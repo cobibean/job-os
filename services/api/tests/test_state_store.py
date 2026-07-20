@@ -126,6 +126,28 @@ def test_workspace_snapshot_is_atomic_revisioned_and_preserves_job_selection(tmp
     assert store.workspace_snapshot("device-a").revision == 1
 
 
+def test_stale_layout_snapshot_never_rolls_back_newer_job_selection(tmp_path):
+    database = tmp_path / "jobos.db"
+    store = JobOsStateStore(database)
+    store.initialize()
+    store.save_job_selection("job-1", "user")
+    stale_layout = store.workspace_snapshot("device-a")
+
+    store.save_job_selection("job-2", "mcp")
+    saved = store.save_workspace_snapshot(
+        "device-a",
+        expected_revision=stale_layout.revision,
+        snapshot={
+            **stale_layout.snapshot,
+            "selected_preset": "research",
+        },
+    )
+
+    assert saved.snapshot["selected_job_id"] == "job-2"
+    assert store.job_workspace_state().selected_job_id == "job-2"
+    assert store.workspace_snapshot("device-a").snapshot["selected_job_id"] == "job-2"
+
+
 def test_corrupt_layout_repairs_only_the_affected_preset(tmp_path):
     database = tmp_path / "jobos.db"
     store = JobOsStateStore(database)

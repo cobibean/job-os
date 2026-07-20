@@ -59,3 +59,30 @@
 
 - Implementation is complete, committed evidence should be reviewed against `CLO-49` before closing it.
 - The implementor leaves `CLO-49` in `Building` and does not transition or close it.
+
+## PM correction - 2026-07-20
+
+### Superseding state-ownership and continuity notes
+
+- The initial statement that a layout snapshot save persists selected job together with geometry is inaccurate and is superseded here. Phase 2 `job_workspace.selected_job_id` is the sole selection authority. A Phase 3 layout command may carry the selection it observed, but the server ignores that value for ownership, reads the current authoritative selection inside the same `BEGIN IMMEDIATE` transaction as the layout revision write, and returns/stores the coherent snapshot view without updating job selection.
+- The exact stale race is covered: select `job-1`, read its layout snapshot, select `job-2` through the user/MCP selection path, then save the stale layout snapshot. The save response, Job Workspace state, and restored device snapshot all remain on `job-2`.
+- Startup restoration now journals layout operations made while `workspace.get()` is pending, applies them over the restored snapshot, and persists the reconciled result against the restored revision. The first resize, reset, preset, collapse, or reorder action cannot be silently replaced by hydration.
+- The initial CSS-order decision is also superseded. Persisted panel order now drives keyed React DOM order directly. The jobs, center, and agent wrappers keep stable keys and DOM identities while visual order, focus traversal, and screen-reader reading order move together.
+- Layout controls occupy a compact reserved rail above each panel rather than overlaying the existing job ordering, center tabs, or agent-context controls. Collapsed-panel recovery uses a separate reserved row.
+- Collapse and reopen now use stable `workbench-panel-*` IDs, correct `aria-controls` and `aria-expanded` relationships, and deterministic focus transfer from the disappearing collapse control to its recovery control and back to the restored panel control.
+
+### Correction verification
+
+- Focused API/state regressions and renderer accessibility/continuity regressions passed, including the stale selection race and delayed-hydration mutation.
+- Pinned Node.js 26.5.0 `pnpm check` passed with 25 renderer/Electron tests and 24 Python tests, plus lint, generated contracts, TypeScript, production Electron build, and packaged-renderer verification.
+- Frozen clean room `/tmp/jobos-phase3-correction-clean.I2om8h` passed `pnpm install --frozen-lockfile`, `uv sync --all-packages --frozen`, and the complete pinned `pnpm check`.
+- Production renderer proof at 1440 x 1024 exercised continuous pointer resize, keyboard reorder, DOM-order equivalence, keyboard collapse focus transfer, reopen focus return, and unobstructed existing panel headers without runtime console errors.
+- Production-built native Electron launched against a disposable authenticated local API on `127.0.0.1:8768`; the API was stopped after capture. The Mac Mini runtime and job-hunter were not touched.
+
+### Retained proof
+
+- The earlier `output/playwright/...` references describe transient local files and are not durable candidate-tree evidence. The retained correction proof is attached to Linear `CLO-49` at the locations below.
+- Pointer resize and unobstructed headers: `https://uploads.linear.app/25ed0851-7a55-4629-9373-9a425d9e572b/f385b2a2-eda2-4348-96a0-f1554ef1939e/e77f8742-ebd6-4d58-a84a-ae1935723548`
+- Persisted visible/DOM order: `https://uploads.linear.app/25ed0851-7a55-4629-9373-9a425d9e572b/96b70e17-9b0e-48b0-a20e-682b5fd2de7b/13feb0ad-a735-48d9-8438-32ee84365858`
+- Keyboard collapse focus recovery: `https://uploads.linear.app/25ed0851-7a55-4629-9373-9a425d9e572b/d09b3034-60a8-42dd-8426-2c516ad24d3d/65f9a49d-72a4-4144-af20-9c6ec774ccf9`
+- Native Electron correction proof: `https://uploads.linear.app/25ed0851-7a55-4629-9373-9a425d9e572b/65df9de1-4255-46e2-88cf-6e5fb208c9fc/2c24f403-20c2-473c-ba93-004664d83b74`

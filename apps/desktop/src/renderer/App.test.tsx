@@ -245,7 +245,30 @@ test('primary panels resize, collapse, reopen, and reorder with keyboard alterna
   expect(screen.getByRole('navigation', { name: 'Workspace layouts' })).not.toBeNull()
 
   fireEvent.click(screen.getByRole('button', { name: 'Move Agent chat left' }))
-  expect(screen.getByTestId('panel-agent').style.order).toBe('1')
+  expect(panelDomOrder()).toEqual(['jobs', 'agent', 'center'])
+})
+
+test('an early layout action is rebased onto delayed startup restoration and persisted', async () => {
+  let resolveWorkspace!: (workspace: ReturnType<typeof restoredWorkspace>) => void
+  const get = vi.fn().mockReturnValue(new Promise(resolve => { resolveWorkspace = resolve }))
+  const save = vi.fn().mockImplementation(snapshot => Promise.resolve({ ...snapshot, revision: snapshot.revision + 1 }))
+  Object.defineProperty(window, 'jobos', {
+    configurable: true,
+    value: {
+      connectivity: { get: vi.fn().mockRejectedValue(new Error('offline')) },
+      workspace: { get, save }
+    }
+  })
+
+  render(<App />)
+  fireEvent.click(screen.getByRole('button', { name: 'Research' }))
+  expect(screen.getByRole('button', { name: 'Research' }).getAttribute('aria-pressed')).toBe('true')
+
+  await act(async () => resolveWorkspace(restoredWorkspace(7)))
+
+  expect(screen.getByRole('button', { name: 'Research' }).getAttribute('aria-pressed')).toBe('true')
+  await waitFor(() => expect(save).toHaveBeenCalled())
+  expect(save.mock.calls.at(-1)?.[0]).toMatchObject({ revision: 7, selectedPreset: 'research' })
 })
 
 test('layout changes preserve mounted content surface identities', async () => {
@@ -258,6 +281,48 @@ test('layout changes preserve mounted content surface identities', async () => {
 
   expect(screen.getByRole('main')).toBe(center)
   expect(screen.getByRole('complementary', { name: 'Agent chat' })).toBe(agent)
+})
+
+test('reordering aligns DOM, focus, and reading order without remounting surfaces', () => {
+  Object.defineProperty(window, 'jobos', { configurable: true, value: undefined })
+  render(<App />)
+  const jobs = screen.getByTestId('panel-jobs')
+  const center = screen.getByTestId('panel-center')
+  const agent = screen.getByTestId('panel-agent')
+
+  fireEvent.click(screen.getByRole('button', { name: 'Move Agent chat left' }))
+
+  expect(panelDomOrder()).toEqual(['jobs', 'agent', 'center'])
+  expect(screen.getByTestId('panel-jobs')).toBe(jobs)
+  expect(screen.getByTestId('panel-center')).toBe(center)
+  expect(screen.getByTestId('panel-agent')).toBe(agent)
+  const collapseControls = screen.getAllByRole('button', { name: /^Collapse / })
+  expect(collapseControls.map(control => control.getAttribute('aria-label'))).toEqual([
+    'Collapse Job navigation',
+    'Collapse Agent chat',
+    'Collapse Center workspace'
+  ])
+})
+
+test('collapse and reopen transfer focus and expose the controlled panel state', async () => {
+  Object.defineProperty(window, 'jobos', { configurable: true, value: undefined })
+  render(<App />)
+  const collapse = screen.getByRole('button', { name: 'Collapse Center workspace' })
+  collapse.focus()
+
+  fireEvent.click(collapse)
+  const reopen = screen.getByRole('button', { name: 'Reopen Center workspace' })
+  await waitFor(() => expect(document.activeElement).toBe(reopen))
+  expect(reopen.getAttribute('aria-controls')).toBe('workbench-panel-center')
+  expect(reopen.getAttribute('aria-expanded')).toBe('false')
+  expect(screen.getByTestId('panel-center').id).toBe('workbench-panel-center')
+  expect(screen.getByTestId('panel-center').hidden).toBe(true)
+
+  fireEvent.click(reopen)
+  const restoredCollapse = screen.getByRole('button', { name: 'Collapse Center workspace' })
+  await waitFor(() => expect(document.activeElement).toBe(restoredCollapse))
+  expect(restoredCollapse.getAttribute('aria-controls')).toBe('workbench-panel-center')
+  expect(restoredCollapse.getAttribute('aria-expanded')).toBe('true')
 })
 
 test('pointer resizing tracks movement and every panel has a recovery affordance', () => {
@@ -290,6 +355,27 @@ test('drag reordering shows an insertion preview before changing presentation on
   expect(target.classList.contains('insertion-target')).toBe(true)
   fireEvent.drop(target, { dataTransfer: transfer })
 
-  expect(screen.getByTestId('panel-agent').style.order).toBe('0')
+  expect(panelDomOrder()).toEqual(['agent', 'jobs', 'center'])
   expect(target.classList.contains('insertion-target')).toBe(false)
 })
+
+function panelDomOrder() {
+  return Array.from(document.querySelector('.workbench')?.children ?? []).map(panel =>
+    panel.getAttribute('data-testid')?.replace('panel-', '')
+  )
+}
+
+function restoredWorkspace(revision: number) {
+  return {
+    revision,
+    selectedPreset: 'review' as const,
+    layouts: {
+      research: { order: ['jobs', 'center', 'agent'] as const, widths: { jobs: 260, center: 760, agent: 350 }, collapsed: [] },
+      review: { order: ['jobs', 'center', 'agent'] as const, widths: { jobs: 300, center: 680, agent: 380 }, collapsed: [] },
+      'agent-focus': { order: ['jobs', 'center', 'agent'] as const, widths: { jobs: 220, center: 420, agent: 650 }, collapsed: [] }
+    },
+    selectedJobId: null,
+    activeCenterSurface: 'document' as const,
+    repairedPresets: []
+  }
+}

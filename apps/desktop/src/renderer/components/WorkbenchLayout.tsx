@@ -1,5 +1,5 @@
 import { ArrowLeft, ArrowRight, GripVertical, PanelLeftClose } from 'lucide-react'
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 
 import type { PanelId, WorkspaceSnapshot } from '../workspaceLayout'
 import { panelNames } from '../workspaceLayout'
@@ -16,6 +16,8 @@ interface WorkbenchLayoutProps {
 
 export function WorkbenchLayout(props: WorkbenchLayoutProps) {
   const [insertionTarget, setInsertionTarget] = useState<PanelId | null>(null)
+  const collapseControls = useRef<Partial<Record<PanelId, HTMLButtonElement | null>>>({})
+  const recoveryControls = useRef<Partial<Record<PanelId, HTMLButtonElement | null>>>({})
   const layout = props.workspace.layouts[props.workspace.selectedPreset]
   const content: Record<PanelId, React.ReactNode> = { jobs: props.jobs, center: props.center, agent: props.agent }
   const visibleOrder = layout.order.filter(panel => !layout.collapsed.includes(panel))
@@ -29,6 +31,7 @@ export function WorkbenchLayout(props: WorkbenchLayoutProps) {
         className={`workbench-panel${insertionTarget === panelId ? ' insertion-target' : ''}`}
         data-testid={`panel-${panelId}`}
         hidden={layout.collapsed.includes(panelId)}
+        id={`workbench-panel-${panelId}`}
         key={panelId}
         onDragOver={event => { event.preventDefault(); setInsertionTarget(panelId) }}
         onDrop={event => {
@@ -37,12 +40,13 @@ export function WorkbenchLayout(props: WorkbenchLayoutProps) {
           if (source && source !== panelId) props.onMove(source, index)
           setInsertionTarget(null)
         }}
-        style={{ order: index, flexBasis: `${layout.widths[panelId]}px` }}
+        style={{ flexBasis: `${layout.widths[panelId]}px` }}
       >
         {previous ? (
           <ResizeHandle before={previous} after={panelId} onResize={props.onResize} widths={layout.widths} />
         ) : null}
         <div className="panel-layout-controls">
+          <span className="panel-layout-title">{panelNames[panelId]}</span>
           <button
             aria-label={`Move ${panelNames[panelId]} left`}
             className="panel-control"
@@ -69,10 +73,15 @@ export function WorkbenchLayout(props: WorkbenchLayoutProps) {
             type="button"
           ><ArrowRight aria-hidden="true" size={13} /></button>
           <button
+            aria-controls={`workbench-panel-${panelId}`}
             aria-expanded="true"
             aria-label={`Collapse ${panelNames[panelId]}`}
             className="panel-control"
-            onClick={() => props.onCollapse(panelId, true)}
+            onClick={() => {
+              props.onCollapse(panelId, true)
+              window.setTimeout(() => recoveryControls.current[panelId]?.focus(), 0)
+            }}
+            ref={control => { collapseControls.current[panelId] = control }}
             type="button"
           ><PanelLeftClose aria-hidden="true" size={14} /></button>
         </div>
@@ -86,7 +95,17 @@ export function WorkbenchLayout(props: WorkbenchLayoutProps) {
       {layout.collapsed.length ? (
         <nav aria-label="Collapsed panels" className="collapsed-panels">
           {layout.order.filter(item => layout.collapsed.includes(item)).map(panelId => (
-            <button aria-expanded="false" key={panelId} onClick={() => props.onCollapse(panelId, false)} type="button">
+            <button
+              aria-controls={`workbench-panel-${panelId}`}
+              aria-expanded="false"
+              key={panelId}
+              onClick={() => {
+                props.onCollapse(panelId, false)
+                window.setTimeout(() => collapseControls.current[panelId]?.focus(), 0)
+              }}
+              ref={control => { recoveryControls.current[panelId] = control }}
+              type="button"
+            >
               Reopen {panelNames[panelId]}
             </button>
           ))}
@@ -95,9 +114,7 @@ export function WorkbenchLayout(props: WorkbenchLayoutProps) {
       <div className="workbench" onDragLeave={event => {
         if (!event.currentTarget.contains(event.relatedTarget as Node)) setInsertionTarget(null)
       }}>
-        {panel('jobs')}
-        {panel('center')}
-        {panel('agent')}
+        {layout.order.map(panel)}
       </div>
     </div>
   )
