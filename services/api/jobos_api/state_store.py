@@ -244,12 +244,15 @@ def normalize_workspace_snapshot(
     recovered_tabs: list[dict[str, object]] = []
     seen_tab_ids: set[str] = set()
     if isinstance(browser_tabs, list):
-        for index, tab in enumerate(browser_tabs):
-            if index >= BROWSER_TAB_LIMIT or not _valid_browser_tab(tab):
+        for tab in browser_tabs:
+            if not _valid_browser_tab(tab):
                 repaired_browser = True
                 continue
             tab_id = tab["tab_id"]
             if tab_id in seen_tab_ids:
+                repaired_browser = True
+                continue
+            if len(recovered_tabs) >= BROWSER_TAB_LIMIT:
                 repaired_browser = True
                 continue
             seen_tab_ids.add(tab_id)

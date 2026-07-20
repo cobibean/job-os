@@ -476,6 +476,26 @@ test('browser tabs expose valid keyboard tab semantics, adjacent actions, and fo
     expect(control.getAttribute('data-tooltip')).toBe(name)
     expect(control.getAttribute('aria-label')).toBe(name)
   }
+
+  fireEvent.mouseEnter(listing)
+  expect(screen.getByRole('tooltip').textContent).toBe('Select Listing')
+  expect(screen.getByRole('tooltip').parentElement).toBe(document.body)
+  fireEvent.mouseLeave(listing)
+  expect(screen.queryByRole('tooltip')).toBeNull()
+
+  const reorder = screen.getByRole('button', { name: 'Move Listing left' })
+  fireEvent.focus(reorder)
+  expect(screen.getByRole('tooltip').textContent).toBe('Move Listing left')
+  fireEvent.blur(reorder)
+
+  const close = screen.getByRole('button', { name: 'Close Listing' })
+  fireEvent.mouseEnter(close)
+  expect(screen.getByRole('tooltip').textContent).toBe('Close Listing')
+  fireEvent.mouseLeave(close)
+
+  const add = screen.getByRole('button', { name: 'Open a new tab' })
+  fireEvent.focus(add)
+  expect(screen.getByRole('tooltip').textContent).toBe('Open a new tab')
 })
 
 test('layout changes preserve mounted content surface identities', async () => {
