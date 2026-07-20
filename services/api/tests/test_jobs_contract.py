@@ -1,3 +1,6 @@
+import json
+import sqlite3
+
 from fastapi.testclient import TestClient
 from jobos_api.app import create_app
 from jobos_api.settings import Settings
@@ -384,3 +387,58 @@ def test_layout_save_cannot_overwrite_a_newer_user_or_mcp_selection(tmp_path):
     assert saved.status_code == 200
     assert saved.json()["selected_job_id"] == "job-1"
     assert job_state.json()["selected_job_id"] == "job-1"
+
+
+def test_workspace_get_repairs_non_scalar_layout_values_without_losing_valid_state(
+    tmp_path,
+):
+    facade = FakeJobHunterFacade()
+    facade.jobs = facade.jobs[:2]
+
+    with make_client(tmp_path, facade) as client:
+        client.put(
+            "/v1/workspace/jobs/selection",
+            headers=auth_headers(),
+            json={"job_id": "job-1", "origin": "user"},
+        )
+        snapshot = client.get("/v1/workspace", headers=auth_headers()).json()
+        snapshot.pop("revision")
+        snapshot.pop("repaired_presets")
+        snapshot["selected_preset"] = {"bad": "value"}
+        snapshot["active_center_surface"] = "browser"
+        snapshot["layouts"]["research"] = {
+            "order": ["center", "jobs", "agent"],
+            "widths": {"jobs": 333, "center": 811, "agent": 377},
+            "collapsed": ["agent"],
+        }
+        snapshot["layouts"]["review"]["collapsed"] = [{"bad": "value"}]
+        snapshot["layouts"]["agent-focus"] = {
+            "order": ["agent", "center", "jobs"],
+            "widths": {"jobs": 245, "center": 465, "agent": 721},
+            "collapsed": ["jobs"],
+        }
+        with sqlite3.connect(tmp_path / "jobos.db") as connection:
+            connection.execute(
+                """
+                INSERT INTO workspace_snapshots(device_id, revision, snapshot_json)
+                VALUES ('primary-device', 7, ?)
+                """,
+                (json.dumps(snapshot),),
+            )
+
+        restored = client.get("/v1/workspace", headers=auth_headers())
+
+    assert restored.status_code == 200
+    body = restored.json()
+    assert body["revision"] == 7
+    assert body["repaired_presets"] == ["review"]
+    assert body["selected_preset"] == "review"
+    assert body["selected_job_id"] == "job-1"
+    assert body["active_center_surface"] == "browser"
+    assert body["layouts"]["research"] == snapshot["layouts"]["research"]
+    assert body["layouts"]["agent-focus"] == snapshot["layouts"]["agent-focus"]
+    assert body["layouts"]["review"] == {
+        "order": ["jobs", "center", "agent"],
+        "widths": {"jobs": 280, "center": 700, "agent": 380},
+        "collapsed": [],
+    }
