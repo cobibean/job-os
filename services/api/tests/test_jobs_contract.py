@@ -1,10 +1,15 @@
 import json
 import sqlite3
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
 from jobos_api.app import create_app
 from jobos_api.settings import Settings
+
+TITLE_POLICY_FIXTURES = json.loads(
+    (Path(__file__).parents[3] / "tests/fixtures/browser-title-policy.json").read_text()
+)
 
 STATUSES = (
     "discovered",
@@ -513,6 +518,63 @@ def test_workspace_rejects_remaining_browser_credential_carriers(
         response = client.put("/v1/workspace", headers=auth_headers(), json=body)
 
     assert response.status_code == 422
+
+
+@pytest.mark.parametrize(
+    "unsafe_title",
+    [fixture["title"] for fixture in TITLE_POLICY_FIXTURES if fixture["unsafe"]],
+)
+def test_workspace_rejects_credential_bearing_remote_page_titles(
+    tmp_path, unsafe_title
+):
+    facade = FakeJobHunterFacade()
+    with make_client(tmp_path, facade) as client:
+        body = client.get("/v1/workspace", headers=auth_headers()).json()
+        body.pop("repaired_presets")
+        body.pop("repaired_browser")
+        body.update(
+            {
+                "origin": "user",
+                "idempotency_key": "workspace-unsafe-title",
+                "browser_tabs": [
+                    {
+                        "tab_id": "unsafe-title",
+                        "url": "https://example.com/account?view=safe",
+                        "title": unsafe_title,
+                    }
+                ],
+                "active_browser_tab_id": "unsafe-title",
+            }
+        )
+        response = client.put("/v1/workspace", headers=auth_headers(), json=body)
+
+    assert response.status_code == 422
+
+
+def test_workspace_preserves_safe_ordinary_remote_page_titles(tmp_path):
+    facade = FakeJobHunterFacade()
+    with make_client(tmp_path, facade) as client:
+        body = client.get("/v1/workspace", headers=auth_headers()).json()
+        body.pop("repaired_presets")
+        body.pop("repaired_browser")
+        body.update(
+            {
+                "origin": "user",
+                "idempotency_key": "workspace-safe-title",
+                "browser_tabs": [
+                    {
+                        "tab_id": "safe-title",
+                        "url": "https://example.com/jobs?view=safe",
+                        "title": "Planning Session: Q3",
+                    }
+                ],
+                "active_browser_tab_id": "safe-title",
+            }
+        )
+        response = client.put("/v1/workspace", headers=auth_headers(), json=body)
+
+    assert response.status_code == 200
+    assert response.json()["browser_tabs"][0]["title"] == "Planning Session: Q3"
 
 
 def test_workspace_preserves_ordinary_browser_query_parameters(tmp_path):

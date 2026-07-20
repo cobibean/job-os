@@ -1,0 +1,20 @@
+[
+  {"title":"authorization_code=title-secret PHPSESSID=session-secret SAMLart=saml-secret","expected":"Protected page","unsafe":true},
+  {"title":"AUTHORIZATION CODE : \"title secret\"","expected":"Protected page","unsafe":true},
+  {"title":"Inbox | PHP-SESSID = session-secret","expected":"Protected page","unsafe":true},
+  {"title":"SAML art: saml-secret","expected":"Protected page","unsafe":true},
+  {"title":"authorization%5Fcode%3Dtitle-secret","expected":"Protected page","unsafe":true},
+  {"title":"authorization%255Fcode%253Dtitle-secret","expected":"Protected page","unsafe":true},
+  {"title":"SAMLart=one | SAML_art : two","expected":"Protected page","unsafe":true},
+  {"title":"X-Amz-Signature=signed-secret X_Goog_Signature : goog-secret","expected":"Protected page","unsafe":true},
+  {"title":"Authorization: Bearer title-secret","expected":"Protected page","unsafe":true},
+  {"title":"session_id=session-secret oauth-verifier:oauth-secret SAMLResponse=saml-secret","expected":"Protected page","unsafe":true},
+  {"title":"session=session-secret","expected":"Protected page","unsafe":true},
+  {"title":"Planning Session: Q3","expected":"Planning Session: Q3","unsafe":false},
+  {"title":"Authorization Code Review","expected":"Authorization Code Review","unsafe":false},
+  {"title":"State: Texas Jobs","expected":"State: Texas Jobs","unsafe":false},
+  {"title":"Code: 1234","expected":"Code: 1234","unsafe":false},
+  {"title":"Senior API Platform Engineer","expected":"Senior API Platform Engineer","unsafe":false},
+  {"title":"SAML Integration Guide","expected":"SAML Integration Guide","unsafe":false},
+  {"title":"Signed URL Design Notes","expected":"Signed URL Design Notes","unsafe":false}
+]

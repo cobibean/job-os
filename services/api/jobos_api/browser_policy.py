@@ -13,6 +13,7 @@ from urllib.parse import parse_qsl, unquote, urlsplit
 BROWSER_TAB_LIMIT = 50
 BROWSER_URL_LIMIT = 8192
 BROWSER_TITLE_LIMIT = 512
+BROWSER_SAFE_TITLE_FALLBACK = "Protected page"
 
 _SENSITIVE_PARAMETER_NAMES = {
     "accesstoken", "apikey", "assertion", "authorization", "authorizationcode",
@@ -24,6 +25,40 @@ _SENSITIVE_PARAMETER_NAMES = {
     "sessionkey", "sid", "sig", "signature", "signedurl", "state", "ticket",
     "token",
 }
+
+_TITLE_CREDENTIAL_CARRIER_NAMES = (
+    "accesstoken", "apikey", "assertion", "authorization", "authorizationcode", "authcode",
+    "authtoken", "bearertoken", "capability", "capabilitytoken", "codeverifier",
+    "credential", "idtoken", "jsessionid", "jwt", "macaroon", "oauthcode",
+    "oauthstate", "oauthtoken", "oauthverifier", "password", "phpsessid",
+    "refreshtoken", "relaystate", "samlart", "samlrequest", "samlresponse",
+    "sessionid", "sessionkey", "signature", "signedurl", "ticket",
+    "xamzcredential", "xamzsignature", "xgoogsignature",
+)
+_TITLE_EQUALS_ONLY_CARRIER_NAMES = (
+    "code", "secret", "session", "sid", "sig", "state", "token",
+)
+
+
+def _title_carrier_pattern(name: str, delimiter: str) -> re.Pattern[str]:
+    flexible_name = r"[\s_.-]*".join(re.escape(character) for character in name)
+    return re.compile(
+        rf"(?:^|[^a-z0-9]){flexible_name}\s*{delimiter}\s*"
+        rf'(?:"[^"]+"|\'[^\']+\'|\S+)',
+        re.IGNORECASE,
+    )
+
+
+_TITLE_CREDENTIAL_PATTERNS = (
+    *(
+        _title_carrier_pattern(name, r"(?:=|:)")
+        for name in _TITLE_CREDENTIAL_CARRIER_NAMES
+    ),
+    *(
+        _title_carrier_pattern(name, "=")
+        for name in _TITLE_EQUALS_ONLY_CARRIER_NAMES
+    ),
+)
 
 
 def is_sensitive_browser_parameter(name: str) -> bool:
@@ -41,6 +76,22 @@ def is_sensitive_browser_parameter(name: str) -> bool:
             ("password", "secret", "token", "credential", "assertion", "signature")
         )
     )
+
+
+def browser_title_contains_credentials(value: object) -> bool:
+    if not isinstance(value, str):
+        return False
+    decoded = value
+    for _attempt in range(3):
+        next_value = unquote(decoded)
+        if next_value == decoded:
+            break
+        decoded = next_value
+    return any(pattern.search(decoded) for pattern in _TITLE_CREDENTIAL_PATTERNS)
+
+
+def sanitize_browser_title(value: str) -> str:
+    return BROWSER_SAFE_TITLE_FALLBACK if browser_title_contains_credentials(value) else value
 
 
 def _has_sensitive_path_parameter(path: str) -> bool:

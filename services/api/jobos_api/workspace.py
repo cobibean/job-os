@@ -6,6 +6,7 @@ from .browser_policy import (
     BROWSER_TAB_LIMIT,
     BROWSER_TITLE_LIMIT,
     BROWSER_URL_LIMIT,
+    browser_title_contains_credentials,
     safe_browser_url,
 )
 
@@ -22,6 +23,13 @@ class BrowserTabMetadata(BaseModel):
     title: str = Field(default="New tab", max_length=BROWSER_TITLE_LIMIT)
     favicon_url: str | None = Field(default=None, max_length=BROWSER_URL_LIMIT)
     associated_job_id: str | None = Field(default=None, max_length=512)
+
+    @field_validator("title")
+    @classmethod
+    def validate_browser_title(cls, value: str) -> str:
+        if browser_title_contains_credentials(value):
+            raise ValueError("Credential-bearing browser titles cannot be persisted")
+        return value
 
     @field_validator("url")
     @classmethod

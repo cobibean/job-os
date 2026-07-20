@@ -22,6 +22,32 @@ const sensitiveParameterNames = new Set([
   'token'
 ])
 
+export const BROWSER_SAFE_TITLE_FALLBACK = 'Protected page'
+
+// Page titles are untrusted plain text, so this deliberately targets explicit
+// credential assignments only. Ambiguous words such as "session" and "code"
+// require "="; high-confidence carrier names also accept ":".
+const titleCredentialCarrierNames = [
+  'accesstoken', 'apikey', 'assertion', 'authorization', 'authorizationcode', 'authcode',
+  'authtoken', 'bearertoken', 'capability', 'capabilitytoken', 'codeverifier',
+  'credential', 'idtoken', 'jsessionid', 'jwt', 'macaroon', 'oauthcode',
+  'oauthstate', 'oauthtoken', 'oauthverifier', 'password', 'phpsessid',
+  'refreshtoken', 'relaystate', 'samlart', 'samlrequest', 'samlresponse',
+  'sessionid', 'sessionkey', 'signature', 'signedurl', 'ticket',
+  'xamzcredential', 'xamzsignature', 'xgoogsignature'
+] as const
+const titleEqualsOnlyCarrierNames = ['code', 'secret', 'session', 'sid', 'sig', 'state', 'token'] as const
+
+function titleCarrierPattern(name: string, delimiter: string): RegExp {
+  const flexibleName = name.split('').join('[\\s_.-]*')
+  return new RegExp(`(?:^|[^a-z0-9])${flexibleName}\\s*${delimiter}\\s*(?:"[^"]+"|'[^']+'|\\S+)`, 'iu')
+}
+
+const titleCredentialPatterns = [
+  ...titleCredentialCarrierNames.map(name => titleCarrierPattern(name, '(?:=|:)')),
+  ...titleEqualsOnlyCarrierNames.map(name => titleCarrierPattern(name, '='))
+]
+
 function decodeBrowserPolicyComponent(value: string): string {
   let decoded = value
   for (let attempt = 0; attempt < 3; attempt += 1) {
@@ -43,6 +69,17 @@ export function isSensitiveBrowserParameter(name: string): boolean {
     || normalized.startsWith('xamz')
     || normalized.startsWith('xgoog')
     || /(?:password|secret|token|credential|assertion|signature)$/u.test(normalized)
+}
+
+export function browserTitleContainsCredentials(value: string): boolean {
+  const decoded = decodeBrowserPolicyComponent(value)
+  return titleCredentialPatterns.some(pattern => pattern.test(decoded))
+}
+
+export function sanitizeBrowserTitleForPersistence(value: string): string {
+  const title = value || 'Untitled'
+  if (browserTitleContainsCredentials(title)) return BROWSER_SAFE_TITLE_FALLBACK
+  return title.slice(0, BROWSER_PERSISTENCE_LIMITS.title)
 }
 
 function sanitizePathParameters(pathname: string): string {
@@ -139,7 +176,7 @@ export function recoverBrowserTabMetadata(value: unknown): BrowserTabMetadata | 
   return {
     tabId: tab.tabId,
     url,
-    title: tab.title,
+    title: sanitizeBrowserTitleForPersistence(tab.title),
     faviconUrl,
     associatedJobId: tab.associatedJobId ?? null
   }
@@ -168,7 +205,7 @@ export function sanitizeBrowserMetadata(tab: BrowserTabMetadata): BrowserTabMeta
     ...tab,
     tabId: tab.tabId.slice(0, BROWSER_PERSISTENCE_LIMITS.tabId),
     url: normalizeBrowserUrlForPersistence(tab.url),
-    title: tab.title.slice(0, BROWSER_PERSISTENCE_LIMITS.title),
+    title: sanitizeBrowserTitleForPersistence(tab.title),
     faviconUrl: tab.faviconUrl?.startsWith('http://') || tab.faviconUrl?.startsWith('https://')
       ? normalizeBrowserUrlForPersistence(tab.faviconUrl, false) || null
       : null,

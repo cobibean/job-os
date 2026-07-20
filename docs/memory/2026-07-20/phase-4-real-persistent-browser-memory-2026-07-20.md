@@ -140,3 +140,38 @@
 - No Mac Mini, job-hunter/Hermes, Mini runtime, Phase 5, or unrelated planning work was touched.
 - The unrelated `docs/planning/.DS_Store` modification remains unstaged and unmodified by this correction.
 - `CLO-50` must remain in `Building`; PM owns acceptance and closure.
+
+## Remote page-title metadata boundary correction - 2026-07-20
+
+### Policy and corrected behavior
+
+- Remote `document.title` is treated as untrusted browser metadata. Electron now applies deterministic plain-text assignment detection before storing or emitting a title; renderer persistence and IPC restoration apply the same sanitizer as defense in depth.
+- Explicit high-confidence credential assignments using authorization, API key, session ID/key, OAuth, SAML, signed URL/signature, capability, password, credential, assertion, JWT/macaroon, and related carrier vocabulary resolve to the safe fallback `Protected page`. Case, spaces, underscore/hyphen/dot separators, `=`/high-confidence `:` delimiters, repeated carriers, and single/double-percent-encoded forms are covered.
+- Ambiguous plain words such as `session`, `state`, `code`, `token`, `secret`, `sid`, and `sig` require `=`. Ordinary titles such as planning-session labels, state names, code review labels, API engineering roles, SAML documentation, and signed-URL design notes remain unchanged. This is intentionally deterministic assignment detection, not generic secret guessing.
+- The API independently rejects credential-bearing titles on Workspace mutation. Stored-state normalization repairs only the unsafe title to `Protected page`, preserves the tab in stable order, preserves a coherent active tab, and leaves layouts, preset, and job selection untouched.
+
+### Regression and direct reproduction evidence
+
+- Shared executable table `tests/fixtures/browser-title-policy.json` is consumed by Vitest and pytest and covers the cited carriers, case/spacing/delimiter variants, encoded and repeated forms, signed/session/OAuth/SAML examples, and safe ordinary titles.
+- The real main-process `page-title-updated` event assigns `Protected page`, emits a restrained security notice, and subsequently accepts a safe ordinary title unchanged.
+- The renderer's exact `browserStateForPersistence` transform emits only the fallback and contains none of the supplied credential-like values.
+- The actual restore IPC path sanitizes an unsafe incoming title while preserving all 50 valid recovered tabs and the intended active tab.
+- Workspace API mutation regressions reject every unsafe shared fixture and accept an ordinary safe title. Corrupted stored-state restoration preserves the unsafe-title tab and active ID, replaces only its title, marks browser metadata repaired, and preserves unrelated workspace state.
+- Direct built-JavaScript and Python reproductions returned `Protected page`; Pydantic rejected the unsafe mutation; stored-state normalization returned the preserved tab, preserved active ID, and repaired-browser marker.
+
+### Final verification
+
+- Focused API: `uv run --project services/api pytest services/api/tests/test_state_store.py services/api/tests/test_jobs_contract.py -q` passed 102 tests.
+- Focused desktop: `PATH=/Users/cobibean/Library/pnpm/nodejs/26.5.0/bin:$PATH pnpm --filter @jobos/desktop test -- --run` passed 44 tests across 11 files.
+- Targeted main-process event, renderer persistence, and actual IPC suites passed.
+- Full pinned gate: `PATH=/Users/cobibean/Library/pnpm/nodejs/26.5.0/bin:$PATH pnpm check` passed lint, generated contracts and type checks, 44 desktop tests, 107 Python tests, production Electron/Vite build, and packaged-renderer verification.
+- Contract drift: `PATH=/Users/cobibean/Library/pnpm/nodejs/26.5.0/bin:$PATH pnpm contracts:check` passed.
+- Detached exact-commit clean room: `/tmp/jobos-phase4-title-boundary-clean` was created from `git archive HEAD`; the disposable archive received a local Git baseline for contract comparison. Frozen pnpm and uv installs, the full pinned `pnpm check`, and `pnpm contracts:check` passed with 44 desktop tests, 107 Python tests, production build, and packaged-renderer verification.
+- Secret scan: gitleaks 8.30.0 scanned the final 15-commit history and found no leaks.
+
+### Remaining constraints and handoff state
+
+- Native visible MacBook acceptance and authenticated Gmail continuity remain explicitly open while the Mac is locked. No new native or authenticated acceptance is claimed.
+- No Mac Mini, Mini runtime, job-hunter/Hermes, Phase 5, or unrelated planning work was touched.
+- The unrelated `docs/planning/.DS_Store` modification remains unstaged and unmodified by this correction.
+- `CLO-50` remains in `Building`; PM owns acceptance and closure.

@@ -5,7 +5,12 @@ from dataclasses import dataclass
 from hashlib import sha256
 from pathlib import Path
 
-from .browser_policy import BROWSER_TAB_LIMIT, BROWSER_TITLE_LIMIT, safe_browser_url
+from .browser_policy import (
+    BROWSER_TAB_LIMIT,
+    BROWSER_TITLE_LIMIT,
+    safe_browser_url,
+    sanitize_browser_title,
+)
 
 
 class IncompatibleSchemaError(RuntimeError):
@@ -260,11 +265,14 @@ def normalize_workspace_snapshot(
                 {"tab_id", "url", "title", "favicon_url", "associated_job_id"}
             ):
                 repaired_browser = True
+            safe_title = sanitize_browser_title(tab["title"])
+            if safe_title != tab["title"]:
+                repaired_browser = True
             recovered_tabs.append(
                 {
                     "tab_id": tab_id,
                     "url": tab["url"],
-                    "title": tab["title"],
+                    "title": safe_title,
                     "favicon_url": tab.get("favicon_url"),
                     "associated_job_id": tab.get("associated_job_id"),
                 }
