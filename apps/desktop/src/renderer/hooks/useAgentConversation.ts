@@ -15,6 +15,7 @@ export interface AgentConversationState {
   activeTurn: AgentTurn | null
   connection: AgentConnectionState
   restoring: boolean
+  restoredEventId: number | null
   error: string | null
 }
 
@@ -32,6 +33,7 @@ export const initialAgentConversationState: AgentConversationState = {
   activeTurn: null,
   connection: 'connecting',
   restoring: true,
+  restoredEventId: null,
   error: null
 }
 
@@ -65,6 +67,7 @@ export function agentConversationReducer(state: AgentConversationState, action: 
         activeTurn: eventsAfterSnapshot.reduce(activeTurnAfterEvent, action.snapshot.activeTurn),
         connection: eventsAfterSnapshot.reduce(connectionAfterEvent, action.snapshot.connection),
         restoring: false,
+        restoredEventId: action.snapshot.latestEventId,
         error: null
       }
     case 'event':
@@ -73,7 +76,7 @@ export function agentConversationReducer(state: AgentConversationState, action: 
         entries: mergeEntries(state.entries, [action.event]),
         activeTurn: activeTurnAfterEvent(state.activeTurn, action.event),
         connection: connectionAfterEvent(state.connection, action.event),
-        restoring: false
+        restoring: state.restoring
       }
     case 'connection':
       return { ...state, connection: action.state }
@@ -98,7 +101,16 @@ export function agentConversationReducer(state: AgentConversationState, action: 
     case 'failure':
       return { ...state, restoring: false, error: action.message }
     case 'restore-failure':
-      return { ...state, restoring: false, error: action.message, connection: 'offline' }
+      return {
+        ...state,
+        restoring: false,
+        restoredEventId: state.entries.reduce(
+          (latest, entry) => Math.max(latest, entry.eventId),
+          0
+        ),
+        error: action.message,
+        connection: 'offline'
+      }
   }
 }
 

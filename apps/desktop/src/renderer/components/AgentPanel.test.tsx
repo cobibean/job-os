@@ -121,6 +121,28 @@ test('focuses the document surface when a live resume render completes', async (
   await waitFor(() => expect(onArtifactRendered).toHaveBeenCalledOnce())
 })
 
+test('focuses a live resume render that arrives before hydration resolves', async () => {
+  let stream!: (update: unknown) => void
+  let resolveSnapshot!: (snapshot: AgentConversationSnapshot) => void
+  installAgent({} as AgentConversationSnapshot, {
+    get: vi.fn(() => new Promise<AgentConversationSnapshot>(resolve => { resolveSnapshot = resolve })),
+    subscribe: vi.fn((listener: (update: unknown) => void) => { stream = listener; return () => undefined })
+  })
+  const onArtifactRendered = vi.fn()
+  render(<AgentPanel apiState="connected" contextLabel="Northstar" onArtifactRendered={onArtifactRendered} />)
+
+  act(() => stream({
+    kind: 'event',
+    event: event(2, { detail: { command: 'document.render', outcome: 'completed' } })
+  }))
+  await act(async () => resolveSnapshot({
+    conversationId: 'conv-current', connection: 'online', activeTurn: null, latestEventId: 1,
+    entries: [event(1)]
+  }))
+
+  await waitFor(() => expect(onArtifactRendered).toHaveBeenCalledOnce())
+})
+
 test('settles a working assistant placeholder before a later interrupted terminal card', async () => {
   installAgent({
     conversationId: 'conv-current', connection: 'online', activeTurn: null, latestEventId: 3,

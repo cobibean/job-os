@@ -140,6 +140,39 @@ describe('trusted document workspace', () => {
     expect((screen.getByRole('button', { name: 'Approved revision' }) as HTMLButtonElement).disabled).toBe(true)
   })
 
+  it('discards a late approval response after the active job changes', async () => {
+    const jobAArtifact = artifact()
+    const jobBArtifact = artifact({
+      artifactId: 'art_BBBBBBBBBBBBBBBBBBBBBBBB',
+      jobId: otherJob.jobId,
+      artifactRevision: 'render-b',
+      sourceRevision: 'source-b',
+      filename: 'acme-resume.pdf'
+    })
+    const jobBState = { ...state([jobBArtifact]), jobId: otherJob.jobId }
+    const pendingApproval = deferred<JobArtifactsState>()
+    const documents = installDocuments({
+      list: vi.fn(jobId => Promise.resolve(jobId === job.jobId ? state([jobAArtifact]) : jobBState)),
+      refresh: vi.fn(jobId => Promise.resolve(jobId === job.jobId ? state([jobAArtifact]) : jobBState)),
+      approve: vi.fn(() => pendingApproval.promise)
+    })
+    const view = render(
+      <DocumentWorkspace hydrated job={job} onViewChange={vi.fn()} restoredArtifactId={null} restoredPage={1} restoredZoom={1} />
+    )
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Approve this revision' }))
+    await waitFor(() => expect(documents.approve).toHaveBeenCalledOnce())
+    view.rerender(
+      <DocumentWorkspace hydrated job={otherJob} onViewChange={vi.fn()} restoredArtifactId={null} restoredPage={1} restoredZoom={1} />
+    )
+    expect(await screen.findByText(/Viewing acme-resume.pdf/)).not.toBeNull()
+
+    pendingApproval.resolve(state([artifact({ isApproved: true })]))
+
+    await waitFor(() => expect(screen.getByText(/Viewing acme-resume.pdf/)).not.toBeNull())
+    expect(screen.queryByText(/Viewing northstar-resume.pdf/)).toBeNull()
+  })
+
   it('keeps the last successful preview when the newest render fails', async () => {
     const retained = artifact({ isCurrent: false, isLastSuccessful: true })
     const failed = artifact({

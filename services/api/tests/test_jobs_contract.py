@@ -932,6 +932,44 @@ def test_approval_persists_the_exact_successful_artifact_for_the_job(tmp_path):
     assert restored["approved_artifact_id"] == artifact_id
 
 
+@pytest.mark.parametrize("damage", ["tampered", "deleted"])
+def test_approval_rejects_artifact_bytes_that_no_longer_match_registration(
+    tmp_path, damage
+):
+    facade = FakeJobHunterFacade()
+    facade.jobs = facade.jobs[:1]
+    pdf = tmp_path / "resume.pdf"
+    pdf.write_bytes(b"%PDF-1.7\ntrusted resume\n%%EOF\n")
+    facade.artifacts["job-0"] = [artifact_metadata(pdf)]
+
+    with make_client(tmp_path, facade) as client:
+        registered = client.post(
+            "/v1/jobs/job-0/artifacts/refresh", headers=auth_headers()
+        ).json()
+        artifact_id = registered["last_successful_artifact_id"]
+        if damage == "tampered":
+            pdf.write_bytes(b"%PDF-1.7\ntampered resume\n%%EOF\n")
+        else:
+            pdf.unlink()
+        rejected = client.post(
+            f"/v1/jobs/job-0/artifacts/{artifact_id}/approve",
+            headers=auth_headers(),
+            json={
+                "origin": "user",
+                "idempotency_key": f"approve-{damage}-artifact",
+            },
+        )
+        restored = client.get(
+            "/v1/jobs/job-0/artifacts", headers=auth_headers()
+        ).json()
+
+    assert rejected.status_code == 409
+    assert rejected.json()["detail"] == (
+        "Registered artifact no longer matches trusted metadata"
+    )
+    assert restored["approved_artifact_id"] is None
+
+
 def test_failed_or_cross_job_artifact_cannot_be_approved(tmp_path):
     facade = FakeJobHunterFacade()
     facade.jobs = facade.jobs[:2]

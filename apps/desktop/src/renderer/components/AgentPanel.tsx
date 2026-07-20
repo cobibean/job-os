@@ -50,15 +50,14 @@ export function AgentPanel({ contextLabel, apiState = 'connected', onArtifactRen
   )
 
   useEffect(() => {
-    if (conversation.restoring) return
+    if (conversation.restoring || conversation.restoredEventId === null) return
+    if (observedEventId.current === null) {
+      observedEventId.current = conversation.restoredEventId
+    }
     const latestEventId = conversation.entries.reduce(
       (latest, entry) => Math.max(latest, entry.eventId),
       0
     )
-    if (observedEventId.current === null) {
-      observedEventId.current = latestEventId
-      return
-    }
     const rendered = conversation.entries.some(entry => (
       entry.eventId > (observedEventId.current ?? 0)
       && entry.type === 'activity'
@@ -67,7 +66,7 @@ export function AgentPanel({ contextLabel, apiState = 'connected', onArtifactRen
     ))
     observedEventId.current = Math.max(observedEventId.current, latestEventId)
     if (rendered) onArtifactRendered?.()
-  }, [conversation.entries, conversation.restoring, onArtifactRendered])
+  }, [conversation.entries, conversation.restoredEventId, conversation.restoring, onArtifactRendered])
 
   useLayoutEffect(() => {
     const transcript = scrollRef.current

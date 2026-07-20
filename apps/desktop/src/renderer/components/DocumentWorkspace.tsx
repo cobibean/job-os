@@ -49,6 +49,8 @@ export function DocumentWorkspace(props: DocumentWorkspaceProps) {
   const restoredArtifactId = useRef(props.restoredArtifactId)
   restoredArtifactId.current = props.restoredArtifactId
   const jobId = props.job?.jobId ?? null
+  const activeJobId = useRef(jobId)
+  activeJobId.current = jobId
 
   useEffect(() => {
     if (!props.hydrated) return
@@ -201,15 +203,18 @@ export function DocumentWorkspace(props: DocumentWorkspaceProps) {
     if (!props.job || !presentedArtifact || !bridge || presentedArtifact.renderStatus !== 'succeeded') {
       return
     }
+    const requestJobId = props.job.jobId
     setLoading(true)
     try {
-      const approved = await bridge.approve(props.job.jobId, presentedArtifact.artifactId)
+      const approved = await bridge.approve(requestJobId, presentedArtifact.artifactId)
+      if (activeJobId.current !== requestJobId) return
       setState(approved)
       setMessage(`Approved revision ${presentedArtifact.artifactRevision}`)
     } catch (error) {
+      if (activeJobId.current !== requestJobId) return
       setMessage(error instanceof Error ? error.message : 'Resume approval failed')
     } finally {
-      setLoading(false)
+      if (activeJobId.current === requestJobId) setLoading(false)
     }
   }
 
