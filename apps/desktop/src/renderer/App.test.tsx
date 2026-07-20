@@ -271,6 +271,41 @@ test('an early layout action is rebased onto delayed startup restoration and per
   expect(save.mock.calls.at(-1)?.[0]).toMatchObject({ revision: 7, selectedPreset: 'research' })
 })
 
+test('failed startup hydration replays early intent over remote state after a save conflict', async () => {
+  let rejectInitialGet!: (error: Error) => void
+  const remote = remoteWorkspace(11)
+  const get = vi.fn()
+    .mockReturnValueOnce(new Promise((_resolve, reject) => { rejectInitialGet = reject }))
+    .mockResolvedValueOnce(remote)
+  const save = vi.fn()
+    .mockRejectedValueOnce(new Error('revision conflict'))
+    .mockImplementationOnce(snapshot => Promise.resolve({ ...snapshot, revision: 12 }))
+  Object.defineProperty(window, 'jobos', {
+    configurable: true,
+    value: {
+      connectivity: { get: vi.fn().mockRejectedValue(new Error('offline')) },
+      workspace: { get, save }
+    }
+  })
+
+  render(<App />)
+  fireEvent.click(screen.getByRole('button', { name: 'Research' }))
+  await act(async () => rejectInitialGet(new Error('startup unavailable')))
+  await waitFor(() => expect(save).toHaveBeenCalledTimes(2))
+
+  const recoveredSave = save.mock.calls[1]?.[0]
+  if (!recoveredSave) throw new Error('Recovered workspace save was not captured')
+  expect(get).toHaveBeenCalledTimes(2)
+  expect(recoveredSave).toMatchObject({
+    revision: 11,
+    selectedPreset: 'research',
+    activeCenterSurface: 'browser',
+    selectedJobId: 'remote-job'
+  })
+  expect(recoveredSave.layouts).toEqual(remote.layouts)
+  expect(screen.getByRole('button', { name: 'Research' }).getAttribute('aria-pressed')).toBe('true')
+})
+
 test('layout changes preserve mounted content surface identities', async () => {
   Object.defineProperty(window, 'jobos', { configurable: true, value: undefined })
   render(<App />)
@@ -375,6 +410,21 @@ function restoredWorkspace(revision: number) {
       'agent-focus': { order: ['jobs', 'center', 'agent'] as const, widths: { jobs: 220, center: 420, agent: 650 }, collapsed: [] }
     },
     selectedJobId: null,
+    activeCenterSurface: 'document' as const,
+    repairedPresets: []
+  }
+}
+
+function remoteWorkspace(revision: number) {
+  return {
+    revision,
+    selectedPreset: 'agent-focus' as const,
+    layouts: {
+      research: { order: ['agent', 'jobs', 'center'] as const, widths: { jobs: 333, center: 811, agent: 377 }, collapsed: ['jobs'] as const },
+      review: { order: ['center', 'agent', 'jobs'] as const, widths: { jobs: 301, center: 843, agent: 419 }, collapsed: ['agent'] as const },
+      'agent-focus': { order: ['center', 'jobs', 'agent'] as const, widths: { jobs: 245, center: 465, agent: 721 }, collapsed: ['center'] as const }
+    },
+    selectedJobId: 'remote-job',
     activeCenterSurface: 'document' as const,
     repairedPresets: []
   }
