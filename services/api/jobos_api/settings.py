@@ -14,3 +14,4 @@ class Settings(BaseModel):
 
     device_token: str = Field(min_length=16)
     state_db_path: Path
+    job_hunter_db_path: Path | None = None

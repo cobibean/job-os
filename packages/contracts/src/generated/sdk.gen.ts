@@ -2,7 +2,7 @@
 
 import { client } from './client.gen.js';
 import type { Client, ClientMeta, Options as Options2, RequestResult, TDataShape } from './client/index.js';
-import type { DeviceSessionV1DeviceSessionGetData, DeviceSessionV1DeviceSessionGetResponses, HealthV1HealthGetData, HealthV1HealthGetResponses, VersionV1VersionGetData, VersionV1VersionGetResponses } from './types.gen.js';
+import type { DeviceSessionV1DeviceSessionGetData, DeviceSessionV1DeviceSessionGetResponses, EventsListV1EventsGetData, EventsListV1EventsGetErrors, EventsListV1EventsGetResponses, EventsStreamV1EventsStreamGetData, EventsStreamV1EventsStreamGetErrors, EventsStreamV1EventsStreamGetResponses, HealthV1HealthGetData, HealthV1HealthGetResponses, JobHistoryV1JobsJobIdHistoryGetData, JobHistoryV1JobsJobIdHistoryGetErrors, JobHistoryV1JobsJobIdHistoryGetResponses, JobInspectV1JobsJobIdGetData, JobInspectV1JobsJobIdGetErrors, JobInspectV1JobsJobIdGetResponses, JobsListV1JobsGetData, JobsListV1JobsGetErrors, JobsListV1JobsGetResponses, JobsReorderV1JobsOrderPutData, JobsReorderV1JobsOrderPutErrors, JobsReorderV1JobsOrderPutResponses, JobUpdateStatusV1JobsJobIdStatusPutData, JobUpdateStatusV1JobsJobIdStatusPutErrors, JobUpdateStatusV1JobsJobIdStatusPutResponses, VersionV1VersionGetData, VersionV1VersionGetResponses, WorkspaceJobsV1WorkspaceJobsGetData, WorkspaceJobsV1WorkspaceJobsGetResponses, WorkspaceSelectJobV1WorkspaceJobsSelectionPutData, WorkspaceSelectJobV1WorkspaceJobsSelectionPutErrors, WorkspaceSelectJobV1WorkspaceJobsSelectionPutResponses, WorkspaceSortJobsV1WorkspaceJobsSortPutData, WorkspaceSortJobsV1WorkspaceJobsSortPutErrors, WorkspaceSortJobsV1WorkspaceJobsSortPutResponses } from './types.gen.js';
 
 export type Options<TData extends TDataShape = TDataShape, ThrowOnError extends boolean = boolean, TResponse = unknown> = Options2<TData, ThrowOnError, TResponse> & {
     /**
@@ -28,11 +28,117 @@ export const deviceSessionV1DeviceSessionGet = <ThrowOnError extends boolean = f
 });
 
 /**
+ * Events List
+ */
+export const eventsListV1EventsGet = <ThrowOnError extends boolean = false>(options?: Options<EventsListV1EventsGetData, ThrowOnError>): RequestResult<EventsListV1EventsGetResponses, EventsListV1EventsGetErrors, ThrowOnError> => (options?.client ?? client).get<EventsListV1EventsGetResponses, EventsListV1EventsGetErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/v1/events',
+    ...options
+});
+
+/**
+ * Events Stream
+ */
+export const eventsStreamV1EventsStreamGet = <ThrowOnError extends boolean = false>(options?: Options<EventsStreamV1EventsStreamGetData, ThrowOnError>): RequestResult<EventsStreamV1EventsStreamGetResponses, EventsStreamV1EventsStreamGetErrors, ThrowOnError> => (options?.client ?? client).get<EventsStreamV1EventsStreamGetResponses, EventsStreamV1EventsStreamGetErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/v1/events/stream',
+    ...options
+});
+
+/**
  * Health
  */
 export const healthV1HealthGet = <ThrowOnError extends boolean = false>(options?: Options<HealthV1HealthGetData, ThrowOnError>): RequestResult<HealthV1HealthGetResponses, unknown, ThrowOnError> => (options?.client ?? client).get<HealthV1HealthGetResponses, unknown, ThrowOnError>({ url: '/v1/health', ...options });
 
 /**
+ * Jobs List
+ */
+export const jobsListV1JobsGet = <ThrowOnError extends boolean = false>(options?: Options<JobsListV1JobsGetData, ThrowOnError>): RequestResult<JobsListV1JobsGetResponses, JobsListV1JobsGetErrors, ThrowOnError> => (options?.client ?? client).get<JobsListV1JobsGetResponses, JobsListV1JobsGetErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/v1/jobs',
+    ...options
+});
+
+/**
+ * Jobs Reorder
+ */
+export const jobsReorderV1JobsOrderPut = <ThrowOnError extends boolean = false>(options: Options<JobsReorderV1JobsOrderPutData, ThrowOnError>): RequestResult<JobsReorderV1JobsOrderPutResponses, JobsReorderV1JobsOrderPutErrors, ThrowOnError> => (options.client ?? client).put<JobsReorderV1JobsOrderPutResponses, JobsReorderV1JobsOrderPutErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/v1/jobs/order',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * Job Inspect
+ */
+export const jobInspectV1JobsJobIdGet = <ThrowOnError extends boolean = false>(options: Options<JobInspectV1JobsJobIdGetData, ThrowOnError>): RequestResult<JobInspectV1JobsJobIdGetResponses, JobInspectV1JobsJobIdGetErrors, ThrowOnError> => (options.client ?? client).get<JobInspectV1JobsJobIdGetResponses, JobInspectV1JobsJobIdGetErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/v1/jobs/{job_id}',
+    ...options
+});
+
+/**
+ * Job History
+ */
+export const jobHistoryV1JobsJobIdHistoryGet = <ThrowOnError extends boolean = false>(options: Options<JobHistoryV1JobsJobIdHistoryGetData, ThrowOnError>): RequestResult<JobHistoryV1JobsJobIdHistoryGetResponses, JobHistoryV1JobsJobIdHistoryGetErrors, ThrowOnError> => (options.client ?? client).get<JobHistoryV1JobsJobIdHistoryGetResponses, JobHistoryV1JobsJobIdHistoryGetErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/v1/jobs/{job_id}/history',
+    ...options
+});
+
+/**
+ * Job Update Status
+ */
+export const jobUpdateStatusV1JobsJobIdStatusPut = <ThrowOnError extends boolean = false>(options: Options<JobUpdateStatusV1JobsJobIdStatusPutData, ThrowOnError>): RequestResult<JobUpdateStatusV1JobsJobIdStatusPutResponses, JobUpdateStatusV1JobsJobIdStatusPutErrors, ThrowOnError> => (options.client ?? client).put<JobUpdateStatusV1JobsJobIdStatusPutResponses, JobUpdateStatusV1JobsJobIdStatusPutErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/v1/jobs/{job_id}/status',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
  * Version
  */
 export const versionV1VersionGet = <ThrowOnError extends boolean = false>(options?: Options<VersionV1VersionGetData, ThrowOnError>): RequestResult<VersionV1VersionGetResponses, unknown, ThrowOnError> => (options?.client ?? client).get<VersionV1VersionGetResponses, unknown, ThrowOnError>({ url: '/v1/version', ...options });
+
+/**
+ * Workspace Jobs
+ */
+export const workspaceJobsV1WorkspaceJobsGet = <ThrowOnError extends boolean = false>(options?: Options<WorkspaceJobsV1WorkspaceJobsGetData, ThrowOnError>): RequestResult<WorkspaceJobsV1WorkspaceJobsGetResponses, unknown, ThrowOnError> => (options?.client ?? client).get<WorkspaceJobsV1WorkspaceJobsGetResponses, unknown, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/v1/workspace/jobs',
+    ...options
+});
+
+/**
+ * Workspace Select Job
+ */
+export const workspaceSelectJobV1WorkspaceJobsSelectionPut = <ThrowOnError extends boolean = false>(options: Options<WorkspaceSelectJobV1WorkspaceJobsSelectionPutData, ThrowOnError>): RequestResult<WorkspaceSelectJobV1WorkspaceJobsSelectionPutResponses, WorkspaceSelectJobV1WorkspaceJobsSelectionPutErrors, ThrowOnError> => (options.client ?? client).put<WorkspaceSelectJobV1WorkspaceJobsSelectionPutResponses, WorkspaceSelectJobV1WorkspaceJobsSelectionPutErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/v1/workspace/jobs/selection',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * Workspace Sort Jobs
+ */
+export const workspaceSortJobsV1WorkspaceJobsSortPut = <ThrowOnError extends boolean = false>(options: Options<WorkspaceSortJobsV1WorkspaceJobsSortPutData, ThrowOnError>): RequestResult<WorkspaceSortJobsV1WorkspaceJobsSortPutResponses, WorkspaceSortJobsV1WorkspaceJobsSortPutErrors, ThrowOnError> => (options.client ?? client).put<WorkspaceSortJobsV1WorkspaceJobsSortPutResponses, WorkspaceSortJobsV1WorkspaceJobsSortPutErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/v1/workspace/jobs/sort',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});

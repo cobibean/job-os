@@ -1,0 +1,36 @@
+import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { afterEach, expect, test, vi } from 'vitest'
+
+import { JobNavigator } from './JobNavigator'
+
+afterEach(cleanup)
+
+test('manual rows support deliberate drag ordering with an accessible button alternative', () => {
+  const onReorder = vi.fn()
+  const jobs = [
+    { jobId: 'a', company: 'Alpha', title: 'Builder', status: 'discovered' as const, statusGroup: 'Inbox', canonicalUrl: 'https://example.com/a', discoveredAt: '', lastSeenAt: '' },
+    { jobId: 'b', company: 'Beta', title: 'Operator', status: 'reviewed' as const, statusGroup: 'Inbox', canonicalUrl: 'https://example.com/b', discoveredAt: '', lastSeenAt: '' }
+  ]
+  render(
+    <JobNavigator
+      error={null} feedback={null} jobs={jobs} loading={false}
+      onMove={vi.fn()} onQueryChange={vi.fn()} onReorder={onReorder}
+      onSelect={vi.fn()} onSortChange={vi.fn()} onStatusChange={vi.fn()}
+      onStatusGroupChange={vi.fn()} query="" selectedJobId={null}
+      sortMode="manual" statusGroup=""
+    />
+  )
+  const transfer = {
+    getData: vi.fn().mockReturnValue('a'),
+    setData: vi.fn(),
+    effectAllowed: ''
+  }
+  const rows = screen.getAllByRole('listitem')
+
+  fireEvent.dragStart(rows[0]!, { dataTransfer: transfer })
+  fireEvent.dragOver(rows[1]!, { dataTransfer: transfer })
+  fireEvent.drop(rows[1]!, { dataTransfer: transfer })
+
+  expect(onReorder).toHaveBeenCalledWith('a', 'b')
+  expect(screen.getByRole('button', { name: 'Move Alpha down' })).not.toBeNull()
+})
