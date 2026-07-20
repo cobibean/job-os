@@ -235,3 +235,76 @@ def test_corrupt_layout_repairs_only_the_affected_preset(tmp_path):
     assert restored.snapshot["layouts"]["review"] == initial.snapshot["layouts"]["review"]
     assert restored.snapshot["layouts"]["research"] == initial.snapshot["layouts"]["research"]
     assert restored.snapshot["selected_job_id"] == "job-9"
+
+
+def test_browser_metadata_round_trips_without_credentials_or_session_material(tmp_path):
+    database = tmp_path / "jobos.db"
+    store = JobOsStateStore(database)
+    store.initialize()
+    initial = store.workspace_snapshot("device-a")
+    saved = store.save_workspace_snapshot(
+        "device-a",
+        expected_revision=0,
+        snapshot={
+            **initial.snapshot,
+            "browser_tabs": [
+                {
+                    "tab_id": "gmail",
+                    "url": "https://mail.google.com/mail/u/0/",
+                    "title": "Inbox",
+                    "favicon_url": "https://mail.google.com/favicon.ico",
+                    "associated_job_id": None,
+                },
+                {
+                    "tab_id": "listing",
+                    "url": "https://jobs.example.com/roles/7",
+                    "title": "Staff Product Manager",
+                    "favicon_url": None,
+                    "associated_job_id": "job-7",
+                },
+            ],
+            "active_browser_tab_id": "gmail",
+        },
+        idempotency_key="browser-tabs-1",
+        origin="user",
+        actor_id="device-a",
+    )
+
+    restored = store.workspace_snapshot("device-a")
+    persisted_json = json.dumps(restored.snapshot)
+
+    assert saved.snapshot["active_browser_tab_id"] == "gmail"
+    assert restored.snapshot["browser_tabs"] == saved.snapshot["browser_tabs"]
+    assert "cookie" not in persisted_json.lower()
+    assert "credential" not in persisted_json.lower()
+    assert "authorization" not in persisted_json.lower()
+    assert "browser_tabs" not in json.dumps(store.list_mutation_audit())
+
+
+def test_malformed_browser_restore_is_repaired_without_resetting_layout_or_job(tmp_path):
+    database = tmp_path / "jobos.db"
+    store = JobOsStateStore(database)
+    store.initialize()
+    store.save_job_selection("job-9", "user")
+    initial = store.workspace_snapshot("device-a")
+    corrupt = {
+        **initial.snapshot,
+        "selected_preset": "research",
+        "browser_tabs": [{"tab_id": "bad", "url": "file:///etc/passwd", "title": "Bad"}],
+        "active_browser_tab_id": "bad",
+    }
+    with sqlite3.connect(database) as connection:
+        connection.execute(
+            "INSERT INTO workspace_snapshots(device_id, revision, snapshot_json) VALUES (?, ?, ?)",
+            ("device-a", 6, json.dumps(corrupt)),
+        )
+
+    restored = store.workspace_snapshot("device-a")
+
+    assert restored.revision == 6
+    assert restored.repaired_browser is True
+    assert restored.snapshot["browser_tabs"] == []
+    assert restored.snapshot["active_browser_tab_id"] is None
+    assert restored.snapshot["selected_preset"] == "research"
+    assert restored.snapshot["layouts"] == initial.snapshot["layouts"]
+    assert restored.snapshot["selected_job_id"] == "job-9"

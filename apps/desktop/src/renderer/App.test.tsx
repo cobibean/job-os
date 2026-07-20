@@ -52,19 +52,20 @@ test('reset preserves the selected layout preset', async () => {
   expect(research.getAttribute('aria-pressed')).toBe('true')
 })
 
-test('later-phase controls are visibly disabled while layout controls remain interactive', () => {
+test('later-phase controls stay disabled while the browser surface is recoverable', () => {
   Object.defineProperty(window, 'jobos', { configurable: true, value: undefined })
   render(<App />)
 
   for (const name of [
-    'Open a new surface',
     'Agent context settings',
     'Send message',
     'Open settings'
   ]) {
     expect((screen.getByRole('button', { name }) as HTMLButtonElement).disabled).toBe(true)
   }
-  expect((screen.getByRole('tab', { name: 'Browser' }) as HTMLButtonElement).disabled).toBe(true)
+  fireEvent.click(screen.getByRole('button', { name: 'Research' }))
+  expect((screen.getByRole('button', { name: 'Open a new tab' }) as HTMLButtonElement).disabled).toBe(true)
+  expect(screen.getByText('Browser available in the desktop app')).not.toBeNull()
   expect((screen.getByRole('button', { name: 'Research' }) as HTMLButtonElement).disabled).toBe(false)
   expect((screen.getByRole('button', { name: 'Reset layout' }) as HTMLButtonElement).disabled).toBe(false)
 })
@@ -147,6 +148,65 @@ test('real jobs render compactly and user selection and status use the shared br
   expect(select).toHaveBeenCalledWith('job-1')
   expect(updateStatus).toHaveBeenCalledWith('job-1', 'reviewed')
   expect(await screen.findByText('Status changed to reviewed')).not.toBeNull()
+})
+
+test('changing jobs never selects, closes, navigates, or reassociates an unrelated browser tab', async () => {
+  const jobs = [
+    { jobId: 'job-1', company: 'Example Co', title: 'Product Builder', status: 'reviewed' as const, statusGroup: 'Inbox', canonicalUrl: 'https://example.com/jobs/1', discoveredAt: '', lastSeenAt: '' },
+    { jobId: 'job-2', company: 'Northstar', title: 'Staff PM', status: 'shortlisted' as const, statusGroup: 'Considering', canonicalUrl: 'https://example.com/jobs/2', discoveredAt: '', lastSeenAt: '' }
+  ]
+  const browserTab = {
+    tabId: 'gmail', url: 'https://mail.google.com/', title: 'Gmail', faviconUrl: null,
+    associatedJobId: null, loading: false, canGoBack: false, canGoForward: false, error: null, crashed: false
+  }
+  const browserActions = {
+    select: vi.fn(), close: vi.fn(), navigate: vi.fn(), associate: vi.fn()
+  }
+  const workspace = {
+    revision: 1,
+    selectedPreset: 'research' as const,
+    layouts: {
+      research: { order: ['jobs', 'center', 'agent'] as const, widths: { jobs: 260, center: 760, agent: 350 }, collapsed: [] },
+      review: { order: ['jobs', 'center', 'agent'] as const, widths: { jobs: 280, center: 700, agent: 380 }, collapsed: [] },
+      'agent-focus': { order: ['jobs', 'center', 'agent'] as const, widths: { jobs: 220, center: 420, agent: 650 }, collapsed: [] }
+    },
+    selectedJobId: null,
+    activeCenterSurface: 'browser' as const,
+    repairedPresets: [],
+    browserTabs: [{ tabId: 'gmail', url: browserTab.url, title: browserTab.title, faviconUrl: null, associatedJobId: null }],
+    activeBrowserTabId: 'gmail',
+    repairedBrowser: false
+  }
+  Object.defineProperty(window, 'jobos', {
+    configurable: true,
+    value: {
+      connectivity: { get: vi.fn().mockRejectedValue(new Error('offline')) },
+      jobs: {
+        getState: vi.fn().mockResolvedValue({ jobs, selectedJobId: null, sortMode: 'manual', manualOrder: ['job-1', 'job-2'] }),
+        list: vi.fn(), select: vi.fn().mockResolvedValue({ eventId: 1 }), reorder: vi.fn(), setSort: vi.fn(), updateStatus: vi.fn(),
+        subscribe: vi.fn().mockReturnValue(() => undefined)
+      },
+      workspace: { get: vi.fn().mockResolvedValue(workspace), save: vi.fn().mockImplementation(value => Promise.resolve({ ...value, revision: value.revision + 1 })) },
+      browser: {
+        getState: vi.fn(),
+        restore: vi.fn().mockResolvedValue({ tabs: [browserTab], activeTabId: 'gmail', download: null, notice: null }),
+        create: vi.fn(), reorder: vi.fn(), back: vi.fn(), forward: vi.fn(), reload: vi.fn(), stop: vi.fn(), setBounds: vi.fn().mockResolvedValue(undefined),
+        subscribe: vi.fn().mockReturnValue(() => undefined),
+        ...browserActions
+      }
+    }
+  })
+
+  render(<App />)
+  expect(await screen.findByRole('button', { name: 'Select Gmail' })).not.toBeNull()
+  fireEvent.click(screen.getByRole('button', { name: 'Select Northstar Staff PM' }))
+
+  await waitFor(() => expect(screen.getByText('Northstar · Staff PM')).not.toBeNull())
+  expect(screen.getByRole('button', { name: 'Select Gmail' })).not.toBeNull()
+  expect(browserActions.select).not.toHaveBeenCalled()
+  expect(browserActions.close).not.toHaveBeenCalled()
+  expect(browserActions.navigate).not.toHaveBeenCalled()
+  expect(browserActions.associate).not.toHaveBeenCalled()
 })
 
 test('an MCP status event refreshes the navigator without a manual action', async () => {

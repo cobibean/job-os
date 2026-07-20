@@ -63,7 +63,7 @@ def test_version_and_openapi_describe_the_shared_workspace_contract(tmp_path):
     assert version.status_code == 200
     assert version.json() == {
         "api_version": "0.1.0",
-        "contract": "jobos-v1-phase3",
+        "contract": "jobos-v1-phase4",
     }
     assert set(openapi.json()["paths"]) == {
         "/v1/health",
@@ -115,3 +115,6 @@ def test_version_and_openapi_describe_the_shared_workspace_contract(tmp_path):
     }
     assert "idempotency_key" not in schemas["WorkspaceSnapshotResponse"]["properties"]
     assert "origin" not in schemas["WorkspaceSnapshotResponse"]["properties"]
+    assert set(schemas["BrowserTabMetadata"]["required"]) == {"tab_id", "url"}
+    assert "browser_tabs" in schemas["WorkspaceSnapshotCommand"]["properties"]
+    assert "active_browser_tab_id" in schemas["WorkspaceSnapshotResponse"]["properties"]

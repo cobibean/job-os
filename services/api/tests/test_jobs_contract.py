@@ -311,6 +311,7 @@ def test_workspace_snapshot_round_trip_and_revision_conflict(tmp_path):
         initial = client.get("/v1/workspace", headers=auth_headers())
         body = initial.json()
         body.pop("repaired_presets")
+        body.pop("repaired_browser")
         body.update({"origin": "user", "idempotency_key": "workspace-round-trip-1"})
         body["selected_preset"] = "agent-focus"
         saved = client.put("/v1/workspace", headers=auth_headers(), json=body)
@@ -333,6 +334,7 @@ def test_workspace_snapshot_idempotent_retry_returns_original_revision(tmp_path)
     with make_client(tmp_path, facade) as client:
         body = client.get("/v1/workspace", headers=auth_headers()).json()
         body.pop("repaired_presets")
+        body.pop("repaired_browser")
         body.update(
             {
                 "selected_preset": "research",
@@ -360,6 +362,32 @@ def test_workspace_snapshot_idempotent_retry_returns_original_revision(tmp_path)
     assert restored.json()["revision"] == 1
 
 
+def test_workspace_rejects_credential_bearing_browser_metadata(tmp_path):
+    facade = FakeJobHunterFacade()
+
+    with make_client(tmp_path, facade) as client:
+        body = client.get("/v1/workspace", headers=auth_headers()).json()
+        body.pop("repaired_presets")
+        body.pop("repaired_browser")
+        body.update(
+            {
+                "origin": "user",
+                "idempotency_key": "workspace-browser-secret-1",
+                "browser_tabs": [
+                    {
+                        "tab_id": "oauth",
+                        "url": "https://example.com/callback?code=must-not-persist",
+                        "title": "Callback",
+                    }
+                ],
+                "active_browser_tab_id": "oauth",
+            }
+        )
+        response = client.put("/v1/workspace", headers=auth_headers(), json=body)
+
+    assert response.status_code == 422
+
+
 def test_layout_save_cannot_overwrite_a_newer_user_or_mcp_selection(tmp_path):
     facade = FakeJobHunterFacade()
     facade.jobs = facade.jobs[:2]
@@ -372,6 +400,7 @@ def test_layout_save_cannot_overwrite_a_newer_user_or_mcp_selection(tmp_path):
         )
         stale_layout = client.get("/v1/workspace", headers=auth_headers()).json()
         stale_layout.pop("repaired_presets")
+        stale_layout.pop("repaired_browser")
         stale_layout.update(
             {"origin": "user", "idempotency_key": "workspace-selection-race-1"}
         )

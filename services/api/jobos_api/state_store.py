@@ -4,6 +4,7 @@ from copy import deepcopy
 from dataclasses import dataclass
 from hashlib import sha256
 from pathlib import Path
+from urllib.parse import parse_qsl, urlsplit
 
 
 class IncompatibleSchemaError(RuntimeError):
@@ -121,6 +122,7 @@ class WorkspaceSnapshotRecord:
     revision: int
     snapshot: dict[str, object]
     repaired_presets: tuple[str, ...] = ()
+    repaired_browser: bool = False
 
 
 PANEL_IDS = ("jobs", "center", "agent")
@@ -149,7 +151,57 @@ def canonical_workspace_snapshot(selected_job_id: str | None = None) -> dict[str
         "layouts": deepcopy(PRESET_DEFAULTS),
         "selected_job_id": selected_job_id,
         "active_center_surface": "document",
+        "browser_tabs": [],
+        "active_browser_tab_id": None,
     }
+
+
+def _safe_browser_url(value: object, *, allow_blank: bool) -> bool:
+    if value == "about:blank":
+        return allow_blank
+    if not isinstance(value, str) or len(value) > 8192:
+        return False
+    parsed = urlsplit(value)
+    sensitive = {
+        "access_token", "auth_token", "authorization", "bearer_token", "code",
+        "credential", "id_token", "jwt", "password", "refresh_token",
+        "samlresponse", "secret", "session", "session_id",
+    }
+    return (
+        parsed.scheme in ("http", "https")
+        and bool(parsed.hostname)
+        and not parsed.username
+        and not parsed.password
+        and not parsed.fragment
+        and not any(key.lower() in sensitive for key, _ in parse_qsl(parsed.query))
+    )
+
+
+def _valid_browser_tab(value: object) -> bool:
+    if not isinstance(value, dict):
+        return False
+    tab_id = value.get("tab_id")
+    url = value.get("url")
+    title = value.get("title")
+    favicon_url = value.get("favicon_url")
+    associated_job_id = value.get("associated_job_id")
+    return (
+        isinstance(tab_id, str)
+        and 0 < len(tab_id) <= 128
+        and _safe_browser_url(url, allow_blank=True)
+        and isinstance(title, str)
+        and len(title) <= 512
+        and (
+            favicon_url is None
+            or (
+                _safe_browser_url(favicon_url, allow_blank=False)
+            )
+        )
+        and (
+            associated_job_id is None
+            or (isinstance(associated_job_id, str) and len(associated_job_id) <= 512)
+        )
+    )
 
 
 def _valid_layout(value: object) -> bool:
@@ -181,6 +233,7 @@ def normalize_workspace_snapshot(
 ) -> tuple[dict[str, object], tuple[str, ...]]:
     canonical = canonical_workspace_snapshot(selected_job_id)
     if not isinstance(value, dict):
+        canonical["_repaired_browser"] = True
         return canonical, tuple(PRESET_DEFAULTS)
     selected_preset = value.get("selected_preset")
     canonical["selected_preset"] = (
@@ -205,6 +258,28 @@ def normalize_workspace_snapshot(
                 repaired.append(preset)
     else:
         repaired.extend(PRESET_DEFAULTS)
+    browser_tabs = value.get("browser_tabs", [])
+    active_tab_id = value.get("active_browser_tab_id")
+    repaired_browser = False
+    if (
+        isinstance(browser_tabs, list)
+        and len(browser_tabs) <= 50
+        and all(_valid_browser_tab(tab) for tab in browser_tabs)
+    ):
+        tab_ids = [tab["tab_id"] for tab in browser_tabs]
+        if len(tab_ids) == len(set(tab_ids)):
+            canonical["browser_tabs"] = deepcopy(browser_tabs)
+            if active_tab_id is None or (
+                isinstance(active_tab_id, str) and active_tab_id in tab_ids
+            ):
+                canonical["active_browser_tab_id"] = active_tab_id
+            else:
+                repaired_browser = True
+        else:
+            repaired_browser = True
+    else:
+        repaired_browser = True
+    canonical["_repaired_browser"] = repaired_browser
     canonical["selected_job_id"] = selected_job_id
     return canonical, tuple(repaired)
 
@@ -317,7 +392,8 @@ class JobOsStateStore:
         except (TypeError, json.JSONDecodeError):
             raw = None
         snapshot, repaired = normalize_workspace_snapshot(raw, selected_job_id)
-        return WorkspaceSnapshotRecord(int(row[0]), snapshot, repaired)
+        repaired_browser = bool(snapshot.pop("_repaired_browser", False))
+        return WorkspaceSnapshotRecord(int(row[0]), snapshot, repaired, repaired_browser)
 
     def save_workspace_snapshot(
         self,
@@ -365,12 +441,14 @@ class JobOsStateStore:
                     int(result["revision"]),
                     result["snapshot"],
                     tuple(result["repaired_presets"]),
+                    bool(result.get("repaired_browser", False)),
                 )
             selection_row = connection.execute(
                 "SELECT selected_job_id FROM job_workspace WHERE workspace_id = 1"
             ).fetchone()
             selected_job_id = selection_row[0] if selection_row else None
             normalized, repaired = normalize_workspace_snapshot(snapshot, selected_job_id)
+            repaired_browser = bool(normalized.pop("_repaired_browser", False))
             payload = json.dumps(normalized, separators=(",", ":"), sort_keys=True)
             row = connection.execute(
                 "SELECT revision FROM workspace_snapshots WHERE device_id = ?",
@@ -397,6 +475,7 @@ class JobOsStateStore:
                     "revision": revision,
                     "snapshot": normalized,
                     "repaired_presets": repaired,
+                    "repaired_browser": repaired_browser,
                 },
                 separators=(",", ":"),
                 sort_keys=True,
@@ -431,7 +510,7 @@ class JobOsStateStore:
                 ),
             )
             connection.commit()
-        return WorkspaceSnapshotRecord(revision, normalized, repaired)
+        return WorkspaceSnapshotRecord(revision, normalized, repaired, repaired_browser)
 
     def list_mutation_audit(self) -> list[dict[str, object]]:
         with sqlite3.connect(f"file:{self._path}?mode=ro", uri=True) as connection:

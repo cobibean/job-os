@@ -13,6 +13,7 @@ export function App() {
   const jobState = useJobs()
   const layoutState = useWorkspace(jobState.selectedJobId)
   const activePreset = layoutState.workspace.selectedPreset
+  const activeLayout = layoutState.workspace.layouts[activePreset]
 
   return (
     <div className="app-shell" data-layout={activePreset}>
@@ -23,7 +24,18 @@ export function App() {
       />
       <WorkbenchLayout
         agent={<AgentPanel contextLabel={jobState.selectedJob ? `${jobState.selectedJob.company} · ${jobState.selectedJob.title}` : 'No active job'} />}
-        center={<CenterWorkspace activeSurface={layoutState.workspace.activeCenterSurface} />}
+        center={<CenterWorkspace
+          activeSurface={layoutState.workspace.activeCenterSurface}
+          browserState={{
+            tabs: layoutState.workspace.browserTabs ?? [],
+            activeTabId: layoutState.workspace.activeBrowserTabId ?? null
+          }}
+          browserVisible={!activeLayout.collapsed.includes('center')}
+          jobs={jobState.jobs}
+          layoutSignal={`${activePreset}:${activeLayout.order.join(',')}:${activeLayout.collapsed.join(',')}`}
+          onBrowserPersist={layoutState.updateBrowserState}
+          workspaceHydrated={layoutState.hydrated}
+        />}
         jobs={<JobNavigator
           error={jobState.error}
           feedback={jobState.feedback}

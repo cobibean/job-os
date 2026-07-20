@@ -15,6 +15,9 @@ export interface WorkspaceSnapshot {
   selectedJobId: string | null
   activeCenterSurface: CenterSurface
   repairedPresets: LayoutPreset[]
+  browserTabs?: import('../shared/contracts').BrowserTabMetadata[]
+  activeBrowserTabId?: string | null
+  repairedBrowser?: boolean
 }
 
 export const panelNames: Record<PanelId, string> = {
@@ -44,7 +47,10 @@ export function canonicalWorkspace(): WorkspaceSnapshot {
     },
     selectedJobId: null,
     activeCenterSurface: 'document',
-    repairedPresets: []
+    repairedPresets: [],
+    browserTabs: [],
+    activeBrowserTabId: null,
+    repairedBrowser: false
   }
 }
 

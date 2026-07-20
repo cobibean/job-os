@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 
 import type { LayoutPreset, PanelId, WorkspaceSnapshot } from '../workspaceLayout'
+import type { BrowserRestoreState } from '../../shared/contracts'
 import {
   canonicalWorkspace,
   movePanel,
@@ -14,6 +15,7 @@ type WorkspaceUpdate = (current: WorkspaceSnapshot) => WorkspaceSnapshot
 export function useWorkspace(selectedJobId: string | null) {
   const [workspace, setWorkspace] = useState<WorkspaceSnapshot>(canonicalWorkspace)
   const [announcement, setAnnouncement] = useState('Layout controls ready')
+  const [hydrated, setHydrated] = useState(!window.jobos?.workspace)
   const revision = useRef(0)
   const latest = useRef(workspace)
   const queue = useRef(Promise.resolve())
@@ -75,6 +77,7 @@ export function useWorkspace(selectedJobId: string | null) {
       revision.current = restored.revision
       latest.current = reconciled
       hydrating.current = false
+      setHydrated(true)
       setWorkspace(reconciled)
       if (restored.repairedPresets.length) {
         setAnnouncement(`Recovered ${restored.repairedPresets.join(', ')} layout`)
@@ -89,6 +92,7 @@ export function useWorkspace(selectedJobId: string | null) {
       const pending = pendingHydrationUpdates.current
       pendingHydrationUpdates.current = []
       hydrating.current = false
+      setHydrated(true)
       setAnnouncement('Using safe default layout')
       recoveringStartup.current = true
       startupRecoveryUpdates.current = pending
@@ -138,7 +142,14 @@ export function useWorkspace(selectedJobId: string | null) {
 
   const reset = () => commit(resetActivePreset, `${panelLabel('center')} layout reset`)
 
-  return { workspace, announcement, selectPreset, resize, collapse, move, reset }
+  const updateBrowserState = useCallback((browser: BrowserRestoreState) => commit(current => ({
+    ...current,
+    browserTabs: browser.tabs,
+    activeBrowserTabId: browser.activeTabId,
+    repairedBrowser: false
+  }), ''), [commit])
+
+  return { workspace, announcement, hydrated, selectPreset, resize, collapse, move, reset, updateBrowserState }
 }
 
 function panelLabel(panel: PanelId) {

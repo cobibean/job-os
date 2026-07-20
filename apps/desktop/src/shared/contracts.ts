@@ -39,6 +39,51 @@ export type PanelId = 'jobs' | 'center' | 'agent'
 export type LayoutPreset = 'research' | 'review' | 'agent-focus'
 export type CenterSurface = 'browser' | 'document'
 
+export interface BrowserTabMetadata {
+  tabId: string
+  url: string
+  title: string
+  faviconUrl: string | null
+  associatedJobId: string | null
+}
+
+export interface BrowserTab extends BrowserTabMetadata {
+  loading: boolean
+  canGoBack: boolean
+  canGoForward: boolean
+  error: string | null
+  crashed: boolean
+}
+
+export interface BrowserDownload {
+  id: string
+  filename: string
+  state: 'starting' | 'progressing' | 'completed' | 'cancelled' | 'interrupted' | 'failed'
+  receivedBytes: number
+  totalBytes: number
+  message?: string
+}
+
+export interface BrowserState {
+  tabs: BrowserTab[]
+  activeTabId: string | null
+  download: BrowserDownload | null
+  notice: string | null
+}
+
+export interface BrowserRestoreState {
+  tabs: BrowserTabMetadata[]
+  activeTabId: string | null
+}
+
+export interface BrowserBounds {
+  x: number
+  y: number
+  width: number
+  height: number
+  visible: boolean
+}
+
 export interface WorkspaceSnapshot {
   revision: number
   selectedPreset: LayoutPreset
@@ -50,6 +95,9 @@ export interface WorkspaceSnapshot {
   selectedJobId: string | null
   activeCenterSurface: CenterSurface
   repairedPresets: LayoutPreset[]
+  browserTabs?: BrowserTabMetadata[]
+  activeBrowserTabId?: string | null
+  repairedBrowser?: boolean
 }
 
 export interface ConnectivitySnapshot {
@@ -75,5 +123,21 @@ export interface JobOsRendererBridge {
   workspace: {
     get: () => Promise<WorkspaceSnapshot>
     save: (snapshot: WorkspaceSnapshot) => Promise<WorkspaceSnapshot>
+  }
+  browser: {
+    getState: () => Promise<BrowserState>
+    restore: (state: BrowserRestoreState) => Promise<BrowserState>
+    create: (url?: string, associatedJobId?: string | null) => Promise<BrowserState>
+    select: (tabId: string) => Promise<BrowserState>
+    close: (tabId: string) => Promise<BrowserState>
+    reorder: (tabIds: string[]) => Promise<BrowserState>
+    navigate: (tabId: string, input: string) => Promise<BrowserState>
+    back: (tabId: string) => Promise<BrowserState>
+    forward: (tabId: string) => Promise<BrowserState>
+    reload: (tabId: string) => Promise<BrowserState>
+    stop: (tabId: string) => Promise<BrowserState>
+    associate: (tabId: string, jobId: string | null) => Promise<BrowserState>
+    setBounds: (bounds: BrowserBounds) => Promise<void>
+    subscribe: (listener: (state: BrowserState) => void) => () => void
   }
 }

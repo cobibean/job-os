@@ -7,7 +7,7 @@ import {
 } from '@jobos/contracts'
 import type { WorkspaceSnapshotResponse } from '@jobos/contracts'
 
-import type { LayoutPreset, PanelId, WorkspaceSnapshot } from '../shared/contracts.js'
+import type { BrowserTabMetadata, LayoutPreset, PanelId, WorkspaceSnapshot } from '../shared/contracts.js'
 import type { JobsConfig } from './jobs.js'
 
 interface ApiResult<T> { data?: T; error?: unknown; response?: Response }
@@ -36,7 +36,16 @@ function fromApi(value: WorkspaceSnapshotResponse): WorkspaceSnapshot {
     layouts,
     selectedJobId: value.selected_job_id,
     activeCenterSurface: value.active_center_surface,
-    repairedPresets: value.repaired_presets ?? []
+    repairedPresets: value.repaired_presets ?? [],
+    browserTabs: (value.browser_tabs ?? []).map(tab => ({
+      tabId: tab.tab_id,
+      url: tab.url,
+      title: tab.title ?? 'New tab',
+      faviconUrl: tab.favicon_url ?? null,
+      associatedJobId: tab.associated_job_id ?? null
+    })) satisfies BrowserTabMetadata[],
+    activeBrowserTabId: value.active_browser_tab_id ?? null,
+    repairedBrowser: value.repaired_browser ?? false
   }
 }
 
@@ -48,7 +57,15 @@ function toApi(snapshot: WorkspaceSnapshot, idempotencyKey: string) {
     selected_preset: snapshot.selectedPreset,
     layouts: snapshot.layouts,
     selected_job_id: snapshot.selectedJobId,
-    active_center_surface: snapshot.activeCenterSurface
+    active_center_surface: snapshot.activeCenterSurface,
+    browser_tabs: (snapshot.browserTabs ?? []).map(tab => ({
+      tab_id: tab.tabId,
+      url: tab.url,
+      title: tab.title,
+      favicon_url: tab.faviconUrl,
+      associated_job_id: tab.associatedJobId
+    })),
+    active_browser_tab_id: snapshot.activeBrowserTabId ?? null
   }
 }
 
