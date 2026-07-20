@@ -297,6 +297,26 @@ export type ManualOrderRequest = {
 };
 
 /**
+ * PanelLayout
+ */
+export type PanelLayout = {
+    /**
+     * Collapsed
+     */
+    collapsed: Array<'jobs' | 'center' | 'agent'>;
+    /**
+     * Order
+     */
+    order: Array<'jobs' | 'center' | 'agent'>;
+    /**
+     * Widths
+     */
+    widths: {
+        [key: string]: number;
+    };
+};
+
+/**
  * StatusChangeRequest
  */
 export type StatusChangeRequest = {
@@ -364,7 +384,7 @@ export type VersionResponse = {
     /**
      * Contract
      */
-    contract: 'jobos-v1-phase2';
+    contract: 'jobos-v1-phase3';
 };
 
 /**
@@ -383,6 +403,70 @@ export type WorkspaceJobsResponse = {
      * Sort Mode
      */
     sort_mode: 'manual' | 'recent' | 'alphabetical' | 'status';
+};
+
+/**
+ * WorkspaceSnapshotCommand
+ */
+export type WorkspaceSnapshotCommand = {
+    /**
+     * Active Center Surface
+     */
+    active_center_surface: 'browser' | 'document';
+    /**
+     * Layouts
+     */
+    layouts: {
+        [key: string]: PanelLayout;
+    };
+    /**
+     * Repaired Presets
+     */
+    repaired_presets?: Array<'research' | 'review' | 'agent-focus'>;
+    /**
+     * Revision
+     */
+    revision: number;
+    /**
+     * Selected Job Id
+     */
+    selected_job_id: string | null;
+    /**
+     * Selected Preset
+     */
+    selected_preset: 'research' | 'review' | 'agent-focus';
+};
+
+/**
+ * WorkspaceSnapshotResponse
+ */
+export type WorkspaceSnapshotResponse = {
+    /**
+     * Active Center Surface
+     */
+    active_center_surface: 'browser' | 'document';
+    /**
+     * Layouts
+     */
+    layouts: {
+        [key: string]: PanelLayout;
+    };
+    /**
+     * Repaired Presets
+     */
+    repaired_presets?: Array<'research' | 'review' | 'agent-focus'>;
+    /**
+     * Revision
+     */
+    revision: number;
+    /**
+     * Selected Job Id
+     */
+    selected_job_id: string | null;
+    /**
+     * Selected Preset
+     */
+    selected_preset: 'research' | 'review' | 'agent-focus';
 };
 
 export type DeviceSessionV1DeviceSessionGetData = {
@@ -647,6 +731,47 @@ export type VersionV1VersionGetResponses = {
 };
 
 export type VersionV1VersionGetResponse = VersionV1VersionGetResponses[keyof VersionV1VersionGetResponses];
+
+export type WorkspaceGetV1WorkspaceGetData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/v1/workspace';
+};
+
+export type WorkspaceGetV1WorkspaceGetResponses = {
+    /**
+     * Successful Response
+     */
+    200: WorkspaceSnapshotResponse;
+};
+
+export type WorkspaceGetV1WorkspaceGetResponse = WorkspaceGetV1WorkspaceGetResponses[keyof WorkspaceGetV1WorkspaceGetResponses];
+
+export type WorkspacePutV1WorkspacePutData = {
+    body: WorkspaceSnapshotCommand;
+    path?: never;
+    query?: never;
+    url: '/v1/workspace';
+};
+
+export type WorkspacePutV1WorkspacePutErrors = {
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type WorkspacePutV1WorkspacePutError = WorkspacePutV1WorkspacePutErrors[keyof WorkspacePutV1WorkspacePutErrors];
+
+export type WorkspacePutV1WorkspacePutResponses = {
+    /**
+     * Successful Response
+     */
+    200: WorkspaceSnapshotResponse;
+};
+
+export type WorkspacePutV1WorkspacePutResponse = WorkspacePutV1WorkspacePutResponses[keyof WorkspacePutV1WorkspacePutResponses];
 
 export type WorkspaceJobsV1WorkspaceJobsGetData = {
     body?: never;

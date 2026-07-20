@@ -1,3 +1,4 @@
+import json
 import sqlite3
 
 import pytest
@@ -33,9 +34,9 @@ def test_initialization_applies_every_migration_once(tmp_path):
     first = store.initialize()
     second = store.initialize()
 
-    assert first.schema_version == SCHEMA_VERSION == 3
+    assert first.schema_version == SCHEMA_VERSION == 4
     assert second.schema_version == SCHEMA_VERSION
-    assert applied_versions(database) == [1, 2, 3]
+    assert applied_versions(database) == [1, 2, 3, 4]
     assert metadata_columns(database) == {"key", "value", "updated_at"}
 
 
@@ -50,11 +51,11 @@ def test_initialization_upgrades_a_behind_database(tmp_path):
     result = JobOsStateStore(database).initialize()
 
     assert result.schema_version == SCHEMA_VERSION
-    assert applied_versions(database) == [1, 2, 3]
+    assert applied_versions(database) == [1, 2, 3, 4]
     assert metadata_columns(database) == {"key", "value", "updated_at"}
 
 
-@pytest.mark.parametrize("versions", ([1, 2, 3, 4], [2]))
+@pytest.mark.parametrize("versions", ([1, 2, 3, 4, 5], [2]))
 def test_initialization_rejects_ahead_or_incompatible_history(tmp_path, versions):
     database = tmp_path / "jobos.db"
     with sqlite3.connect(database) as connection:
@@ -94,3 +95,61 @@ def test_a_failed_migration_rolls_back_its_schema_and_ledger_entry(tmp_path):
         }
         assert "partial_change" not in tables
         assert connection.execute("SELECT COUNT(*) FROM schema_migrations").fetchone() == (0,)
+
+
+def test_workspace_snapshot_is_atomic_revisioned_and_preserves_job_selection(tmp_path):
+    database = tmp_path / "jobos.db"
+    store = JobOsStateStore(database)
+    store.initialize()
+    store.save_job_selection("job-7", "user")
+
+    initial = store.workspace_snapshot("device-a")
+    saved = store.save_workspace_snapshot(
+        "device-a",
+        expected_revision=0,
+        snapshot={
+            **initial.snapshot,
+            "selected_preset": "research",
+            "selected_job_id": "job-7",
+            "active_center_surface": "browser",
+        },
+    )
+
+    assert saved.revision == 1
+    assert store.workspace_snapshot("device-a").snapshot["selected_job_id"] == "job-7"
+
+    with pytest.raises(Exception, match="revision conflict"):
+        store.save_workspace_snapshot(
+            "device-a", expected_revision=0, snapshot=initial.snapshot
+        )
+
+    assert store.workspace_snapshot("device-a").revision == 1
+
+
+def test_corrupt_layout_repairs_only_the_affected_preset(tmp_path):
+    database = tmp_path / "jobos.db"
+    store = JobOsStateStore(database)
+    store.initialize()
+    store.save_job_selection("job-9", "user")
+    initial = store.workspace_snapshot("device-a")
+    corrupt = {
+        **initial.snapshot,
+        "selected_preset": "review",
+        "layouts": {
+            **initial.snapshot["layouts"],
+            "review": {"order": ["unknown"], "widths": {"agent": -1}},
+        },
+    }
+    with sqlite3.connect(database) as connection:
+        connection.execute(
+            "INSERT INTO workspace_snapshots(device_id, revision, snapshot_json) VALUES (?, ?, ?)",
+            ("device-a", 4, json.dumps(corrupt)),
+        )
+
+    restored = store.workspace_snapshot("device-a")
+
+    assert restored.revision == 4
+    assert restored.repaired_presets == ("review",)
+    assert restored.snapshot["layouts"]["review"] == initial.snapshot["layouts"]["review"]
+    assert restored.snapshot["layouts"]["research"] == initial.snapshot["layouts"]["research"]
+    assert restored.snapshot["selected_job_id"] == "job-9"

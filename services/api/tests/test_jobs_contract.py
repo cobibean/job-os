@@ -293,3 +293,25 @@ def test_sort_mode_persists_without_rewriting_manual_order(tmp_path):
         "Inbox",
         "Applied",
     ]
+
+
+def test_workspace_snapshot_round_trip_and_revision_conflict(tmp_path):
+    facade = FakeJobHunterFacade()
+    facade.jobs = facade.jobs[:2]
+
+    with make_client(tmp_path, facade) as client:
+        initial = client.get("/v1/workspace", headers=auth_headers())
+        body = initial.json()
+        body["selected_preset"] = "agent-focus"
+        body["selected_job_id"] = "job-1"
+        saved = client.put("/v1/workspace", headers=auth_headers(), json=body)
+        stale = client.put("/v1/workspace", headers=auth_headers(), json=body)
+        restored = client.get("/v1/workspace", headers=auth_headers())
+
+    assert initial.status_code == 200
+    assert saved.status_code == 200
+    assert saved.json()["revision"] == 1
+    assert stale.status_code == 409
+    assert stale.json()["detail"] == "Workspace revision conflict; current revision is 1"
+    assert restored.json()["selected_preset"] == "agent-focus"
+    assert restored.json()["selected_job_id"] == "job-1"

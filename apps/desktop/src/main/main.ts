@@ -5,11 +5,12 @@ import { fileURLToPath } from 'node:url'
 import { app, BrowserWindow, ipcMain, session } from 'electron'
 import type { IpcMainInvokeEvent } from 'electron'
 
-import type { ConnectivitySnapshot, JobSortMode, JobStatus } from '../shared/contracts.js'
+import type { ConnectivitySnapshot, JobSortMode, JobStatus, WorkspaceSnapshot } from '../shared/contracts.js'
 import { probeConnectivity } from './connectivity.js'
 import { createMainJobsClient, startJobEventStream } from './jobs.js'
 import type { JobsConfig } from './jobs.js'
 import { isTrustedRendererUrl } from './security.js'
+import { createMainWorkspaceClient } from './workspace.js'
 
 const currentDirectory = path.dirname(fileURLToPath(import.meta.url))
 const rendererRoot = path.resolve(currentDirectory, '../renderer')
@@ -97,6 +98,23 @@ function registerJobsInterface(): void {
   })
 }
 
+function registerWorkspaceInterface(): void {
+  const config = jobsConfig()
+  const workspace = config ? createMainWorkspaceClient(config) : null
+  const trusted = (event: IpcMainInvokeEvent) => {
+    assertTrustedRenderer(event)
+    if (!workspace) throw new Error('Device credential unavailable')
+    return workspace
+  }
+  ipcMain.handle('jobos:workspace:get', event => trusted(event).get())
+  ipcMain.handle('jobos:workspace:save', (event, snapshot: WorkspaceSnapshot) => {
+    if (!snapshot || typeof snapshot !== 'object' || !Number.isInteger(snapshot.revision)) {
+      throw new Error('Invalid workspace snapshot')
+    }
+    return trusted(event).save(snapshot)
+  })
+}
+
 async function createWindow(): Promise<BrowserWindow> {
   const window = new BrowserWindow({
     width: 1440,
@@ -159,6 +177,7 @@ app.whenReady().then(async () => {
   })
   registerConnectivityInterface()
   registerJobsInterface()
+  registerWorkspaceInterface()
   await createWindow()
 
   app.on('activate', async () => {

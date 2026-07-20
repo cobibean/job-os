@@ -3,7 +3,7 @@ from jobos_api.app import create_app
 from jobos_api.settings import Settings
 
 
-def test_health_reports_a_ready_phase_two_api(tmp_path):
+def test_health_reports_a_ready_phase_three_api(tmp_path):
     app = create_app(
         Settings(
             device_token="test-device-token",
@@ -19,7 +19,7 @@ def test_health_reports_a_ready_phase_two_api(tmp_path):
         "status": "ready",
         "service": "jobos-api",
         "version": "0.1.0",
-        "state_schema": 3,
+        "state_schema": 4,
     }
 
 
@@ -48,7 +48,7 @@ def test_device_session_requires_the_runtime_credential(tmp_path):
     }
 
 
-def test_version_and_openapi_describe_the_shared_jobs_contract(tmp_path):
+def test_version_and_openapi_describe_the_shared_workspace_contract(tmp_path):
     app = create_app(
         Settings(
             device_token="test-device-token",
@@ -63,7 +63,7 @@ def test_version_and_openapi_describe_the_shared_jobs_contract(tmp_path):
     assert version.status_code == 200
     assert version.json() == {
         "api_version": "0.1.0",
-        "contract": "jobos-v1-phase2",
+        "contract": "jobos-v1-phase3",
     }
     assert set(openapi.json()["paths"]) == {
         "/v1/health",
@@ -75,6 +75,7 @@ def test_version_and_openapi_describe_the_shared_jobs_contract(tmp_path):
         "/v1/jobs/{job_id}/status",
         "/v1/jobs/{job_id}/history",
         "/v1/workspace/jobs",
+        "/v1/workspace",
         "/v1/workspace/jobs/selection",
         "/v1/workspace/jobs/sort",
         "/v1/events",

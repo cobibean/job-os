@@ -1,7 +1,7 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import type { IpcRendererEvent } from 'electron'
 
-import type { JobEvent, JobOsRendererBridge, JobSortMode, JobStatus } from '../shared/contracts.js'
+import type { JobEvent, JobOsRendererBridge, JobSortMode, JobStatus, WorkspaceSnapshot } from '../shared/contracts.js'
 
 const bridge: JobOsRendererBridge = Object.freeze({
   connectivity: Object.freeze({
@@ -19,6 +19,10 @@ const bridge: JobOsRendererBridge = Object.freeze({
       ipcRenderer.on('jobos:jobs:event', wrapped)
       return () => ipcRenderer.removeListener('jobos:jobs:event', wrapped)
     }
+  }),
+  workspace: Object.freeze({
+    get: () => ipcRenderer.invoke('jobos:workspace:get'),
+    save: (snapshot: WorkspaceSnapshot) => ipcRenderer.invoke('jobos:workspace:save', snapshot)
   })
 })
 

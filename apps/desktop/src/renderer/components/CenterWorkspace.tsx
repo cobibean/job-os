@@ -1,12 +1,12 @@
 import { FileText, FolderOpen, Globe2, Plus, Search } from 'lucide-react'
 
-export function CenterWorkspace() {
+export function CenterWorkspace({ activeSurface = 'browser' }: { activeSurface?: 'browser' | 'document' }) {
   return (
     <main className="center-workspace panel-region">
       <div className="workspace-tabs" role="tablist" aria-label="Open workspace surfaces">
-        <button aria-selected="true" className="surface-tab active placeholder-control" disabled role="tab" title="Available in a later phase" type="button">
+        <button aria-label="Browser" aria-selected="true" className="surface-tab active placeholder-control" disabled role="tab" title="Available in a later phase" type="button">
           <Globe2 aria-hidden="true" size={15} strokeWidth={1.5} />
-          Browser
+          {activeSurface === 'document' ? 'Document review' : 'Browser research'}
         </button>
         <button aria-label="Open a new surface" className="icon-button tab-add placeholder-control" disabled title="Available in a later phase" type="button">
           <Plus aria-hidden="true" size={16} strokeWidth={1.5} />

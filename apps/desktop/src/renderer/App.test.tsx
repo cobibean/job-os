@@ -209,3 +209,87 @@ test('filtering the list never clears the active job context', async () => {
   await waitFor(() => expect(screen.queryByRole('button', { name: 'Select Northstar Product Manager' })).toBeNull())
   expect(screen.getByText('Northstar · Product Manager')).not.toBeNull()
 })
+
+test('primary panels resize, collapse, reopen, and reorder with keyboard alternatives', async () => {
+  Object.defineProperty(window, 'jobos', {
+    configurable: true,
+    value: {
+      connectivity: { get: vi.fn().mockRejectedValue(new Error('offline')) },
+      workspace: {
+        get: vi.fn().mockResolvedValue({
+          revision: 0,
+          selectedPreset: 'review',
+          layouts: {
+            research: { order: ['jobs', 'center', 'agent'], widths: { jobs: 260, center: 760, agent: 350 }, collapsed: [] },
+            review: { order: ['jobs', 'center', 'agent'], widths: { jobs: 280, center: 700, agent: 380 }, collapsed: [] },
+            'agent-focus': { order: ['jobs', 'center', 'agent'], widths: { jobs: 220, center: 420, agent: 650 }, collapsed: [] }
+          },
+          selectedJobId: null,
+          activeCenterSurface: 'document',
+          repairedPresets: []
+        }),
+        save: vi.fn().mockImplementation(snapshot => Promise.resolve({ ...snapshot, revision: snapshot.revision + 1 }))
+      }
+    }
+  })
+
+  render(<App />)
+  const separator = await screen.findByRole('separator', { name: 'Resize Job navigation and Center workspace' })
+  fireEvent.keyDown(separator, { key: 'ArrowRight' })
+  expect(screen.getByText(/Job navigation 300 pixels/)).not.toBeNull()
+
+  fireEvent.click(screen.getByRole('button', { name: 'Collapse Job navigation' }))
+  expect(screen.getByRole('button', { name: 'Reopen Job navigation' })).not.toBeNull()
+  expect(screen.queryByRole('complementary', { name: 'Job navigation' })).toBeNull()
+  fireEvent.click(screen.getByRole('button', { name: 'Reopen Job navigation' }))
+  expect(screen.getByRole('navigation', { name: 'Workspace layouts' })).not.toBeNull()
+
+  fireEvent.click(screen.getByRole('button', { name: 'Move Agent chat left' }))
+  expect(screen.getByTestId('panel-agent').style.order).toBe('1')
+})
+
+test('layout changes preserve mounted content surface identities', async () => {
+  Object.defineProperty(window, 'jobos', { configurable: true, value: undefined })
+  render(<App />)
+  const center = screen.getByRole('main')
+  const agent = screen.getByRole('complementary', { name: 'Agent chat' })
+
+  fireEvent.click(screen.getByRole('button', { name: 'Agent Focus' }))
+
+  expect(screen.getByRole('main')).toBe(center)
+  expect(screen.getByRole('complementary', { name: 'Agent chat' })).toBe(agent)
+})
+
+test('pointer resizing tracks movement and every panel has a recovery affordance', () => {
+  Object.defineProperty(window, 'jobos', { configurable: true, value: undefined })
+  render(<App />)
+  const separator = screen.getByRole('separator', { name: 'Resize Job navigation and Center workspace' })
+
+  fireEvent.pointerDown(separator, { clientX: 100, pointerId: 1 })
+  fireEvent.pointerMove(window, { clientX: 140, pointerId: 1 })
+  fireEvent.pointerUp(window, { clientX: 140, pointerId: 1 })
+  expect(separator.getAttribute('aria-valuenow')).toBe('320')
+
+  for (const panel of ['Job navigation', 'Center workspace', 'Agent chat']) {
+    fireEvent.click(screen.getByRole('button', { name: `Collapse ${panel}` }))
+    const reopen = screen.getByRole('button', { name: `Reopen ${panel}` })
+    expect(reopen.getAttribute('aria-expanded')).toBe('false')
+    fireEvent.click(reopen)
+  }
+})
+
+test('drag reordering shows an insertion preview before changing presentation only', () => {
+  Object.defineProperty(window, 'jobos', { configurable: true, value: undefined })
+  render(<App />)
+  const source = screen.getByRole('button', { name: 'Reorder Agent chat' })
+  const target = screen.getByTestId('panel-jobs')
+  const transfer = { getData: vi.fn().mockReturnValue('agent'), setData: vi.fn(), effectAllowed: '' }
+
+  fireEvent.dragStart(source, { dataTransfer: transfer })
+  fireEvent.dragOver(target, { dataTransfer: transfer })
+  expect(target.classList.contains('insertion-target')).toBe(true)
+  fireEvent.drop(target, { dataTransfer: transfer })
+
+  expect(screen.getByTestId('panel-agent').style.order).toBe('0')
+  expect(target.classList.contains('insertion-target')).toBe(false)
+})

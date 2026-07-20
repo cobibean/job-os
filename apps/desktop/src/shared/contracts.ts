@@ -35,6 +35,23 @@ export interface JobEvent {
   jobId?: string | null
 }
 
+export type PanelId = 'jobs' | 'center' | 'agent'
+export type LayoutPreset = 'research' | 'review' | 'agent-focus'
+export type CenterSurface = 'browser' | 'document'
+
+export interface WorkspaceSnapshot {
+  revision: number
+  selectedPreset: LayoutPreset
+  layouts: Record<LayoutPreset, {
+    order: PanelId[]
+    widths: Record<PanelId, number>
+    collapsed: PanelId[]
+  }>
+  selectedJobId: string | null
+  activeCenterSurface: CenterSurface
+  repairedPresets: LayoutPreset[]
+}
+
 export interface ConnectivitySnapshot {
   state: Exclude<ConnectivityState, 'connecting'>
   apiVersion?: string
@@ -54,5 +71,9 @@ export interface JobOsRendererBridge {
     setSort: (sort: JobSortMode) => Promise<JobMutationResult>
     updateStatus: (jobId: string, status: JobStatus) => Promise<JobStatusMutationResult>
     subscribe: (listener: (event: JobEvent) => void) => () => void
+  }
+  workspace: {
+    get: () => Promise<WorkspaceSnapshot>
+    save: (snapshot: WorkspaceSnapshot) => Promise<WorkspaceSnapshot>
   }
 }

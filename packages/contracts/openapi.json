@@ -508,6 +508,56 @@
         "title": "ManualOrderRequest",
         "type": "object"
       },
+      "PanelLayout": {
+        "additionalProperties": false,
+        "properties": {
+          "collapsed": {
+            "items": {
+              "enum": [
+                "jobs",
+                "center",
+                "agent"
+              ],
+              "type": "string"
+            },
+            "title": "Collapsed",
+            "type": "array"
+          },
+          "order": {
+            "items": {
+              "enum": [
+                "jobs",
+                "center",
+                "agent"
+              ],
+              "type": "string"
+            },
+            "title": "Order",
+            "type": "array"
+          },
+          "widths": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "propertyNames": {
+              "enum": [
+                "jobs",
+                "center",
+                "agent"
+              ]
+            },
+            "title": "Widths",
+            "type": "object"
+          }
+        },
+        "required": [
+          "order",
+          "widths",
+          "collapsed"
+        ],
+        "title": "PanelLayout",
+        "type": "object"
+      },
       "StatusChangeRequest": {
         "additionalProperties": false,
         "properties": {
@@ -624,7 +674,7 @@
             "type": "string"
           },
           "contract": {
-            "const": "jobos-v1-phase2",
+            "const": "jobos-v1-phase3",
             "title": "Contract",
             "type": "string"
           }
@@ -674,6 +724,152 @@
           "manual_order"
         ],
         "title": "WorkspaceJobsResponse",
+        "type": "object"
+      },
+      "WorkspaceSnapshotCommand": {
+        "additionalProperties": false,
+        "properties": {
+          "active_center_surface": {
+            "enum": [
+              "browser",
+              "document"
+            ],
+            "title": "Active Center Surface",
+            "type": "string"
+          },
+          "layouts": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/PanelLayout"
+            },
+            "propertyNames": {
+              "enum": [
+                "research",
+                "review",
+                "agent-focus"
+              ]
+            },
+            "title": "Layouts",
+            "type": "object"
+          },
+          "repaired_presets": {
+            "items": {
+              "enum": [
+                "research",
+                "review",
+                "agent-focus"
+              ],
+              "type": "string"
+            },
+            "title": "Repaired Presets",
+            "type": "array"
+          },
+          "revision": {
+            "minimum": 0.0,
+            "title": "Revision",
+            "type": "integer"
+          },
+          "selected_job_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Selected Job Id"
+          },
+          "selected_preset": {
+            "enum": [
+              "research",
+              "review",
+              "agent-focus"
+            ],
+            "title": "Selected Preset",
+            "type": "string"
+          }
+        },
+        "required": [
+          "revision",
+          "selected_preset",
+          "layouts",
+          "selected_job_id",
+          "active_center_surface"
+        ],
+        "title": "WorkspaceSnapshotCommand",
+        "type": "object"
+      },
+      "WorkspaceSnapshotResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "active_center_surface": {
+            "enum": [
+              "browser",
+              "document"
+            ],
+            "title": "Active Center Surface",
+            "type": "string"
+          },
+          "layouts": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/PanelLayout"
+            },
+            "propertyNames": {
+              "enum": [
+                "research",
+                "review",
+                "agent-focus"
+              ]
+            },
+            "title": "Layouts",
+            "type": "object"
+          },
+          "repaired_presets": {
+            "items": {
+              "enum": [
+                "research",
+                "review",
+                "agent-focus"
+              ],
+              "type": "string"
+            },
+            "title": "Repaired Presets",
+            "type": "array"
+          },
+          "revision": {
+            "minimum": 0.0,
+            "title": "Revision",
+            "type": "integer"
+          },
+          "selected_job_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Selected Job Id"
+          },
+          "selected_preset": {
+            "enum": [
+              "research",
+              "review",
+              "agent-focus"
+            ],
+            "title": "Selected Preset",
+            "type": "string"
+          }
+        },
+        "required": [
+          "revision",
+          "selected_preset",
+          "layouts",
+          "selected_job_id",
+          "active_center_surface"
+        ],
+        "title": "WorkspaceSnapshotResponse",
         "type": "object"
       }
     },
@@ -1148,6 +1344,76 @@
         "summary": "Version",
         "tags": [
           "system"
+        ]
+      }
+    },
+    "/v1/workspace": {
+      "get": {
+        "operationId": "workspace_get_v1_workspace_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceSnapshotResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Workspace Get",
+        "tags": [
+          "workspace"
+        ]
+      },
+      "put": {
+        "operationId": "workspace_put_v1_workspace_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WorkspaceSnapshotCommand"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceSnapshotResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Workspace Put",
+        "tags": [
+          "workspace"
         ]
       }
     },

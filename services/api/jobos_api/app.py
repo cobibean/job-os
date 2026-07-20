@@ -30,13 +30,14 @@ from jobos_api.jobs import (
 )
 from jobos_api.responses import DeviceSessionResponse, HealthResponse, VersionResponse
 from jobos_api.settings import Settings
-from jobos_api.state_store import JobOsStateStore
+from jobos_api.state_store import JobOsStateStore, WorkspaceRevisionConflict
+from jobos_api.workspace import WorkspaceSnapshotCommand, WorkspaceSnapshotResponse
 
 
 def create_app(settings: Settings, *, job_facade: JobFacade | None = None) -> FastAPI:
     state_store = JobOsStateStore(settings.state_db_path)
     jobs = job_facade or create_job_hunter_adapter(settings.job_hunter_db_path)
-    device_authenticator = DeviceAuthenticator(settings.device_token)
+    device_authenticator = DeviceAuthenticator(settings.device_token, settings.device_id)
     bearer = HTTPBearer(auto_error=False)
 
     @asynccontextmanager
@@ -62,7 +63,7 @@ def create_app(settings: Settings, *, job_facade: JobFacade | None = None) -> Fa
 
     @app.get("/v1/version", tags=["system"])
     def version() -> VersionResponse:
-        return VersionResponse(api_version=__version__, contract="jobos-v1-phase2")
+        return VersionResponse(api_version=__version__, contract="jobos-v1-phase3")
 
     def authenticated_device(
         credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer)],
@@ -119,6 +120,46 @@ def create_app(settings: Settings, *, job_facade: JobFacade | None = None) -> Fa
             selected_job_id=state.selected_job_id,
             sort_mode=state.sort_mode,
             manual_order=state.manual_order,
+        )
+
+    @app.get("/v1/workspace", tags=["workspace"])
+    def workspace_get(
+        identity: Annotated[DeviceIdentity, Depends(authenticated_device)],
+    ) -> WorkspaceSnapshotResponse:
+        record = state_store.workspace_snapshot(identity.device_id)
+        return WorkspaceSnapshotResponse(
+            revision=record.revision,
+            repaired_presets=list(record.repaired_presets),
+            **record.snapshot,
+        )
+
+    @app.put("/v1/workspace", tags=["workspace"])
+    def workspace_put(
+        command: WorkspaceSnapshotCommand,
+        identity: Annotated[DeviceIdentity, Depends(authenticated_device)],
+    ) -> WorkspaceSnapshotResponse:
+        if command.selected_job_id is not None:
+            known_ids = {str(job["job_id"]) for job in jobs.list_jobs()}
+            if command.selected_job_id not in known_ids:
+                raise HTTPException(status_code=404, detail="Job not found")
+        try:
+            record = state_store.save_workspace_snapshot(
+                identity.device_id,
+                expected_revision=command.revision,
+                snapshot=command.model_dump(exclude={"revision", "repaired_presets"}),
+            )
+        except WorkspaceRevisionConflict as error:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "Workspace revision conflict; current revision is "
+                    f"{error.current_revision}"
+                ),
+            ) from error
+        return WorkspaceSnapshotResponse(
+            revision=record.revision,
+            repaired_presets=list(record.repaired_presets),
+            **record.snapshot,
         )
 
     @app.put("/v1/workspace/jobs/selection", tags=["workspace"])
