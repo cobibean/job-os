@@ -737,6 +737,12 @@
             "title": "Active Center Surface",
             "type": "string"
           },
+          "idempotency_key": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Idempotency Key",
+            "type": "string"
+          },
           "layouts": {
             "additionalProperties": {
               "$ref": "#/components/schemas/PanelLayout"
@@ -751,17 +757,14 @@
             "title": "Layouts",
             "type": "object"
           },
-          "repaired_presets": {
-            "items": {
-              "enum": [
-                "research",
-                "review",
-                "agent-focus"
-              ],
-              "type": "string"
-            },
-            "title": "Repaired Presets",
-            "type": "array"
+          "origin": {
+            "enum": [
+              "user",
+              "mcp",
+              "system"
+            ],
+            "title": "Origin",
+            "type": "string"
           },
           "revision": {
             "minimum": 0.0,
@@ -790,11 +793,13 @@
           }
         },
         "required": [
-          "revision",
           "selected_preset",
           "layouts",
           "selected_job_id",
-          "active_center_surface"
+          "active_center_surface",
+          "revision",
+          "origin",
+          "idempotency_key"
         ],
         "title": "WorkspaceSnapshotCommand",
         "type": "object"
@@ -863,11 +868,11 @@
           }
         },
         "required": [
-          "revision",
           "selected_preset",
           "layouts",
           "selected_job_id",
-          "active_center_surface"
+          "active_center_surface",
+          "revision"
         ],
         "title": "WorkspaceSnapshotResponse",
         "type": "object"

@@ -28,15 +28,13 @@ class PanelLayout(BaseModel):
         return self
 
 
-class WorkspaceSnapshotCommand(BaseModel):
+class WorkspaceSnapshotBase(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    revision: int = Field(ge=0)
     selected_preset: LayoutPreset
     layouts: dict[LayoutPreset, PanelLayout]
     selected_job_id: str | None
     active_center_surface: CenterSurface
-    repaired_presets: list[LayoutPreset] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def validate_presets(self):
@@ -45,5 +43,12 @@ class WorkspaceSnapshotCommand(BaseModel):
         return self
 
 
-class WorkspaceSnapshotResponse(WorkspaceSnapshotCommand):
-    pass
+class WorkspaceSnapshotCommand(WorkspaceSnapshotBase):
+    revision: int = Field(ge=0)
+    origin: Literal["user", "mcp", "system"]
+    idempotency_key: str = Field(min_length=1, max_length=128)
+
+
+class WorkspaceSnapshotResponse(WorkspaceSnapshotBase):
+    revision: int = Field(ge=0)
+    repaired_presets: list[LayoutPreset] = Field(default_factory=list)

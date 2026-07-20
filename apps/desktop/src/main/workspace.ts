@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto'
+
 import {
   createJobOsApiClient,
   workspaceGetV1WorkspaceGet,
@@ -38,14 +40,15 @@ function fromApi(value: WorkspaceSnapshotResponse): WorkspaceSnapshot {
   }
 }
 
-function toApi(snapshot: WorkspaceSnapshot) {
+function toApi(snapshot: WorkspaceSnapshot, idempotencyKey: string) {
   return {
     revision: snapshot.revision,
+    origin: 'user' as const,
+    idempotency_key: idempotencyKey,
     selected_preset: snapshot.selectedPreset,
     layouts: snapshot.layouts,
     selected_job_id: snapshot.selectedJobId,
-    active_center_surface: snapshot.activeCenterSurface,
-    repaired_presets: snapshot.repairedPresets
+    active_center_surface: snapshot.activeCenterSurface
   }
 }
 
@@ -56,7 +59,14 @@ export function createMainWorkspaceClient(config: JobsConfig) {
       return fromApi(unwrap(await workspaceGetV1WorkspaceGet({ client }), 'Workspace unavailable'))
     },
     async save(snapshot: WorkspaceSnapshot): Promise<WorkspaceSnapshot> {
-      return fromApi(unwrap(await workspacePutV1WorkspacePut({ client, body: toApi(snapshot) }), 'Workspace save failed'))
+      const body = toApi(snapshot, randomUUID())
+      let result
+      try {
+        result = await workspacePutV1WorkspacePut({ client, body })
+      } catch {
+        result = await workspacePutV1WorkspacePut({ client, body })
+      }
+      return fromApi(unwrap(result, 'Workspace save failed'))
     }
   }
 }

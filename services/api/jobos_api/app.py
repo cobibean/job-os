@@ -30,7 +30,11 @@ from jobos_api.jobs import (
 )
 from jobos_api.responses import DeviceSessionResponse, HealthResponse, VersionResponse
 from jobos_api.settings import Settings
-from jobos_api.state_store import JobOsStateStore, WorkspaceRevisionConflict
+from jobos_api.state_store import (
+    IdempotencyConflict,
+    JobOsStateStore,
+    WorkspaceRevisionConflict,
+)
 from jobos_api.workspace import WorkspaceSnapshotCommand, WorkspaceSnapshotResponse
 
 
@@ -142,8 +146,15 @@ def create_app(settings: Settings, *, job_facade: JobFacade | None = None) -> Fa
             record = state_store.save_workspace_snapshot(
                 identity.device_id,
                 expected_revision=command.revision,
-                snapshot=command.model_dump(exclude={"revision", "repaired_presets"}),
+                snapshot=command.model_dump(
+                    exclude={"revision", "origin", "idempotency_key"}
+                ),
+                idempotency_key=command.idempotency_key,
+                origin=command.origin,
+                actor_id=identity.device_id,
             )
+        except IdempotencyConflict as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
         except WorkspaceRevisionConflict as error:
             raise HTTPException(
                 status_code=409,
