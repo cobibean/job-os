@@ -2,10 +2,11 @@ import { writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { app, BrowserWindow, ipcMain, session } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, session, WebContentsView } from 'electron'
 import type { IpcMainInvokeEvent } from 'electron'
 
-import type { ConnectivitySnapshot, JobSortMode, JobStatus, WorkspaceSnapshot } from '../shared/contracts.js'
+import type { BrowserBounds, BrowserRestoreState, ConnectivitySnapshot, JobSortMode, JobStatus, WorkspaceSnapshot } from '../shared/contracts.js'
+import { BROWSER_PARTITION, BrowserManager, remoteBrowserPreferences } from './browser.js'
 import { probeConnectivity } from './connectivity.js'
 import { createMainJobsClient, startJobEventStream } from './jobs.js'
 import type { JobsConfig } from './jobs.js'
@@ -16,6 +17,7 @@ const currentDirectory = path.dirname(fileURLToPath(import.meta.url))
 const rendererRoot = path.resolve(currentDirectory, '../renderer')
 const developmentUrl = process.env.VITE_DEV_SERVER_URL
 const developmentOrigin = developmentUrl ? new URL(developmentUrl).origin : undefined
+let browserManager: BrowserManager | null = null
 
 function disconnectedCredentialSnapshot(): ConnectivitySnapshot {
   return {
@@ -115,6 +117,50 @@ function registerWorkspaceInterface(): void {
   })
 }
 
+function registerBrowserInterface(): void {
+  const trusted = (event: IpcMainInvokeEvent) => {
+    assertTrustedRenderer(event)
+    if (!browserManager) throw new Error('Browser surface unavailable')
+    return browserManager
+  }
+  const tabId = (value: unknown) => {
+    if (typeof value !== 'string' || !value || value.length > 128) throw new Error('Invalid browser tab')
+    return value
+  }
+  ipcMain.handle('jobos:browser:get-state', event => trusted(event).getState())
+  ipcMain.handle('jobos:browser:restore', (event, state: BrowserRestoreState) => {
+    if (!state || !Array.isArray(state.tabs) || state.tabs.length > 50) throw new Error('Invalid browser restore state')
+    return trusted(event).restore(state)
+  })
+  ipcMain.handle('jobos:browser:create', (event, url?: string, jobId?: string | null) => {
+    if (url !== undefined && (typeof url !== 'string' || url.length > 8192)) throw new Error('Invalid browser address')
+    if (jobId !== undefined && jobId !== null && typeof jobId !== 'string') throw new Error('Invalid job association')
+    return trusted(event).create(url, jobId)
+  })
+  ipcMain.handle('jobos:browser:select', (event, id: string) => trusted(event).select(tabId(id)))
+  ipcMain.handle('jobos:browser:close', (event, id: string) => trusted(event).close(tabId(id)))
+  ipcMain.handle('jobos:browser:reorder', (event, ids: string[]) => {
+    if (!Array.isArray(ids) || ids.some(id => typeof id !== 'string') || new Set(ids).size !== ids.length) throw new Error('Invalid tab order')
+    return trusted(event).reorder(ids)
+  })
+  ipcMain.handle('jobos:browser:navigate', (event, id: string, input: string) => {
+    if (typeof input !== 'string' || input.length > 8192) throw new Error('Invalid browser address')
+    return trusted(event).navigate(tabId(id), input)
+  })
+  ipcMain.handle('jobos:browser:back', (event, id: string) => trusted(event).back(tabId(id)))
+  ipcMain.handle('jobos:browser:forward', (event, id: string) => trusted(event).forward(tabId(id)))
+  ipcMain.handle('jobos:browser:reload', (event, id: string) => trusted(event).reload(tabId(id)))
+  ipcMain.handle('jobos:browser:stop', (event, id: string) => trusted(event).stop(tabId(id)))
+  ipcMain.handle('jobos:browser:associate', (event, id: string, jobId: string | null) => {
+    if (jobId !== null && (typeof jobId !== 'string' || jobId.length > 512)) throw new Error('Invalid job association')
+    return trusted(event).associate(tabId(id), jobId)
+  })
+  ipcMain.handle('jobos:browser:set-bounds', (event, bounds: BrowserBounds) => {
+    if (!bounds || ['x', 'y', 'width', 'height'].some(key => !Number.isFinite(bounds[key as keyof BrowserBounds]))) throw new Error('Invalid browser bounds')
+    trusted(event).setBounds(bounds)
+  })
+}
+
 async function createWindow(): Promise<BrowserWindow> {
   const window = new BrowserWindow({
     width: 1440,
@@ -139,6 +185,15 @@ async function createWindow(): Promise<BrowserWindow> {
   window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
   window.webContents.on('will-navigate', event => event.preventDefault())
 
+  const browserSession = session.fromPartition(BROWSER_PARTITION, { cache: true })
+  browserManager = new BrowserManager({
+    window,
+    browserSession,
+    createView: () => new WebContentsView({ webPreferences: remoteBrowserPreferences() }),
+    dialog,
+    downloadsPath: app.getPath('downloads')
+  })
+
   if (developmentUrl) {
     await window.loadURL(developmentUrl)
   } else {
@@ -157,7 +212,11 @@ async function createWindow(): Promise<BrowserWindow> {
         config
       )
     : () => undefined
-  window.once('closed', stopJobEvents)
+  window.once('closed', () => {
+    stopJobEvents()
+    browserManager?.dispose()
+    browserManager = null
+  })
 
   const capturePath = process.env.JOBOS_CAPTURE_PATH
   if (capturePath) {
@@ -178,6 +237,7 @@ app.whenReady().then(async () => {
   registerConnectivityInterface()
   registerJobsInterface()
   registerWorkspaceInterface()
+  registerBrowserInterface()
   await createWindow()
 
   app.on('activate', async () => {

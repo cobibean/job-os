@@ -1,6 +1,59 @@
 {
   "components": {
     "schemas": {
+      "BrowserTabMetadata": {
+        "additionalProperties": false,
+        "properties": {
+          "associated_job_id": {
+            "anyOf": [
+              {
+                "maxLength": 512,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Associated Job Id"
+          },
+          "favicon_url": {
+            "anyOf": [
+              {
+                "maxLength": 8192,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Favicon Url"
+          },
+          "tab_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Tab Id",
+            "type": "string"
+          },
+          "title": {
+            "default": "New tab",
+            "maxLength": 512,
+            "title": "Title",
+            "type": "string"
+          },
+          "url": {
+            "maxLength": 8192,
+            "minLength": 1,
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "tab_id",
+          "url"
+        ],
+        "title": "BrowserTabMetadata",
+        "type": "object"
+      },
       "DeviceSessionResponse": {
         "additionalProperties": false,
         "properties": {
@@ -674,7 +727,7 @@
             "type": "string"
           },
           "contract": {
-            "const": "jobos-v1-phase3",
+            "const": "jobos-v1-phase4",
             "title": "Contract",
             "type": "string"
           }
@@ -729,6 +782,18 @@
       "WorkspaceSnapshotCommand": {
         "additionalProperties": false,
         "properties": {
+          "active_browser_tab_id": {
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Active Browser Tab Id"
+          },
           "active_center_surface": {
             "enum": [
               "browser",
@@ -736,6 +801,14 @@
             ],
             "title": "Active Center Surface",
             "type": "string"
+          },
+          "browser_tabs": {
+            "items": {
+              "$ref": "#/components/schemas/BrowserTabMetadata"
+            },
+            "maxItems": 50,
+            "title": "Browser Tabs",
+            "type": "array"
           },
           "idempotency_key": {
             "maxLength": 128,
@@ -807,6 +880,18 @@
       "WorkspaceSnapshotResponse": {
         "additionalProperties": false,
         "properties": {
+          "active_browser_tab_id": {
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Active Browser Tab Id"
+          },
           "active_center_surface": {
             "enum": [
               "browser",
@@ -814,6 +899,14 @@
             ],
             "title": "Active Center Surface",
             "type": "string"
+          },
+          "browser_tabs": {
+            "items": {
+              "$ref": "#/components/schemas/BrowserTabMetadata"
+            },
+            "maxItems": 50,
+            "title": "Browser Tabs",
+            "type": "array"
           },
           "layouts": {
             "additionalProperties": {
@@ -828,6 +921,11 @@
             },
             "title": "Layouts",
             "type": "object"
+          },
+          "repaired_browser": {
+            "default": false,
+            "title": "Repaired Browser",
+            "type": "boolean"
           },
           "repaired_presets": {
             "items": {

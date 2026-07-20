@@ -67,7 +67,7 @@ def create_app(settings: Settings, *, job_facade: JobFacade | None = None) -> Fa
 
     @app.get("/v1/version", tags=["system"])
     def version() -> VersionResponse:
-        return VersionResponse(api_version=__version__, contract="jobos-v1-phase3")
+        return VersionResponse(api_version=__version__, contract="jobos-v1-phase4")
 
     def authenticated_device(
         credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer)],
@@ -134,6 +134,7 @@ def create_app(settings: Settings, *, job_facade: JobFacade | None = None) -> Fa
         return WorkspaceSnapshotResponse(
             revision=record.revision,
             repaired_presets=list(record.repaired_presets),
+            repaired_browser=record.repaired_browser,
             **record.snapshot,
         )
 
@@ -166,6 +167,7 @@ def create_app(settings: Settings, *, job_facade: JobFacade | None = None) -> Fa
         return WorkspaceSnapshotResponse(
             revision=record.revision,
             repaired_presets=list(record.repaired_presets),
+            repaired_browser=record.repaired_browser,
             **record.snapshot,
         )
 

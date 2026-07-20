@@ -1,7 +1,7 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import type { IpcRendererEvent } from 'electron'
 
-import type { JobEvent, JobOsRendererBridge, JobSortMode, JobStatus, WorkspaceSnapshot } from '../shared/contracts.js'
+import type { BrowserBounds, BrowserRestoreState, BrowserState, JobEvent, JobOsRendererBridge, JobSortMode, JobStatus, WorkspaceSnapshot } from '../shared/contracts.js'
 
 const bridge: JobOsRendererBridge = Object.freeze({
   connectivity: Object.freeze({
@@ -23,6 +23,26 @@ const bridge: JobOsRendererBridge = Object.freeze({
   workspace: Object.freeze({
     get: () => ipcRenderer.invoke('jobos:workspace:get'),
     save: (snapshot: WorkspaceSnapshot) => ipcRenderer.invoke('jobos:workspace:save', snapshot)
+  }),
+  browser: Object.freeze({
+    getState: () => ipcRenderer.invoke('jobos:browser:get-state'),
+    restore: (state: BrowserRestoreState) => ipcRenderer.invoke('jobos:browser:restore', state),
+    create: (url?: string, associatedJobId?: string | null) => ipcRenderer.invoke('jobos:browser:create', url, associatedJobId),
+    select: (tabId: string) => ipcRenderer.invoke('jobos:browser:select', tabId),
+    close: (tabId: string) => ipcRenderer.invoke('jobos:browser:close', tabId),
+    reorder: (tabIds: string[]) => ipcRenderer.invoke('jobos:browser:reorder', tabIds),
+    navigate: (tabId: string, input: string) => ipcRenderer.invoke('jobos:browser:navigate', tabId, input),
+    back: (tabId: string) => ipcRenderer.invoke('jobos:browser:back', tabId),
+    forward: (tabId: string) => ipcRenderer.invoke('jobos:browser:forward', tabId),
+    reload: (tabId: string) => ipcRenderer.invoke('jobos:browser:reload', tabId),
+    stop: (tabId: string) => ipcRenderer.invoke('jobos:browser:stop', tabId),
+    associate: (tabId: string, jobId: string | null) => ipcRenderer.invoke('jobos:browser:associate', tabId, jobId),
+    setBounds: (bounds: BrowserBounds) => ipcRenderer.invoke('jobos:browser:set-bounds', bounds),
+    subscribe: (listener: (state: BrowserState) => void) => {
+      const wrapped = (_event: IpcRendererEvent, state: BrowserState) => listener(state)
+      ipcRenderer.on('jobos:browser:state', wrapped)
+      return () => ipcRenderer.removeListener('jobos:browser:state', wrapped)
+    }
   })
 })
 

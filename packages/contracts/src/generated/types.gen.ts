@@ -5,6 +5,32 @@ export type ClientOptions = {
 };
 
 /**
+ * BrowserTabMetadata
+ */
+export type BrowserTabMetadata = {
+    /**
+     * Associated Job Id
+     */
+    associated_job_id?: string | null;
+    /**
+     * Favicon Url
+     */
+    favicon_url?: string | null;
+    /**
+     * Tab Id
+     */
+    tab_id: string;
+    /**
+     * Title
+     */
+    title?: string;
+    /**
+     * Url
+     */
+    url: string;
+};
+
+/**
  * DeviceSessionResponse
  */
 export type DeviceSessionResponse = {
@@ -384,7 +410,7 @@ export type VersionResponse = {
     /**
      * Contract
      */
-    contract: 'jobos-v1-phase3';
+    contract: 'jobos-v1-phase4';
 };
 
 /**
@@ -410,9 +436,17 @@ export type WorkspaceJobsResponse = {
  */
 export type WorkspaceSnapshotCommand = {
     /**
+     * Active Browser Tab Id
+     */
+    active_browser_tab_id?: string | null;
+    /**
      * Active Center Surface
      */
     active_center_surface: 'browser' | 'document';
+    /**
+     * Browser Tabs
+     */
+    browser_tabs?: Array<BrowserTabMetadata>;
     /**
      * Idempotency Key
      */
@@ -446,15 +480,27 @@ export type WorkspaceSnapshotCommand = {
  */
 export type WorkspaceSnapshotResponse = {
     /**
+     * Active Browser Tab Id
+     */
+    active_browser_tab_id?: string | null;
+    /**
      * Active Center Surface
      */
     active_center_surface: 'browser' | 'document';
+    /**
+     * Browser Tabs
+     */
+    browser_tabs?: Array<BrowserTabMetadata>;
     /**
      * Layouts
      */
     layouts: {
         [key: string]: PanelLayout;
     };
+    /**
+     * Repaired Browser
+     */
+    repaired_browser?: boolean;
     /**
      * Repaired Presets
      */
