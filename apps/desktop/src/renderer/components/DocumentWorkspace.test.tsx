@@ -7,9 +7,9 @@ import { DocumentWorkspace } from './DocumentWorkspace'
 vi.mock('./PdfPreview', async () => {
   const React = await import('react')
   return {
-    PdfPreview: ({ page, zoom, onPageCount }: { page: number, zoom: number, onPageCount: (count: number) => void }) => {
+    PdfPreview: ({ bytes, page, zoom, onPageCount }: { bytes: ArrayBuffer, page: number, zoom: number, onPageCount: (count: number) => void }) => {
       React.useEffect(() => onPageCount(3), [onPageCount])
-      return <div>PDF page {page} at {Math.round(zoom * 100)}%</div>
+      return <div>PDF bytes {new Uint8Array(bytes)[0]} · page {page} at {Math.round(zoom * 100)}%</div>
     }
   }
 })
@@ -23,6 +23,14 @@ const job: JobListItem = {
   canonicalUrl: 'https://example.com/jobs/1',
   discoveredAt: '2026-07-20T00:00:00Z',
   lastSeenAt: '2026-07-20T00:00:00Z'
+}
+
+const otherJob: JobListItem = {
+  ...job,
+  jobId: 'job-2',
+  company: 'Acme',
+  title: 'Product Director',
+  canonicalUrl: 'https://example.com/jobs/2'
 }
 
 function artifact(overrides: Partial<DocumentArtifact> = {}): DocumentArtifact {
@@ -53,6 +61,16 @@ function state(artifacts: DocumentArtifact[]): JobArtifactsState {
   }
 }
 
+function deferred<T>() {
+  let resolve!: (value: T) => void
+  let reject!: (error: Error) => void
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise
+    reject = rejectPromise
+  })
+  return { promise, resolve, reject }
+}
+
 function installDocuments(overrides: Partial<JobOsRendererBridge['documents']> = {}) {
   const successful = state([artifact()])
   const documents: JobOsRendererBridge['documents'] = {
@@ -63,7 +81,7 @@ function installDocuments(overrides: Partial<JobOsRendererBridge['documents']> =
       artifactRevision: 'render-2',
       sourceRevision: 'source-2',
       sha256: 'a'.repeat(64),
-      bytes: new ArrayBuffer(8)
+      bytes: Uint8Array.of(2).buffer
     })),
     export: vi.fn(async () => 'Exported northstar-resume.pdf'),
     reveal: vi.fn(async () => 'Revealed northstar-resume.pdf'),
@@ -91,7 +109,7 @@ describe('trusted document workspace', () => {
 
     await screen.findByText('Newest successful revision · render-2 · source source-2')
     expect(documents.refresh).toHaveBeenCalledWith(job.jobId)
-    expect(await screen.findByText('PDF page 1 at 100%')).not.toBeNull()
+    expect(await screen.findByText('PDF bytes 2 · page 1 at 100%')).not.toBeNull()
     await screen.findByText('Page 1 of 3')
 
     fireEvent.click(screen.getByRole('button', { name: 'Next page' }))
@@ -123,7 +141,7 @@ describe('trusted document workspace', () => {
 
     expect(await screen.findByText(/Newest render failed/)).not.toBeNull()
     expect(screen.getByText(/Showing last successful revision render-2/)).not.toBeNull()
-    expect(await screen.findByText('PDF page 1 at 100%')).not.toBeNull()
+    expect(await screen.findByText('PDF bytes 2 · page 1 at 100%')).not.toBeNull()
   })
 
   it('presents DOCX as external-only while keeping native actions available', async () => {
@@ -146,5 +164,156 @@ describe('trusted document workspace', () => {
     expect(documents.reveal).toHaveBeenCalledWith(docx.artifactId)
     expect(documents.export).toHaveBeenCalledWith(docx.artifactId)
     expect(documents.loadPdf).not.toHaveBeenCalled()
+  })
+
+  it('invalidates job A bytes and actions while job B is pending, then keeps them cleared on failure', async () => {
+    const jobAArtifact = artifact()
+    const jobBArtifact = artifact({
+      artifactId: 'art_BBBBBBBBBBBBBBBBBBBBBBBB',
+      jobId: otherJob.jobId,
+      artifactRevision: 'render-b',
+      sourceRevision: 'source-b',
+      filename: 'acme-resume.pdf'
+    })
+    const jobBState = { ...state([jobBArtifact]), jobId: otherJob.jobId }
+    const pendingB = deferred<ReturnType<typeof state>>()
+    const loadB = deferred<Awaited<ReturnType<JobOsRendererBridge['documents']['loadPdf']>>>()
+    const documents = installDocuments({
+      list: vi.fn(jobId => jobId === job.jobId ? Promise.resolve(state([jobAArtifact])) : pendingB.promise),
+      refresh: vi.fn(jobId => Promise.resolve(jobId === job.jobId ? state([jobAArtifact]) : jobBState)),
+      loadPdf: vi.fn(artifactId => artifactId === jobAArtifact.artifactId
+        ? Promise.resolve({ artifactId, artifactRevision: 'render-2', sourceRevision: 'source-2', sha256: 'a'.repeat(64), bytes: Uint8Array.of(1).buffer })
+        : loadB.promise)
+    })
+    const view = render(<DocumentWorkspace hydrated job={job} onViewChange={vi.fn()} restoredArtifactId={null} restoredPage={1} restoredZoom={1} />)
+    expect(await screen.findByText('PDF bytes 1 · page 1 at 100%')).not.toBeNull()
+
+    view.rerender(<DocumentWorkspace hydrated job={otherJob} onViewChange={vi.fn()} restoredArtifactId={null} restoredPage={1} restoredZoom={1} />)
+    expect(screen.queryByText(/PDF bytes 1/)).toBeNull()
+    expect((screen.getByRole('button', { name: /^Open$/ }) as HTMLButtonElement).disabled).toBe(true)
+
+    pendingB.resolve(jobBState)
+    await waitFor(() => expect(documents.loadPdf).toHaveBeenCalledWith(jobBArtifact.artifactId))
+    loadB.reject(new Error('job B PDF unavailable'))
+    expect(await screen.findByText('job B PDF unavailable')).not.toBeNull()
+    expect(screen.queryByText(/PDF bytes 1/)).toBeNull()
+    expect(screen.getByText(/Viewing acme-resume.pdf · revision render-b · source source-b/)).not.toBeNull()
+  })
+
+  it('keeps bytes, viewed metadata, and native actions aligned during revision transitions', async () => {
+    const revisionA = artifact({ isCurrent: false, isLastSuccessful: false })
+    const revisionB = artifact({
+      artifactId: 'art_CCCCCCCCCCCCCCCCCCCCCCCC',
+      artifactRevision: 'render-3',
+      sourceRevision: 'source-3',
+      filename: 'northstar-resume-v3.pdf'
+    })
+    const revisions = state([revisionB, revisionA])
+    const pendingB = deferred<Awaited<ReturnType<JobOsRendererBridge['documents']['loadPdf']>>>()
+    const documents = installDocuments({
+      list: vi.fn(async () => revisions),
+      refresh: vi.fn(async () => revisions),
+      loadPdf: vi.fn(artifactId => artifactId === revisionA.artifactId
+        ? Promise.resolve({ artifactId, artifactRevision: 'render-2', sourceRevision: 'source-2', sha256: 'a'.repeat(64), bytes: Uint8Array.of(1).buffer })
+        : pendingB.promise)
+    })
+    render(<DocumentWorkspace hydrated job={job} onViewChange={vi.fn()} restoredArtifactId={revisionA.artifactId} restoredPage={2} restoredZoom={1.4} />)
+    expect(await screen.findByText('PDF bytes 1 · page 2 at 140%')).not.toBeNull()
+
+    fireEvent.change(screen.getByRole('combobox', { name: 'Resume revision' }), { target: { value: revisionB.artifactId } })
+    expect(screen.queryByText(/PDF bytes 1/)).toBeNull()
+    expect(screen.getByText(/Viewing northstar-resume-v3.pdf · revision render-3 · source source-3/)).not.toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: /^Export$/ }))
+    await waitFor(() => expect(documents.export).toHaveBeenCalledWith(revisionB.artifactId))
+
+    pendingB.reject(new Error('revision B failed to load'))
+    expect(await screen.findByText('revision B failed to load')).not.toBeNull()
+    expect(screen.queryByText(/PDF bytes 1/)).toBeNull()
+  })
+
+  it('preserves an older restored revision and its page and zoom across automatic refresh', async () => {
+    const older = artifact({ isCurrent: false, isLastSuccessful: false })
+    const newest = artifact({
+      artifactId: 'art_DDDDDDDDDDDDDDDDDDDDDDDD',
+      artifactRevision: 'render-4',
+      sourceRevision: 'source-4'
+    })
+    const revisions = state([newest, older])
+    const documents = installDocuments({
+      list: vi.fn(async () => revisions),
+      refresh: vi.fn(async () => revisions),
+      loadPdf: vi.fn(async artifactId => ({
+        artifactId,
+        artifactRevision: artifactId === older.artifactId ? 'render-2' : 'render-4',
+        sourceRevision: artifactId === older.artifactId ? 'source-2' : 'source-4',
+        sha256: 'a'.repeat(64),
+        bytes: Uint8Array.of(artifactId === older.artifactId ? 1 : 4).buffer
+      }))
+    })
+    render(<DocumentWorkspace hydrated job={job} onViewChange={vi.fn()} restoredArtifactId={older.artifactId} restoredPage={2} restoredZoom={1.4} />)
+
+    expect(await screen.findByText('PDF bytes 1 · page 2 at 140%')).not.toBeNull()
+    await waitFor(() => expect(documents.refresh).toHaveBeenCalledOnce())
+    expect((screen.getByRole('combobox', { name: 'Resume revision' }) as HTMLSelectElement).value).toBe(older.artifactId)
+    expect(screen.queryByText(/PDF bytes 4/)).toBeNull()
+  })
+
+  it('falls back deterministically and resets view when the selected revision disappears', async () => {
+    const older = artifact({ isCurrent: false, isLastSuccessful: false })
+    const newest = artifact({
+      artifactId: 'art_EEEEEEEEEEEEEEEEEEEEEEEE',
+      artifactRevision: 'render-5',
+      sourceRevision: 'source-5'
+    })
+    const listed = state([newest, older])
+    const refreshed = state([newest])
+    installDocuments({
+      list: vi.fn(async () => listed),
+      refresh: vi.fn(async () => refreshed),
+      loadPdf: vi.fn(async artifactId => ({
+        artifactId,
+        artifactRevision: artifactId === older.artifactId ? 'render-2' : 'render-5',
+        sourceRevision: artifactId === older.artifactId ? 'source-2' : 'source-5',
+        sha256: 'a'.repeat(64),
+        bytes: Uint8Array.of(artifactId === older.artifactId ? 1 : 5).buffer
+      }))
+    })
+    render(<DocumentWorkspace hydrated job={job} onViewChange={vi.fn()} restoredArtifactId={older.artifactId} restoredPage={3} restoredZoom={1.6} />)
+
+    expect(await screen.findByText('PDF bytes 5 · page 1 at 100%')).not.toBeNull()
+    expect(screen.queryByText(/PDF bytes 1/)).toBeNull()
+  })
+
+  it('shows a last-successful DOCX instead of an older PDF when the newest render failed', async () => {
+    const olderPdf = artifact({ isCurrent: false, isLastSuccessful: false, artifactRevision: 'render-1' })
+    const lastGoodDocx = artifact({
+      artifactId: 'art_FFFFFFFFFFFFFFFFFFFFFFFF',
+      mediaType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      artifactRevision: 'render-2',
+      filename: 'northstar-resume.docx',
+      previewAvailable: false,
+      isCurrent: false,
+      isLastSuccessful: true
+    })
+    const failed = artifact({
+      artifactId: 'art_GGGGGGGGGGGGGGGGGGGGGGGG',
+      artifactRevision: 'render-3',
+      renderStatus: 'failed',
+      failureMessage: 'newest failed',
+      filename: null,
+      sha256: null,
+      previewAvailable: false,
+      isCurrent: true,
+      isLastSuccessful: false
+    })
+    const failedState = state([failed, lastGoodDocx, olderPdf])
+    const documents = installDocuments({ list: vi.fn(async () => failedState), refresh: vi.fn(async () => failedState) })
+    render(<DocumentWorkspace hydrated job={job} onViewChange={vi.fn()} restoredArtifactId={null} restoredPage={1} restoredZoom={1} />)
+
+    expect(await screen.findByText('DOCX stays external')).not.toBeNull()
+    expect(screen.getByText(/Viewing northstar-resume.docx · revision render-2/)).not.toBeNull()
+    expect(screen.queryByText(/PDF bytes/)).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: /^Export$/ }))
+    await waitFor(() => expect(documents.export).toHaveBeenCalledWith(lastGoodDocx.artifactId))
   })
 })

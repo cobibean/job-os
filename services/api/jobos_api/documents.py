@@ -35,6 +35,7 @@ class VerifiedArtifact:
     media_type: str
     sha256: str
     render_status: Literal["succeeded", "failed", "rendering"]
+    render_sequence: int
     canonical_path: str | None
     filename: str | None
     failure_message: str | None
@@ -48,6 +49,7 @@ class VerifiedArtifact:
                 self.artifact_revision,
                 self.media_type,
                 self.render_status,
+                str(self.render_sequence),
                 self.sha256,
                 self.failure_message or "",
             )
@@ -100,7 +102,9 @@ class ArtifactContentHeaders(BaseModel):
     digest: str
 
 
-def verify_source_artifact(raw: dict[str, Any], roots: tuple[Path, ...]) -> VerifiedArtifact:
+def read_source_artifact(
+    raw: dict[str, Any], roots: tuple[Path, ...]
+) -> tuple[VerifiedArtifact, bytes | None]:
     required = ("job_id", "source_revision", "artifact_revision", "media_type", "render_status")
     if any(not isinstance(raw.get(key), str) or not raw[key] for key in required):
         raise ArtifactTrustError("Artifact metadata is incomplete")
@@ -110,6 +114,13 @@ def verify_source_artifact(raw: dict[str, Any], roots: tuple[Path, ...]) -> Veri
     media_type = raw["media_type"]
     if media_type not in ALLOWED_MEDIA_TYPES:
         raise ArtifactTrustError("Artifact media type is not allowlisted")
+    render_sequence = raw.get("render_sequence")
+    if (
+        not isinstance(render_sequence, int)
+        or isinstance(render_sequence, bool)
+        or render_sequence < 0
+    ):
+        raise ArtifactTrustError("Artifact render sequence is missing or invalid")
 
     if status != "succeeded":
         message = raw.get("failure_message")
@@ -120,10 +131,11 @@ def verify_source_artifact(raw: dict[str, Any], roots: tuple[Path, ...]) -> Veri
             media_type=media_type,
             sha256="",
             render_status=status,
+            render_sequence=render_sequence,
             canonical_path=None,
             filename=None,
             failure_message=str(message)[:500] if message else None,
-        )
+        ), None
 
     supplied_path = raw.get("path")
     supplied_hash = raw.get("sha256")
@@ -151,10 +163,25 @@ def verify_source_artifact(raw: dict[str, Any], roots: tuple[Path, ...]) -> Veri
         media_type=media_type,
         sha256=computed_hash,
         render_status="succeeded",
+        render_sequence=render_sequence,
         canonical_path=str(candidate),
         filename=candidate.name,
         failure_message=None,
-    )
+    ), content
+
+
+def verify_source_artifact(raw: dict[str, Any], roots: tuple[Path, ...]) -> VerifiedArtifact:
+    return read_source_artifact(raw, roots)[0]
+
+
+def verify_facade_artifacts(
+    raw_artifacts: list[dict[str, Any]], roots: tuple[Path, ...]
+) -> list[VerifiedArtifact]:
+    verified = [verify_source_artifact(raw, roots) for raw in raw_artifacts]
+    sequences = [artifact.render_sequence for artifact in verified]
+    if len(sequences) != len(set(sequences)):
+        raise ArtifactTrustError("Facade artifact render sequences must be unique")
+    return verified
 
 
 def artifact_record(

@@ -36,25 +36,32 @@ export function DocumentWorkspace(props: DocumentWorkspaceProps) {
   const [activeId, setActiveId] = useState<string | null>(props.restoredArtifactId)
   const [page, setPage] = useState(Math.max(1, props.restoredPage))
   const [zoom, setZoom] = useState(Math.max(0.5, Math.min(3, props.restoredZoom)))
-  const [pageCount, setPageCount] = useState(1)
+  const [pageCount, setPageCount] = useState(0)
   const [payload, setPayload] = useState<PdfArtifactPayload | null>(null)
   const [loading, setLoading] = useState(false)
   const [message, setMessage] = useState('')
   const persistedView = useRef(
     `${props.restoredArtifactId ?? ''}:${props.restoredPage}:${props.restoredZoom}`
   )
+  const selectedId = useRef<string | null>(props.restoredArtifactId)
 
   useEffect(() => {
     if (!props.hydrated) return
     setActiveId(props.restoredArtifactId)
+    selectedId.current = props.restoredArtifactId
     setPage(Math.max(1, props.restoredPage))
     setZoom(Math.max(0.5, Math.min(3, props.restoredZoom)))
     persistedView.current = `${props.restoredArtifactId ?? ''}:${props.restoredPage}:${props.restoredZoom}`
   }, [props.hydrated, props.restoredArtifactId, props.restoredPage, props.restoredZoom])
 
+  const stateMatchesJob = state.jobId === props.job?.jobId
   const artifactById = useMemo(
-    () => new Map(state.artifacts.map(artifact => [artifact.artifactId, artifact])),
-    [state.artifacts]
+    () => new Map(
+      stateMatchesJob
+        ? state.artifacts.map(artifact => [artifact.artifactId, artifact])
+        : []
+    ),
+    [state.artifacts, stateMatchesJob]
   )
   const activeArtifact = activeId ? artifactById.get(activeId) ?? null : null
   const currentArtifact = state.currentArtifactId
@@ -64,23 +71,32 @@ export function DocumentWorkspace(props: DocumentWorkspaceProps) {
     ? artifactById.get(state.lastSuccessfulArtifactId) ?? null
     : null
 
-  const choosePreview = useCallback((next: JobArtifactsState, preferRestored: boolean) => {
+  const choosePreview = useCallback((next: JobArtifactsState, preferredId: string | null) => {
     const byId = new Map(next.artifacts.map(artifact => [artifact.artifactId, artifact]))
     const current = next.currentArtifactId ? byId.get(next.currentArtifactId) : undefined
     const lastGood = next.lastSuccessfulArtifactId
       ? byId.get(next.lastSuccessfulArtifactId)
       : undefined
-    const restored = props.restoredArtifactId ? byId.get(props.restoredArtifactId) : undefined
-    const chosen = preferRestored && restored
-      ? restored
-      : current?.previewAvailable
+    const preferred = preferredId ? byId.get(preferredId) : undefined
+    const usable = (artifact: typeof current) => artifact?.renderStatus === 'succeeded'
+    const chosen = usable(preferred)
+      ? preferred
+      : usable(current)
         ? current
-        : lastGood?.previewAvailable
+        : usable(lastGood)
           ? lastGood
-          : current?.renderStatus === 'succeeded'
-            ? current
-            : next.artifacts.find(artifact => artifact.previewAvailable)
-    setActiveId(chosen?.artifactId ?? null)
+          : next.artifacts.find(artifact => artifact.renderStatus === 'succeeded')
+    const nextId = chosen?.artifactId ?? null
+    const changed = selectedId.current !== nextId
+    selectedId.current = nextId
+    setActiveId(nextId)
+    setPayload(null)
+    if (changed && nextId !== props.restoredArtifactId) {
+      setPage(1)
+      setZoom(1)
+      setPageCount(0)
+    }
+    return nextId
   }, [props.restoredArtifactId])
 
   useEffect(() => {
@@ -91,17 +107,23 @@ export function DocumentWorkspace(props: DocumentWorkspaceProps) {
       return
     }
     let active = true
+    setState(emptyState(props.job.jobId))
+    selectedId.current = null
+    setActiveId(null)
+    setPayload(null)
     setLoading(true)
     setMessage('Loading registered artifacts…')
     bridge.list(props.job.jobId).then(listed => {
       if (!active) return
       setState(listed)
-      choosePreview(listed, true)
+      const listedId = choosePreview(listed, props.restoredArtifactId)
       return bridge.refresh(props.job!.jobId)
-    }).then(refreshed => {
-      if (!active || !refreshed) return
+        .then(refreshed => ({ refreshed, listedId }))
+    }).then(result => {
+      if (!active || !result) return
+      const { refreshed, listedId } = result
       setState(refreshed)
-      choosePreview(refreshed, false)
+      choosePreview(refreshed, listedId)
       setMessage(refreshed.artifacts.length ? 'Artifact registry is current' : 'No artifacts registered for this job')
     }).catch(error => {
       if (active) setMessage(error instanceof Error ? error.message : 'Artifact refresh failed')
@@ -112,14 +134,19 @@ export function DocumentWorkspace(props: DocumentWorkspaceProps) {
   }, [bridge, choosePreview, props.job])
 
   useEffect(() => {
+    setPayload(null)
     if (!activeArtifact?.previewAvailable || !bridge) {
-      setPayload(null)
       return
     }
     let active = true
     setLoading(true)
     bridge.loadPdf(activeArtifact.artifactId).then(value => {
-      if (active) setPayload(value)
+      if (!active) return
+      if (value.artifactId !== activeArtifact.artifactId) {
+        setMessage('PDF preview identity mismatch')
+        return
+      }
+      setPayload(value)
     }).catch(error => {
       if (active) setMessage(error instanceof Error ? error.message : 'PDF preview failed')
     }).finally(() => {
@@ -136,7 +163,7 @@ export function DocumentWorkspace(props: DocumentWorkspaceProps) {
   }, [activeId, page, props.hydrated, props.onViewChange, zoom])
 
   useEffect(() => {
-    if (page > pageCount) setPage(pageCount)
+    if (pageCount > 0 && page > pageCount) setPage(pageCount)
   }, [page, pageCount])
 
   const refresh = async () => {
@@ -145,7 +172,7 @@ export function DocumentWorkspace(props: DocumentWorkspaceProps) {
     try {
       const refreshed = await bridge.refresh(props.job.jobId)
       setState(refreshed)
-      choosePreview(refreshed, false)
+      choosePreview(refreshed, selectedId.current)
       setMessage('Checked for newer artifacts')
     } catch (error) {
       setMessage(error instanceof Error ? error.message : 'Artifact refresh failed')
@@ -155,9 +182,10 @@ export function DocumentWorkspace(props: DocumentWorkspaceProps) {
   }
 
   const action = async (name: 'export' | 'reveal' | 'open') => {
-    if (!activeArtifact || !bridge) return
+    const presentedArtifact = activeArtifact
+    if (!presentedArtifact || !bridge) return
     try {
-      setMessage(await bridge[name](activeArtifact.artifactId))
+      setMessage(await bridge[name](presentedArtifact.artifactId))
     } catch (error) {
       setMessage(error instanceof Error ? error.message : 'Document action failed')
     }
@@ -184,7 +212,15 @@ export function DocumentWorkspace(props: DocumentWorkspaceProps) {
         </div>
         <select
           aria-label="Resume revision"
-          onChange={event => { setActiveId(event.target.value || null); setPage(1) }}
+          onChange={event => {
+            const nextId = event.target.value || null
+            selectedId.current = nextId
+            setActiveId(nextId)
+            setPayload(null)
+            setPage(1)
+            setZoom(1)
+            setPageCount(0)
+          }}
           value={activeId ?? ''}
         >
           <option value="">No artifact</option>
@@ -203,7 +239,7 @@ export function DocumentWorkspace(props: DocumentWorkspaceProps) {
         <button disabled={!activeArtifact || !bridge} onClick={() => action('export')} type="button"><Download aria-hidden="true" size={14} /> Export</button>
         <span className="document-toolbar-spacer" />
         <button aria-label="Previous page" disabled={page <= 1 || !payload} onClick={() => setPage(value => Math.max(1, value - 1))} type="button"><ChevronLeft aria-hidden="true" size={14} /></button>
-        <span className="page-count">Page {page} of {pageCount}</span>
+        <span className="page-count">Page {page} of {pageCount || '—'}</span>
         <button aria-label="Next page" disabled={page >= pageCount || !payload} onClick={() => setPage(value => Math.min(pageCount, value + 1))} type="button"><ChevronRight aria-hidden="true" size={14} /></button>
         <button aria-label="Zoom out" disabled={zoom <= 0.5} onClick={() => setZoom(value => Math.max(0.5, Number((value - 0.1).toFixed(1))))} type="button"><Minus aria-hidden="true" size={14} /></button>
         <span className="zoom-value">{Math.round(zoom * 100)}%</span>
@@ -223,9 +259,15 @@ export function DocumentWorkspace(props: DocumentWorkspaceProps) {
         <div className="render-progress" role="status">No registered render is available for this job.</div>
       )}
 
+      {activeArtifact ? (
+        <div className="viewed-artifact" role="status">
+          Viewing {activeArtifact.filename ?? 'unnamed artifact'} · revision {activeArtifact.artifactRevision} · source {activeArtifact.sourceRevision} · {activeArtifact.mediaType} · {activeArtifact.renderStatus}
+        </div>
+      ) : null}
+
       <section className="document-canvas">
-        {payload && activeArtifact?.previewAvailable ? (
-          <PdfPreview bytes={payload.bytes} onPageCount={setPageCount} page={page} zoom={zoom} />
+        {payload && activeArtifact && payload.artifactId === activeArtifact.artifactId && activeArtifact.previewAvailable ? (
+          <PdfPreview key={payload.artifactId} bytes={payload.bytes} onPageCount={setPageCount} page={page} zoom={zoom} />
         ) : activeArtifact?.mediaType === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' ? (
           <div className="document-external-only">
             <FileText aria-hidden="true" size={28} />

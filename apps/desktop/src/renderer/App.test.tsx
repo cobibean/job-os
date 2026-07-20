@@ -128,7 +128,11 @@ test('real jobs render compactly and user selection and status use the shared br
           sortMode: 'manual',
           manualOrder: ['job-1']
         }),
-        list: vi.fn(),
+        list: vi.fn().mockResolvedValue([{
+          jobId: 'job-1', company: 'Example Co', title: 'Product Builder', status: 'discovered',
+          statusGroup: 'Inbox', canonicalUrl: 'https://example.com/jobs/1',
+          discoveredAt: '2026-07-20T00:00:00Z', lastSeenAt: '2026-07-20T01:00:00Z'
+        }]),
         select,
         reorder: vi.fn(),
         setSort: vi.fn(),
@@ -183,7 +187,7 @@ test('changing jobs never selects, closes, navigates, or reassociates an unrelat
       connectivity: { get: vi.fn().mockRejectedValue(new Error('offline')) },
       jobs: {
         getState: vi.fn().mockResolvedValue({ jobs, selectedJobId: null, sortMode: 'manual', manualOrder: ['job-1', 'job-2'] }),
-        list: vi.fn(), select: vi.fn().mockResolvedValue({ eventId: 1 }), reorder: vi.fn(), setSort: vi.fn(), updateStatus: vi.fn(),
+        list: vi.fn().mockResolvedValue(jobs), select: vi.fn().mockResolvedValue({ eventId: 1 }), reorder: vi.fn(), setSort: vi.fn(), updateStatus: vi.fn(),
         subscribe: vi.fn().mockReturnValue(() => undefined)
       },
       workspace: { get: vi.fn().mockResolvedValue(workspace), save: vi.fn().mockImplementation(value => Promise.resolve({ ...value, revision: value.revision + 1 })) },

@@ -120,6 +120,11 @@ Initial Interface:
 
 Its Implementation calls the existing `JobStorage`, lead transition logic, and resume rendering pipeline. It owns translation from job-hunter records into application contracts. No JobOS Module may issue raw SQL against job-hunter tables.
 
+The artifact manifest contract is order-independent. Every item returned by
+`list_job_artifacts(job_id)` carries a unique, non-negative `render_sequence`;
+the highest sequence is current, and the highest successful sequence is the
+last successful artifact. List position is never used to infer either pointer.
+
 This creates Depth: the Interface stays small while it hides storage schema, state-transition rules, render manifests, and filesystem conventions. It also improves Locality by keeping changes to those rules in the job-hunter repository.
 
 ### Workspace Module

@@ -609,6 +609,7 @@ class JobOsStateStore:
             ).fetchone()
             current_id = state[0] if state else None
             last_successful_id = state[1] if state else None
+            ids_by_sequence: dict[int, tuple[str, str]] = {}
             for artifact in artifacts:
                 row = connection.execute(
                     "SELECT artifact_id FROM document_artifacts WHERE registry_key = ?",
@@ -638,10 +639,23 @@ class JobOsStateStore:
                             artifact.failure_message,
                         ),
                     )
-                current_id = artifact_id
-                if artifact.render_status == "succeeded":
-                    last_successful_id = artifact_id
+                ids_by_sequence[artifact.render_sequence] = (
+                    artifact_id,
+                    artifact.render_status,
+                )
             if artifacts:
+                current_sequence = max(ids_by_sequence)
+                current_id = ids_by_sequence[current_sequence][0]
+                successful_sequences = [
+                    sequence
+                    for sequence, (_, status) in ids_by_sequence.items()
+                    if status == "succeeded"
+                ]
+                last_successful_id = (
+                    ids_by_sequence[max(successful_sequences)][0]
+                    if successful_sequences
+                    else None
+                )
                 connection.execute(
                     """
                     INSERT INTO job_document_state(
