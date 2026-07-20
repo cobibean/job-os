@@ -3,7 +3,7 @@ from jobos_api.app import create_app
 from jobos_api.settings import Settings
 
 
-def test_health_reports_a_ready_phase_one_api(tmp_path):
+def test_health_reports_a_ready_phase_two_api(tmp_path):
     app = create_app(
         Settings(
             device_token="test-device-token",
@@ -19,7 +19,7 @@ def test_health_reports_a_ready_phase_one_api(tmp_path):
         "status": "ready",
         "service": "jobos-api",
         "version": "0.1.0",
-        "state_schema": 2,
+        "state_schema": 3,
     }
 
 
@@ -48,7 +48,7 @@ def test_device_session_requires_the_runtime_credential(tmp_path):
     }
 
 
-def test_version_and_openapi_describe_the_connected_shell_contract(tmp_path):
+def test_version_and_openapi_describe_the_shared_jobs_contract(tmp_path):
     app = create_app(
         Settings(
             device_token="test-device-token",
@@ -63,12 +63,22 @@ def test_version_and_openapi_describe_the_connected_shell_contract(tmp_path):
     assert version.status_code == 200
     assert version.json() == {
         "api_version": "0.1.0",
-        "contract": "jobos-v1-phase1",
+        "contract": "jobos-v1-phase2",
     }
     assert set(openapi.json()["paths"]) == {
         "/v1/health",
         "/v1/version",
         "/v1/device-session",
+        "/v1/jobs",
+        "/v1/jobs/order",
+        "/v1/jobs/{job_id}",
+        "/v1/jobs/{job_id}/status",
+        "/v1/jobs/{job_id}/history",
+        "/v1/workspace/jobs",
+        "/v1/workspace/jobs/selection",
+        "/v1/workspace/jobs/sort",
+        "/v1/events",
+        "/v1/events/stream",
     }
     schemas = openapi.json()["components"]["schemas"]
     assert set(schemas["HealthResponse"]["required"]) == {
@@ -82,4 +92,14 @@ def test_version_and_openapi_describe_the_connected_shell_contract(tmp_path):
         "authenticated",
         "transport",
         "api_version",
+    }
+    assert set(schemas["JobListItem"]["required"]) == {
+        "job_id",
+        "company",
+        "title",
+        "status",
+        "status_group",
+        "canonical_url",
+        "discovered_at",
+        "last_seen_at",
     }

@@ -1,0 +1,295 @@
+from fastapi.testclient import TestClient
+from jobos_api.app import create_app
+from jobos_api.settings import Settings
+
+STATUSES = (
+    "discovered",
+    "scored",
+    "reviewed",
+    "shortlisted",
+    "apply_now",
+    "maybe",
+    "stretch",
+    "skipped",
+    "applied",
+    "interviewing",
+    "closed",
+    "archived",
+)
+
+EXPECTED_GROUPS = {
+    "discovered": "Inbox",
+    "scored": "Inbox",
+    "reviewed": "Inbox",
+    "shortlisted": "Considering",
+    "apply_now": "Considering",
+    "maybe": "Considering",
+    "stretch": "Considering",
+    "applied": "Applied",
+    "interviewing": "Interviewing",
+    "closed": "Closed",
+    "skipped": "Inactive",
+    "archived": "Inactive",
+}
+
+
+class FakeJobHunterFacade:
+    def __init__(self):
+        self.jobs = [
+            {
+                "job_id": f"job-{index}",
+                "company": f"Company {index:02d}",
+                "title": f"Role {index:02d}",
+                "status": status,
+                "canonical_url": f"https://example.com/jobs/{index}",
+                "discovered_at": f"2026-07-{index + 1:02d}T00:00:00+00:00",
+                "last_seen_at": f"2026-07-{index + 1:02d}T01:00:00+00:00",
+            }
+            for index, status in enumerate(STATUSES)
+        ]
+        self.history = []
+
+    def list_jobs(self):
+        return list(self.jobs)
+
+    def inspect_job(self, job_id):
+        job = next((job for job in self.jobs if job["job_id"] == job_id), None)
+        if job is None:
+            raise KeyError(job_id)
+        return {**job, "description": "A job description", "location": "Remote"}
+
+    def get_lead_history(self, job_id):
+        self.inspect_job(job_id)
+        return list(self.history)
+
+    def update_lead_state(self, job_id, target_state, *, reason=None):
+        job = self.inspect_job(job_id)
+        if job["status"] == "discovered" and target_state == "interviewing":
+            raise ValueError("Invalid lead state transition: discovered -> interviewing")
+        stored = next(job for job in self.jobs if job["job_id"] == job_id)
+        stored["status"] = target_state
+        return self.inspect_job(job_id)
+
+
+def make_client(tmp_path, facade=None):
+    app = create_app(
+        Settings(device_token="test-device-token", state_db_path=tmp_path / "jobos.db"),
+        job_facade=facade or FakeJobHunterFacade(),
+    )
+    return TestClient(app)
+
+
+def auth_headers():
+    return {"Authorization": "Bearer test-device-token"}
+
+
+def test_every_canonical_status_maps_to_exactly_one_approved_group(tmp_path):
+    with make_client(tmp_path) as client:
+        response = client.get("/v1/jobs", headers=auth_headers())
+
+    assert response.status_code == 200
+    jobs = response.json()["jobs"]
+    assert {job["status"]: job["status_group"] for job in jobs} == EXPECTED_GROUPS
+    assert len(jobs) == len(STATUSES)
+
+
+def test_list_filters_then_applies_the_requested_calculated_order(tmp_path):
+    facade = FakeJobHunterFacade()
+    facade.jobs = [facade.jobs[8], facade.jobs[0], facade.jobs[4]]
+    facade.jobs[0]["company"] = "Zulu Labs"
+    facade.jobs[1]["company"] = "Alpha Systems"
+    facade.jobs[2]["company"] = "Middle Works"
+
+    with make_client(tmp_path, facade) as client:
+        recent = client.get("/v1/jobs?sort=recent", headers=auth_headers()).json()["jobs"]
+        alphabetical = client.get(
+            "/v1/jobs?sort=alphabetical", headers=auth_headers()
+        ).json()["jobs"]
+        status = client.get("/v1/jobs?sort=status", headers=auth_headers()).json()["jobs"]
+        filtered = client.get(
+            "/v1/jobs?query=alpha&status_group=Inbox",
+            headers=auth_headers(),
+        ).json()["jobs"]
+
+    assert [job["job_id"] for job in recent] == ["job-8", "job-4", "job-0"]
+    assert [job["company"] for job in alphabetical] == [
+        "Alpha Systems",
+        "Middle Works",
+        "Zulu Labs",
+    ]
+    assert [job["status_group"] for job in status] == ["Inbox", "Considering", "Applied"]
+    assert [job["job_id"] for job in filtered] == ["job-0"]
+
+
+def test_manual_order_survives_switching_to_calculated_sort_modes(tmp_path):
+    facade = FakeJobHunterFacade()
+    facade.jobs = facade.jobs[:3]
+
+    with make_client(tmp_path, facade) as client:
+        reordered = client.put(
+            "/v1/jobs/order",
+            headers=auth_headers(),
+            json={"job_ids": ["job-2", "job-0", "job-1"], "origin": "user"},
+        )
+        alphabetical = client.get(
+            "/v1/jobs?sort=alphabetical", headers=auth_headers()
+        ).json()["jobs"]
+        manual = client.get("/v1/jobs?sort=manual", headers=auth_headers()).json()["jobs"]
+
+    assert reordered.status_code == 200
+    assert [job["job_id"] for job in alphabetical] == ["job-0", "job-1", "job-2"]
+    assert [job["job_id"] for job in manual] == ["job-2", "job-0", "job-1"]
+
+
+def test_user_and_mcp_status_changes_share_one_command_and_event_path(tmp_path):
+    facade = FakeJobHunterFacade()
+    facade.jobs = facade.jobs[:1]
+
+    with make_client(tmp_path, facade) as client:
+        user_change = client.put(
+            "/v1/jobs/job-0/status",
+            headers=auth_headers(),
+            json={"target_status": "reviewed", "origin": "user", "reason": "Worth review"},
+        )
+        visible_to_mcp = client.get("/v1/jobs/job-0", headers=auth_headers())
+        mcp_change = client.put(
+            "/v1/jobs/job-0/status",
+            headers=auth_headers(),
+            json={"target_status": "shortlisted", "origin": "mcp"},
+        )
+        events = client.get("/v1/events?after=0", headers=auth_headers())
+
+    assert user_change.status_code == 200
+    assert user_change.json()["job"]["status"] == "reviewed"
+    assert visible_to_mcp.json()["status"] == "reviewed"
+    assert mcp_change.status_code == 200
+    assert mcp_change.json()["job"]["status"] == "shortlisted"
+    assert [(event["origin"], event["to_status"]) for event in events.json()["events"]] == [
+        ("user", "reviewed"),
+        ("mcp", "shortlisted"),
+    ]
+
+
+def test_invalid_transition_returns_clear_feedback_without_an_event_or_partial_change(tmp_path):
+    facade = FakeJobHunterFacade()
+    facade.jobs = facade.jobs[:1]
+
+    with make_client(tmp_path, facade) as client:
+        rejected = client.put(
+            "/v1/jobs/job-0/status",
+            headers=auth_headers(),
+            json={"target_status": "interviewing", "origin": "user"},
+        )
+        current = client.get("/v1/jobs/job-0", headers=auth_headers())
+        events = client.get("/v1/events?after=0", headers=auth_headers())
+
+    assert rejected.status_code == 409
+    assert rejected.json()["detail"] == (
+        "Invalid lead state transition: discovered -> interviewing"
+    )
+    assert current.json()["status"] == "discovered"
+    assert events.json() == {"events": []}
+
+
+def test_selection_is_durable_and_uses_the_same_event_path_for_user_and_mcp(tmp_path):
+    facade = FakeJobHunterFacade()
+    facade.jobs = facade.jobs[:2]
+
+    with make_client(tmp_path, facade) as client:
+        user_selection = client.put(
+            "/v1/workspace/jobs/selection",
+            headers=auth_headers(),
+            json={"job_id": "job-1", "origin": "user"},
+        )
+        state = client.get("/v1/workspace/jobs", headers=auth_headers())
+        mcp_selection = client.put(
+            "/v1/workspace/jobs/selection",
+            headers=auth_headers(),
+            json={"job_id": "job-0", "origin": "mcp"},
+        )
+        events = client.get("/v1/events?after=0", headers=auth_headers()).json()["events"]
+
+    assert user_selection.status_code == 200
+    assert state.json()["selected_job_id"] == "job-1"
+    assert mcp_selection.status_code == 200
+    assert events[-1]["event_type"] == "job_selected"
+    assert events[-1]["origin"] == "mcp"
+    assert events[-1]["selected_job_id"] == "job-0"
+
+
+def test_inspect_and_history_expose_normalized_facade_records(tmp_path):
+    facade = FakeJobHunterFacade()
+    facade.jobs = facade.jobs[:1]
+    facade.history = [
+        {
+            "event_id": 9,
+            "event_type": "lead_state_changed",
+            "from_status": "discovered",
+            "to_status": "reviewed",
+            "occurred_at": "2026-07-20T02:00:00+00:00",
+            "reason": "Reviewed in JobOS",
+        }
+    ]
+
+    with make_client(tmp_path, facade) as client:
+        inspected = client.get("/v1/jobs/job-0", headers=auth_headers())
+        history = client.get("/v1/jobs/job-0/history", headers=auth_headers())
+
+    assert inspected.status_code == 200
+    assert inspected.json()["description"] == "A job description"
+    assert history.status_code == 200
+    assert history.json() == {"events": facade.history}
+
+
+def test_event_stream_emits_ordered_resumable_status_events(tmp_path):
+    facade = FakeJobHunterFacade()
+    facade.jobs = facade.jobs[:1]
+
+    with make_client(tmp_path, facade) as client:
+        changed = client.put(
+            "/v1/jobs/job-0/status",
+            headers=auth_headers(),
+            json={"target_status": "reviewed", "origin": "mcp"},
+        )
+        streamed = client.get(
+            "/v1/events/stream?after=0&once=true",
+            headers=auth_headers(),
+        )
+
+    assert streamed.status_code == 200
+    assert streamed.headers["content-type"].startswith("text/event-stream")
+    assert f"id: {changed.json()['event_id']}" in streamed.text
+    assert '"origin":"mcp"' in streamed.text
+    assert '"to_status":"reviewed"' in streamed.text
+
+
+def test_sort_mode_persists_without_rewriting_manual_order(tmp_path):
+    facade = FakeJobHunterFacade()
+    facade.jobs = facade.jobs[:3]
+    facade.jobs[0]["status"] = "applied"
+
+    with make_client(tmp_path, facade) as client:
+        client.put(
+            "/v1/jobs/order",
+            headers=auth_headers(),
+            json={"job_ids": ["job-2", "job-0", "job-1"], "origin": "user"},
+        )
+        changed = client.put(
+            "/v1/workspace/jobs/sort",
+            headers=auth_headers(),
+            json={"sort_mode": "status", "origin": "user"},
+        )
+        state = client.get("/v1/workspace/jobs", headers=auth_headers())
+        default_list = client.get("/v1/jobs", headers=auth_headers())
+
+    assert changed.status_code == 200
+    assert state.json() == {
+        "selected_job_id": None,
+        "sort_mode": "status",
+        "manual_order": ["job-2", "job-0", "job-1"],
+    }
+    assert [job["status_group"] for job in default_list.json()["jobs"]] == [
+        "Inbox",
+        "Inbox",
+        "Applied",
+    ]

@@ -23,6 +23,16 @@ export type DeviceSessionResponse = {
 };
 
 /**
+ * HTTPValidationError
+ */
+export type HttpValidationError = {
+    /**
+     * Detail
+     */
+    detail?: Array<ValidationError>;
+};
+
+/**
  * HealthResponse
  */
 export type HealthResponse = {
@@ -45,6 +55,305 @@ export type HealthResponse = {
 };
 
 /**
+ * JobDetail
+ */
+export type JobDetail = {
+    /**
+     * Canonical Url
+     */
+    canonical_url: string;
+    /**
+     * Company
+     */
+    company: string;
+    /**
+     * Description
+     */
+    description: string;
+    /**
+     * Discovered At
+     */
+    discovered_at: string;
+    /**
+     * Job Id
+     */
+    job_id: string;
+    /**
+     * Last Seen At
+     */
+    last_seen_at: string;
+    /**
+     * Location
+     */
+    location: string | null;
+    /**
+     * Status
+     */
+    status: string;
+    /**
+     * Status Group
+     */
+    status_group: string;
+    /**
+     * Title
+     */
+    title: string;
+};
+
+/**
+ * JobEvent
+ */
+export type JobEvent = {
+    /**
+     * Event Id
+     */
+    event_id: number;
+    /**
+     * Event Type
+     */
+    event_type: string;
+    /**
+     * From Status
+     */
+    from_status?: string | null;
+    /**
+     * Job Id
+     */
+    job_id: string | null;
+    /**
+     * Job Ids
+     */
+    job_ids?: Array<string> | null;
+    /**
+     * Occurred At
+     */
+    occurred_at: string;
+    /**
+     * Origin
+     */
+    origin: 'user' | 'mcp';
+    /**
+     * Selected Job Id
+     */
+    selected_job_id?: string | null;
+    /**
+     * Sort Mode
+     */
+    sort_mode?: 'manual' | 'recent' | 'alphabetical' | 'status' | null;
+    /**
+     * To Status
+     */
+    to_status?: string | null;
+};
+
+/**
+ * JobEventsResponse
+ */
+export type JobEventsResponse = {
+    /**
+     * Events
+     */
+    events: Array<JobEvent>;
+};
+
+/**
+ * JobListItem
+ */
+export type JobListItem = {
+    /**
+     * Canonical Url
+     */
+    canonical_url: string;
+    /**
+     * Company
+     */
+    company: string;
+    /**
+     * Discovered At
+     */
+    discovered_at: string;
+    /**
+     * Job Id
+     */
+    job_id: string;
+    /**
+     * Last Seen At
+     */
+    last_seen_at: string;
+    /**
+     * Status
+     */
+    status: string;
+    /**
+     * Status Group
+     */
+    status_group: string;
+    /**
+     * Title
+     */
+    title: string;
+};
+
+/**
+ * JobListResponse
+ */
+export type JobListResponse = {
+    /**
+     * Jobs
+     */
+    jobs: Array<JobListItem>;
+};
+
+/**
+ * JobMutationResponse
+ */
+export type JobMutationResponse = {
+    /**
+     * Event Id
+     */
+    event_id: number;
+};
+
+/**
+ * JobSelectionRequest
+ */
+export type JobSelectionRequest = {
+    /**
+     * Job Id
+     */
+    job_id: string;
+    /**
+     * Origin
+     */
+    origin: 'user' | 'mcp';
+};
+
+/**
+ * JobSortRequest
+ */
+export type JobSortRequest = {
+    /**
+     * Origin
+     */
+    origin: 'user' | 'mcp';
+    /**
+     * Sort Mode
+     */
+    sort_mode: 'manual' | 'recent' | 'alphabetical' | 'status';
+};
+
+/**
+ * LeadHistoryEvent
+ */
+export type LeadHistoryEvent = {
+    /**
+     * Event Id
+     */
+    event_id: number;
+    /**
+     * Event Type
+     */
+    event_type: string;
+    /**
+     * From Status
+     */
+    from_status: string | null;
+    /**
+     * Occurred At
+     */
+    occurred_at: string;
+    /**
+     * Reason
+     */
+    reason: string | null;
+    /**
+     * To Status
+     */
+    to_status: string | null;
+};
+
+/**
+ * LeadHistoryResponse
+ */
+export type LeadHistoryResponse = {
+    /**
+     * Events
+     */
+    events: Array<LeadHistoryEvent>;
+};
+
+/**
+ * ManualOrderRequest
+ */
+export type ManualOrderRequest = {
+    /**
+     * Job Ids
+     */
+    job_ids: Array<string>;
+    /**
+     * Origin
+     */
+    origin: 'user' | 'mcp';
+};
+
+/**
+ * StatusChangeRequest
+ */
+export type StatusChangeRequest = {
+    /**
+     * Origin
+     */
+    origin: 'user' | 'mcp';
+    /**
+     * Reason
+     */
+    reason?: string | null;
+    /**
+     * Target Status
+     */
+    target_status: 'discovered' | 'scored' | 'reviewed' | 'shortlisted' | 'apply_now' | 'maybe' | 'stretch' | 'skipped' | 'applied' | 'interviewing' | 'closed' | 'archived';
+};
+
+/**
+ * StatusChangeResponse
+ */
+export type StatusChangeResponse = {
+    /**
+     * Event Id
+     */
+    event_id: number;
+    job: JobDetail;
+};
+
+/**
+ * ValidationError
+ */
+export type ValidationError = {
+    /**
+     * Context
+     */
+    ctx?: {
+        [key: string]: unknown;
+    };
+    /**
+     * Input
+     */
+    input?: unknown;
+    /**
+     * Location
+     */
+    loc: Array<string | number>;
+    /**
+     * Message
+     */
+    msg: string;
+    /**
+     * Error Type
+     */
+    type: string;
+};
+
+/**
  * VersionResponse
  */
 export type VersionResponse = {
@@ -55,7 +364,25 @@ export type VersionResponse = {
     /**
      * Contract
      */
-    contract: 'jobos-v1-phase1';
+    contract: 'jobos-v1-phase2';
+};
+
+/**
+ * WorkspaceJobsResponse
+ */
+export type WorkspaceJobsResponse = {
+    /**
+     * Manual Order
+     */
+    manual_order: Array<string>;
+    /**
+     * Selected Job Id
+     */
+    selected_job_id: string | null;
+    /**
+     * Sort Mode
+     */
+    sort_mode: 'manual' | 'recent' | 'alphabetical' | 'status';
 };
 
 export type DeviceSessionV1DeviceSessionGetData = {
@@ -74,6 +401,68 @@ export type DeviceSessionV1DeviceSessionGetResponses = {
 
 export type DeviceSessionV1DeviceSessionGetResponse = DeviceSessionV1DeviceSessionGetResponses[keyof DeviceSessionV1DeviceSessionGetResponses];
 
+export type EventsListV1EventsGetData = {
+    body?: never;
+    path?: never;
+    query?: {
+        /**
+         * After
+         */
+        after?: number;
+    };
+    url: '/v1/events';
+};
+
+export type EventsListV1EventsGetErrors = {
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type EventsListV1EventsGetError = EventsListV1EventsGetErrors[keyof EventsListV1EventsGetErrors];
+
+export type EventsListV1EventsGetResponses = {
+    /**
+     * Successful Response
+     */
+    200: JobEventsResponse;
+};
+
+export type EventsListV1EventsGetResponse = EventsListV1EventsGetResponses[keyof EventsListV1EventsGetResponses];
+
+export type EventsStreamV1EventsStreamGetData = {
+    body?: never;
+    path?: never;
+    query?: {
+        /**
+         * After
+         */
+        after?: number;
+        /**
+         * Once
+         */
+        once?: boolean;
+    };
+    url: '/v1/events/stream';
+};
+
+export type EventsStreamV1EventsStreamGetErrors = {
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type EventsStreamV1EventsStreamGetError = EventsStreamV1EventsStreamGetErrors[keyof EventsStreamV1EventsStreamGetErrors];
+
+export type EventsStreamV1EventsStreamGetResponses = {
+    /**
+     * Successful Response
+     */
+    200: unknown;
+};
+
 export type HealthV1HealthGetData = {
     body?: never;
     path?: never;
@@ -90,6 +479,159 @@ export type HealthV1HealthGetResponses = {
 
 export type HealthV1HealthGetResponse = HealthV1HealthGetResponses[keyof HealthV1HealthGetResponses];
 
+export type JobsListV1JobsGetData = {
+    body?: never;
+    path?: never;
+    query?: {
+        /**
+         * Sort
+         */
+        sort?: 'manual' | 'recent' | 'alphabetical' | 'status' | null;
+        /**
+         * Query
+         */
+        query?: string | null;
+        /**
+         * Status Group
+         */
+        status_group?: string | null;
+    };
+    url: '/v1/jobs';
+};
+
+export type JobsListV1JobsGetErrors = {
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type JobsListV1JobsGetError = JobsListV1JobsGetErrors[keyof JobsListV1JobsGetErrors];
+
+export type JobsListV1JobsGetResponses = {
+    /**
+     * Successful Response
+     */
+    200: JobListResponse;
+};
+
+export type JobsListV1JobsGetResponse = JobsListV1JobsGetResponses[keyof JobsListV1JobsGetResponses];
+
+export type JobsReorderV1JobsOrderPutData = {
+    body: ManualOrderRequest;
+    path?: never;
+    query?: never;
+    url: '/v1/jobs/order';
+};
+
+export type JobsReorderV1JobsOrderPutErrors = {
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type JobsReorderV1JobsOrderPutError = JobsReorderV1JobsOrderPutErrors[keyof JobsReorderV1JobsOrderPutErrors];
+
+export type JobsReorderV1JobsOrderPutResponses = {
+    /**
+     * Successful Response
+     */
+    200: JobMutationResponse;
+};
+
+export type JobsReorderV1JobsOrderPutResponse = JobsReorderV1JobsOrderPutResponses[keyof JobsReorderV1JobsOrderPutResponses];
+
+export type JobInspectV1JobsJobIdGetData = {
+    body?: never;
+    path: {
+        /**
+         * Job Id
+         */
+        job_id: string;
+    };
+    query?: never;
+    url: '/v1/jobs/{job_id}';
+};
+
+export type JobInspectV1JobsJobIdGetErrors = {
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type JobInspectV1JobsJobIdGetError = JobInspectV1JobsJobIdGetErrors[keyof JobInspectV1JobsJobIdGetErrors];
+
+export type JobInspectV1JobsJobIdGetResponses = {
+    /**
+     * Successful Response
+     */
+    200: JobDetail;
+};
+
+export type JobInspectV1JobsJobIdGetResponse = JobInspectV1JobsJobIdGetResponses[keyof JobInspectV1JobsJobIdGetResponses];
+
+export type JobHistoryV1JobsJobIdHistoryGetData = {
+    body?: never;
+    path: {
+        /**
+         * Job Id
+         */
+        job_id: string;
+    };
+    query?: never;
+    url: '/v1/jobs/{job_id}/history';
+};
+
+export type JobHistoryV1JobsJobIdHistoryGetErrors = {
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type JobHistoryV1JobsJobIdHistoryGetError = JobHistoryV1JobsJobIdHistoryGetErrors[keyof JobHistoryV1JobsJobIdHistoryGetErrors];
+
+export type JobHistoryV1JobsJobIdHistoryGetResponses = {
+    /**
+     * Successful Response
+     */
+    200: LeadHistoryResponse;
+};
+
+export type JobHistoryV1JobsJobIdHistoryGetResponse = JobHistoryV1JobsJobIdHistoryGetResponses[keyof JobHistoryV1JobsJobIdHistoryGetResponses];
+
+export type JobUpdateStatusV1JobsJobIdStatusPutData = {
+    body: StatusChangeRequest;
+    path: {
+        /**
+         * Job Id
+         */
+        job_id: string;
+    };
+    query?: never;
+    url: '/v1/jobs/{job_id}/status';
+};
+
+export type JobUpdateStatusV1JobsJobIdStatusPutErrors = {
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type JobUpdateStatusV1JobsJobIdStatusPutError = JobUpdateStatusV1JobsJobIdStatusPutErrors[keyof JobUpdateStatusV1JobsJobIdStatusPutErrors];
+
+export type JobUpdateStatusV1JobsJobIdStatusPutResponses = {
+    /**
+     * Successful Response
+     */
+    200: StatusChangeResponse;
+};
+
+export type JobUpdateStatusV1JobsJobIdStatusPutResponse = JobUpdateStatusV1JobsJobIdStatusPutResponses[keyof JobUpdateStatusV1JobsJobIdStatusPutResponses];
+
 export type VersionV1VersionGetData = {
     body?: never;
     path?: never;
@@ -105,3 +647,69 @@ export type VersionV1VersionGetResponses = {
 };
 
 export type VersionV1VersionGetResponse = VersionV1VersionGetResponses[keyof VersionV1VersionGetResponses];
+
+export type WorkspaceJobsV1WorkspaceJobsGetData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/v1/workspace/jobs';
+};
+
+export type WorkspaceJobsV1WorkspaceJobsGetResponses = {
+    /**
+     * Successful Response
+     */
+    200: WorkspaceJobsResponse;
+};
+
+export type WorkspaceJobsV1WorkspaceJobsGetResponse = WorkspaceJobsV1WorkspaceJobsGetResponses[keyof WorkspaceJobsV1WorkspaceJobsGetResponses];
+
+export type WorkspaceSelectJobV1WorkspaceJobsSelectionPutData = {
+    body: JobSelectionRequest;
+    path?: never;
+    query?: never;
+    url: '/v1/workspace/jobs/selection';
+};
+
+export type WorkspaceSelectJobV1WorkspaceJobsSelectionPutErrors = {
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type WorkspaceSelectJobV1WorkspaceJobsSelectionPutError = WorkspaceSelectJobV1WorkspaceJobsSelectionPutErrors[keyof WorkspaceSelectJobV1WorkspaceJobsSelectionPutErrors];
+
+export type WorkspaceSelectJobV1WorkspaceJobsSelectionPutResponses = {
+    /**
+     * Successful Response
+     */
+    200: JobMutationResponse;
+};
+
+export type WorkspaceSelectJobV1WorkspaceJobsSelectionPutResponse = WorkspaceSelectJobV1WorkspaceJobsSelectionPutResponses[keyof WorkspaceSelectJobV1WorkspaceJobsSelectionPutResponses];
+
+export type WorkspaceSortJobsV1WorkspaceJobsSortPutData = {
+    body: JobSortRequest;
+    path?: never;
+    query?: never;
+    url: '/v1/workspace/jobs/sort';
+};
+
+export type WorkspaceSortJobsV1WorkspaceJobsSortPutErrors = {
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type WorkspaceSortJobsV1WorkspaceJobsSortPutError = WorkspaceSortJobsV1WorkspaceJobsSortPutErrors[keyof WorkspaceSortJobsV1WorkspaceJobsSortPutErrors];
+
+export type WorkspaceSortJobsV1WorkspaceJobsSortPutResponses = {
+    /**
+     * Successful Response
+     */
+    200: JobMutationResponse;
+};
+
+export type WorkspaceSortJobsV1WorkspaceJobsSortPutResponse = WorkspaceSortJobsV1WorkspaceJobsSortPutResponses[keyof WorkspaceSortJobsV1WorkspaceJobsSortPutResponses];

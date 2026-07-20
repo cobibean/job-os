@@ -1,10 +1,10 @@
 import { Bot, BriefcaseBusiness, ChevronDown, Send, SlidersHorizontal } from 'lucide-react'
 
-export function AgentPanel() {
+export function AgentPanel({ contextLabel }: { contextLabel: string }) {
   return (
     <aside aria-label="Agent chat" className="agent-panel panel-region">
       <div className="agent-context">
-        <span><BriefcaseBusiness aria-hidden="true" size={16} strokeWidth={1.5} /> No active job</span>
+        <span><BriefcaseBusiness aria-hidden="true" size={16} strokeWidth={1.5} /> {contextLabel}</span>
         <ChevronDown aria-hidden="true" size={14} strokeWidth={1.5} />
         <button aria-label="Agent context settings" className="icon-button context-settings placeholder-control" disabled title="Available in a later phase" type="button">
           <SlidersHorizontal aria-hidden="true" size={16} strokeWidth={1.5} />

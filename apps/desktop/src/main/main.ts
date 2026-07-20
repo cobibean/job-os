@@ -3,9 +3,12 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { app, BrowserWindow, ipcMain, session } from 'electron'
+import type { IpcMainInvokeEvent } from 'electron'
 
-import type { ConnectivitySnapshot } from '../shared/contracts.js'
+import type { ConnectivitySnapshot, JobSortMode, JobStatus } from '../shared/contracts.js'
 import { probeConnectivity } from './connectivity.js'
+import { createMainJobsClient, startJobEventStream } from './jobs.js'
+import type { JobsConfig } from './jobs.js'
 import { isTrustedRendererUrl } from './security.js'
 
 const currentDirectory = path.dirname(fileURLToPath(import.meta.url))
@@ -21,15 +24,25 @@ function disconnectedCredentialSnapshot(): ConnectivitySnapshot {
   }
 }
 
+function assertTrustedRenderer(event: IpcMainInvokeEvent): void {
+  const senderUrl = event.senderFrame?.url ?? ''
+  if (!isTrustedRendererUrl(senderUrl, { developmentOrigin, rendererRoot })) {
+    throw new Error('Untrusted renderer')
+  }
+}
+
+function jobsConfig(): JobsConfig | null {
+  const deviceToken = process.env.JOBOS_DEVICE_TOKEN
+  if (!deviceToken) return null
+  return {
+    baseUrl: process.env.JOBOS_API_BASE_URL ?? 'http://100.123.109.19:8766',
+    deviceToken
+  }
+}
+
 function registerConnectivityInterface(): void {
   ipcMain.handle('jobos:connectivity:get', async event => {
-    const senderUrl = event.senderFrame?.url ?? ''
-    if (!isTrustedRendererUrl(senderUrl, { developmentOrigin, rendererRoot })) {
-      if (process.env.JOBOS_CAPTURE_PATH) {
-        console.info('[JobOS capture] rejected renderer URL', senderUrl)
-      }
-      throw new Error('Untrusted renderer')
-    }
+    assertTrustedRenderer(event)
 
     const deviceToken = process.env.JOBOS_DEVICE_TOKEN
     if (!deviceToken) return disconnectedCredentialSnapshot()
@@ -42,6 +55,45 @@ function registerConnectivityInterface(): void {
       console.info('[JobOS capture] connectivity', JSON.stringify(snapshot))
     }
     return snapshot
+  })
+}
+
+function registerJobsInterface(): void {
+  const config = jobsConfig()
+  const jobs = config ? createMainJobsClient(config) : null
+  const requireJobs = () => {
+    if (!jobs) throw new Error('Device credential unavailable')
+    return jobs
+  }
+  const trusted = (event: IpcMainInvokeEvent) => {
+    assertTrustedRenderer(event)
+    return requireJobs()
+  }
+  const sortModes = new Set<JobSortMode>(['manual', 'recent', 'alphabetical', 'status'])
+  const statuses = new Set<JobStatus>(['discovered', 'scored', 'reviewed', 'shortlisted', 'apply_now', 'maybe', 'stretch', 'skipped', 'applied', 'interviewing', 'closed', 'archived'])
+
+  ipcMain.handle('jobos:jobs:get-state', event => trusted(event).getState())
+  ipcMain.handle('jobos:jobs:list', (event, sort: JobSortMode, query?: string, statusGroup?: string) => {
+    if (!sortModes.has(sort)) throw new Error('Invalid job ordering')
+    return trusted(event).list(sort, query, statusGroup)
+  })
+  ipcMain.handle('jobos:jobs:select', (event, jobId: string) => {
+    if (typeof jobId !== 'string' || !jobId) throw new Error('Invalid job selection')
+    return trusted(event).select(jobId)
+  })
+  ipcMain.handle('jobos:jobs:reorder', (event, jobIds: string[]) => {
+    if (!Array.isArray(jobIds) || jobIds.some(jobId => typeof jobId !== 'string') || new Set(jobIds).size !== jobIds.length) {
+      throw new Error('Invalid manual job order')
+    }
+    return trusted(event).reorder(jobIds)
+  })
+  ipcMain.handle('jobos:jobs:set-sort', (event, sort: JobSortMode) => {
+    if (!sortModes.has(sort)) throw new Error('Invalid job ordering')
+    return trusted(event).setSort(sort)
+  })
+  ipcMain.handle('jobos:jobs:update-status', (event, jobId: string, status: JobStatus) => {
+    if (typeof jobId !== 'string' || !jobId || !statuses.has(status)) throw new Error('Invalid job status change')
+    return trusted(event).updateStatus(jobId, status)
   })
 }
 
@@ -77,6 +129,18 @@ async function createWindow(): Promise<BrowserWindow> {
 
   window.show()
 
+  const config = jobsConfig()
+  const stopJobEvents = config
+    ? startJobEventStream(
+        {
+          isDestroyed: () => window.isDestroyed(),
+          send: (channel, event) => window.webContents.send(channel, event)
+        },
+        config
+      )
+    : () => undefined
+  window.once('closed', stopJobEvents)
+
   const capturePath = process.env.JOBOS_CAPTURE_PATH
   if (capturePath) {
     setTimeout(async () => {
@@ -94,6 +158,7 @@ app.whenReady().then(async () => {
     callback(false)
   })
   registerConnectivityInterface()
+  registerJobsInterface()
   await createWindow()
 
   app.on('activate', async () => {
