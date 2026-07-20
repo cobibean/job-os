@@ -9,6 +9,8 @@ import {
   setPanelCollapsed
 } from '../workspaceLayout'
 
+type WorkspaceUpdate = (current: WorkspaceSnapshot) => WorkspaceSnapshot
+
 export function useWorkspace(selectedJobId: string | null) {
   const [workspace, setWorkspace] = useState<WorkspaceSnapshot>(canonicalWorkspace)
   const [announcement, setAnnouncement] = useState('Layout controls ready')
@@ -17,7 +19,9 @@ export function useWorkspace(selectedJobId: string | null) {
   const queue = useRef(Promise.resolve())
   const bridge = window.jobos?.workspace
   const hydrating = useRef(Boolean(bridge))
-  const pendingHydrationUpdates = useRef<Array<(current: WorkspaceSnapshot) => WorkspaceSnapshot>>([])
+  const pendingHydrationUpdates = useRef<WorkspaceUpdate[]>([])
+  const startupRecoveryUpdates = useRef<WorkspaceUpdate[]>([])
+  const recoveringStartup = useRef(false)
   const selectedJobIdRef = useRef(selectedJobId)
   selectedJobIdRef.current = selectedJobId
 
@@ -32,16 +36,29 @@ export function useWorkspace(selectedJobId: string | null) {
           selectedJobId: selectedJobIdRef.current ?? latest.current.selectedJobId
         })
         revision.current = saved.revision
+        if (recoveringStartup.current) {
+          recoveringStartup.current = false
+          startupRecoveryUpdates.current = []
+        }
       } catch (error) {
         if (!(error instanceof Error) || !error.message.includes('revision conflict')) throw error
         const remote = await bridge.get()
+        const reconciled = recoveringStartup.current
+          ? startupRecoveryUpdates.current.reduce((current, update) => update(current), remote)
+          : latest.current
         revision.current = remote.revision
+        latest.current = reconciled
+        setWorkspace(reconciled)
         const saved = await bridge.save({
-          ...latest.current,
+          ...reconciled,
           revision: remote.revision,
-          selectedJobId: selectedJobIdRef.current ?? latest.current.selectedJobId
+          selectedJobId: selectedJobIdRef.current ?? reconciled.selectedJobId
         })
         revision.current = saved.revision
+        if (recoveringStartup.current) {
+          recoveringStartup.current = false
+          startupRecoveryUpdates.current = []
+        }
       }
     }).catch(() => setAnnouncement('Layout save failed; changes remain visible'))
   }, [bridge])
@@ -62,24 +79,35 @@ export function useWorkspace(selectedJobId: string | null) {
       if (restored.repairedPresets.length) {
         setAnnouncement(`Recovered ${restored.repairedPresets.join(', ')} layout`)
       }
-      if (pending.length) persist(reconciled)
+      if (pending.length) {
+        recoveringStartup.current = true
+        startupRecoveryUpdates.current = pending
+        persist(reconciled)
+      }
     }).catch(() => {
       if (!active) return
-      const hadPendingUpdates = pendingHydrationUpdates.current.length > 0
+      const pending = pendingHydrationUpdates.current
       pendingHydrationUpdates.current = []
       hydrating.current = false
       setAnnouncement('Using safe default layout')
-      if (hadPendingUpdates) persist(latest.current)
+      if (pending.length) {
+        recoveringStartup.current = true
+        startupRecoveryUpdates.current = pending
+        persist(latest.current)
+      }
     })
     return () => { active = false }
   }, [bridge, persist])
 
-  const commit = useCallback((update: (current: WorkspaceSnapshot) => WorkspaceSnapshot, message: string) => {
+  const commit = useCallback((update: WorkspaceUpdate, message: string) => {
     const next = update(latest.current)
     latest.current = next
     setWorkspace(next)
     if (bridge && hydrating.current) pendingHydrationUpdates.current.push(update)
-    else persist(next)
+    else {
+      if (recoveringStartup.current) startupRecoveryUpdates.current.push(update)
+      persist(next)
+    }
     if (message) setAnnouncement(message)
   }, [bridge, persist])
 

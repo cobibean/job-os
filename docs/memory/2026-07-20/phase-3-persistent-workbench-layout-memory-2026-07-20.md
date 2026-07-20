@@ -86,3 +86,12 @@
 - Persisted visible/DOM order: `https://uploads.linear.app/25ed0851-7a55-4629-9373-9a425d9e572b/96b70e17-9b0e-48b0-a20e-682b5fd2de7b/13feb0ad-a735-48d9-8438-32ee84365858`
 - Keyboard collapse focus recovery: `https://uploads.linear.app/25ed0851-7a55-4629-9373-9a425d9e572b/d09b3034-60a8-42dd-8426-2c516ad24d3d/65f9a49d-72a4-4144-af20-9c6ec774ccf9`
 - Native Electron correction proof: `https://uploads.linear.app/25ed0851-7a55-4629-9373-9a425d9e572b/65df9de1-4255-46e2-88cf-6e5fb208c9fc/2c24f403-20c2-473c-ba93-004664d83b74`
+
+## Second PM correction - startup recovery and CI accuracy
+
+- A failed initial `workspace.get()` no longer discards the pending layout operations after showing the safe local fallback. Those operations remain replayable until an authoritative save succeeds.
+- If the speculative fallback save receives a revision conflict, the renderer fetches the remote snapshot, replays only the preserved startup operations over that snapshot, updates the visible workspace to the reconciled result, and saves against the recovered revision. Unrelated remote presets, geometry, order, collapsed panels, selected job, and active surface remain intact unless the original user operation intentionally changes them.
+- The exact regression covers initial GET rejection, an early Research action, a conflicting speculative save, recovery of a deliberately non-default remote snapshot, and a final save containing the remote snapshot plus only the Research preset/surface intent.
+- Pinned Node.js 26.5.0 `pnpm check` passed with 26 renderer/Electron tests and 24 Python tests, plus lint, generated contracts, TypeScript, production Electron build, and packaged-renderer verification.
+- Frozen clean room `/tmp/jobos-phase3-recovery-clean.zTMPLn` passed `pnpm install --frozen-lockfile`, `uv sync --all-packages --frozen`, and the complete pinned `pnpm check`.
+- GitHub Actions run `29714570158` concluded `failure` before any workflow steps started because the Actions budget prevented startup. The `quality` job records an empty step list. This is an infrastructure/billing failure, not a code-test failure; CI is not green. The pinned local and frozen clean-room gates above remain green.
