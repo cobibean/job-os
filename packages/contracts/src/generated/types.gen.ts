@@ -5,6 +5,44 @@ export type ClientOptions = {
 };
 
 /**
+ * ActivityReportRequest
+ */
+export type ActivityReportRequest = {
+    /**
+     * Detail
+     */
+    detail?: {
+        [key: string]: unknown;
+    };
+    /**
+     * Idempotency Key
+     */
+    idempotency_key: string;
+    /**
+     * Label
+     */
+    label: string;
+    /**
+     * Origin
+     */
+    origin: string;
+    /**
+     * State
+     */
+    state: string;
+};
+
+/**
+ * ActivityReportResponse
+ */
+export type ActivityReportResponse = {
+    /**
+     * Event Id
+     */
+    event_id: number;
+};
+
+/**
  * ArtifactRecord
  */
 export type ArtifactRecord = {
@@ -63,6 +101,20 @@ export type ArtifactRecord = {
 };
 
 /**
+ * ArtifactRefreshRequest
+ */
+export type ArtifactRefreshRequest = {
+    /**
+     * Idempotency Key
+     */
+    idempotency_key?: string;
+    /**
+     * Origin
+     */
+    origin?: 'user' | 'mcp';
+};
+
+/**
  * ArtifactRegistrationRequest
  */
 export type ArtifactRegistrationRequest = {
@@ -70,6 +122,81 @@ export type ArtifactRegistrationRequest = {
      * Artifact Reference
      */
     artifact_reference: string;
+    /**
+     * Idempotency Key
+     */
+    idempotency_key?: string;
+    /**
+     * Origin
+     */
+    origin?: 'user' | 'mcp';
+};
+
+/**
+ * BrowserCommandError
+ */
+export type BrowserCommandError = {
+    /**
+     * Code
+     */
+    code: 'desktop_unavailable' | 'tab_not_found' | 'timeout' | 'validation' | 'execution';
+    /**
+     * Message
+     */
+    message: string;
+};
+
+/**
+ * BrowserCommandRequest
+ */
+export type BrowserCommandRequest = {
+    /**
+     * Arguments
+     */
+    arguments?: {
+        [key: string]: unknown;
+    };
+    /**
+     * Command
+     */
+    command: 'tabs.inspect' | 'tab.create' | 'tab.select' | 'tab.close' | 'tabs.reorder' | 'tab.navigate' | 'tab.back' | 'tab.forward' | 'tab.reload' | 'tab.stop' | 'page.snapshot' | 'element.click' | 'element.type' | 'page.scroll';
+    /**
+     * Idempotency Key
+     */
+    idempotency_key: string;
+    /**
+     * Origin
+     */
+    origin: 'user' | 'mcp';
+    /**
+     * Timeout Ms
+     */
+    timeout_ms?: number;
+};
+
+/**
+ * BrowserCommandResponse
+ */
+export type BrowserCommandResponse = {
+    /**
+     * Command Id
+     */
+    command_id: string;
+    /**
+     * Data
+     */
+    data?: {
+        [key: string]: unknown;
+    };
+    error?: BrowserCommandError | null;
+    /**
+     * Outcome
+     */
+    outcome: string;
+    /**
+     * State
+     */
+    state: 'completed' | 'failed';
 };
 
 /**
@@ -133,6 +260,24 @@ export type ConversationResponse = {
      * Latest Event Id
      */
     latest_event_id: number;
+};
+
+/**
+ * DesktopCapabilityPresence
+ */
+export type DesktopCapabilityPresence = {
+    /**
+     * Available
+     */
+    available: boolean;
+    /**
+     * Device Id
+     */
+    device_id: string;
+    /**
+     * Lease Remaining Ms
+     */
+    lease_remaining_ms: number;
 };
 
 /**
@@ -376,6 +521,10 @@ export type JobMutationResponse = {
  */
 export type JobSelectionRequest = {
     /**
+     * Idempotency Key
+     */
+    idempotency_key?: string;
+    /**
      * Job Id
      */
     job_id: string;
@@ -389,6 +538,10 @@ export type JobSelectionRequest = {
  * JobSortRequest
  */
 export type JobSortRequest = {
+    /**
+     * Idempotency Key
+     */
+    idempotency_key?: string;
     /**
      * Origin
      */
@@ -444,6 +597,10 @@ export type LeadHistoryResponse = {
  */
 export type ManualOrderRequest = {
     /**
+     * Idempotency Key
+     */
+    idempotency_key?: string;
+    /**
      * Job Ids
      */
     job_ids: Array<string>;
@@ -474,6 +631,28 @@ export type PanelLayout = {
 };
 
 /**
+ * ResumeRenderRequest
+ */
+export type ResumeRenderRequest = {
+    /**
+     * Idempotency Key
+     */
+    idempotency_key: string;
+    /**
+     * Origin
+     */
+    origin: 'user' | 'mcp';
+    /**
+     * Output Format
+     */
+    output_format?: 'pdf';
+    /**
+     * Source Id
+     */
+    source_id: string;
+};
+
+/**
  * RetryTurnRequest
  */
 export type RetryTurnRequest = {
@@ -501,6 +680,10 @@ export type SendMessageRequest = {
  * StatusChangeRequest
  */
 export type StatusChangeRequest = {
+    /**
+     * Idempotency Key
+     */
+    idempotency_key?: string;
     /**
      * Origin
      */
@@ -587,7 +770,7 @@ export type VersionResponse = {
     /**
      * Contract
      */
-    contract: 'jobos-v1-phase6-backend';
+    contract: 'jobos-v1-phase7-parity';
 };
 
 /**
@@ -724,6 +907,31 @@ export type WorkspaceSnapshotResponse = {
     selected_preset: 'research' | 'review' | 'agent-focus';
 };
 
+export type ReportActivityV1ActivityPostData = {
+    body: ActivityReportRequest;
+    path?: never;
+    query?: never;
+    url: '/v1/activity';
+};
+
+export type ReportActivityV1ActivityPostErrors = {
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type ReportActivityV1ActivityPostError = ReportActivityV1ActivityPostErrors[keyof ReportActivityV1ActivityPostErrors];
+
+export type ReportActivityV1ActivityPostResponses = {
+    /**
+     * Successful Response
+     */
+    200: ActivityReportResponse;
+};
+
+export type ReportActivityV1ActivityPostResponse = ReportActivityV1ActivityPostResponses[keyof ReportActivityV1ActivityPostResponses];
+
 export type ArtifactContentV1ArtifactsArtifactIdContentGetData = {
     body?: never;
     path: {
@@ -779,6 +987,31 @@ export type ArtifactDownloadV1ArtifactsArtifactIdDownloadGetResponses = {
      */
     200: unknown;
 };
+
+export type BrowserCommandV1BrowserCommandsPostData = {
+    body: BrowserCommandRequest;
+    path?: never;
+    query?: never;
+    url: '/v1/browser/commands';
+};
+
+export type BrowserCommandV1BrowserCommandsPostErrors = {
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type BrowserCommandV1BrowserCommandsPostError = BrowserCommandV1BrowserCommandsPostErrors[keyof BrowserCommandV1BrowserCommandsPostErrors];
+
+export type BrowserCommandV1BrowserCommandsPostResponses = {
+    /**
+     * Successful Response
+     */
+    200: BrowserCommandResponse;
+};
+
+export type BrowserCommandV1BrowserCommandsPostResponse = BrowserCommandV1BrowserCommandsPostResponses[keyof BrowserCommandV1BrowserCommandsPostResponses];
 
 export type ConversationCurrentV1ConversationsCurrentGetData = {
     body?: never;
@@ -913,6 +1146,22 @@ export type ConversationRetryV1ConversationsCurrentTurnsTurnIdRetryPostResponses
 
 export type ConversationRetryV1ConversationsCurrentTurnsTurnIdRetryPostResponse = ConversationRetryV1ConversationsCurrentTurnsTurnIdRetryPostResponses[keyof ConversationRetryV1ConversationsCurrentTurnsTurnIdRetryPostResponses];
 
+export type DesktopCapabilityPresenceV1DesktopCapabilitiesGetData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/v1/desktop/capabilities';
+};
+
+export type DesktopCapabilityPresenceV1DesktopCapabilitiesGetResponses = {
+    /**
+     * Successful Response
+     */
+    200: DesktopCapabilityPresence;
+};
+
+export type DesktopCapabilityPresenceV1DesktopCapabilitiesGetResponse = DesktopCapabilityPresenceV1DesktopCapabilitiesGetResponses[keyof DesktopCapabilityPresenceV1DesktopCapabilitiesGetResponses];
+
 export type DeviceSessionV1DeviceSessionGetData = {
     body?: never;
     path?: never;
@@ -1023,6 +1272,14 @@ export type JobsListV1JobsGetData = {
          * Status Group
          */
         status_group?: string | null;
+        /**
+         * Origin
+         */
+        origin?: 'mcp' | null;
+        /**
+         * Idempotency Key
+         */
+        idempotency_key?: string | null;
     };
     url: '/v1/jobs';
 };
@@ -1078,7 +1335,16 @@ export type JobInspectV1JobsJobIdGetData = {
          */
         job_id: string;
     };
-    query?: never;
+    query?: {
+        /**
+         * Origin
+         */
+        origin?: 'mcp' | null;
+        /**
+         * Idempotency Key
+         */
+        idempotency_key?: string | null;
+    };
     url: '/v1/jobs/{job_id}';
 };
 
@@ -1108,7 +1374,16 @@ export type JobArtifactsV1JobsJobIdArtifactsGetData = {
          */
         job_id: string;
     };
-    query?: never;
+    query?: {
+        /**
+         * Origin
+         */
+        origin?: 'mcp' | null;
+        /**
+         * Idempotency Key
+         */
+        idempotency_key?: string | null;
+    };
     url: '/v1/jobs/{job_id}/artifacts';
 };
 
@@ -1131,7 +1406,10 @@ export type JobArtifactsV1JobsJobIdArtifactsGetResponses = {
 export type JobArtifactsV1JobsJobIdArtifactsGetResponse = JobArtifactsV1JobsJobIdArtifactsGetResponses[keyof JobArtifactsV1JobsJobIdArtifactsGetResponses];
 
 export type RefreshJobArtifactsV1JobsJobIdArtifactsRefreshPostData = {
-    body?: never;
+    /**
+     * Command
+     */
+    body?: ArtifactRefreshRequest | null;
     path: {
         /**
          * Job Id
@@ -1189,6 +1467,36 @@ export type RegisterJobArtifactV1JobsJobIdArtifactsRegisterPostResponses = {
 };
 
 export type RegisterJobArtifactV1JobsJobIdArtifactsRegisterPostResponse = RegisterJobArtifactV1JobsJobIdArtifactsRegisterPostResponses[keyof RegisterJobArtifactV1JobsJobIdArtifactsRegisterPostResponses];
+
+export type RenderJobArtifactV1JobsJobIdArtifactsRenderPostData = {
+    body: ResumeRenderRequest;
+    path: {
+        /**
+         * Job Id
+         */
+        job_id: string;
+    };
+    query?: never;
+    url: '/v1/jobs/{job_id}/artifacts/render';
+};
+
+export type RenderJobArtifactV1JobsJobIdArtifactsRenderPostErrors = {
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type RenderJobArtifactV1JobsJobIdArtifactsRenderPostError = RenderJobArtifactV1JobsJobIdArtifactsRenderPostErrors[keyof RenderJobArtifactV1JobsJobIdArtifactsRenderPostErrors];
+
+export type RenderJobArtifactV1JobsJobIdArtifactsRenderPostResponses = {
+    /**
+     * Successful Response
+     */
+    200: JobArtifactsResponse;
+};
+
+export type RenderJobArtifactV1JobsJobIdArtifactsRenderPostResponse = RenderJobArtifactV1JobsJobIdArtifactsRenderPostResponses[keyof RenderJobArtifactV1JobsJobIdArtifactsRenderPostResponses];
 
 export type JobHistoryV1JobsJobIdHistoryGetData = {
     body?: never;
@@ -1269,9 +1577,27 @@ export type VersionV1VersionGetResponse = VersionV1VersionGetResponses[keyof Ver
 export type WorkspaceGetV1WorkspaceGetData = {
     body?: never;
     path?: never;
-    query?: never;
+    query?: {
+        /**
+         * Origin
+         */
+        origin?: 'mcp' | null;
+        /**
+         * Idempotency Key
+         */
+        idempotency_key?: string | null;
+    };
     url: '/v1/workspace';
 };
+
+export type WorkspaceGetV1WorkspaceGetErrors = {
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type WorkspaceGetV1WorkspaceGetError = WorkspaceGetV1WorkspaceGetErrors[keyof WorkspaceGetV1WorkspaceGetErrors];
 
 export type WorkspaceGetV1WorkspaceGetResponses = {
     /**

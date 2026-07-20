@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from hashlib import sha256
 from pathlib import Path
 from typing import Any, Literal, Protocol
+from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -88,6 +89,24 @@ class ArtifactRegistrationRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     artifact_reference: str = Field(pattern=r"^[A-Za-z0-9_-]{1,128}$")
+    origin: Literal["user", "mcp"] = "user"
+    idempotency_key: str = Field(default_factory=lambda: str(uuid4()), min_length=1, max_length=128)
+
+
+class ArtifactRefreshRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    origin: Literal["user", "mcp"] = "user"
+    idempotency_key: str = Field(default_factory=lambda: str(uuid4()), min_length=1, max_length=128)
+
+
+class ResumeRenderRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    source_id: str = Field(pattern=r"^[A-Za-z0-9_-]{1,128}$")
+    output_format: Literal["pdf"] = "pdf"
+    origin: Literal["user", "mcp"]
+    idempotency_key: str = Field(min_length=1, max_length=128)
 
 
 class ArtifactContentHeaders(BaseModel):

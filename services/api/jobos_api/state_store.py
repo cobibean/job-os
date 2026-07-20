@@ -30,6 +30,16 @@ class IdempotencyConflict(RuntimeError):
     """An idempotency key was reused for a different command payload."""
 
 
+def mutation_activity_source_id(
+    *, actor_id: str, target_resource: str, command_name: str, idempotency_key: str
+) -> str:
+    identity = json.dumps(
+        [actor_id, target_resource, command_name, idempotency_key],
+        separators=(",", ":"),
+    )
+    return f"action:{sha256(identity.encode()).hexdigest()}"
+
+
 class ConversationBusy(RuntimeError):
     """A serialized agent turn is already active."""
 
@@ -880,6 +890,35 @@ class JobOsStateStore:
                 return None
         return int(cursor.lastrowid)
 
+    def ensure_conversation_event(
+        self,
+        *,
+        turn_id: str | None,
+        event_type: str,
+        state: str,
+        summary: str,
+        detail: dict[str, object] | None = None,
+        source_event_id: str,
+    ) -> int:
+        event_id = self.append_conversation_event(
+            turn_id=turn_id,
+            event_type=event_type,
+            state=state,
+            summary=summary,
+            detail=detail,
+            source_event_id=source_event_id,
+        )
+        if event_id is not None:
+            return event_id
+        with sqlite3.connect(f"file:{self._path}?mode=ro", uri=True) as connection:
+            row = connection.execute(
+                "SELECT event_id FROM conversation_events WHERE source_event_id = ?",
+                (source_event_id,),
+            ).fetchone()
+        if row is None:
+            raise RuntimeError("Conversation activity could not be recovered")
+        return int(row[0])
+
     def recover_active_conversation_turns(self) -> int:
         """Interrupt turns whose remote execution state cannot survive an API restart."""
         with sqlite3.connect(self._path) as connection:
@@ -1219,6 +1258,117 @@ class JobOsStateStore:
             }
             for row in rows
         ]
+
+    def mutation_result(
+        self,
+        *,
+        actor_id: str,
+        target_resource: str,
+        command_name: str,
+        idempotency_key: str,
+        request_hash: str,
+    ) -> dict[str, object] | None:
+        with sqlite3.connect(f"file:{self._path}?mode=ro", uri=True) as connection:
+            row = connection.execute(
+                """
+                SELECT request_hash, result_json FROM job_events
+                WHERE actor_id = ? AND target_resource = ? AND command_name = ?
+                    AND idempotency_key = ?
+                """,
+                (actor_id, target_resource, command_name, idempotency_key),
+            ).fetchone()
+        if row is None:
+            return None
+        if row[0] != request_hash:
+            raise IdempotencyConflict("Idempotency key was already used for a different command")
+        return json.loads(row[1])
+
+    def ensure_mutation_activity(
+        self,
+        *,
+        actor_id: str,
+        target_resource: str,
+        command_name: str,
+        idempotency_key: str,
+    ) -> None:
+        with sqlite3.connect(f"file:{self._path}?mode=ro", uri=True) as connection:
+            row = connection.execute(
+                """
+                SELECT origin, outcome, payload_json FROM job_events
+                WHERE actor_id = ? AND target_resource = ? AND command_name = ?
+                    AND idempotency_key = ?
+                """,
+                (actor_id, target_resource, command_name, idempotency_key),
+            ).fetchone()
+        if row is None or row[0] != "mcp":
+            return
+        stored_detail = json.loads(row[2])
+        label = str(stored_detail.pop("label", command_name))
+        stored_detail.pop("state", None)
+        stored_detail.pop("origin", None)
+        stored_detail.pop("outcome", None)
+        outcome = str(row[1])
+        self.ensure_conversation_event(
+            turn_id=None,
+            event_type="activity",
+            state="completed" if outcome in {"completed", "succeeded"} else "failed",
+            summary=label,
+            detail={
+                "origin": "mcp",
+                "command": command_name,
+                "outcome": outcome,
+                **stored_detail,
+            },
+            source_event_id=mutation_activity_source_id(
+                actor_id=actor_id,
+                target_resource=target_resource,
+                command_name=command_name,
+                idempotency_key=idempotency_key,
+            ),
+        )
+
+    def record_mutation_result(
+        self,
+        *,
+        event_type: str,
+        origin: str,
+        actor_id: str,
+        target_resource: str,
+        command_name: str,
+        outcome: str,
+        idempotency_key: str,
+        request_hash: str,
+        result: dict[str, object],
+        detail: dict[str, object],
+        job_id: str | None = None,
+    ) -> int:
+        safe_detail = redact_detail(detail)
+        with sqlite3.connect(self._path) as connection:
+            try:
+                cursor = connection.execute(
+                    """
+                    INSERT INTO job_events(
+                        event_type, job_id, origin, payload_json, actor_id, target_resource,
+                        command_name, outcome, idempotency_key, request_hash, result_json
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        event_type[:50],
+                        job_id,
+                        origin,
+                        json.dumps(safe_detail, separators=(",", ":"), sort_keys=True),
+                        actor_id,
+                        target_resource,
+                        command_name,
+                        outcome[:30],
+                        idempotency_key,
+                        request_hash,
+                        json.dumps(result, separators=(",", ":"), sort_keys=True),
+                    ),
+                )
+            except sqlite3.IntegrityError as error:
+                raise IdempotencyConflict("Idempotency key was already used") from error
+        return int(cursor.lastrowid)
 
     def save_job_selection(self, job_id: str, origin: str) -> int:
         payload = json.dumps({"selected_job_id": job_id}, separators=(",", ":"))

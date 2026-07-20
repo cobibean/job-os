@@ -1,5 +1,7 @@
 import json
 import sqlite3
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from hashlib import sha256
 from pathlib import Path
 
@@ -7,6 +9,7 @@ import pytest
 from fastapi.testclient import TestClient
 from jobos_api.app import create_app
 from jobos_api.settings import Settings
+from jobos_api.state_store import mutation_activity_source_id
 
 TITLE_POLICY_FIXTURES = json.loads(
     (Path(__file__).parents[3] / "tests/fixtures/browser-title-policy.json").read_text()
@@ -1075,8 +1078,22 @@ def test_unregistered_ids_paths_and_docx_preview_are_rejected(tmp_path):
     assert arbitrary_path.status_code in {404, 422}
 
 
-def test_workspace_restores_active_artifact_page_and_zoom(tmp_path):
-    with make_client(tmp_path) as client:
+def test_workspace_restores_only_an_active_artifact_owned_by_the_selected_job(tmp_path):
+    facade = FakeJobHunterFacade()
+    facade.jobs = facade.jobs[:2]
+    pdf = tmp_path / "resume.pdf"
+    pdf.write_bytes(b"%PDF-1.7\nowned resume\n%%EOF\n")
+    facade.artifacts["job-0"] = [artifact_metadata(pdf)]
+
+    with make_client(tmp_path, facade) as client:
+        client.put(
+            "/v1/workspace/jobs/selection",
+            headers=auth_headers(),
+            json={"job_id": "job-0", "origin": "user"},
+        )
+        artifact_id = client.post(
+            "/v1/jobs/job-0/artifacts/refresh", headers=auth_headers()
+        ).json()["current_artifact_id"]
         initial = client.get("/v1/workspace", headers=auth_headers()).json()
         command = {
             key: value
@@ -1092,7 +1109,7 @@ def test_workspace_restores_active_artifact_page_and_zoom(tmp_path):
             {
                 "origin": "user",
                 "idempotency_key": "document-view-restore-1",
-                "active_artifact_id": "art_ABCDEFGHIJKLMNOPQRSTUVWX",
+                "active_artifact_id": artifact_id,
                 "active_artifact_page": 2,
                 "active_artifact_zoom": 1.4,
             }
@@ -1101,6 +1118,223 @@ def test_workspace_restores_active_artifact_page_and_zoom(tmp_path):
         restored = client.get("/v1/workspace", headers=auth_headers())
 
     assert saved.status_code == 200
-    assert restored.json()["active_artifact_id"] == "art_ABCDEFGHIJKLMNOPQRSTUVWX"
+    assert restored.json()["active_artifact_id"] == artifact_id
     assert restored.json()["active_artifact_page"] == 2
     assert restored.json()["active_artifact_zoom"] == 1.4
+
+
+def test_workspace_rejects_cross_job_stale_and_unselected_active_artifacts(tmp_path):
+    facade = FakeJobHunterFacade()
+    facade.jobs = facade.jobs[:2]
+    pdf = tmp_path / "resume.pdf"
+    pdf.write_bytes(b"%PDF-1.7\njob zero resume\n%%EOF\n")
+    facade.artifacts["job-0"] = [artifact_metadata(pdf)]
+
+    with make_client(tmp_path, facade) as client:
+        artifact_id = client.post(
+            "/v1/jobs/job-0/artifacts/refresh", headers=auth_headers()
+        ).json()["current_artifact_id"]
+        initial = client.get("/v1/workspace", headers=auth_headers()).json()
+        command = {
+            key: value
+            for key, value in initial.items()
+            if key not in {"repaired_presets", "repaired_browser", "browser_repair_reasons"}
+        }
+        unselected = client.put(
+            "/v1/workspace",
+            headers=auth_headers(),
+            json={
+                **command,
+                "origin": "user",
+                "idempotency_key": "unselected-artifact",
+                "active_artifact_id": artifact_id,
+            },
+        )
+        client.put(
+            "/v1/workspace/jobs/selection",
+            headers=auth_headers(),
+            json={"job_id": "job-1", "origin": "user"},
+        )
+        selected = client.get("/v1/workspace", headers=auth_headers()).json()
+        selected = {
+            key: value
+            for key, value in selected.items()
+            if key not in {"repaired_presets", "repaired_browser", "browser_repair_reasons"}
+        }
+        mismatch = client.put(
+            "/v1/workspace",
+            headers=auth_headers(),
+            json={
+                **selected,
+                "origin": "user",
+                "idempotency_key": "cross-job-artifact",
+                "active_artifact_id": artifact_id,
+            },
+        )
+        stale = client.put(
+            "/v1/workspace",
+            headers=auth_headers(),
+            json={
+                **selected,
+                "origin": "user",
+                "idempotency_key": "stale-artifact",
+                "active_artifact_id": "art_AAAAAAAAAAAAAAAA",
+            },
+        )
+
+    assert unselected.status_code in {409, 422}
+    assert mismatch.status_code in {409, 422}
+    assert stale.status_code in {409, 422}
+
+
+@pytest.mark.parametrize(
+    ("method", "endpoint", "payload", "source_event_id"),
+    [
+        (
+            "put",
+            "/v1/workspace/jobs/selection",
+            {"job_id": "job-0", "origin": "mcp", "idempotency_key": "repair-select"},
+            mutation_activity_source_id(
+                actor_id="primary-device",
+                target_resource="workspace/jobs",
+                command_name="job.select",
+                idempotency_key="repair-select",
+            ),
+        ),
+        (
+            "put",
+            "/v1/jobs/job-0/status",
+            {"target_status": "reviewed", "origin": "mcp", "idempotency_key": "repair-status"},
+            mutation_activity_source_id(
+                actor_id="primary-device",
+                target_resource="jobs/job-0",
+                command_name="job.update_status",
+                idempotency_key="repair-status",
+            ),
+        ),
+        (
+            "post",
+            "/v1/jobs/job-0/artifacts/register",
+            {
+                "artifact_reference": "resume-ref",
+                "origin": "mcp",
+                "idempotency_key": "repair-register",
+            },
+            mutation_activity_source_id(
+                actor_id="primary-device",
+                target_resource="jobs/job-0/artifacts",
+                command_name="document.register",
+                idempotency_key="repair-register",
+            ),
+        ),
+    ],
+)
+def test_mutation_replay_repairs_a_missing_activity_row(
+    tmp_path, method, endpoint, payload, source_event_id
+):
+    facade = FakeJobHunterFacade()
+    facade.jobs = facade.jobs[:1]
+    pdf = tmp_path / "resume.pdf"
+    pdf.write_bytes(b"%PDF-1.7\nchronology\n%%EOF\n")
+    facade.artifacts["job-0"] = [
+        {**artifact_metadata(pdf), "artifact_reference": "resume-ref"}
+    ]
+
+    with make_client(tmp_path, facade) as client:
+        request = getattr(client, method)
+        first = request(endpoint, headers=auth_headers(), json=payload)
+        with sqlite3.connect(tmp_path / "jobos.db") as connection:
+            connection.execute(
+                "DELETE FROM conversation_events WHERE source_event_id = ?",
+                (source_event_id,),
+            )
+        replay = request(endpoint, headers=auth_headers(), json=payload)
+
+    assert first.status_code == 200
+    assert replay.status_code == 200
+    assert replay.json() == first.json()
+    with sqlite3.connect(tmp_path / "jobos.db") as connection:
+        count = connection.execute(
+            "SELECT COUNT(*) FROM conversation_events WHERE source_event_id = ?",
+            (source_event_id,),
+        ).fetchone()[0]
+    assert count == 1
+
+
+def test_workspace_save_replay_repairs_a_missing_activity_row(tmp_path):
+    with make_client(tmp_path) as client:
+        body = client.get("/v1/workspace", headers=auth_headers()).json()
+        for key in ("repaired_presets", "repaired_browser", "browser_repair_reasons"):
+            body.pop(key)
+        body.update({"origin": "mcp", "idempotency_key": "repair-workspace"})
+        first = client.put("/v1/workspace", headers=auth_headers(), json=body)
+        source_event_id = "workspace:primary-device:repair-workspace"
+        with sqlite3.connect(tmp_path / "jobos.db") as connection:
+            connection.execute(
+                "DELETE FROM conversation_events WHERE source_event_id = ?",
+                (source_event_id,),
+            )
+        replay = client.put("/v1/workspace", headers=auth_headers(), json=body)
+
+    assert replay.json() == first.json()
+    with sqlite3.connect(tmp_path / "jobos.db") as connection:
+        assert connection.execute(
+            "SELECT COUNT(*) FROM conversation_events WHERE source_event_id = ?",
+            (source_event_id,),
+        ).fetchone()[0] == 1
+
+
+def test_concurrent_identical_artifact_registration_executes_the_facade_once(tmp_path):
+    class BlockingFacade(FakeJobHunterFacade):
+        def __init__(self):
+            super().__init__()
+            self.side_effect_started = threading.Event()
+            self.second_request_started = threading.Event()
+            self.release_side_effect = threading.Event()
+            self.register_calls = 0
+
+        def inspect_job(self, job_id):
+            if self.side_effect_started.is_set() and not self.release_side_effect.is_set():
+                self.second_request_started.set()
+            return super().inspect_job(job_id)
+
+        def register_artifact(self, job_id, artifact_reference):
+            self.register_calls += 1
+            self.side_effect_started.set()
+            assert self.release_side_effect.wait(timeout=2)
+            return super().register_artifact(job_id, artifact_reference)
+
+    facade = BlockingFacade()
+    facade.jobs = facade.jobs[:1]
+    pdf = tmp_path / "resume.pdf"
+    pdf.write_bytes(b"%PDF-1.7\nconcurrent\n%%EOF\n")
+    facade.artifacts["job-0"] = [
+        {**artifact_metadata(pdf), "artifact_reference": "resume-ref"}
+    ]
+    payload = {
+        "artifact_reference": "resume-ref",
+        "origin": "mcp",
+        "idempotency_key": "concurrent-register",
+    }
+
+    with make_client(tmp_path, facade) as client, ThreadPoolExecutor(max_workers=2) as executor:
+        first = executor.submit(
+            client.post,
+            "/v1/jobs/job-0/artifacts/register",
+            headers=auth_headers(),
+            json=payload,
+        )
+        assert facade.side_effect_started.wait(timeout=2)
+        second = executor.submit(
+            client.post,
+            "/v1/jobs/job-0/artifacts/register",
+            headers=auth_headers(),
+            json=payload,
+        )
+        assert facade.second_request_started.wait(timeout=2)
+        facade.release_side_effect.set()
+        responses = [first.result(), second.result()]
+
+    assert [response.status_code for response in responses] == [200, 200]
+    assert responses[0].json() == responses[1].json()
+    assert facade.register_calls == 1
