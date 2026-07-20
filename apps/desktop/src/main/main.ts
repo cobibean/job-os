@@ -5,8 +5,9 @@ import { fileURLToPath } from 'node:url'
 import { app, BrowserWindow, clipboard, dialog, ipcMain, session, WebContentsView } from 'electron'
 import type { IpcMainInvokeEvent } from 'electron'
 
-import type { BrowserBounds, BrowserRestoreState, ConnectivitySnapshot, JobSortMode, JobStatus, WorkspaceSnapshot } from '../shared/contracts.js'
+import type { BrowserBounds, ConnectivitySnapshot, JobSortMode, JobStatus, WorkspaceSnapshot } from '../shared/contracts.js'
 import { BROWSER_PARTITION, BrowserManager, remoteBrowserPreferences } from './browser.js'
+import { registerBrowserRestoreHandler } from './browserIpc.js'
 import { probeConnectivity } from './connectivity.js'
 import { createMainJobsClient, startJobEventStream } from './jobs.js'
 import type { JobsConfig } from './jobs.js'
@@ -128,10 +129,7 @@ function registerBrowserInterface(): void {
     return value
   }
   ipcMain.handle('jobos:browser:get-state', event => trusted(event).getState())
-  ipcMain.handle('jobos:browser:restore', (event, state: BrowserRestoreState) => {
-    if (!state || !Array.isArray(state.tabs) || state.tabs.length > 50) throw new Error('Invalid browser restore state')
-    return trusted(event).restore(state)
-  })
+  registerBrowserRestoreHandler(ipcMain, trusted)
   ipcMain.handle('jobos:browser:create', (event, url?: string, jobId?: string | null) => {
     if (url !== undefined && (typeof url !== 'string' || url.length > 8192)) throw new Error('Invalid browser address')
     if (jobId !== undefined && jobId !== null && typeof jobId !== 'string') throw new Error('Invalid job association')

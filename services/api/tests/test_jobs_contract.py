@@ -1,6 +1,7 @@
 import json
 import sqlite3
 
+import pytest
 from fastapi.testclient import TestClient
 from jobos_api.app import create_app
 from jobos_api.settings import Settings
@@ -467,6 +468,51 @@ def test_workspace_rejects_capability_session_and_signed_url_variants(tmp_path):
             )
             response = client.put("/v1/workspace", headers=auth_headers(), json=body)
             assert response.status_code == 422, parameter
+
+
+@pytest.mark.parametrize("metadata_field", ["url", "favicon_url"])
+@pytest.mark.parametrize(
+    "unsafe_url",
+    [
+        "https://example.com/jobs?api_key=secret&view=safe",
+        "https://example.com/jobs?SAMLart=secret&view=safe",
+        "https://example.com/jobs?authorization-code=secret&view=safe",
+        "https://example.com/jobs?code_verifier=secret&view=safe",
+        "https://example.com/jobs?PHPSESSID=secret&view=safe",
+        "https://example.com/jobs?api%5Fkey=one&api%5Fkey=two&view=safe",
+        "https://example.com/jobs;jsessionid=secret/opening?view=safe",
+        "https://example.com/jobs%3BJSESSIONID%3Dsecret/opening?view=safe",
+        "https://example.com/jobs%253Bjsessionid%253Dsecret/opening?view=safe",
+    ],
+)
+def test_workspace_rejects_remaining_browser_credential_carriers(
+    tmp_path, metadata_field, unsafe_url
+):
+    facade = FakeJobHunterFacade()
+    with make_client(tmp_path, facade) as client:
+        body = client.get("/v1/workspace", headers=auth_headers()).json()
+        body.pop("repaired_presets")
+        body.pop("repaired_browser")
+        tab = {
+            "tab_id": "unsafe",
+            "url": "https://example.com/jobs?view=safe",
+            "title": "Unsafe",
+        }
+        tab[metadata_field] = unsafe_url
+        body.update(
+            {
+                "origin": "user",
+                "idempotency_key": (
+                    f"workspace-final-carrier-{metadata_field}-"
+                    f"{abs(hash(unsafe_url))}"
+                ),
+                "browser_tabs": [tab],
+                "active_browser_tab_id": "unsafe",
+            }
+        )
+        response = client.put("/v1/workspace", headers=auth_headers(), json=body)
+
+    assert response.status_code == 422
 
 
 def test_workspace_preserves_ordinary_browser_query_parameters(tmp_path):

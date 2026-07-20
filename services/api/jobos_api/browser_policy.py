@@ -8,24 +8,32 @@ Ordinary query parameters remain valid.
 
 import re
 from ipaddress import IPv6Address
-from urllib.parse import parse_qsl, urlsplit
+from urllib.parse import parse_qsl, unquote, urlsplit
 
 BROWSER_TAB_LIMIT = 50
 BROWSER_URL_LIMIT = 8192
 BROWSER_TITLE_LIMIT = 512
 
 _SENSITIVE_PARAMETER_NAMES = {
-    "accesstoken", "assertion", "authorization", "authtoken", "bearertoken",
-    "capability", "capabilitytoken", "code", "credential", "idtoken", "jwt",
+    "accesstoken", "apikey", "assertion", "authorization", "authorizationcode",
+    "authcode", "authtoken", "bearertoken", "capability", "capabilitytoken",
+    "code", "codeverifier", "credential", "idtoken", "jsessionid", "jwt",
     "macaroon", "oauthcode", "oauthstate", "oauthtoken", "oauthverifier",
-    "password", "refreshtoken", "relaystate", "samlrequest", "samlresponse",
-    "secret", "session", "sessionid", "sessionkey", "sid", "sig", "signature",
-    "signedurl", "state", "ticket", "token",
+    "password", "phpsessid", "refreshtoken", "relaystate", "samlart",
+    "samlrequest", "samlresponse", "secret", "session", "sessionid",
+    "sessionkey", "sid", "sig", "signature", "signedurl", "state", "ticket",
+    "token",
 }
 
 
 def is_sensitive_browser_parameter(name: str) -> bool:
-    normalized = re.sub(r"[^a-z0-9]", "", name.lower())
+    decoded = name
+    for _attempt in range(3):
+        next_value = unquote(decoded)
+        if next_value == decoded:
+            break
+        decoded = next_value
+    normalized = re.sub(r"[^a-z0-9]", "", decoded.lower())
     return (
         normalized in _SENSITIVE_PARAMETER_NAMES
         or normalized.startswith(("xamz", "xgoog"))
@@ -33,6 +41,22 @@ def is_sensitive_browser_parameter(name: str) -> bool:
             ("password", "secret", "token", "credential", "assertion", "signature")
         )
     )
+
+
+def _has_sensitive_path_parameter(path: str) -> bool:
+    decoded_path = path
+    for _attempt in range(3):
+        next_value = unquote(decoded_path)
+        if next_value == decoded_path:
+            break
+        decoded_path = next_value
+    for segment in decoded_path.split("/"):
+        parts = segment.split(";")
+        for parameter in parts[1:]:
+            name = parameter.split("=", maxsplit=1)[0]
+            if is_sensitive_browser_parameter(name):
+                return True
+    return False
 
 
 def safe_browser_url(value: object, *, allow_blank: bool) -> bool:
@@ -71,8 +95,11 @@ def safe_browser_url(value: object, *, allow_blank: bool) -> bool:
                 for label in ascii_hostname.split(".")
             ):
                 return False
+        if _has_sensitive_path_parameter(parsed.path):
+            return False
         return not any(
-            is_sensitive_browser_parameter(key) for key, _ in parse_qsl(parsed.query)
+            is_sensitive_browser_parameter(key)
+            for key, _ in parse_qsl(parsed.query, keep_blank_values=True)
         )
     except (TypeError, ValueError, UnicodeError, OverflowError):
         return False

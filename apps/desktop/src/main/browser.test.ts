@@ -3,12 +3,22 @@
 import { expect, test } from 'vitest'
 
 import { EventEmitter } from 'node:events'
+import { readFileSync } from 'node:fs'
 
 import type { BrowserWindow, Dialog, Session, WebContents, WebContentsView } from 'electron'
 import { vi } from 'vitest'
 
 import { BrowserManager, DEFAULT_BROWSER_URL, isOrdinaryWebUrl, normalizeBrowserInput, remoteBrowserPreferences, safeBlockedExternalUrl } from './browser.js'
-import { BROWSER_PERSISTENCE_LIMITS, sanitizeBrowserUrlForPersistence } from '../shared/browserPersistence.js'
+import {
+  BROWSER_PERSISTENCE_LIMITS,
+  normalizeBrowserUrlForPersistence,
+  sanitizeBrowserUrlForPersistence
+} from '../shared/browserPersistence.js'
+
+const browserUrlPolicyFixtures = JSON.parse(readFileSync(
+  new URL('../../../../tests/fixtures/browser-url-policy.json', import.meta.url),
+  'utf8'
+)) as Array<{ url: string, desktop: string, api_safe: boolean }>
 
 test('browser input keeps ordinary sites free and turns plain text into a search', () => {
   expect(normalizeBrowserInput('https://mail.google.com/mail/u/0/')).toBe('https://mail.google.com/mail/u/0/')
@@ -48,6 +58,12 @@ test('persisted browser URLs remove credentials, auth parameters, and fragments'
     'mailto:person@example.com?subject=Hello'
   )
   expect(safeBlockedExternalUrl('javascript:alert(1)')).toBeNull()
+})
+
+test('desktop URL persistence matches the shared credential, host, and port fixtures', () => {
+  for (const fixture of browserUrlPolicyFixtures) {
+    expect(normalizeBrowserUrlForPersistence(fixture.url), fixture.url).toBe(fixture.desktop)
+  }
 })
 
 test('tabs reorder and bounds changes reuse the same live WebContentsView instances', async () => {
@@ -187,6 +203,26 @@ test('main-process emission enforces Workspace bounds and keeps later saves viab
   expect(durable.tabs[0]?.title).toHaveLength(BROWSER_PERSISTENCE_LIMITS.title)
   expect(durable.tabs[0]?.faviconUrl).toBe('https://example.com/')
   expect(JSON.stringify({ tabs: durable.tabs, activeTabId: durable.activeTabId }).length).toBeGreaterThan(0)
+
+  await manager.navigate(
+    'authoritative',
+    'https://example.com/jobs;jsessionid=path-secret/opening?api_key=query-secret&view=safe'
+  )
+  firstContents.emit('did-navigate')
+  firstContents.emit('page-favicon-updated', {}, [
+    'https://example.com/icon.png;PHPSESSID=path-secret?SAMLart=query-secret&theme=dark'
+  ])
+  expect(manager.getState().tabs[0]).toMatchObject({
+    url: 'https://example.com/jobs/opening?view=safe',
+    faviconUrl: 'https://example.com/icon.png?theme=dark'
+  })
+
+  await manager.navigate('authoritative', 'https://-foo.example/unsafe')
+  firstContents.emit('did-navigate')
+  expect(manager.getState().tabs[0]?.url).toBe('about:blank')
+  await manager.navigate('authoritative', 'https://example.com/safe-after-invalid?view=compact')
+  firstContents.emit('did-navigate')
+  expect(manager.getState().tabs[0]?.url).toBe('https://example.com/safe-after-invalid?view=compact')
 
   const navigationEvent = { preventDefault: vi.fn() }
   firstContents.emit('will-navigate', navigationEvent, 'mailto:person@example.com?subject=Hello&ticket=secret#fragment')
