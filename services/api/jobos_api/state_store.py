@@ -161,6 +161,7 @@ def _valid_layout(value: object) -> bool:
     return (
         isinstance(order, list)
         and len(order) == 3
+        and all(isinstance(panel, str) for panel in order)
         and set(order) == set(PANEL_IDS)
         and isinstance(widths, dict)
         and set(widths) == set(PANEL_IDS)
@@ -169,6 +170,7 @@ def _valid_layout(value: object) -> bool:
             for panel in PANEL_IDS
         )
         and isinstance(collapsed, list)
+        and all(isinstance(panel, str) for panel in collapsed)
         and len(collapsed) == len(set(collapsed))
         and set(collapsed).issubset(PANEL_IDS)
     )
@@ -182,11 +184,15 @@ def normalize_workspace_snapshot(
         return canonical, tuple(PRESET_DEFAULTS)
     selected_preset = value.get("selected_preset")
     canonical["selected_preset"] = (
-        selected_preset if selected_preset in PRESET_DEFAULTS else "review"
+        selected_preset
+        if isinstance(selected_preset, str) and selected_preset in PRESET_DEFAULTS
+        else "review"
     )
     active_surface = value.get("active_center_surface")
     canonical["active_center_surface"] = (
-        active_surface if active_surface in ("browser", "document") else "document"
+        active_surface
+        if isinstance(active_surface, str) and active_surface in ("browser", "document")
+        else "document"
     )
     layouts = value.get("layouts")
     repaired: list[str] = []

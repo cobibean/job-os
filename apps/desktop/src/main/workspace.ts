@@ -61,9 +61,14 @@ export function createMainWorkspaceClient(config: JobsConfig) {
     async save(snapshot: WorkspaceSnapshot): Promise<WorkspaceSnapshot> {
       const body = toApi(snapshot, randomUUID())
       let result
+      let retried = false
       try {
         result = await workspacePutV1WorkspacePut({ client, body })
       } catch {
+        retried = true
+        result = await workspacePutV1WorkspacePut({ client, body })
+      }
+      if (!retried && result.response === undefined && result.error !== undefined) {
         result = await workspacePutV1WorkspacePut({ client, body })
       }
       return fromApi(unwrap(result, 'Workspace save failed'))

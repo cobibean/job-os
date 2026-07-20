@@ -31,7 +31,7 @@ beforeEach(() => workspacePut.mockReset())
 
 test('desktop retries an ambiguous workspace save with the same idempotency command', async () => {
   workspacePut
-    .mockRejectedValueOnce(new Error('connection reset'))
+    .mockResolvedValueOnce({ error: new TypeError('fetch failed'), response: undefined })
     .mockResolvedValueOnce({
       response: { status: 200 },
       data: {
@@ -57,4 +57,18 @@ test('desktop retries an ambiguous workspace save with the same idempotency comm
   expect(firstBody).toMatchObject({ origin: 'user', revision: 0 })
   expect(firstBody.idempotency_key).toMatch(/^[0-9a-f-]{36}$/)
   expect(firstBody).not.toHaveProperty('repaired_presets')
+})
+
+test('desktop does not retry a workspace save that received an HTTP response', async () => {
+  workspacePut.mockResolvedValueOnce({
+    response: { status: 409 },
+    error: { detail: 'Workspace revision conflict; current revision is 4' }
+  })
+
+  await expect(createMainWorkspaceClient({
+    baseUrl: 'http://127.0.0.1:8765',
+    deviceToken: 'test-token'
+  }).save(snapshot)).rejects.toThrow('Workspace revision conflict; current revision is 4')
+
+  expect(workspacePut).toHaveBeenCalledTimes(1)
 })
