@@ -106,3 +106,37 @@
 - Detached final-commit clean room: `/tmp/jobos-phase4-final-rereview-clean` was created from `git archive HEAD`; `pnpm install --frozen-lockfile`, `uv sync --all-packages --frozen`, and the full pinned `pnpm check` passed with 38 desktop tests, 39 Python tests, production build, and packaged-renderer verification.
 - Native visible MacBook acceptance and authenticated Gmail continuity remain explicitly open while the Mac is locked. No new native or authenticated acceptance is claimed.
 - No Mac Mini, job-hunter/Hermes, Phase 5, or unrelated planning work was touched. The unrelated `docs/planning/.DS_Store` modification remains unstaged and unmodified by this correction.
+
+## Final acceptance integration and security correction - 2026-07-20
+
+### Corrected behavior
+
+- The mirrored browser metadata policy now treats `api_key`, `SAMLart`, `authorization_code`, `code_verifier`, `PHPSESSID`, and `jsessionid` as credential or capability carriers after case and underscore/hyphen normalization. Repeated and percent-encoded query names are covered. Electron removes them before metadata emission; the API independently rejects them.
+- URL-rewritten path parameters, including literal, percent-encoded, and double-percent-encoded `;jsessionid=...` forms, are removed by Electron and rejected by Python. Ordinary safe queries and safe matrix parameters remain intact.
+- Desktop and API now share executable parity fixtures for authority handling. Both reject leading- or trailing-hyphen DNS labels, port 0, malformed authorities, illegal ports, and invalid bracketed IPv6 while accepting ordinary DNS names, valid bracketed IPv6, legal explicit ports, and trailing-dot/underscore behavior already allowed by the contract.
+- The main-process restore IPC boundary accepts at most 250 raw candidates, repairs and deduplicates them in stable order, retains the first 50 recoverable unique tabs, and forwards only that bounded repaired state to `BrowserManager`. The manager applies the same shared recovery helper again as defense in depth.
+
+### Regression and direct reproduction evidence
+
+- Shared executable table: `tests/fixtures/browser-url-policy.json`, consumed by both Vitest and pytest, covers every cited carrier, case/separator variants, repeated values, percent encoding, literal/encoded/double-encoded path parameters, host/port mismatches, valid IPv6, and ordinary safe query/matrix cases.
+- Direct built-JavaScript reproduction converted all cited query carriers to the same safe URL, removed literal and double-encoded `jsessionid` path parameters, and converted `https://-foo.example/`, `https://foo-.example/`, and `https://example.com:0/` to `about:blank` before emission.
+- Direct Python reproduction returned `False` without raising for the same carrier, path, host, and port cases.
+- Actual registered IPC handler reproduction passed with an invalid entry, a duplicate, and a malformed entry before 50 valid tabs in a raw payload greater than 50 entries. All 50 valid tabs reached the manager with `tab-49` active. A payload above the 250-candidate abuse bound was rejected before manager restore.
+- End-to-end Workspace PUT regressions reject every remaining carrier independently in tab URL and favicon URL metadata. Main-process emission regressions prove the same carriers are absent from emitted tab and favicon metadata, invalid remote hosts reduce to safe local metadata, and a later ordinary navigation remains persistable.
+
+### Final verification
+
+- Focused API: `uv run --project services/api pytest services/api/tests/test_state_store.py services/api/tests/test_jobs_contract.py -q` passed 72 tests.
+- Focused desktop: `PATH=/Users/cobibean/Library/pnpm/nodejs/26.5.0/bin:$PATH pnpm --filter @jobos/desktop test -- --run` passed 41 tests across 10 files.
+- Actual IPC targeted proof: `pnpm --filter @jobos/desktop exec vitest run src/main/browserIpc.test.ts -t "actual IPC restore handler"` passed the selected regression.
+- Full pinned gate: `PATH=/Users/cobibean/Library/pnpm/nodejs/26.5.0/bin:$PATH pnpm check` passed lint, generated contracts and type checks, 41 desktop tests, 77 Python tests, production Electron/Vite build, and packaged-renderer verification.
+- Contract drift: `PATH=/Users/cobibean/Library/pnpm/nodejs/26.5.0/bin:$PATH pnpm contracts:check` passed.
+- Detached exact-commit clean room: `/tmp/jobos-phase4-final-acceptance-clean` was created from `git archive HEAD`; the archive was committed only inside the disposable directory so contract drift could compare against a baseline. Frozen pnpm and uv installs, the full pinned `pnpm check`, and `pnpm contracts:check` passed with 41 desktop tests, 77 Python tests, production build, and packaged-renderer verification.
+- Secret scan: gitleaks 8.30.0 scanned the final 14-commit history and found no leaks.
+
+### Remaining constraints and handoff state
+
+- Native visible MacBook acceptance and authenticated Gmail continuity remain explicitly open while the Mac is locked. No new native or authenticated acceptance is claimed.
+- No Mac Mini, job-hunter/Hermes, Mini runtime, Phase 5, or unrelated planning work was touched.
+- The unrelated `docs/planning/.DS_Store` modification remains unstaged and unmodified by this correction.
+- `CLO-50` must remain in `Building`; PM owns acceptance and closure.

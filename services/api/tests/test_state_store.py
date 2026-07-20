@@ -1,5 +1,6 @@
 import json
 import sqlite3
+from pathlib import Path
 
 import pytest
 from jobos_api.browser_policy import safe_browser_url
@@ -8,6 +9,10 @@ from jobos_api.state_store import (
     IncompatibleSchemaError,
     JobOsStateStore,
     Migration,
+)
+
+BROWSER_URL_POLICY_FIXTURES = json.loads(
+    (Path(__file__).parents[3] / "tests/fixtures/browser-url-policy.json").read_text()
 )
 
 
@@ -32,6 +37,14 @@ def test_browser_url_policy_rejects_parser_and_deferred_property_errors(value):
 def test_browser_url_policy_accepts_electron_compatible_ipv6_and_ordinary_hosts():
     assert safe_browser_url("https://[::1]:443/jobs?view=safe", allow_blank=False)
     assert safe_browser_url("https://jobs.example.com:8443/roles/7", allow_blank=False)
+
+
+@pytest.mark.parametrize(
+    ("url", "expected"),
+    [(fixture["url"], fixture["api_safe"]) for fixture in BROWSER_URL_POLICY_FIXTURES],
+)
+def test_browser_url_policy_matches_shared_credential_host_and_port_fixtures(url, expected):
+    assert safe_browser_url(url, allow_blank=False) is expected
 
 
 def metadata_columns(path):

@@ -22,6 +22,8 @@ import type {
 } from '../shared/contracts.js'
 import {
   BROWSER_PERSISTENCE_LIMITS,
+  recoverBrowserRestoreState,
+  recoverBrowserTabMetadata,
   sanitizeBrowserMetadata,
   sanitizeBrowserUrlForPersistence
 } from '../shared/browserPersistence.js'
@@ -69,19 +71,7 @@ export function isOrdinaryWebUrl(value: string): boolean {
 }
 
 export function isBrowserTabMetadata(value: unknown): value is BrowserTabMetadata {
-  if (!value || typeof value !== 'object') return false
-  const tab = value as Partial<BrowserTabMetadata>
-  return (
-    typeof tab.tabId === 'string'
-    && tab.tabId.length > 0
-    && tab.tabId.length <= BROWSER_PERSISTENCE_LIMITS.tabId
-    && typeof tab.url === 'string'
-    && isOrdinaryWebUrl(tab.url)
-    && typeof tab.title === 'string'
-    && tab.title.length <= BROWSER_PERSISTENCE_LIMITS.title
-    && (tab.faviconUrl === null || (typeof tab.faviconUrl === 'string' && isOrdinaryWebUrl(tab.faviconUrl)))
-    && (tab.associatedJobId === null || (typeof tab.associatedJobId === 'string' && tab.associatedJobId.length <= BROWSER_PERSISTENCE_LIMITS.associatedJobId))
-  )
+  return recoverBrowserTabMetadata(value) !== null
 }
 
 interface ManagedTab {
@@ -159,11 +149,8 @@ export class BrowserManager {
       this.#attachedTabId = null
       this.#synthesizedDefault = false
     }
-    const unique = new Set<string>()
-    for (const tab of restored.tabs) {
-      if (!isBrowserTabMetadata(tab) || unique.has(tab.tabId)) continue
-      if (unique.size >= BROWSER_PERSISTENCE_LIMITS.tabs) break
-      unique.add(tab.tabId)
+    const recovered = recoverBrowserRestoreState(restored)
+    for (const tab of recovered.tabs) {
       this.#createTab(tab)
     }
     if (!this.#order.length) {
@@ -176,8 +163,8 @@ export class BrowserManager {
         associatedJobId: null
       })
     }
-    this.#activeTabId = restored.activeTabId && this.#tabs.has(restored.activeTabId)
-      ? restored.activeTabId
+    this.#activeTabId = recovered.activeTabId && this.#tabs.has(recovered.activeTabId)
+      ? recovered.activeTabId
       : this.#order[0] ?? null
     this.#syncAttachedView()
     this.#emit()

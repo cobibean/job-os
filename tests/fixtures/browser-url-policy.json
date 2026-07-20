@@ -1,0 +1,22 @@
+[
+  {"url":"https://example.com/jobs?api_key=secret&page=2","desktop":"https://example.com/jobs?page=2","api_safe":false},
+  {"url":"https://example.com/jobs?API-KEY=secret&page=2","desktop":"https://example.com/jobs?page=2","api_safe":false},
+  {"url":"https://example.com/jobs?SAMLart=secret&view=compact","desktop":"https://example.com/jobs?view=compact","api_safe":false},
+  {"url":"https://example.com/jobs?authorization_code=secret&view=compact","desktop":"https://example.com/jobs?view=compact","api_safe":false},
+  {"url":"https://example.com/jobs?code-verifier=secret&view=compact","desktop":"https://example.com/jobs?view=compact","api_safe":false},
+  {"url":"https://example.com/jobs?PHPSESSID=secret&view=compact","desktop":"https://example.com/jobs?view=compact","api_safe":false},
+  {"url":"https://example.com/jobs?api_key=one&api_key=two&page=2","desktop":"https://example.com/jobs?page=2","api_safe":false},
+  {"url":"https://example.com/jobs?api%5Fkey=secret&page=2","desktop":"https://example.com/jobs?page=2","api_safe":false},
+  {"url":"https://example.com/jobs;jsessionid=secret/opening?view=compact","desktop":"https://example.com/jobs/opening?view=compact","api_safe":false},
+  {"url":"https://example.com/jobs%3BJSESSIONID%3Dsecret/opening?view=compact","desktop":"https://example.com/jobs/opening?view=compact","api_safe":false},
+  {"url":"https://example.com/jobs%253Bjsessionid%253Dsecret/opening?view=compact","desktop":"https://example.com/jobs/opening?view=compact","api_safe":false},
+  {"url":"https://example.com/jobs;%6asession_id=secret/opening?view=compact","desktop":"https://example.com/jobs/opening?view=compact","api_safe":false},
+  {"url":"https://-foo.example/jobs","desktop":"about:blank","api_safe":false},
+  {"url":"https://foo-.example/jobs","desktop":"about:blank","api_safe":false},
+  {"url":"https://example.com:0/jobs","desktop":"about:blank","api_safe":false},
+  {"url":"https://[::1]:443/jobs?view=safe","desktop":"https://[::1]/jobs?view=safe","api_safe":true},
+  {"url":"https://jobs.example.com:8443/roles/7?page=2","desktop":"https://jobs.example.com:8443/roles/7?page=2","api_safe":true},
+  {"url":"https://jobs_internal.example.com/roles/7?page=2","desktop":"https://jobs_internal.example.com/roles/7?page=2","api_safe":true},
+  {"url":"https://example.com./jobs?view=compact","desktop":"https://example.com./jobs?view=compact","api_safe":true},
+  {"url":"https://example.com/jobs;page=2/opening?view=compact&utm_source=jobos","desktop":"https://example.com/jobs;page=2/opening?view=compact&utm_source=jobos","api_safe":true}
+]
