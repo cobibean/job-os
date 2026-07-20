@@ -2,7 +2,7 @@ import { writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { app, BrowserWindow, clipboard, dialog, ipcMain, session, WebContentsView } from 'electron'
+import { app, BrowserWindow, clipboard, dialog, ipcMain, session, shell, WebContentsView } from 'electron'
 import type { IpcMainInvokeEvent } from 'electron'
 
 import type { BrowserBounds, ConnectivitySnapshot, JobSortMode, JobStatus, WorkspaceSnapshot } from '../shared/contracts.js'
@@ -11,6 +11,7 @@ import { registerBrowserRestoreHandler } from './browserIpc.js'
 import { probeConnectivity } from './connectivity.js'
 import { createMainJobsClient, startJobEventStream } from './jobs.js'
 import type { JobsConfig } from './jobs.js'
+import { createMainDocumentsClient } from './documents.js'
 import { isTrustedRendererUrl } from './security.js'
 import { createMainWorkspaceClient } from './workspace.js'
 
@@ -160,6 +161,40 @@ function registerBrowserInterface(): void {
   })
 }
 
+function registerDocumentsInterface(): void {
+  const config = jobsConfig()
+  const documents = config
+    ? createMainDocumentsClient(config, {
+        dialog,
+        shell,
+        cacheRoot: path.join(app.getPath('temp'), 'jobos-artifacts')
+      })
+    : null
+  const trusted = (event: IpcMainInvokeEvent) => {
+    assertTrustedRenderer(event)
+    if (!documents) throw new Error('Device credential unavailable')
+    return documents
+  }
+  const artifactId = (value: unknown) => {
+    if (typeof value !== 'string' || !/^art_[A-Za-z0-9_-]{16,80}$/.test(value)) {
+      throw new Error('Invalid artifact')
+    }
+    return value
+  }
+  const jobId = (value: unknown) => {
+    if (typeof value !== 'string' || !value || value.length > 512 || /[\\/]/.test(value)) {
+      throw new Error('Invalid job')
+    }
+    return value
+  }
+  ipcMain.handle('jobos:documents:list', (event, id: string) => trusted(event).list(jobId(id)))
+  ipcMain.handle('jobos:documents:refresh', (event, id: string) => trusted(event).refresh(jobId(id)))
+  ipcMain.handle('jobos:documents:load-pdf', (event, id: string) => trusted(event).loadPdf(artifactId(id)))
+  ipcMain.handle('jobos:documents:export', (event, id: string) => trusted(event).exportArtifact(artifactId(id)))
+  ipcMain.handle('jobos:documents:reveal', (event, id: string) => trusted(event).reveal(artifactId(id)))
+  ipcMain.handle('jobos:documents:open', (event, id: string) => trusted(event).open(artifactId(id)))
+}
+
 async function createWindow(): Promise<BrowserWindow> {
   const window = new BrowserWindow({
     width: 1440,
@@ -220,11 +255,15 @@ async function createWindow(): Promise<BrowserWindow> {
 
   const capturePath = process.env.JOBOS_CAPTURE_PATH
   if (capturePath) {
+    const requestedDelay = Number(process.env.JOBOS_CAPTURE_DELAY_MS ?? 1_200)
+    const captureDelay = Number.isFinite(requestedDelay)
+      ? Math.max(500, Math.min(requestedDelay, 10_000))
+      : 1_200
     setTimeout(async () => {
       const image = await window.webContents.capturePage()
       await writeFile(capturePath, image.toPNG())
       app.quit()
-    }, 1_200)
+    }, captureDelay)
   }
 
   return window
@@ -238,6 +277,7 @@ app.whenReady().then(async () => {
   registerJobsInterface()
   registerWorkspaceInterface()
   registerBrowserInterface()
+  registerDocumentsInterface()
   await createWindow()
 
   app.on('activate', async () => {

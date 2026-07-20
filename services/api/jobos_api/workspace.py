@@ -84,6 +84,11 @@ class WorkspaceSnapshotBase(BaseModel):
         default_factory=list, max_length=BROWSER_TAB_LIMIT
     )
     active_browser_tab_id: str | None = Field(default=None, max_length=128)
+    active_artifact_id: str | None = Field(
+        default=None, pattern=r"^art_[A-Za-z0-9_-]{16,80}$"
+    )
+    active_artifact_page: int = Field(default=1, ge=1, le=5000)
+    active_artifact_zoom: float = Field(default=1.0, ge=0.5, le=3.0)
 
     @model_validator(mode="after")
     def validate_presets(self):

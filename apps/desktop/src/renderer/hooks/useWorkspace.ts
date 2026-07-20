@@ -153,7 +153,14 @@ export function useWorkspace(selectedJobId: string | null) {
     browserRepairReasons: []
   }), ''), [commit])
 
-  return { workspace, announcement, hydrated, selectPreset, resize, collapse, move, reset, updateBrowserState }
+  const updateDocumentState = useCallback((artifactId: string | null, page: number, zoom: number) => commit(current => ({
+    ...current,
+    activeArtifactId: artifactId,
+    activeArtifactPage: page,
+    activeArtifactZoom: zoom
+  }), ''), [commit])
+
+  return { workspace, announcement, hydrated, selectPreset, resize, collapse, move, reset, updateBrowserState, updateDocumentState }
 }
 
 function panelLabel(panel: PanelId) {

@@ -46,7 +46,10 @@ function fromApi(value: WorkspaceSnapshotResponse): WorkspaceSnapshot {
     })) satisfies BrowserTabMetadata[],
     activeBrowserTabId: value.active_browser_tab_id ?? null,
     repairedBrowser: value.repaired_browser ?? false,
-    browserRepairReasons: value.browser_repair_reasons ?? []
+    browserRepairReasons: value.browser_repair_reasons ?? [],
+    activeArtifactId: value.active_artifact_id ?? null,
+    activeArtifactPage: value.active_artifact_page ?? 1,
+    activeArtifactZoom: value.active_artifact_zoom ?? 1
   }
 }
 
@@ -66,7 +69,10 @@ function toApi(snapshot: WorkspaceSnapshot, idempotencyKey: string) {
       favicon_url: tab.faviconUrl,
       associated_job_id: tab.associatedJobId
     })),
-    active_browser_tab_id: snapshot.activeBrowserTabId ?? null
+    active_browser_tab_id: snapshot.activeBrowserTabId ?? null,
+    active_artifact_id: snapshot.activeArtifactId ?? null,
+    active_artifact_page: snapshot.activeArtifactPage ?? 1,
+    active_artifact_zoom: snapshot.activeArtifactZoom ?? 1
   }
 }
 

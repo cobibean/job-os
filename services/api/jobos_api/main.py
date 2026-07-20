@@ -11,11 +11,17 @@ def settings_from_environment() -> Settings:
         raise RuntimeError("JOBOS_DEVICE_TOKEN is required")
     state_db_path = Path(os.environ.get("JOBOS_STATE_DB_PATH", "data/jobos.db"))
     job_hunter_db = os.environ.get("JOBOS_JOB_HUNTER_DB_PATH")
+    artifact_roots = tuple(
+        Path(value)
+        for value in os.environ.get("JOBOS_ARTIFACT_ROOTS", "").split(os.pathsep)
+        if value
+    )
     return Settings(
         device_token=token,
         device_id=os.environ.get("JOBOS_DEVICE_ID", "primary-device"),
         state_db_path=state_db_path,
         job_hunter_db_path=Path(job_hunter_db) if job_hunter_db else None,
+        artifact_roots=artifact_roots,
     )
 
 

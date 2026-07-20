@@ -16,3 +16,4 @@ class Settings(BaseModel):
     device_id: str = Field(default="primary-device", min_length=1, max_length=100)
     state_db_path: Path
     job_hunter_db_path: Path | None = None
+    artifact_roots: tuple[Path, ...] = ()

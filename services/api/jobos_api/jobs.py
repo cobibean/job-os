@@ -37,6 +37,14 @@ class JobFacade(Protocol):
         reason: str | None = None,
     ) -> dict[str, Any]: ...
 
+    def list_job_artifacts(self, job_id: str) -> list[dict[str, Any]]: ...
+
+    def register_artifact(self, job_id: str, artifact_reference: str) -> dict[str, Any]: ...
+
+    def render_resume(
+        self, job_id: str, source_id: str, output_options: dict[str, Any]
+    ) -> dict[str, Any]: ...
+
 
 class EmptyJobFacade:
     def list_jobs(self) -> list[dict[str, Any]]:
@@ -54,6 +62,17 @@ class EmptyJobFacade:
         target_state: str,
         *,
         reason: str | None = None,
+    ) -> dict[str, Any]:
+        raise KeyError(job_id)
+
+    def list_job_artifacts(self, job_id: str) -> list[dict[str, Any]]:
+        return []
+
+    def register_artifact(self, job_id: str, artifact_reference: str) -> dict[str, Any]:
+        raise KeyError(artifact_reference)
+
+    def render_resume(
+        self, job_id: str, source_id: str, output_options: dict[str, Any]
     ) -> dict[str, Any]:
         raise KeyError(job_id)
 
