@@ -198,11 +198,11 @@ test('changing jobs never selects, closes, navigates, or reassociates an unrelat
   })
 
   render(<App />)
-  expect(await screen.findByRole('button', { name: 'Select Gmail' })).not.toBeNull()
+  expect(await screen.findByRole('tab', { name: 'Select Gmail' })).not.toBeNull()
   fireEvent.click(screen.getByRole('button', { name: 'Select Northstar Staff PM' }))
 
   await waitFor(() => expect(screen.getByText('Northstar · Staff PM')).not.toBeNull())
-  expect(screen.getByRole('button', { name: 'Select Gmail' })).not.toBeNull()
+  expect(screen.getByRole('tab', { name: 'Select Gmail' })).not.toBeNull()
   expect(browserActions.select).not.toHaveBeenCalled()
   expect(browserActions.close).not.toHaveBeenCalled()
   expect(browserActions.navigate).not.toHaveBeenCalled()
@@ -371,6 +371,111 @@ test('a first action after failed startup hydration replays over remote state af
     order: ['center', 'agent', 'jobs']
   })
   expect(panelDomOrder()).toEqual(['center', 'agent', 'jobs'])
+})
+
+test('a synthesized default tab is not replayed over authoritative browser state after startup recovery', async () => {
+  let rejectInitialGet!: (error: Error) => void
+  const authoritativeTabs = [
+    { tabId: 'gmail', url: 'https://mail.google.com/mail/u/0/', title: 'Gmail', faviconUrl: null, associatedJobId: null },
+    { tabId: 'listing', url: 'https://jobs.example.com/roles/7', title: 'Listing', faviconUrl: null, associatedJobId: 'job-7' }
+  ]
+  const remote = {
+    ...remoteWorkspace(11),
+    browserTabs: authoritativeTabs,
+    activeBrowserTabId: 'listing',
+    repairedBrowser: false
+  }
+  const defaultTab = {
+    tabId: 'default-google', url: 'https://www.google.com/', title: 'Google', faviconUrl: null, associatedJobId: null,
+    loading: false, canGoBack: false, canGoForward: false, error: null, crashed: false, blockedUrl: null
+  }
+  const authoritativeState = {
+    tabs: authoritativeTabs.map(tab => ({ ...tab, loading: false, canGoBack: false, canGoForward: false, error: null, crashed: false, blockedUrl: null })),
+    activeTabId: 'listing', download: null, notice: null
+  }
+  const get = vi.fn()
+    .mockReturnValueOnce(new Promise((_resolve, reject) => { rejectInitialGet = reject }))
+    .mockResolvedValueOnce(remote)
+  const save = vi.fn()
+    .mockRejectedValueOnce(new Error('revision conflict'))
+    .mockImplementationOnce(snapshot => Promise.resolve({ ...snapshot, revision: 12 }))
+  const restore = vi.fn()
+    .mockResolvedValueOnce({ tabs: [defaultTab], activeTabId: defaultTab.tabId, download: null, notice: null })
+    .mockResolvedValueOnce(authoritativeState)
+  Object.defineProperty(window, 'jobos', {
+    configurable: true,
+    value: {
+      connectivity: { get: vi.fn().mockRejectedValue(new Error('offline')) },
+      workspace: { get, save },
+      browser: {
+        restore, getState: vi.fn(), subscribe: vi.fn().mockReturnValue(() => undefined), setBounds: vi.fn().mockResolvedValue(undefined),
+        create: vi.fn(), select: vi.fn(), close: vi.fn(), reorder: vi.fn(), navigate: vi.fn(), back: vi.fn(), forward: vi.fn(),
+        reload: vi.fn(), stop: vi.fn(), associate: vi.fn(), copyBlockedUrl: vi.fn()
+      }
+    }
+  })
+
+  render(<App />)
+  await act(async () => rejectInitialGet(new Error('startup unavailable')))
+  await waitFor(() => expect(restore).toHaveBeenCalledWith({ tabs: [], activeTabId: null }))
+  expect(save).not.toHaveBeenCalled()
+
+  fireEvent.click(screen.getByRole('button', { name: 'Move Agent chat left' }))
+  await waitFor(() => expect(save).toHaveBeenCalledTimes(2))
+  await waitFor(() => expect(restore).toHaveBeenLastCalledWith({ tabs: authoritativeTabs, activeTabId: 'listing' }))
+
+  expect(save.mock.calls[1]?.[0]).toMatchObject({
+    revision: 11,
+    browserTabs: authoritativeTabs,
+    activeBrowserTabId: 'listing'
+  })
+})
+
+test('browser tabs expose valid keyboard tab semantics, adjacent actions, and focus tooltips', async () => {
+  const metadata = [
+    { tabId: 'gmail', url: 'https://mail.google.com/', title: 'Gmail', faviconUrl: null, associatedJobId: null },
+    { tabId: 'listing', url: 'https://jobs.example.com/7', title: 'Listing', faviconUrl: null, associatedJobId: null }
+  ]
+  const browserState = (activeTabId: string) => ({
+    tabs: metadata.map(tab => ({ ...tab, loading: false, canGoBack: false, canGoForward: false, error: null, crashed: false, blockedUrl: null })),
+    activeTabId, download: null, notice: null
+  })
+  const select = vi.fn().mockImplementation(tabId => Promise.resolve(browserState(tabId)))
+  Object.defineProperty(window, 'jobos', {
+    configurable: true,
+    value: {
+      connectivity: { get: vi.fn().mockRejectedValue(new Error('offline')) },
+      workspace: {
+        get: vi.fn().mockResolvedValue({ ...restoredWorkspace(2), selectedPreset: 'research', activeCenterSurface: 'browser', browserTabs: metadata, activeBrowserTabId: 'gmail', repairedBrowser: true }),
+        save: vi.fn().mockImplementation(snapshot => Promise.resolve({ ...snapshot, revision: snapshot.revision + 1 }))
+      },
+      browser: {
+        restore: vi.fn().mockResolvedValue(browserState('gmail')), select,
+        getState: vi.fn(), subscribe: vi.fn().mockReturnValue(() => undefined), setBounds: vi.fn().mockResolvedValue(undefined),
+        create: vi.fn(), close: vi.fn(), reorder: vi.fn(), navigate: vi.fn(), back: vi.fn(), forward: vi.fn(),
+        reload: vi.fn(), stop: vi.fn(), associate: vi.fn(), copyBlockedUrl: vi.fn()
+      }
+    }
+  })
+
+  render(<App />)
+  const gmail = await screen.findByRole('tab', { name: 'Select Gmail' })
+  const listing = screen.getByRole('tab', { name: 'Select Listing' })
+  expect(gmail.querySelector('button')).toBeNull()
+  expect(gmail.getAttribute('aria-selected')).toBe('true')
+  expect(gmail.getAttribute('tabindex')).toBe('0')
+  expect(listing.getAttribute('tabindex')).toBe('-1')
+  expect(screen.getByText(/Some saved browser tabs could not be restored/)).not.toBeNull()
+  fireEvent.keyDown(gmail, { key: 'ArrowRight' })
+  await waitFor(() => expect(select).toHaveBeenCalledWith('listing'))
+  expect(document.activeElement).toBe(listing)
+  await screen.findByRole('button', { name: 'Close Listing' })
+
+  for (const name of ['Select Gmail', 'Select Listing', 'Move Listing left', 'Move Listing right', 'Close Listing', 'Open a new tab', 'Back', 'Forward', 'Reload']) {
+    const control = screen.getByRole(name.startsWith('Select') ? 'tab' : 'button', { name })
+    expect(control.getAttribute('data-tooltip')).toBe(name)
+    expect(control.getAttribute('aria-label')).toBe(name)
+  }
 })
 
 test('layout changes preserve mounted content surface identities', async () => {

@@ -1,7 +1,13 @@
 from typing import Literal
-from urllib.parse import parse_qsl, urlsplit
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+from .browser_policy import (
+    BROWSER_TAB_LIMIT,
+    BROWSER_TITLE_LIMIT,
+    BROWSER_URL_LIMIT,
+    safe_browser_url,
+)
 
 PanelId = Literal["jobs", "center", "agent"]
 LayoutPreset = Literal["research", "review", "agent-focus"]
@@ -12,37 +18,24 @@ class BrowserTabMetadata(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     tab_id: str = Field(min_length=1, max_length=128)
-    url: str = Field(min_length=1, max_length=8192)
-    title: str = Field(default="New tab", max_length=512)
-    favicon_url: str | None = Field(default=None, max_length=8192)
+    url: str = Field(min_length=1, max_length=BROWSER_URL_LIMIT)
+    title: str = Field(default="New tab", max_length=BROWSER_TITLE_LIMIT)
+    favicon_url: str | None = Field(default=None, max_length=BROWSER_URL_LIMIT)
     associated_job_id: str | None = Field(default=None, max_length=512)
 
     @field_validator("url")
     @classmethod
     def validate_browser_url(cls, value: str) -> str:
-        if value != "about:blank" and not value.startswith(("http://", "https://")):
-            raise ValueError("Browser tabs may restore only ordinary web URLs")
-        if value != "about:blank":
-            parsed = urlsplit(value)
-            if parsed.scheme not in ("http", "https") or not parsed.hostname:
-                raise ValueError("Browser tab URL is not an ordinary website")
-            if parsed.username or parsed.password or parsed.fragment:
-                raise ValueError("Credential-bearing browser URLs cannot be persisted")
-            sensitive = {
-                "access_token", "auth_token", "authorization", "bearer_token",
-                "code", "credential", "id_token", "jwt", "password",
-                "refresh_token", "samlresponse", "secret", "session", "session_id",
-            }
-            if any(key.lower() in sensitive for key, _ in parse_qsl(parsed.query)):
-                raise ValueError("Credential-bearing browser URLs cannot be persisted")
+        if not safe_browser_url(value, allow_blank=True):
+            raise ValueError("Credential-bearing or unsupported browser URLs cannot be persisted")
         return value
 
     @field_validator("favicon_url")
     @classmethod
     def validate_favicon_url(cls, value: str | None) -> str | None:
-        if value is not None and not value.startswith(("http://", "https://")):
+        if value is not None and not safe_browser_url(value, allow_blank=False):
             raise ValueError("Favicon URL is not supported")
-        return cls.validate_browser_url(value) if value is not None else None
+        return value
 
 
 class PanelLayout(BaseModel):
@@ -73,7 +66,9 @@ class WorkspaceSnapshotBase(BaseModel):
     layouts: dict[LayoutPreset, PanelLayout]
     selected_job_id: str | None
     active_center_surface: CenterSurface
-    browser_tabs: list[BrowserTabMetadata] = Field(default_factory=list, max_length=50)
+    browser_tabs: list[BrowserTabMetadata] = Field(
+        default_factory=list, max_length=BROWSER_TAB_LIMIT
+    )
     active_browser_tab_id: str | None = Field(default=None, max_length=128)
 
     @model_validator(mode="after")

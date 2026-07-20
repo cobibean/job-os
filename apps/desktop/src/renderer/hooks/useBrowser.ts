@@ -30,11 +30,14 @@ export function useBrowser(
   const [message, setMessage] = useState('Browser ready')
   const viewportRef = useRef<HTMLDivElement | null>(null)
   const restored = useRef(false)
+  const explicitBrowserAction = useRef(false)
   const persistedKey = useRef(JSON.stringify(restoredState))
+  const requestedRestoreKey = useRef(JSON.stringify(restoredState))
 
-  const acceptState = useCallback((next: BrowserState) => {
+  const acceptState = useCallback((next: BrowserState, explicit = false) => {
     setState(next)
-    if (!restored.current) return
+    if (explicit) explicitBrowserAction.current = true
+    if (!restored.current || !explicitBrowserAction.current) return
     const durable = persisted(next)
     const key = JSON.stringify(durable)
     if (key !== persistedKey.current) {
@@ -43,16 +46,31 @@ export function useBrowser(
     }
   }, [onPersist])
 
-  useEffect(() => bridge?.subscribe(acceptState), [acceptState, bridge])
+  useEffect(() => bridge?.subscribe(next => acceptState(next)), [acceptState, bridge])
 
   useEffect(() => {
     if (!bridge || !workspaceHydrated || restored.current) return
     restored.current = true
     persistedKey.current = JSON.stringify(restoredState)
-    void bridge.restore(restoredState).then(acceptState).catch(error => {
+    requestedRestoreKey.current = JSON.stringify(restoredState)
+    void bridge.restore(restoredState).then(next => {
+      setState(next)
+      persistedKey.current = JSON.stringify(persisted(next))
+    }).catch(error => {
       setMessage(error instanceof Error ? error.message : 'Browser restore failed')
     })
   }, [acceptState, bridge, restoredState, workspaceHydrated])
+
+  useEffect(() => {
+    if (!bridge || !restored.current || explicitBrowserAction.current) return
+    const requestedKey = JSON.stringify(restoredState)
+    if (requestedKey === requestedRestoreKey.current) return
+    requestedRestoreKey.current = requestedKey
+    void bridge.restore(restoredState).then(next => {
+      setState(next)
+      persistedKey.current = JSON.stringify(persisted(next))
+    }).catch(error => setMessage(error instanceof Error ? error.message : 'Browser recovery failed'))
+  }, [bridge, restoredState])
 
   const activeTab = useMemo(
     () => state.tabs.find(tab => tab.tabId === state.activeTabId) ?? null,
@@ -84,7 +102,7 @@ export function useBrowser(
 
   const run = useCallback(async (operation: () => Promise<BrowserState>) => {
     try {
-      acceptState(await operation())
+      acceptState(await operation(), true)
       setMessage('Browser ready')
     } catch (error) {
       setMessage(error instanceof Error ? error.message : 'Browser action failed')
@@ -106,6 +124,7 @@ export function useBrowser(
     forward: (tabId: string) => bridge && run(() => bridge.forward(tabId)),
     reload: (tabId: string) => bridge && run(() => bridge.reload(tabId)),
     stop: (tabId: string) => bridge && run(() => bridge.stop(tabId)),
-    associate: (tabId: string, jobId: string | null) => bridge && run(() => bridge.associate(tabId, jobId))
+    associate: (tabId: string, jobId: string | null) => bridge && run(() => bridge.associate(tabId, jobId)),
+    copyBlockedUrl: (tabId: string) => bridge && run(() => bridge.copyBlockedUrl(tabId))
   }
 }

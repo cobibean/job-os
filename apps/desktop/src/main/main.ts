@@ -2,7 +2,7 @@ import { writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { app, BrowserWindow, dialog, ipcMain, session, WebContentsView } from 'electron'
+import { app, BrowserWindow, clipboard, dialog, ipcMain, session, WebContentsView } from 'electron'
 import type { IpcMainInvokeEvent } from 'electron'
 
 import type { BrowserBounds, BrowserRestoreState, ConnectivitySnapshot, JobSortMode, JobStatus, WorkspaceSnapshot } from '../shared/contracts.js'
@@ -155,6 +155,7 @@ function registerBrowserInterface(): void {
     if (jobId !== null && (typeof jobId !== 'string' || jobId.length > 512)) throw new Error('Invalid job association')
     return trusted(event).associate(tabId(id), jobId)
   })
+  ipcMain.handle('jobos:browser:copy-blocked-url', (event, id: string) => trusted(event).copyBlockedUrl(tabId(id)))
   ipcMain.handle('jobos:browser:set-bounds', (event, bounds: BrowserBounds) => {
     if (!bounds || ['x', 'y', 'width', 'height'].some(key => !Number.isFinite(bounds[key as keyof BrowserBounds]))) throw new Error('Invalid browser bounds')
     trusted(event).setBounds(bounds)
@@ -191,6 +192,7 @@ async function createWindow(): Promise<BrowserWindow> {
     browserSession,
     createView: () => new WebContentsView({ webPreferences: remoteBrowserPreferences() }),
     dialog,
+    clipboard,
     downloadsPath: app.getPath('downloads')
   })
 

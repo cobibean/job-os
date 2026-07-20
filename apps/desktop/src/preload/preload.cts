@@ -37,6 +37,7 @@ const bridge: JobOsRendererBridge = Object.freeze({
     reload: (tabId: string) => ipcRenderer.invoke('jobos:browser:reload', tabId),
     stop: (tabId: string) => ipcRenderer.invoke('jobos:browser:stop', tabId),
     associate: (tabId: string, jobId: string | null) => ipcRenderer.invoke('jobos:browser:associate', tabId, jobId),
+    copyBlockedUrl: (tabId: string) => ipcRenderer.invoke('jobos:browser:copy-blocked-url', tabId),
     setBounds: (bounds: BrowserBounds) => ipcRenderer.invoke('jobos:browser:set-bounds', bounds),
     subscribe: (listener: (state: BrowserState) => void) => {
       const wrapped = (_event: IpcRendererEvent, state: BrowserState) => listener(state)

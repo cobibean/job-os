@@ -388,6 +388,64 @@ def test_workspace_rejects_credential_bearing_browser_metadata(tmp_path):
     assert response.status_code == 422
 
 
+def test_workspace_rejects_capability_session_and_signed_url_variants(tmp_path):
+    facade = FakeJobHunterFacade()
+    sensitive_parameters = [
+        "ticket", "assertion", "sig", "sessionid", "oauth_verifier",
+        "X-Amz-Credential", "X-Amz-Signature", "X-Goog-Signature",
+    ]
+
+    with make_client(tmp_path, facade) as client:
+        for index, parameter in enumerate(sensitive_parameters):
+            body = client.get("/v1/workspace", headers=auth_headers()).json()
+            body.pop("repaired_presets")
+            body.pop("repaired_browser")
+            body.update(
+                {
+                    "origin": "user",
+                    "idempotency_key": f"workspace-sensitive-variant-{index}",
+                    "browser_tabs": [
+                        {
+                            "tab_id": "unsafe",
+                            "url": f"https://example.com/download?view=safe&{parameter}=secret",
+                            "title": "Unsafe",
+                        }
+                    ],
+                    "active_browser_tab_id": "unsafe",
+                }
+            )
+            response = client.put("/v1/workspace", headers=auth_headers(), json=body)
+            assert response.status_code == 422, parameter
+
+
+def test_workspace_preserves_ordinary_browser_query_parameters(tmp_path):
+    facade = FakeJobHunterFacade()
+    with make_client(tmp_path, facade) as client:
+        body = client.get("/v1/workspace", headers=auth_headers()).json()
+        body.pop("repaired_presets")
+        body.pop("repaired_browser")
+        body.update(
+            {
+                "origin": "user",
+                "idempotency_key": "workspace-safe-query-1",
+                "browser_tabs": [
+                    {
+                        "tab_id": "safe",
+                        "url": "https://example.com/jobs?page=2&view=compact&utm_source=jobos",
+                        "title": "Safe",
+                    }
+                ],
+                "active_browser_tab_id": "safe",
+            }
+        )
+        response = client.put("/v1/workspace", headers=auth_headers(), json=body)
+
+    assert response.status_code == 200
+    assert response.json()["browser_tabs"][0]["url"].endswith(
+        "page=2&view=compact&utm_source=jobos"
+    )
+
+
 def test_layout_save_cannot_overwrite_a_newer_user_or_mcp_selection(tmp_path):
     facade = FakeJobHunterFacade()
     facade.jobs = facade.jobs[:2]

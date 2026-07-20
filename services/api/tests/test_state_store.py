@@ -281,7 +281,7 @@ def test_browser_metadata_round_trips_without_credentials_or_session_material(tm
     assert "browser_tabs" not in json.dumps(store.list_mutation_audit())
 
 
-def test_malformed_browser_restore_is_repaired_without_resetting_layout_or_job(tmp_path):
+def test_mixed_browser_restore_repairs_entries_and_active_tab_without_resetting_workspace(tmp_path):
     database = tmp_path / "jobos.db"
     store = JobOsStateStore(database)
     store.initialize()
@@ -290,7 +290,30 @@ def test_malformed_browser_restore_is_repaired_without_resetting_layout_or_job(t
     corrupt = {
         **initial.snapshot,
         "selected_preset": "research",
-        "browser_tabs": [{"tab_id": "bad", "url": "file:///etc/passwd", "title": "Bad"}],
+        "browser_tabs": [
+            {
+                "tab_id": "gmail",
+                "url": "https://mail.google.com/mail/u/0/?view=inbox",
+                "title": "Inbox",
+                "favicon_url": None,
+                "associated_job_id": None,
+            },
+            {"tab_id": "bad", "url": "file:///etc/passwd", "title": "Bad"},
+            {
+                "tab_id": "gmail",
+                "url": "https://duplicate.example.com/",
+                "title": "Duplicate",
+                "favicon_url": None,
+                "associated_job_id": None,
+            },
+            {
+                "tab_id": "listing",
+                "url": "https://jobs.example.com/roles/7?page=2",
+                "title": "Listing",
+                "favicon_url": None,
+                "associated_job_id": "job-9",
+            },
+        ],
         "active_browser_tab_id": "bad",
     }
     with sqlite3.connect(database) as connection:
@@ -303,8 +326,51 @@ def test_malformed_browser_restore_is_repaired_without_resetting_layout_or_job(t
 
     assert restored.revision == 6
     assert restored.repaired_browser is True
-    assert restored.snapshot["browser_tabs"] == []
-    assert restored.snapshot["active_browser_tab_id"] is None
+    assert [tab["tab_id"] for tab in restored.snapshot["browser_tabs"]] == [
+        "gmail",
+        "listing",
+    ]
+    assert restored.snapshot["active_browser_tab_id"] == "gmail"
     assert restored.snapshot["selected_preset"] == "research"
     assert restored.snapshot["layouts"] == initial.snapshot["layouts"]
     assert restored.snapshot["selected_job_id"] == "job-9"
+
+
+def test_browser_repair_keeps_first_fifty_valid_tabs_in_stable_order(tmp_path):
+    database = tmp_path / "jobos.db"
+    store = JobOsStateStore(database)
+    store.initialize()
+    initial = store.workspace_snapshot("device-a")
+    tabs = [
+        {
+            "tab_id": f"tab-{index}",
+            "url": f"https://example.com/{index}?view=safe",
+            "title": f"Tab {index}",
+            "favicon_url": None,
+            "associated_job_id": None,
+        }
+        for index in range(52)
+    ]
+    with sqlite3.connect(database) as connection:
+        connection.execute(
+            "INSERT INTO workspace_snapshots(device_id, revision, snapshot_json) VALUES (?, ?, ?)",
+            (
+                "device-a",
+                3,
+                json.dumps(
+                    {
+                        **initial.snapshot,
+                        "browser_tabs": tabs,
+                        "active_browser_tab_id": "tab-51",
+                    }
+                ),
+            ),
+        )
+
+    restored = store.workspace_snapshot("device-a")
+
+    assert restored.repaired_browser is True
+    assert [tab["tab_id"] for tab in restored.snapshot["browser_tabs"]] == [
+        f"tab-{index}" for index in range(50)
+    ]
+    assert restored.snapshot["active_browser_tab_id"] == "tab-0"

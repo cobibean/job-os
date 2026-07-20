@@ -30,6 +30,7 @@ export function App() {
             tabs: layoutState.workspace.browserTabs ?? [],
             activeTabId: layoutState.workspace.activeBrowserTabId ?? null
           }}
+          browserRepaired={Boolean(layoutState.workspace.repairedBrowser)}
           browserVisible={!activeLayout.collapsed.includes('center')}
           jobs={jobState.jobs}
           layoutSignal={`${activePreset}:${activeLayout.order.join(',')}:${activeLayout.collapsed.join(',')}`}
