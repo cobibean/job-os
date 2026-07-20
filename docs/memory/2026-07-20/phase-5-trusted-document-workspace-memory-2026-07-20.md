@@ -35,6 +35,9 @@
 - Native visual evidence: `/Users/cobibean/.codex/visualizations/2026/07/20/019f7ff6-b7cf-7e01-9b7c-e39c9d88ba22/jobos-phase5-artifact-trust.png`.
 - In-app-browser proof loaded the production renderer, exercised the Research/Review layout control, and confirmed the renderer-only degraded state remains coherent when the Electron bridge is intentionally unavailable.
 - All disposable proof processes, database, script, and browser tabs were stopped or removed after verification. No live Mini state was contacted.
+- Generated-contract drift: `PATH=/Users/cobibean/.nvm/versions/node/v26.5.0/bin:$PATH pnpm contracts:check` passed from committed candidate `ec8fcf424f5eef36ca5e1c87a504a9bd98d5644e`.
+- Frozen candidate clean room: `/tmp/jobos-phase5-candidate-clean.NCYJXw` was created from `git archive ec8fcf424f5eef36ca5e1c87a504a9bd98d5644e`, given a disposable local Git baseline for drift comparison, and passed `pnpm install --frozen-lockfile`, `uv sync --all-packages --frozen`, the complete pinned `pnpm check`, and `pnpm contracts:check` with the same 59 desktop and 153 Python tests plus production/package verification.
+- Secret scan: gitleaks 8.30.0 scanned 17 commits / about 927 KB and found no leaks.
 
 ## Constraints and honest remaining gate
 
@@ -45,7 +48,8 @@
 
 ## Exact handoff state
 
-- Candidate commit: pending final commit.
-- Remote: pending push to `origin/main`.
-- Frozen exact-commit clean room, generated-contract drift, and gitleaks: pending final committed-byte gates.
+- Implementation candidate: `ec8fcf424f5eef36ca5e1c87a504a9bd98d5644e` (`feat: add trusted document workspace`).
+- The closeout commit containing these exact verification results is documentation-only; resolve it as the commit containing this memory file after the final push. The final response and Linear comment record its exact SHA and confirmed `origin/main` equality.
+- Remote: pending the final documentation-only closeout commit and push to `origin/main`.
+- Frozen implementation-commit clean room, generated-contract drift, and gitleaks are complete and green. The documentation-only closeout commit receives a final exact-commit contract/status gate before push.
 - Implementation and implementor verification are otherwise complete. Leave `CLO-51` in `Building`; PM owns acceptance and closure.
