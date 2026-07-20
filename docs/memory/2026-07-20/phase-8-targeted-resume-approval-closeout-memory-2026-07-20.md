@@ -37,6 +37,17 @@ The real native smoke found and drove bounded fixes for:
 
 Regression coverage now protects failed-render activity state, stable same-job rerenders, stable context-bridge capture, retained PDF bytes after same-artifact refresh, automatic document focus, approval transport, approval persistence, and invalid approval rejection.
 
+## Post-shipment independent-review hardening
+
+A delayed independent review completed after the first Phase 8 push. `CLO-54` was moved back to Building while its findings were addressed, and shipment was re-gated before the follow-up push. The review drove four bounded corrections:
+
+- approval now reopens the registered file and verifies canonical-root containment, file type, and the current SHA-256 bytes before persisting approval; deleted or tampered files are rejected;
+- a completed render streamed before conversation hydration resolves is compared against the hydration snapshot cursor and still focuses the document surface;
+- a late approval response is discarded when the user has already switched to another job;
+- Job Hunter records a stable user-safe render failure while detailed exception diagnostics remain only in private local logs.
+
+Targeted red/green regressions cover all four findings. No architecture expansion was required.
+
 ## Native golden-path acceptance
 
 The proof used:
@@ -66,8 +77,8 @@ Final visual evidence is attached from the Hermes profile cache as `jobos-phase8
 Final post-fix execution evidence:
 
 - Canonical repository gate: `pnpm check` passed.
-- Desktop: **107 passed** across 18 files.
-- Python: **276 passed**.
+- Desktop: **109 passed** across 18 files.
+- Python: **278 passed**.
 - Contract and desktop lint: passed with zero warnings/errors.
 - Ruff: passed.
 - TypeScript contract and desktop typechecks: passed.

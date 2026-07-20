@@ -926,6 +926,32 @@ def create_app(
             approved_artifact_id=approved_id,
         )
 
+    def registered_artifact_payload(record: dict[str, object]) -> bytes:
+        try:
+            _, payload = read_source_artifact(
+                {
+                    "job_id": record["job_id"],
+                    "source_revision": record["source_revision"],
+                    "artifact_revision": record["artifact_revision"],
+                    "media_type": record["media_type"],
+                    "sha256": record["sha256"],
+                    "render_status": record["render_status"],
+                    # Registry identity is already fixed; sequence is only used to
+                    # select facade current/last-successful pointers during refresh.
+                    "render_sequence": 0,
+                    "path": record["canonical_path"],
+                },
+                settings.artifact_roots,
+            )
+        except (ArtifactTrustError, OSError) as error:
+            raise HTTPException(
+                status_code=409,
+                detail="Registered artifact no longer matches trusted metadata",
+            ) from error
+        if payload is None:
+            raise HTTPException(status_code=409, detail="Artifact render is not available")
+        return payload
+
     @app.get("/v1/jobs/{job_id}/artifacts", tags=["documents"])
     def job_artifacts(
         job_id: str,
@@ -958,6 +984,18 @@ def create_app(
     ) -> JobArtifactsResponse:
         command = command or ArtifactApprovalRequest()
         ensure_job(job_id)
+        artifact = state_store.get_document_artifact(artifact_id)
+        if (
+            artifact is None
+            or artifact["job_id"] != job_id
+            or artifact["render_status"] != "succeeded"
+            or not artifact["canonical_path"]
+        ):
+            raise HTTPException(
+                status_code=409,
+                detail="Only a successful artifact registered for this job can be approved",
+            )
+        registered_artifact_payload(artifact)
         request_hash = mutation_hash(
             "document.approve",
             {"job_id": job_id, "artifact_id": artifact_id, "origin": command.origin},
@@ -1221,29 +1259,7 @@ def create_app(
                 status_code=415,
                 detail="Only authoritative PDF artifacts can be previewed in JobOS",
             )
-        try:
-            verified, payload = read_source_artifact(
-                {
-                    "job_id": record["job_id"],
-                    "source_revision": record["source_revision"],
-                    "artifact_revision": record["artifact_revision"],
-                    "media_type": record["media_type"],
-                    "sha256": record["sha256"],
-                    "render_status": record["render_status"],
-                    # Registry identity is already fixed; sequence is only used to
-                    # select facade current/last-successful pointers during refresh.
-                    "render_sequence": 0,
-                    "path": record["canonical_path"],
-                },
-                settings.artifact_roots,
-            )
-        except (ArtifactTrustError, OSError) as error:
-            raise HTTPException(
-                status_code=409,
-                detail="Registered artifact no longer matches trusted metadata",
-            ) from error
-        if payload is None:
-            raise HTTPException(status_code=409, detail="Artifact render is not available")
+        payload = registered_artifact_payload(record)
         headers = content_headers(record)
         disposition = "inline" if preview else "attachment"
         filename = quote(headers.filename, safe="")
