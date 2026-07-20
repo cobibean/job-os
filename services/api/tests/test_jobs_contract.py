@@ -1,5 +1,6 @@
 import json
 import sqlite3
+from hashlib import sha256
 from pathlib import Path
 
 import pytest
@@ -57,6 +58,7 @@ class FakeJobHunterFacade:
             for index, status in enumerate(STATUSES)
         ]
         self.history = []
+        self.artifacts = {}
 
     def list_jobs(self):
         return list(self.jobs)
@@ -79,10 +81,25 @@ class FakeJobHunterFacade:
         stored["status"] = target_state
         return self.inspect_job(job_id)
 
+    def list_job_artifacts(self, job_id):
+        self.inspect_job(job_id)
+        return list(self.artifacts.get(job_id, []))
+
+    def register_artifact(self, job_id, artifact_reference):
+        return next(
+            artifact
+            for artifact in self.list_job_artifacts(job_id)
+            if artifact.get("artifact_reference") == artifact_reference
+        )
+
 
 def make_client(tmp_path, facade=None):
     app = create_app(
-        Settings(device_token="test-device-token", state_db_path=tmp_path / "jobos.db"),
+        Settings(
+            device_token="test-device-token",
+            state_db_path=tmp_path / "jobos.db",
+            artifact_roots=(tmp_path,),
+        ),
         job_facade=facade or FakeJobHunterFacade(),
     )
     return TestClient(app)
@@ -90,6 +107,19 @@ def make_client(tmp_path, facade=None):
 
 def auth_headers():
     return {"Authorization": "Bearer test-device-token"}
+
+
+def artifact_metadata(path, *, job_id="job-0", source="source-1", revision="render-1"):
+    content = path.read_bytes()
+    return {
+        "job_id": job_id,
+        "source_revision": source,
+        "artifact_revision": revision,
+        "media_type": "application/pdf",
+        "sha256": sha256(content).hexdigest(),
+        "render_status": "succeeded",
+        "path": str(path),
+    }
 
 
 def test_every_canonical_status_maps_to_exactly_one_approved_group(tmp_path):
@@ -772,3 +802,178 @@ def test_workspace_get_repairs_non_scalar_layout_values_without_losing_valid_sta
         "widths": {"jobs": 280, "center": 700, "agent": 380},
         "collapsed": [],
     }
+
+
+def test_registered_pdf_is_discoverable_and_streamed_with_trust_metadata(tmp_path):
+    facade = FakeJobHunterFacade()
+    facade.jobs = facade.jobs[:1]
+    pdf = tmp_path / "resume.pdf"
+    pdf.write_bytes(b"%PDF-1.7\ntrusted resume fixture\n%%EOF\n")
+    facade.artifacts["job-0"] = [artifact_metadata(pdf)]
+
+    with make_client(tmp_path, facade) as client:
+        refreshed = client.post(
+            "/v1/jobs/job-0/artifacts/refresh", headers=auth_headers()
+        )
+        artifact = refreshed.json()["artifacts"][0]
+        streamed = client.get(
+            f"/v1/artifacts/{artifact['artifact_id']}/content", headers=auth_headers()
+        )
+
+    assert refreshed.status_code == 200
+    assert artifact["job_id"] == "job-0"
+    assert artifact["is_current"] is True
+    assert artifact["is_last_successful"] is True
+    assert artifact["preview_available"] is True
+    assert streamed.status_code == 200
+    assert streamed.content == pdf.read_bytes()
+    assert streamed.headers["content-type"] == "application/pdf"
+    assert streamed.headers["x-artifact-revision"] == "render-1"
+    assert streamed.headers["x-source-revision"] == "source-1"
+    assert streamed.headers["x-content-sha256"] == sha256(pdf.read_bytes()).hexdigest()
+    assert streamed.headers["content-disposition"].startswith("inline;")
+
+
+def test_newer_success_and_failed_render_preserve_last_successful_preview(tmp_path):
+    facade = FakeJobHunterFacade()
+    facade.jobs = facade.jobs[:1]
+    first = tmp_path / "resume-1.pdf"
+    second = tmp_path / "resume-2.pdf"
+    first.write_bytes(b"%PDF-1.7\nrevision one\n%%EOF\n")
+    second.write_bytes(b"%PDF-1.7\nrevision two\n%%EOF\n")
+    facade.artifacts["job-0"] = [artifact_metadata(first)]
+
+    with make_client(tmp_path, facade) as client:
+        initial = client.post(
+            "/v1/jobs/job-0/artifacts/refresh", headers=auth_headers()
+        ).json()
+        facade.artifacts["job-0"] = [
+            artifact_metadata(first),
+            artifact_metadata(second, source="source-2", revision="render-2"),
+        ]
+        newer = client.post(
+            "/v1/jobs/job-0/artifacts/refresh", headers=auth_headers()
+        ).json()
+        facade.artifacts["job-0"].append(
+            {
+                "job_id": "job-0",
+                "source_revision": "source-3",
+                "artifact_revision": "render-3",
+                "media_type": "application/pdf",
+                "render_status": "failed",
+                "failure_message": "PDF render failed in fixture",
+            }
+        )
+        failed = client.post(
+            "/v1/jobs/job-0/artifacts/refresh", headers=auth_headers()
+        ).json()
+
+    assert newer["current_artifact_id"] != initial["current_artifact_id"]
+    assert newer["current_artifact_id"] == newer["last_successful_artifact_id"]
+    assert failed["current_artifact_id"] != failed["last_successful_artifact_id"]
+    current = next(
+        item for item in failed["artifacts"] if item["is_current"]
+    )
+    retained = next(
+        item for item in failed["artifacts"] if item["is_last_successful"]
+    )
+    assert current["render_status"] == "failed"
+    assert current["failure_message"] == "PDF render failed in fixture"
+    assert retained["artifact_revision"] == "render-2"
+    assert retained["preview_available"] is True
+
+
+@pytest.mark.parametrize("attack", ["root_escape", "wrong_media", "hash_mismatch"])
+def test_artifact_refresh_rejects_root_media_and_metadata_mismatches(tmp_path, attack):
+    facade = FakeJobHunterFacade()
+    facade.jobs = facade.jobs[:1]
+    root_pdf = tmp_path / "resume.pdf"
+    root_pdf.write_bytes(b"%PDF-1.7\ntrusted\n%%EOF\n")
+    raw = artifact_metadata(root_pdf)
+    if attack == "root_escape":
+        outside = tmp_path.parent / "outside-jobos-artifact.pdf"
+        outside.write_bytes(b"%PDF-1.7\noutside\n%%EOF\n")
+        raw = artifact_metadata(outside)
+    elif attack == "wrong_media":
+        raw["media_type"] = "text/plain"
+    else:
+        raw["sha256"] = "0" * 64
+    facade.artifacts["job-0"] = [raw]
+
+    with make_client(tmp_path, facade) as client:
+        response = client.post(
+            "/v1/jobs/job-0/artifacts/refresh", headers=auth_headers()
+        )
+        listed = client.get("/v1/jobs/job-0/artifacts", headers=auth_headers())
+
+    assert response.status_code == 422
+    assert listed.json()["artifacts"] == []
+    if attack == "root_escape":
+        outside.unlink(missing_ok=True)
+
+
+def test_unregistered_ids_paths_and_docx_preview_are_rejected(tmp_path):
+    facade = FakeJobHunterFacade()
+    facade.jobs = facade.jobs[:1]
+    docx = tmp_path / "resume.docx"
+    docx.write_bytes(b"PK\x03\x04fixture docx")
+    facade.artifacts["job-0"] = [
+        {
+            **artifact_metadata(docx),
+            "media_type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        }
+    ]
+
+    with make_client(tmp_path, facade) as client:
+        artifact = client.post(
+            "/v1/jobs/job-0/artifacts/refresh", headers=auth_headers()
+        ).json()["artifacts"][0]
+        docx_preview = client.get(
+            f"/v1/artifacts/{artifact['artifact_id']}/content", headers=auth_headers()
+        )
+        docx_download = client.get(
+            f"/v1/artifacts/{artifact['artifact_id']}/download", headers=auth_headers()
+        )
+        unregistered = client.get(
+            "/v1/artifacts/art_AAAAAAAAAAAAAAAA/content", headers=auth_headers()
+        )
+        arbitrary_path = client.get(
+            "/v1/artifacts/..%2F..%2Fetc%2Fpasswd/content", headers=auth_headers()
+        )
+
+    assert artifact["preview_available"] is False
+    assert docx_preview.status_code == 415
+    assert docx_download.status_code == 200
+    assert unregistered.status_code == 404
+    assert arbitrary_path.status_code in {404, 422}
+
+
+def test_workspace_restores_active_artifact_page_and_zoom(tmp_path):
+    with make_client(tmp_path) as client:
+        initial = client.get("/v1/workspace", headers=auth_headers()).json()
+        command = {
+            key: value
+            for key, value in initial.items()
+            if key
+            not in {
+                "repaired_presets",
+                "repaired_browser",
+                "browser_repair_reasons",
+            }
+        }
+        command.update(
+            {
+                "origin": "user",
+                "idempotency_key": "document-view-restore-1",
+                "active_artifact_id": "art_ABCDEFGHIJKLMNOPQRSTUVWX",
+                "active_artifact_page": 2,
+                "active_artifact_zoom": 1.4,
+            }
+        )
+        saved = client.put("/v1/workspace", headers=auth_headers(), json=command)
+        restored = client.get("/v1/workspace", headers=auth_headers())
+
+    assert saved.status_code == 200
+    assert restored.json()["active_artifact_id"] == "art_ABCDEFGHIJKLMNOPQRSTUVWX"
+    assert restored.json()["active_artifact_page"] == 2
+    assert restored.json()["active_artifact_zoom"] == 1.4

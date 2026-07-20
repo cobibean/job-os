@@ -26,6 +26,10 @@ export function App() {
         agent={<AgentPanel contextLabel={jobState.selectedJob ? `${jobState.selectedJob.company} · ${jobState.selectedJob.title}` : 'No active job'} />}
         center={<CenterWorkspace
           activeSurface={layoutState.workspace.activeCenterSurface}
+          activeJob={jobState.selectedJob}
+          activeArtifactId={layoutState.workspace.activeArtifactId ?? null}
+          activeArtifactPage={layoutState.workspace.activeArtifactPage ?? 1}
+          activeArtifactZoom={layoutState.workspace.activeArtifactZoom ?? 1}
           browserState={{
             tabs: layoutState.workspace.browserTabs ?? [],
             activeTabId: layoutState.workspace.activeBrowserTabId ?? null
@@ -36,6 +40,7 @@ export function App() {
           jobs={jobState.jobs}
           layoutSignal={`${activePreset}:${activeLayout.order.join(',')}:${activeLayout.collapsed.join(',')}`}
           onBrowserPersist={layoutState.updateBrowserState}
+          onDocumentPersist={layoutState.updateDocumentState}
           workspaceHydrated={layoutState.hydrated}
         />}
         jobs={<JobNavigator

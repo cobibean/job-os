@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState, type KeyboardEvent, type SyntheticEvent } from 'react'
 import { createPortal } from 'react-dom'
-import { ArrowLeft, ArrowRight, Download, FileText, Globe2, LoaderCircle, Plus, RefreshCw, Search, Square, X } from 'lucide-react'
+import { ArrowLeft, ArrowRight, Download, Globe2, LoaderCircle, Plus, RefreshCw, Search, Square, X } from 'lucide-react'
 
 import type { BrowserRestoreState, JobListItem } from '../../shared/contracts'
 import { useBrowser } from '../hooks/useBrowser'
 import { browserRepairMessage, type BrowserRepairReason } from '../workspaceLayout'
+import { DocumentWorkspace } from './DocumentWorkspace'
 
 interface CenterWorkspaceProps {
   activeSurface: 'browser' | 'document'
@@ -16,6 +17,11 @@ interface CenterWorkspaceProps {
   layoutSignal: string
   workspaceHydrated: boolean
   onBrowserPersist: (state: BrowserRestoreState) => void
+  activeJob: JobListItem | null
+  activeArtifactId: string | null
+  activeArtifactPage: number
+  activeArtifactZoom: number
+  onDocumentPersist: (artifactId: string | null, page: number, zoom: number) => void
 }
 
 export function CenterWorkspace(props: CenterWorkspaceProps) {
@@ -34,16 +40,14 @@ export function CenterWorkspace(props: CenterWorkspaceProps) {
   useEffect(() => setAddress(active?.url ?? ''), [active?.tabId, active?.url])
 
   if (props.activeSurface === 'document') {
-    return (
-      <main className="center-workspace document-placeholder panel-region">
-        <div className="workspace-tabs"><span className="surface-tab active"><FileText aria-hidden="true" size={15} /> Document review</span></div>
-        <section className="workspace-empty">
-          <span className="empty-orbit"><FileText aria-hidden="true" size={23} /></span>
-          <h1>Document workspace</h1>
-          <p>Faithful resume preview arrives in Phase 5. Your live browser tabs remain open in the background.</p>
-        </section>
-      </main>
-    )
+    return <DocumentWorkspace
+      job={props.activeJob}
+      hydrated={props.workspaceHydrated}
+      onViewChange={props.onDocumentPersist}
+      restoredArtifactId={props.activeArtifactId}
+      restoredPage={props.activeArtifactPage}
+      restoredZoom={props.activeArtifactZoom}
+    />
   }
 
   const moveTab = (tabId: string, delta: number) => {

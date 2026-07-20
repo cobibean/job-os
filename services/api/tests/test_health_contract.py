@@ -3,7 +3,7 @@ from jobos_api.app import create_app
 from jobos_api.settings import Settings
 
 
-def test_health_reports_a_ready_phase_three_api(tmp_path):
+def test_health_reports_a_ready_phase_five_api(tmp_path):
     app = create_app(
         Settings(
             device_token="test-device-token",
@@ -19,7 +19,7 @@ def test_health_reports_a_ready_phase_three_api(tmp_path):
         "status": "ready",
         "service": "jobos-api",
         "version": "0.1.0",
-        "state_schema": 5,
+        "state_schema": 6,
     }
 
 
@@ -63,7 +63,7 @@ def test_version_and_openapi_describe_the_shared_workspace_contract(tmp_path):
     assert version.status_code == 200
     assert version.json() == {
         "api_version": "0.1.0",
-        "contract": "jobos-v1-phase4",
+        "contract": "jobos-v1-phase5",
     }
     assert set(openapi.json()["paths"]) == {
         "/v1/health",
@@ -74,6 +74,11 @@ def test_version_and_openapi_describe_the_shared_workspace_contract(tmp_path):
         "/v1/jobs/{job_id}",
         "/v1/jobs/{job_id}/status",
         "/v1/jobs/{job_id}/history",
+        "/v1/jobs/{job_id}/artifacts",
+        "/v1/jobs/{job_id}/artifacts/refresh",
+        "/v1/jobs/{job_id}/artifacts/register",
+        "/v1/artifacts/{artifact_id}/content",
+        "/v1/artifacts/{artifact_id}/download",
         "/v1/workspace/jobs",
         "/v1/workspace",
         "/v1/workspace/jobs/selection",
@@ -118,3 +123,6 @@ def test_version_and_openapi_describe_the_shared_workspace_contract(tmp_path):
     assert set(schemas["BrowserTabMetadata"]["required"]) == {"tab_id", "url"}
     assert "browser_tabs" in schemas["WorkspaceSnapshotCommand"]["properties"]
     assert "active_browser_tab_id" in schemas["WorkspaceSnapshotResponse"]["properties"]
+    assert "active_artifact_id" in schemas["WorkspaceSnapshotResponse"]["properties"]
+    assert "active_artifact_page" in schemas["WorkspaceSnapshotResponse"]["properties"]
+    assert "active_artifact_zoom" in schemas["WorkspaceSnapshotResponse"]["properties"]

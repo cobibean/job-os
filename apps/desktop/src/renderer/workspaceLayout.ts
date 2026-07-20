@@ -20,6 +20,9 @@ export interface WorkspaceSnapshot {
   activeBrowserTabId?: string | null
   repairedBrowser?: boolean
   browserRepairReasons?: BrowserRepairReason[]
+  activeArtifactId?: string | null
+  activeArtifactPage?: number
+  activeArtifactZoom?: number
 }
 
 export const panelNames: Record<PanelId, string> = {
@@ -53,7 +56,10 @@ export function canonicalWorkspace(): WorkspaceSnapshot {
     browserTabs: [],
     activeBrowserTabId: null,
     repairedBrowser: false,
-    browserRepairReasons: []
+    browserRepairReasons: [],
+    activeArtifactId: null,
+    activeArtifactPage: 1,
+    activeArtifactZoom: 1
   }
 }
 

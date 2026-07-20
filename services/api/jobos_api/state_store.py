@@ -1,4 +1,5 @@
 import json
+import secrets
 import sqlite3
 from copy import deepcopy
 from dataclasses import dataclass
@@ -11,6 +12,7 @@ from .browser_policy import (
     safe_browser_url,
     sanitize_browser_title,
 )
+from .documents import VerifiedArtifact
 
 
 class IncompatibleSchemaError(RuntimeError):
@@ -107,6 +109,39 @@ MIGRATIONS = (
             """,
         ),
     ),
+    Migration(
+        version=6,
+        statements=(
+            """
+            CREATE TABLE document_artifacts (
+                artifact_id TEXT PRIMARY KEY,
+                registry_key TEXT NOT NULL UNIQUE,
+                job_id TEXT NOT NULL,
+                source_revision TEXT NOT NULL,
+                artifact_revision TEXT NOT NULL,
+                media_type TEXT NOT NULL,
+                sha256 TEXT,
+                render_status TEXT NOT NULL,
+                canonical_path TEXT,
+                filename TEXT,
+                failure_message TEXT,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                CHECK (render_status IN ('succeeded', 'failed', 'rendering'))
+            )
+            """,
+            "CREATE INDEX document_artifacts_job ON document_artifacts(job_id, created_at)",
+            """
+            CREATE TABLE job_document_state (
+                job_id TEXT PRIMARY KEY,
+                current_artifact_id TEXT,
+                last_successful_artifact_id TEXT,
+                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY(current_artifact_id) REFERENCES document_artifacts(artifact_id),
+                FOREIGN KEY(last_successful_artifact_id) REFERENCES document_artifacts(artifact_id)
+            )
+            """,
+        ),
+    ),
 )
 SCHEMA_VERSION = MIGRATIONS[-1].version
 
@@ -160,6 +195,9 @@ def canonical_workspace_snapshot(selected_job_id: str | None = None) -> dict[str
         "active_center_surface": "document",
         "browser_tabs": [],
         "active_browser_tab_id": None,
+        "active_artifact_id": None,
+        "active_artifact_page": 1,
+        "active_artifact_zoom": 1.0,
     }
 
 
@@ -294,6 +332,26 @@ def normalize_workspace_snapshot(
     canonical["_repaired_browser"] = bool(ordered_reasons)
     canonical["_browser_repair_reasons"] = ordered_reasons
     canonical["selected_job_id"] = selected_job_id
+    active_artifact_id = value.get("active_artifact_id")
+    canonical["active_artifact_id"] = (
+        active_artifact_id
+        if isinstance(active_artifact_id, str) and 1 <= len(active_artifact_id) <= 84
+        else None
+    )
+    active_artifact_page = value.get("active_artifact_page")
+    canonical["active_artifact_page"] = (
+        active_artifact_page
+        if isinstance(active_artifact_page, int) and 1 <= active_artifact_page <= 5000
+        else 1
+    )
+    active_artifact_zoom = value.get("active_artifact_zoom")
+    canonical["active_artifact_zoom"] = (
+        float(active_artifact_zoom)
+        if isinstance(active_artifact_zoom, (int, float))
+        and not isinstance(active_artifact_zoom, bool)
+        and 0.5 <= active_artifact_zoom <= 3.0
+        else 1.0
+    )
     return canonical, tuple(repaired)
 
 
@@ -536,6 +594,98 @@ class JobOsStateStore:
             repaired_browser,
             browser_repair_reasons,
         )
+
+    def register_document_artifacts(
+        self, job_id: str, artifacts: list[VerifiedArtifact]
+    ) -> tuple[str | None, str | None]:
+        if any(artifact.job_id != job_id for artifact in artifacts):
+            raise ValueError("Artifact job association does not match the requested job")
+        with sqlite3.connect(self._path) as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            state = connection.execute(
+                "SELECT current_artifact_id, last_successful_artifact_id "
+                "FROM job_document_state WHERE job_id = ?",
+                (job_id,),
+            ).fetchone()
+            current_id = state[0] if state else None
+            last_successful_id = state[1] if state else None
+            for artifact in artifacts:
+                row = connection.execute(
+                    "SELECT artifact_id FROM document_artifacts WHERE registry_key = ?",
+                    (artifact.registry_key,),
+                ).fetchone()
+                artifact_id = row[0] if row else f"art_{secrets.token_urlsafe(18)}"
+                if row is None:
+                    connection.execute(
+                        """
+                        INSERT INTO document_artifacts(
+                            artifact_id, registry_key, job_id, source_revision,
+                            artifact_revision, media_type, sha256, render_status,
+                            canonical_path, filename, failure_message
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            artifact_id,
+                            artifact.registry_key,
+                            artifact.job_id,
+                            artifact.source_revision,
+                            artifact.artifact_revision,
+                            artifact.media_type,
+                            artifact.sha256 or None,
+                            artifact.render_status,
+                            artifact.canonical_path,
+                            artifact.filename,
+                            artifact.failure_message,
+                        ),
+                    )
+                current_id = artifact_id
+                if artifact.render_status == "succeeded":
+                    last_successful_id = artifact_id
+            if artifacts:
+                connection.execute(
+                    """
+                    INSERT INTO job_document_state(
+                        job_id, current_artifact_id, last_successful_artifact_id
+                    ) VALUES (?, ?, ?)
+                    ON CONFLICT(job_id) DO UPDATE SET
+                        current_artifact_id = excluded.current_artifact_id,
+                        last_successful_artifact_id = excluded.last_successful_artifact_id,
+                        updated_at = CURRENT_TIMESTAMP
+                    """,
+                    (job_id, current_id, last_successful_id),
+                )
+            connection.commit()
+        return current_id, last_successful_id
+
+    def list_document_artifacts(
+        self, job_id: str
+    ) -> tuple[list[dict[str, object]], str | None, str | None]:
+        with sqlite3.connect(f"file:{self._path}?mode=ro", uri=True) as connection:
+            connection.row_factory = sqlite3.Row
+            state = connection.execute(
+                "SELECT current_artifact_id, last_successful_artifact_id "
+                "FROM job_document_state WHERE job_id = ?",
+                (job_id,),
+            ).fetchone()
+            rows = connection.execute(
+                "SELECT * FROM document_artifacts WHERE job_id = ? "
+                "ORDER BY rowid DESC",
+                (job_id,),
+            ).fetchall()
+        return (
+            [dict(row) for row in rows],
+            state["current_artifact_id"] if state else None,
+            state["last_successful_artifact_id"] if state else None,
+        )
+
+    def get_document_artifact(self, artifact_id: str) -> dict[str, object] | None:
+        with sqlite3.connect(f"file:{self._path}?mode=ro", uri=True) as connection:
+            connection.row_factory = sqlite3.Row
+            row = connection.execute(
+                "SELECT * FROM document_artifacts WHERE artifact_id = ?",
+                (artifact_id,),
+            ).fetchone()
+        return dict(row) if row else None
 
     def list_mutation_audit(self) -> list[dict[str, object]]:
         with sqlite3.connect(f"file:{self._path}?mode=ro", uri=True) as connection:

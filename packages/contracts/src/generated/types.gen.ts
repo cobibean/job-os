@@ -5,6 +5,74 @@ export type ClientOptions = {
 };
 
 /**
+ * ArtifactRecord
+ */
+export type ArtifactRecord = {
+    /**
+     * Artifact Id
+     */
+    artifact_id: string;
+    /**
+     * Artifact Revision
+     */
+    artifact_revision: string;
+    /**
+     * Created At
+     */
+    created_at: string;
+    /**
+     * Failure Message
+     */
+    failure_message: string | null;
+    /**
+     * Filename
+     */
+    filename: string | null;
+    /**
+     * Is Current
+     */
+    is_current: boolean;
+    /**
+     * Is Last Successful
+     */
+    is_last_successful: boolean;
+    /**
+     * Job Id
+     */
+    job_id: string;
+    /**
+     * Media Type
+     */
+    media_type: string;
+    /**
+     * Preview Available
+     */
+    preview_available: boolean;
+    /**
+     * Render Status
+     */
+    render_status: 'succeeded' | 'failed' | 'rendering';
+    /**
+     * Sha256
+     */
+    sha256: string | null;
+    /**
+     * Source Revision
+     */
+    source_revision: string;
+};
+
+/**
+ * ArtifactRegistrationRequest
+ */
+export type ArtifactRegistrationRequest = {
+    /**
+     * Artifact Reference
+     */
+    artifact_reference: string;
+};
+
+/**
  * BrowserTabMetadata
  */
 export type BrowserTabMetadata = {
@@ -78,6 +146,28 @@ export type HealthResponse = {
      * Version
      */
     version: string;
+};
+
+/**
+ * JobArtifactsResponse
+ */
+export type JobArtifactsResponse = {
+    /**
+     * Artifacts
+     */
+    artifacts: Array<ArtifactRecord>;
+    /**
+     * Current Artifact Id
+     */
+    current_artifact_id: string | null;
+    /**
+     * Job Id
+     */
+    job_id: string;
+    /**
+     * Last Successful Artifact Id
+     */
+    last_successful_artifact_id: string | null;
 };
 
 /**
@@ -410,7 +500,7 @@ export type VersionResponse = {
     /**
      * Contract
      */
-    contract: 'jobos-v1-phase4';
+    contract: 'jobos-v1-phase5';
 };
 
 /**
@@ -435,6 +525,18 @@ export type WorkspaceJobsResponse = {
  * WorkspaceSnapshotCommand
  */
 export type WorkspaceSnapshotCommand = {
+    /**
+     * Active Artifact Id
+     */
+    active_artifact_id?: string | null;
+    /**
+     * Active Artifact Page
+     */
+    active_artifact_page?: number;
+    /**
+     * Active Artifact Zoom
+     */
+    active_artifact_zoom?: number;
     /**
      * Active Browser Tab Id
      */
@@ -480,6 +582,18 @@ export type WorkspaceSnapshotCommand = {
  */
 export type WorkspaceSnapshotResponse = {
     /**
+     * Active Artifact Id
+     */
+    active_artifact_id?: string | null;
+    /**
+     * Active Artifact Page
+     */
+    active_artifact_page?: number;
+    /**
+     * Active Artifact Zoom
+     */
+    active_artifact_zoom?: number;
+    /**
      * Active Browser Tab Id
      */
     active_browser_tab_id?: string | null;
@@ -521,6 +635,62 @@ export type WorkspaceSnapshotResponse = {
      * Selected Preset
      */
     selected_preset: 'research' | 'review' | 'agent-focus';
+};
+
+export type ArtifactContentV1ArtifactsArtifactIdContentGetData = {
+    body?: never;
+    path: {
+        /**
+         * Artifact Id
+         */
+        artifact_id: string;
+    };
+    query?: never;
+    url: '/v1/artifacts/{artifact_id}/content';
+};
+
+export type ArtifactContentV1ArtifactsArtifactIdContentGetErrors = {
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type ArtifactContentV1ArtifactsArtifactIdContentGetError = ArtifactContentV1ArtifactsArtifactIdContentGetErrors[keyof ArtifactContentV1ArtifactsArtifactIdContentGetErrors];
+
+export type ArtifactContentV1ArtifactsArtifactIdContentGetResponses = {
+    /**
+     * Successful Response
+     */
+    200: unknown;
+};
+
+export type ArtifactDownloadV1ArtifactsArtifactIdDownloadGetData = {
+    body?: never;
+    path: {
+        /**
+         * Artifact Id
+         */
+        artifact_id: string;
+    };
+    query?: never;
+    url: '/v1/artifacts/{artifact_id}/download';
+};
+
+export type ArtifactDownloadV1ArtifactsArtifactIdDownloadGetErrors = {
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type ArtifactDownloadV1ArtifactsArtifactIdDownloadGetError = ArtifactDownloadV1ArtifactsArtifactIdDownloadGetErrors[keyof ArtifactDownloadV1ArtifactsArtifactIdDownloadGetErrors];
+
+export type ArtifactDownloadV1ArtifactsArtifactIdDownloadGetResponses = {
+    /**
+     * Successful Response
+     */
+    200: unknown;
 };
 
 export type DeviceSessionV1DeviceSessionGetData = {
@@ -709,6 +879,96 @@ export type JobInspectV1JobsJobIdGetResponses = {
 };
 
 export type JobInspectV1JobsJobIdGetResponse = JobInspectV1JobsJobIdGetResponses[keyof JobInspectV1JobsJobIdGetResponses];
+
+export type JobArtifactsV1JobsJobIdArtifactsGetData = {
+    body?: never;
+    path: {
+        /**
+         * Job Id
+         */
+        job_id: string;
+    };
+    query?: never;
+    url: '/v1/jobs/{job_id}/artifacts';
+};
+
+export type JobArtifactsV1JobsJobIdArtifactsGetErrors = {
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type JobArtifactsV1JobsJobIdArtifactsGetError = JobArtifactsV1JobsJobIdArtifactsGetErrors[keyof JobArtifactsV1JobsJobIdArtifactsGetErrors];
+
+export type JobArtifactsV1JobsJobIdArtifactsGetResponses = {
+    /**
+     * Successful Response
+     */
+    200: JobArtifactsResponse;
+};
+
+export type JobArtifactsV1JobsJobIdArtifactsGetResponse = JobArtifactsV1JobsJobIdArtifactsGetResponses[keyof JobArtifactsV1JobsJobIdArtifactsGetResponses];
+
+export type RefreshJobArtifactsV1JobsJobIdArtifactsRefreshPostData = {
+    body?: never;
+    path: {
+        /**
+         * Job Id
+         */
+        job_id: string;
+    };
+    query?: never;
+    url: '/v1/jobs/{job_id}/artifacts/refresh';
+};
+
+export type RefreshJobArtifactsV1JobsJobIdArtifactsRefreshPostErrors = {
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type RefreshJobArtifactsV1JobsJobIdArtifactsRefreshPostError = RefreshJobArtifactsV1JobsJobIdArtifactsRefreshPostErrors[keyof RefreshJobArtifactsV1JobsJobIdArtifactsRefreshPostErrors];
+
+export type RefreshJobArtifactsV1JobsJobIdArtifactsRefreshPostResponses = {
+    /**
+     * Successful Response
+     */
+    200: JobArtifactsResponse;
+};
+
+export type RefreshJobArtifactsV1JobsJobIdArtifactsRefreshPostResponse = RefreshJobArtifactsV1JobsJobIdArtifactsRefreshPostResponses[keyof RefreshJobArtifactsV1JobsJobIdArtifactsRefreshPostResponses];
+
+export type RegisterJobArtifactV1JobsJobIdArtifactsRegisterPostData = {
+    body: ArtifactRegistrationRequest;
+    path: {
+        /**
+         * Job Id
+         */
+        job_id: string;
+    };
+    query?: never;
+    url: '/v1/jobs/{job_id}/artifacts/register';
+};
+
+export type RegisterJobArtifactV1JobsJobIdArtifactsRegisterPostErrors = {
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type RegisterJobArtifactV1JobsJobIdArtifactsRegisterPostError = RegisterJobArtifactV1JobsJobIdArtifactsRegisterPostErrors[keyof RegisterJobArtifactV1JobsJobIdArtifactsRegisterPostErrors];
+
+export type RegisterJobArtifactV1JobsJobIdArtifactsRegisterPostResponses = {
+    /**
+     * Successful Response
+     */
+    200: JobArtifactsResponse;
+};
+
+export type RegisterJobArtifactV1JobsJobIdArtifactsRegisterPostResponse = RegisterJobArtifactV1JobsJobIdArtifactsRegisterPostResponses[keyof RegisterJobArtifactV1JobsJobIdArtifactsRegisterPostResponses];
 
 export type JobHistoryV1JobsJobIdHistoryGetData = {
     body?: never;

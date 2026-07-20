@@ -2,15 +2,27 @@ import asyncio
 import json
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Annotated
+from urllib.parse import quote
 
 from fastapi import Depends, FastAPI, HTTPException, Request
-from fastapi.responses import StreamingResponse
+from fastapi.responses import Response, StreamingResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from jobos_api import __version__
 from jobos_api.adapters import create_job_hunter_adapter
 from jobos_api.device_auth import DeviceAuthenticator, DeviceIdentity
+from jobos_api.documents import (
+    ARTIFACT_ID_PATTERN,
+    PDF_MEDIA_TYPE,
+    ArtifactRegistrationRequest,
+    ArtifactTrustError,
+    JobArtifactsResponse,
+    artifact_record,
+    content_headers,
+    verify_source_artifact,
+)
 from jobos_api.jobs import (
     JobDetail,
     JobEventsResponse,
@@ -67,7 +79,7 @@ def create_app(settings: Settings, *, job_facade: JobFacade | None = None) -> Fa
 
     @app.get("/v1/version", tags=["system"])
     def version() -> VersionResponse:
-        return VersionResponse(api_version=__version__, contract="jobos-v1-phase4")
+        return VersionResponse(api_version=__version__, contract="jobos-v1-phase5")
 
     def authenticated_device(
         credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer)],
@@ -234,6 +246,133 @@ def create_app(settings: Settings, *, job_facade: JobFacade | None = None) -> Fa
             return LeadHistoryResponse(events=jobs.get_lead_history(job_id))
         except KeyError as error:
             raise HTTPException(status_code=404, detail="Job not found") from error
+
+    def ensure_job(job_id: str) -> None:
+        try:
+            jobs.inspect_job(job_id)
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail="Job not found") from error
+
+    def artifact_list(job_id: str) -> JobArtifactsResponse:
+        rows, current_id, last_successful_id = state_store.list_document_artifacts(job_id)
+        return JobArtifactsResponse(
+            job_id=job_id,
+            artifacts=[
+                artifact_record(
+                    row,
+                    current_id=current_id,
+                    last_successful_id=last_successful_id,
+                )
+                for row in rows
+            ],
+            current_artifact_id=current_id,
+            last_successful_artifact_id=last_successful_id,
+        )
+
+    @app.get("/v1/jobs/{job_id}/artifacts", tags=["documents"])
+    def job_artifacts(
+        job_id: str,
+        _: Annotated[DeviceIdentity, Depends(authenticated_device)],
+    ) -> JobArtifactsResponse:
+        ensure_job(job_id)
+        return artifact_list(job_id)
+
+    @app.post("/v1/jobs/{job_id}/artifacts/refresh", tags=["documents"])
+    def refresh_job_artifacts(
+        job_id: str,
+        _: Annotated[DeviceIdentity, Depends(authenticated_device)],
+    ) -> JobArtifactsResponse:
+        ensure_job(job_id)
+        try:
+            raw_artifacts = jobs.list_job_artifacts(job_id)
+            verified = [
+                verify_source_artifact(raw, settings.artifact_roots) for raw in raw_artifacts
+            ]
+            state_store.register_document_artifacts(job_id, verified)
+        except (ArtifactTrustError, ValueError) as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
+        return artifact_list(job_id)
+
+    @app.post("/v1/jobs/{job_id}/artifacts/register", tags=["documents"])
+    def register_job_artifact(
+        job_id: str,
+        command: ArtifactRegistrationRequest,
+        _: Annotated[DeviceIdentity, Depends(authenticated_device)],
+    ) -> JobArtifactsResponse:
+        ensure_job(job_id)
+        try:
+            raw = jobs.register_artifact(job_id, command.artifact_reference)
+            verified = verify_source_artifact(raw, settings.artifact_roots)
+            state_store.register_document_artifacts(job_id, [verified])
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail="Artifact reference not found") from error
+        except (ArtifactTrustError, ValueError) as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
+        return artifact_list(job_id)
+
+    def registered_artifact_response(artifact_id: str, *, preview: bool) -> Response:
+        if not ARTIFACT_ID_PATTERN.fullmatch(artifact_id):
+            raise HTTPException(status_code=404, detail="Artifact not found")
+        record = state_store.get_document_artifact(artifact_id)
+        if record is None:
+            raise HTTPException(status_code=404, detail="Artifact not found")
+        if record["render_status"] != "succeeded" or not record["canonical_path"]:
+            raise HTTPException(status_code=409, detail="Artifact render is not available")
+        if preview and record["media_type"] != PDF_MEDIA_TYPE:
+            raise HTTPException(
+                status_code=415,
+                detail="Only authoritative PDF artifacts can be previewed in JobOS",
+            )
+        try:
+            verified = verify_source_artifact(
+                {
+                    "job_id": record["job_id"],
+                    "source_revision": record["source_revision"],
+                    "artifact_revision": record["artifact_revision"],
+                    "media_type": record["media_type"],
+                    "sha256": record["sha256"],
+                    "render_status": record["render_status"],
+                    "path": record["canonical_path"],
+                },
+                settings.artifact_roots,
+            )
+        except (ArtifactTrustError, OSError) as error:
+            raise HTTPException(
+                status_code=409,
+                detail="Registered artifact no longer matches trusted metadata",
+            ) from error
+        path = Path(verified.canonical_path or "")
+        payload = path.read_bytes()
+        headers = content_headers(record)
+        disposition = "inline" if preview else "attachment"
+        filename = quote(headers.filename, safe="")
+        return Response(
+            content=payload,
+            media_type=headers.media_type,
+            headers={
+                "Content-Disposition": f"{disposition}; filename*=UTF-8''{filename}",
+                "Digest": headers.digest,
+                "ETag": f'"{headers.sha256}"',
+                "X-Artifact-ID": headers.artifact_id,
+                "X-Artifact-Revision": headers.artifact_revision,
+                "X-Source-Revision": headers.source_revision,
+                "X-Content-SHA256": headers.sha256,
+            },
+        )
+
+    @app.get("/v1/artifacts/{artifact_id}/content", tags=["documents"])
+    def artifact_content(
+        artifact_id: str,
+        _: Annotated[DeviceIdentity, Depends(authenticated_device)],
+    ) -> Response:
+        return registered_artifact_response(artifact_id, preview=True)
+
+    @app.get("/v1/artifacts/{artifact_id}/download", tags=["documents"])
+    def artifact_download(
+        artifact_id: str,
+        _: Annotated[DeviceIdentity, Depends(authenticated_device)],
+    ) -> Response:
+        return registered_artifact_response(artifact_id, preview=False)
 
     @app.get("/v1/events", tags=["events"])
     def events_list(

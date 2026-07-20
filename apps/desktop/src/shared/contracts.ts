@@ -101,6 +101,43 @@ export interface WorkspaceSnapshot {
   activeBrowserTabId?: string | null
   repairedBrowser?: boolean
   browserRepairReasons?: BrowserRepairReason[]
+  activeArtifactId?: string | null
+  activeArtifactPage?: number
+  activeArtifactZoom?: number
+}
+
+export type ArtifactMediaType = 'application/pdf' | 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+export type ArtifactRenderStatus = 'succeeded' | 'failed' | 'rendering'
+
+export interface DocumentArtifact {
+  artifactId: string
+  jobId: string
+  sourceRevision: string
+  artifactRevision: string
+  mediaType: ArtifactMediaType
+  sha256: string | null
+  renderStatus: ArtifactRenderStatus
+  filename: string | null
+  failureMessage: string | null
+  createdAt: string
+  isCurrent: boolean
+  isLastSuccessful: boolean
+  previewAvailable: boolean
+}
+
+export interface JobArtifactsState {
+  jobId: string
+  artifacts: DocumentArtifact[]
+  currentArtifactId: string | null
+  lastSuccessfulArtifactId: string | null
+}
+
+export interface PdfArtifactPayload {
+  artifactId: string
+  artifactRevision: string
+  sourceRevision: string
+  sha256: string
+  bytes: ArrayBuffer
 }
 
 export interface ConnectivitySnapshot {
@@ -143,5 +180,13 @@ export interface JobOsRendererBridge {
     copyBlockedUrl: (tabId: string) => Promise<BrowserState>
     setBounds: (bounds: BrowserBounds) => Promise<void>
     subscribe: (listener: (state: BrowserState) => void) => () => void
+  }
+  documents: {
+    list: (jobId: string) => Promise<JobArtifactsState>
+    refresh: (jobId: string) => Promise<JobArtifactsState>
+    loadPdf: (artifactId: string) => Promise<PdfArtifactPayload>
+    export: (artifactId: string) => Promise<string>
+    reveal: (artifactId: string) => Promise<string>
+    open: (artifactId: string) => Promise<string>
   }
 }

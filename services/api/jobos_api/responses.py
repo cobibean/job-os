@@ -16,7 +16,7 @@ class HealthResponse(ApiResponse):
 
 class VersionResponse(ApiResponse):
     api_version: str = Field(min_length=1)
-    contract: Literal["jobos-v1-phase4"]
+    contract: Literal["jobos-v1-phase5"]
 
 
 class DeviceSessionResponse(ApiResponse):
