@@ -1,0 +1,19 @@
+{
+  "name": "job-os",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "pnpm@10.33.1",
+  "engines": {
+    "node": ">=26.5.0 <27"
+  },
+  "scripts": {
+    "api:export": "uv run python scripts/export_openapi.py",
+    "build": "pnpm contracts:generate && pnpm --filter @jobos/contracts build && pnpm --filter @jobos/desktop build && node scripts/verify-packaged-renderer.mjs",
+    "check": "pnpm lint && pnpm typecheck && pnpm test && pnpm build",
+    "contracts:generate": "pnpm api:export && pnpm --filter @jobos/openapi-generator generate",
+    "dev": "pnpm --filter @jobos/desktop dev",
+    "lint": "pnpm --filter @jobos/contracts lint && pnpm --filter @jobos/desktop lint && uv run ruff check services scripts",
+    "test": "pnpm --filter @jobos/desktop test && uv run pytest",
+    "typecheck": "pnpm contracts:generate && pnpm --filter @jobos/contracts build && pnpm --filter @jobos/contracts typecheck && pnpm --filter @jobos/desktop typecheck"
+  }
+}
