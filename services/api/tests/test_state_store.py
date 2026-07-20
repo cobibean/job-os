@@ -2,6 +2,7 @@ import json
 import sqlite3
 
 import pytest
+from jobos_api.browser_policy import safe_browser_url
 from jobos_api.state_store import (
     SCHEMA_VERSION,
     IncompatibleSchemaError,
@@ -18,6 +19,19 @@ def applied_versions(path):
                 "SELECT version FROM schema_migrations ORDER BY version"
             ).fetchall()
         ]
+
+
+@pytest.mark.parametrize(
+    "value",
+    ["https://[::1", "http://[", "https://example.com:bad", "https://example.com:70000"],
+)
+def test_browser_url_policy_rejects_parser_and_deferred_property_errors(value):
+    assert safe_browser_url(value, allow_blank=False) is False
+
+
+def test_browser_url_policy_accepts_electron_compatible_ipv6_and_ordinary_hosts():
+    assert safe_browser_url("https://[::1]:443/jobs?view=safe", allow_blank=False)
+    assert safe_browser_url("https://jobs.example.com:8443/roles/7", allow_blank=False)
 
 
 def metadata_columns(path):
@@ -299,6 +313,14 @@ def test_mixed_browser_restore_repairs_entries_and_active_tab_without_resetting_
                 "associated_job_id": None,
             },
             {"tab_id": "bad", "url": "file:///etc/passwd", "title": "Bad"},
+            {"tab_id": "bad-ipv6", "url": "https://[::1", "title": "Bad IPv6"},
+            {
+                "tab_id": "bad-favicon",
+                "url": "https://valid.example.com/",
+                "title": "Bad favicon",
+                "favicon_url": "http://[",
+                "associated_job_id": None,
+            },
             {
                 "tab_id": "gmail",
                 "url": "https://duplicate.example.com/",
@@ -341,7 +363,7 @@ def test_browser_repair_keeps_first_fifty_valid_tabs_in_stable_order(tmp_path):
     store = JobOsStateStore(database)
     store.initialize()
     initial = store.workspace_snapshot("device-a")
-    tabs = [
+    valid_tabs = [
         {
             "tab_id": f"tab-{index}",
             "url": f"https://example.com/{index}?view=safe",
@@ -350,6 +372,20 @@ def test_browser_repair_keeps_first_fifty_valid_tabs_in_stable_order(tmp_path):
             "associated_job_id": None,
         }
         for index in range(52)
+    ]
+    tabs = [
+        {"tab_id": "invalid", "url": "file:///etc/passwd", "title": "Invalid"},
+        valid_tabs[0],
+        {**valid_tabs[0], "url": "https://duplicate.example.com/"},
+        {"tab_id": "malformed", "url": "https://[::1", "title": "Malformed"},
+        {
+            "tab_id": "bad-favicon",
+            "url": "https://valid.example.com/",
+            "title": "Bad favicon",
+            "favicon_url": "http://[",
+            "associated_job_id": None,
+        },
+        *valid_tabs[1:],
     ]
     with sqlite3.connect(database) as connection:
         connection.execute(
@@ -361,7 +397,7 @@ def test_browser_repair_keeps_first_fifty_valid_tabs_in_stable_order(tmp_path):
                     {
                         **initial.snapshot,
                         "browser_tabs": tabs,
-                        "active_browser_tab_id": "tab-51",
+                        "active_browser_tab_id": "tab-49",
                     }
                 ),
             ),
@@ -373,4 +409,4 @@ def test_browser_repair_keeps_first_fifty_valid_tabs_in_stable_order(tmp_path):
     assert [tab["tab_id"] for tab in restored.snapshot["browser_tabs"]] == [
         f"tab-{index}" for index in range(50)
     ]
-    assert restored.snapshot["active_browser_tab_id"] == "tab-0"
+    assert restored.snapshot["active_browser_tab_id"] == "tab-49"

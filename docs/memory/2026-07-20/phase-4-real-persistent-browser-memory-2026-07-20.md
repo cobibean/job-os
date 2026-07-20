@@ -75,3 +75,34 @@
 - A native programmatic rerun was attempted with a disposable `/tmp/jobos-phase4-correction-proof-profile`, but Electron did not complete while the Mac was locked and was stopped. The script and profile were moved to Trash; no proof is claimed from that attempt.
 - Native visible MacBook acceptance and authenticated Gmail continuity remain explicitly open. The earlier native Phase 4 baseline remains recorded above, but it is not substituted for this human gate.
 - No Mac Mini, job-hunter/Hermes, Phase 5, or unrelated planning work was touched. Preserve the unrelated `docs/planning/.DS_Store` modification.
+
+## Final PM re-review correction - 2026-07-20
+
+### Corrected behavior
+
+- Python URL validation is exception-safe across parsing, hostname, port, user-info, and IDNA access. Malformed bracketed IPv6 and invalid port forms are rejected as individual browser metadata entries instead of aborting the Workspace GET. Valid bracketed IPv6 remains accepted.
+- API repair and Electron restoration now stream raw tabs in stable order, validate and deduplicate first, and only then retain the first 50 recoverable unique tabs. Invalid, malformed, or duplicate entries before the limit no longer consume capacity or displace the intended active tab.
+- Browser tab action tooltips render through a fixed document-level portal. Horizontal tab-strip scrolling remains intact while select, reorder, close, and add-tab tooltips are visibly available on both hover and keyboard focus outside the clipped strip.
+
+### Direct regressions and final source-tree verification
+
+- Direct Python malformed-URL reproduction returned `False` without raising for `https://[::1`, `http://[`, `https://example.com:bad`, and accepted `https://[::1]:443/jobs`.
+- API regressions cover malformed tab and favicon URLs surrounded by valid tabs, active-tab continuity, and a real `/v1/workspace` GET that returns `200` with repaired browser metadata. Cap-order coverage places invalid, duplicate, malformed-IPv6, and malformed-favicon entries before 52 valid unique tabs and restores `tab-0` through `tab-49` with `tab-49` active.
+- Electron regressions apply the same invalid/duplicate/malformed-before-cap ordering and restore exactly 50 unique tabs with the coherent requested active tab.
+- Focused API: `uv run --project services/api pytest services/api/tests/test_state_store.py services/api/tests/test_jobs_contract.py -q` passed.
+- Focused desktop: `PATH=/Users/cobibean/Library/pnpm/nodejs/26.5.0/bin:$PATH pnpm --filter @jobos/desktop test -- --run` passed 38 tests across 9 files.
+- Full pinned source-tree gate: `PATH=/Users/cobibean/Library/pnpm/nodejs/26.5.0/bin:$PATH pnpm check` passed lint, generated contracts and type checks, 38 desktop tests, 39 Python tests, the production Electron/Vite build, and packaged-renderer verification.
+- Contract drift: `PATH=/Users/cobibean/Library/pnpm/nodejs/26.5.0/bin:$PATH pnpm contracts:check` passed.
+- Secret scan: gitleaks 8.30.0 scanned the final 13-commit history and found no leaks.
+- Current hosted CI evidence before this correction commit: GitHub Actions run `29718496016` for `35ad9fc2284a1a28bdf836962acfbeaaf1a38ee4` failed before executing any steps (`quality` contained zero steps). It is infrastructure-only evidence and is not claimed as green; local and frozen clean-room gates remain the acceptance proof.
+
+### Visible tooltip proof
+
+- Playwright rendered the production renderer with the proof bridge and verified valid `tablist`/`tab` semantics plus the adjacent action group. Select, reorder, close, and add-tab tooltip portals each produced visible 24-pixel-high bounding boxes at renderer y-coordinate 134, below the clipped tab strip, on hover and keyboard focus. Browser console errors and warnings were zero.
+- Evidence: `output/playwright/jobos-phase4-final-tooltip-select-hover.png`, `jobos-phase4-final-tooltip-select-focus.png`, `jobos-phase4-final-tooltip-reorder-hover.png`, `jobos-phase4-final-tooltip-reorder-focus.png`, `jobos-phase4-final-tooltip-close-hover.png`, `jobos-phase4-final-tooltip-close-focus.png`, `jobos-phase4-final-tooltip-add-hover.png`, and `jobos-phase4-final-tooltip-add-focus.png`.
+
+### Final handoff constraints
+
+- Detached final-commit clean room: `/tmp/jobos-phase4-final-rereview-clean` was created from `git archive HEAD`; `pnpm install --frozen-lockfile`, `uv sync --all-packages --frozen`, and the full pinned `pnpm check` passed with 38 desktop tests, 39 Python tests, production build, and packaged-renderer verification.
+- Native visible MacBook acceptance and authenticated Gmail continuity remain explicitly open while the Mac is locked. No new native or authenticated acceptance is claimed.
+- No Mac Mini, job-hunter/Hermes, Phase 5, or unrelated planning work was touched. The unrelated `docs/planning/.DS_Store` modification remains unstaged and unmodified by this correction.

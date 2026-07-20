@@ -160,8 +160,9 @@ export class BrowserManager {
       this.#synthesizedDefault = false
     }
     const unique = new Set<string>()
-    for (const tab of restored.tabs.slice(0, BROWSER_PERSISTENCE_LIMITS.tabs)) {
+    for (const tab of restored.tabs) {
       if (!isBrowserTabMetadata(tab) || unique.has(tab.tabId)) continue
+      if (unique.size >= BROWSER_PERSISTENCE_LIMITS.tabs) break
       unique.add(tab.tabId)
       this.#createTab(tab)
     }

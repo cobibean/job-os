@@ -203,3 +203,54 @@ test('main-process emission enforces Workspace bounds and keeps later saves viab
   expect(manager.getState().tabs[0]?.blockedUrl).toBe('slack://channel/open?team=safe')
   manager.dispose()
 })
+
+test('restore validates and deduplicates before retaining fifty recoverable tabs', async () => {
+  const views: WebContentsView[] = []
+  const createView = () => {
+    const events = new EventEmitter()
+    let url = ''
+    const contents = Object.assign(events, {
+      navigationHistory: { canGoBack: () => false, canGoForward: () => false, goBack: vi.fn(), goForward: vi.fn() },
+      loadURL: vi.fn(async (next: string) => { url = next }), getURL: () => url,
+      setWindowOpenHandler: vi.fn(), isDestroyed: () => false, close: vi.fn(), reload: vi.fn(), stop: vi.fn()
+    })
+    const view = { webContents: contents, setBounds: vi.fn() } as unknown as WebContentsView
+    views.push(view)
+    return view
+  }
+  const browserSession = Object.assign(new EventEmitter(), {
+    setPermissionCheckHandler: vi.fn(), setPermissionRequestHandler: vi.fn()
+  }) as unknown as Session
+  const manager = new BrowserManager({
+    window: {
+      contentView: { addChildView: vi.fn(), removeChildView: vi.fn() },
+      webContents: { send: vi.fn() }, isDestroyed: () => false
+    } as unknown as BrowserWindow,
+    browserSession, createView, clipboard: { writeText: vi.fn() },
+    dialog: { showSaveDialog: vi.fn() } as unknown as Pick<Dialog, 'showSaveDialog'>,
+    downloadsPath: '/tmp'
+  })
+  const validTabs = Array.from({ length: 51 }, (_, index) => ({
+    tabId: `tab-${index}`, url: `https://example.com/${index}`, title: `Tab ${index}`,
+    faviconUrl: null, associatedJobId: null
+  }))
+
+  await manager.restore({
+    tabs: [
+      { tabId: 'invalid', url: 'file:///etc/passwd', title: 'Invalid', faviconUrl: null, associatedJobId: null },
+      validTabs[0]!,
+      { ...validTabs[0]!, url: 'https://duplicate.example.com/' },
+      { tabId: 'malformed', url: 'https://[::1', title: 'Malformed', faviconUrl: null, associatedJobId: null },
+      { tabId: 'bad-favicon', url: 'https://valid.example.com/', title: 'Bad favicon', faviconUrl: 'http://[', associatedJobId: null },
+      ...validTabs.slice(1)
+    ],
+    activeTabId: 'tab-49'
+  })
+
+  expect(manager.getState().tabs.map(tab => tab.tabId)).toEqual(
+    Array.from({ length: 50 }, (_, index) => `tab-${index}`)
+  )
+  expect(manager.getState().activeTabId).toBe('tab-49')
+  expect(views).toHaveLength(50)
+  manager.dispose()
+})

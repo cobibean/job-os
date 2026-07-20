@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState, type KeyboardEvent } from 'react'
+import { useEffect, useRef, useState, type KeyboardEvent, type SyntheticEvent } from 'react'
+import { createPortal } from 'react-dom'
 import { ArrowLeft, ArrowRight, Download, FileText, Globe2, LoaderCircle, Plus, RefreshCw, Search, Square, X } from 'lucide-react'
 
 import type { BrowserRestoreState, JobListItem } from '../../shared/contracts'
@@ -24,6 +25,7 @@ export function CenterWorkspace(props: CenterWorkspaceProps) {
     props.onBrowserPersist
   )
   const [address, setAddress] = useState('')
+  const [tooltip, setTooltip] = useState<{ text: string, x: number, y: number } | null>(null)
   const tabRefs = useRef(new Map<string, HTMLButtonElement>())
   const active = browser.activeTab
 
@@ -80,6 +82,21 @@ export function CenterWorkspace(props: CenterWorkspaceProps) {
   }
 
   const activeIndex = browser.state.tabs.findIndex(tab => tab.tabId === browser.state.activeTabId)
+  const tooltipTrigger = (text: string) => ({
+    'aria-describedby': 'browser-control-tooltip',
+    onBlur: () => setTooltip(null),
+    onFocus: (event: SyntheticEvent<HTMLElement>) => showTooltip(event.currentTarget, text),
+    onMouseEnter: (event: SyntheticEvent<HTMLElement>) => showTooltip(event.currentTarget, text),
+    onMouseLeave: () => setTooltip(null)
+  })
+  const showTooltip = (element: HTMLElement, text: string) => {
+    const bounds = element.getBoundingClientRect()
+    setTooltip({
+      text,
+      x: Math.max(90, Math.min(window.innerWidth - 90, bounds.left + bounds.width / 2)),
+      y: bounds.bottom + 6
+    })
+  }
 
   return (
     <main className="browser-workspace panel-region">
@@ -100,6 +117,7 @@ export function CenterWorkspace(props: CenterWorkspaceProps) {
             role="tab"
             tabIndex={tab.tabId === browser.state.activeTabId ? 0 : -1}
             type="button"
+            {...tooltipTrigger(`Select ${tab.title}`)}
           >
             {tab.faviconUrl ? <img alt="" src={tab.faviconUrl} /> : <Globe2 aria-hidden="true" size={14} />}
             <span>{tab.title || 'New tab'}</span>
@@ -108,17 +126,17 @@ export function CenterWorkspace(props: CenterWorkspaceProps) {
           ))}
         </div>
         {active ? <div className="browser-tab-actions" aria-label={`Actions for ${active.title}`} role="group">
-          <button aria-label={`Move ${active.title} left`} className="tab-order" data-tooltip={`Move ${active.title} left`} disabled={activeIndex <= 0} onClick={() => moveTab(active.tabId, -1)} type="button"><ArrowLeft aria-hidden="true" size={11} /></button>
-          <button aria-label={`Move ${active.title} right`} className="tab-order" data-tooltip={`Move ${active.title} right`} disabled={activeIndex === browser.state.tabs.length - 1} onClick={() => moveTab(active.tabId, 1)} type="button"><ArrowRight aria-hidden="true" size={11} /></button>
-          <button aria-label={`Close ${active.title}`} className="tab-close" data-tooltip={`Close ${active.title}`} onClick={() => browser.close(active.tabId)} type="button"><X aria-hidden="true" size={13} /></button>
+          <button aria-label={`Move ${active.title} left`} className="tab-order" data-tooltip={`Move ${active.title} left`} disabled={activeIndex <= 0} onClick={() => moveTab(active.tabId, -1)} type="button" {...tooltipTrigger(`Move ${active.title} left`)}><ArrowLeft aria-hidden="true" size={11} /></button>
+          <button aria-label={`Move ${active.title} right`} className="tab-order" data-tooltip={`Move ${active.title} right`} disabled={activeIndex === browser.state.tabs.length - 1} onClick={() => moveTab(active.tabId, 1)} type="button" {...tooltipTrigger(`Move ${active.title} right`)}><ArrowRight aria-hidden="true" size={11} /></button>
+          <button aria-label={`Close ${active.title}`} className="tab-close" data-tooltip={`Close ${active.title}`} onClick={() => browser.close(active.tabId)} type="button" {...tooltipTrigger(`Close ${active.title}`)}><X aria-hidden="true" size={13} /></button>
         </div> : null}
-        <button aria-label="Open a new tab" className="icon-button browser-tab-add" data-tooltip="Open a new tab" disabled={!browser.bridgeAvailable} onClick={() => browser.create()} type="button"><Plus aria-hidden="true" size={16} /></button>
+        <button aria-label="Open a new tab" className="icon-button browser-tab-add" data-tooltip="Open a new tab" disabled={!browser.bridgeAvailable} onClick={() => browser.create()} type="button" {...tooltipTrigger('Open a new tab')}><Plus aria-hidden="true" size={16} /></button>
       </div>
 
       <div className="browser-toolbar">
-        <button aria-label="Back" className="icon-button" data-tooltip="Back" disabled={!active?.canGoBack} onClick={() => active && browser.back(active.tabId)} type="button"><ArrowLeft aria-hidden="true" size={15} /></button>
-        <button aria-label="Forward" className="icon-button" data-tooltip="Forward" disabled={!active?.canGoForward} onClick={() => active && browser.forward(active.tabId)} type="button"><ArrowRight aria-hidden="true" size={15} /></button>
-        <button aria-label={active?.loading ? 'Stop loading' : 'Reload'} className="icon-button" data-tooltip={active?.loading ? 'Stop loading' : 'Reload'} disabled={!active} onClick={() => active && (active.loading ? browser.stop(active.tabId) : browser.reload(active.tabId))} type="button">
+        <button aria-label="Back" className="icon-button" data-tooltip="Back" disabled={!active?.canGoBack} onClick={() => active && browser.back(active.tabId)} type="button" {...tooltipTrigger('Back')}><ArrowLeft aria-hidden="true" size={15} /></button>
+        <button aria-label="Forward" className="icon-button" data-tooltip="Forward" disabled={!active?.canGoForward} onClick={() => active && browser.forward(active.tabId)} type="button" {...tooltipTrigger('Forward')}><ArrowRight aria-hidden="true" size={15} /></button>
+        <button aria-label={active?.loading ? 'Stop loading' : 'Reload'} className="icon-button" data-tooltip={active?.loading ? 'Stop loading' : 'Reload'} disabled={!active} onClick={() => active && (active.loading ? browser.stop(active.tabId) : browser.reload(active.tabId))} type="button" {...tooltipTrigger(active?.loading ? 'Stop loading' : 'Reload')}>
           {active?.loading ? <Square aria-hidden="true" size={13} /> : <RefreshCw aria-hidden="true" size={14} />}
         </button>
         <form className="address-form" onSubmit={event => { event.preventDefault(); if (active) browser.navigate(active.tabId, address) }}>
@@ -164,6 +182,10 @@ export function CenterWorkspace(props: CenterWorkspaceProps) {
         ) : null}
       </div>
       <p aria-live="polite" className="browser-announcement">{browser.message}</p>
+      {tooltip ? createPortal(
+        <div className="browser-tooltip" id="browser-control-tooltip" role="tooltip" style={{ left: tooltip.x, top: tooltip.y }}>{tooltip.text}</div>,
+        document.body
+      ) : null}
     </main>
   )
 }

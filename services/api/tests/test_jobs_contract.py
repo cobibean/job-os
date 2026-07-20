@@ -388,6 +388,57 @@ def test_workspace_rejects_credential_bearing_browser_metadata(tmp_path):
     assert response.status_code == 422
 
 
+def test_workspace_get_drops_malformed_url_and_favicon_without_losing_valid_tabs(tmp_path):
+    with make_client(tmp_path) as client:
+        initial = client.get("/v1/workspace", headers=auth_headers()).json()
+        snapshot = {
+            key: value
+            for key, value in initial.items()
+            if key not in {"revision", "repaired_presets", "repaired_browser"}
+        }
+        snapshot["browser_tabs"] = [
+            {
+                "tab_id": "before",
+                "url": "https://example.com/before",
+                "title": "Before",
+                "favicon_url": None,
+                "associated_job_id": None,
+            },
+            {"tab_id": "bad-url", "url": "https://[::1", "title": "Bad URL"},
+            {
+                "tab_id": "bad-favicon",
+                "url": "https://example.com/valid-page",
+                "title": "Bad favicon",
+                "favicon_url": "http://[",
+                "associated_job_id": None,
+            },
+            {
+                "tab_id": "after",
+                "url": "https://example.com/after",
+                "title": "After",
+                "favicon_url": None,
+                "associated_job_id": None,
+            },
+        ]
+        snapshot["active_browser_tab_id"] = "after"
+        with sqlite3.connect(tmp_path / "jobos.db") as connection:
+            connection.execute(
+                """
+                INSERT INTO workspace_snapshots(device_id, revision, snapshot_json)
+                VALUES (?, ?, ?)
+                """,
+                ("primary-device", 9, json.dumps(snapshot)),
+            )
+
+        response = client.get("/v1/workspace", headers=auth_headers())
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["repaired_browser"] is True
+    assert [tab["tab_id"] for tab in body["browser_tabs"]] == ["before", "after"]
+    assert body["active_browser_tab_id"] == "after"
+
+
 def test_workspace_rejects_capability_session_and_signed_url_variants(tmp_path):
     facade = FakeJobHunterFacade()
     sensitive_parameters = [

@@ -7,6 +7,7 @@ Ordinary query parameters remain valid.
 """
 
 import re
+from ipaddress import IPv6Address
 from urllib.parse import parse_qsl, urlsplit
 
 BROWSER_TAB_LIMIT = 50
@@ -39,12 +40,39 @@ def safe_browser_url(value: object, *, allow_blank: bool) -> bool:
         return allow_blank
     if not isinstance(value, str) or len(value) > BROWSER_URL_LIMIT:
         return False
-    parsed = urlsplit(value)
-    return (
-        parsed.scheme in ("http", "https")
-        and bool(parsed.hostname)
-        and not parsed.username
-        and not parsed.password
-        and not parsed.fragment
-        and not any(is_sensitive_browser_parameter(key) for key, _ in parse_qsl(parsed.query))
-    )
+    try:
+        parsed = urlsplit(value)
+        hostname = parsed.hostname
+        # Accessing these properties performs validation that urlsplit defers,
+        # including bracketed hosts and numeric port range checks.
+        port = parsed.port
+        username = parsed.username
+        password = parsed.password
+        if parsed.scheme not in ("http", "https") or not hostname:
+            return False
+        if username or password or parsed.fragment:
+            return False
+        if any(character.isspace() or ord(character) < 32 for character in value):
+            return False
+        if "\\" in parsed.netloc or port is not None and not 0 < port <= 65535:
+            return False
+        if ":" in hostname:
+            IPv6Address(hostname)
+        else:
+            ascii_hostname = hostname.rstrip(".").encode("idna").decode("ascii")
+            if not ascii_hostname or len(ascii_hostname) > 253:
+                return False
+            if any(
+                not label
+                or len(label) > 63
+                or label.startswith("-")
+                or label.endswith("-")
+                or re.fullmatch(r"[a-zA-Z0-9_-]+", label) is None
+                for label in ascii_hostname.split(".")
+            ):
+                return False
+        return not any(
+            is_sensitive_browser_parameter(key) for key, _ in parse_qsl(parsed.query)
+        )
+    except (TypeError, ValueError, UnicodeError, OverflowError):
+        return False
