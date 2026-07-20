@@ -446,7 +446,7 @@ test('browser tabs expose valid keyboard tab semantics, adjacent actions, and fo
     value: {
       connectivity: { get: vi.fn().mockRejectedValue(new Error('offline')) },
       workspace: {
-        get: vi.fn().mockResolvedValue({ ...restoredWorkspace(2), selectedPreset: 'research', activeCenterSurface: 'browser', browserTabs: metadata, activeBrowserTabId: 'gmail', repairedBrowser: true }),
+        get: vi.fn().mockResolvedValue({ ...restoredWorkspace(2), selectedPreset: 'research', activeCenterSurface: 'browser', browserTabs: metadata, activeBrowserTabId: 'gmail', repairedBrowser: true, browserRepairReasons: ['dropped_tabs', 'reselected_active_tab'] }),
         save: vi.fn().mockImplementation(snapshot => Promise.resolve({ ...snapshot, revision: snapshot.revision + 1 }))
       },
       browser: {
@@ -465,7 +465,7 @@ test('browser tabs expose valid keyboard tab semantics, adjacent actions, and fo
   expect(gmail.getAttribute('aria-selected')).toBe('true')
   expect(gmail.getAttribute('tabindex')).toBe('0')
   expect(listing.getAttribute('tabindex')).toBe('-1')
-  expect(screen.getByText(/Some saved browser tabs could not be restored/)).not.toBeNull()
+  expect(screen.getAllByText(/invalid saved tabs were skipped; a recoverable active tab was selected/)).toHaveLength(2)
   fireEvent.keyDown(gmail, { key: 'ArrowRight' })
   await waitFor(() => expect(select).toHaveBeenCalledWith('listing'))
   expect(document.activeElement).toBe(listing)
@@ -496,6 +496,45 @@ test('browser tabs expose valid keyboard tab semantics, adjacent actions, and fo
   const add = screen.getByRole('button', { name: 'Open a new tab' })
   fireEvent.focus(add)
   expect(screen.getByRole('tooltip').textContent).toBe('Open a new tab')
+})
+
+test.each([
+  [['protected_title'], 'Credential-like title metadata was protected. No browser tabs were lost.'],
+  [['dropped_tabs'], 'Browser metadata was repaired: invalid saved tabs were skipped.'],
+  [['reselected_active_tab'], 'Browser metadata was repaired: a recoverable active tab was selected.'],
+  [['protected_title', 'dropped_tabs', 'reselected_active_tab'], 'Browser metadata was repaired: credential-like title metadata was protected; invalid saved tabs were skipped; a recoverable active tab was selected.']
+] as const)('announces %j browser repairs accurately in the live region', async (reasons, expected) => {
+  const metadata = [{ tabId: 'safe', url: 'https://example.com/', title: 'Safe', faviconUrl: null, associatedJobId: null }]
+  const browserState = {
+    tabs: metadata.map(tab => ({ ...tab, loading: false, canGoBack: false, canGoForward: false, error: null, crashed: false, blockedUrl: null })),
+    activeTabId: 'safe', download: null, notice: null
+  }
+  Object.defineProperty(window, 'jobos', {
+    configurable: true,
+    value: {
+      connectivity: { get: vi.fn().mockRejectedValue(new Error('offline')) },
+      workspace: {
+        get: vi.fn().mockResolvedValue({
+          ...restoredWorkspace(2), selectedPreset: 'research', activeCenterSurface: 'browser',
+          browserTabs: metadata, activeBrowserTabId: 'safe', repairedBrowser: true,
+          browserRepairReasons: [...reasons]
+        }),
+        save: vi.fn().mockImplementation(snapshot => Promise.resolve({ ...snapshot, revision: snapshot.revision + 1 }))
+      },
+      browser: {
+        restore: vi.fn().mockResolvedValue(browserState), getState: vi.fn(), subscribe: vi.fn().mockReturnValue(() => undefined),
+        setBounds: vi.fn().mockResolvedValue(undefined), create: vi.fn(), select: vi.fn(), close: vi.fn(), reorder: vi.fn(),
+        navigate: vi.fn(), back: vi.fn(), forward: vi.fn(), reload: vi.fn(), stop: vi.fn(), associate: vi.fn(), copyBlockedUrl: vi.fn()
+      }
+    }
+  })
+
+  render(<App />)
+
+  await waitFor(() => {
+    const messages = screen.getAllByText(expected)
+    expect(messages.some(message => message.getAttribute('role') === 'status')).toBe(true)
+  })
 })
 
 test('layout changes preserve mounted content surface identities', async () => {

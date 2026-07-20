@@ -4,6 +4,7 @@ import type { LayoutPreset, PanelId, WorkspaceSnapshot } from '../workspaceLayou
 import type { BrowserRestoreState } from '../../shared/contracts'
 import {
   canonicalWorkspace,
+  browserRepairMessage,
   movePanel,
   resetActivePreset,
   resizeAdjacentPanels,
@@ -82,7 +83,7 @@ export function useWorkspace(selectedJobId: string | null) {
       if (restored.repairedPresets.length) {
         setAnnouncement(`Recovered ${restored.repairedPresets.join(', ')} layout`)
       } else if (restored.repairedBrowser) {
-        setAnnouncement('Recovered valid browser tabs from partially damaged saved metadata')
+        setAnnouncement(browserRepairMessage(restored.browserRepairReasons, true) ?? 'Saved browser metadata was repaired.')
       }
       if (pending.length) {
         recoveringStartup.current = true
@@ -148,7 +149,8 @@ export function useWorkspace(selectedJobId: string | null) {
     ...current,
     browserTabs: browser.tabs,
     activeBrowserTabId: browser.activeTabId,
-    repairedBrowser: false
+    repairedBrowser: false,
+    browserRepairReasons: []
   }), ''), [commit])
 
   return { workspace, announcement, hydrated, selectPreset, resize, collapse, move, reset, updateBrowserState }

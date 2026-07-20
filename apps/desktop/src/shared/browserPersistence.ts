@@ -28,11 +28,12 @@ export const BROWSER_SAFE_TITLE_FALLBACK = 'Protected page'
 // credential assignments only. Ambiguous words such as "session" and "code"
 // require "="; high-confidence carrier names also accept ":".
 const titleCredentialCarrierNames = [
-  'accesstoken', 'apikey', 'assertion', 'authorization', 'authorizationcode', 'authcode',
+  'accesskey', 'accesstoken', 'apikey', 'assertion', 'authorization',
+  'authorizationcode', 'authcode', 'awsaccesskeyid', 'awssecretaccesskey',
   'authtoken', 'bearertoken', 'capability', 'capabilitytoken', 'codeverifier',
   'credential', 'idtoken', 'jsessionid', 'jwt', 'macaroon', 'oauthcode',
   'oauthstate', 'oauthtoken', 'oauthverifier', 'password', 'phpsessid',
-  'refreshtoken', 'relaystate', 'samlart', 'samlrequest', 'samlresponse',
+  'privatekey', 'refreshtoken', 'relaystate', 'samlart', 'samlrequest', 'samlresponse',
   'sessionid', 'sessionkey', 'signature', 'signedurl', 'ticket',
   'xamzcredential', 'xamzsignature', 'xgoogsignature'
 ] as const
@@ -48,16 +49,24 @@ const titleCredentialPatterns = [
   ...titleEqualsOnlyCarrierNames.map(name => titleCarrierPattern(name, '='))
 ]
 
-function decodeBrowserPolicyComponent(value: string): string {
-  let decoded = value
+function decodeValidPercentRuns(value: string): string {
+  return value.replace(/(?:%[0-9a-f]{2})+/giu, run => {
+    const bytes = run.match(/[0-9a-f]{2}/giu)?.map(byte => Number.parseInt(byte, 16)) ?? []
+    return new TextDecoder('utf-8', { fatal: false }).decode(Uint8Array.from(bytes))
+  })
+}
+
+export function decodeBrowserPolicyComponent(
+  value: string,
+  limit: number = BROWSER_PERSISTENCE_LIMITS.url
+): string {
+  let decoded = value.slice(0, limit)
   for (let attempt = 0; attempt < 3; attempt += 1) {
-    try {
-      const next = decodeURIComponent(decoded)
-      if (next === decoded) break
-      decoded = next
-    } catch {
-      break
-    }
+    const next = decodeValidPercentRuns(decoded)
+      .replace(/%(?![0-9a-f]{2})[^\s%]{0,2}/giu, ' ')
+      .slice(0, limit)
+    if (next === decoded) break
+    decoded = next
   }
   return decoded
 }
@@ -72,7 +81,7 @@ export function isSensitiveBrowserParameter(name: string): boolean {
 }
 
 export function browserTitleContainsCredentials(value: string): boolean {
-  const decoded = decodeBrowserPolicyComponent(value)
+  const decoded = decodeBrowserPolicyComponent(value, BROWSER_PERSISTENCE_LIMITS.title * 4)
   return titleCredentialPatterns.some(pattern => pattern.test(decoded))
 }
 

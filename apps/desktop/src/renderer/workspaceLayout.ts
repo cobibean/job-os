@@ -1,6 +1,7 @@
 export type PanelId = 'jobs' | 'center' | 'agent'
 export type LayoutPreset = 'research' | 'review' | 'agent-focus'
 export type CenterSurface = 'browser' | 'document'
+export type BrowserRepairReason = import('../shared/contracts').BrowserRepairReason
 
 export interface PanelLayout {
   order: PanelId[]
@@ -18,6 +19,7 @@ export interface WorkspaceSnapshot {
   browserTabs?: import('../shared/contracts').BrowserTabMetadata[]
   activeBrowserTabId?: string | null
   repairedBrowser?: boolean
+  browserRepairReasons?: BrowserRepairReason[]
 }
 
 export const panelNames: Record<PanelId, string> = {
@@ -50,8 +52,27 @@ export function canonicalWorkspace(): WorkspaceSnapshot {
     repairedPresets: [],
     browserTabs: [],
     activeBrowserTabId: null,
-    repairedBrowser: false
+    repairedBrowser: false,
+    browserRepairReasons: []
   }
+}
+
+export function browserRepairMessage(
+  reasons: BrowserRepairReason[] = [],
+  repairedBrowser = false
+): string | null {
+  if (!repairedBrowser && reasons.length === 0) return null
+  const unique = new Set(reasons)
+  const messages: string[] = []
+  if (unique.has('protected_title')) messages.push('credential-like title metadata was protected')
+  if (unique.has('dropped_tabs')) messages.push('invalid saved tabs were skipped')
+  if (unique.has('reselected_active_tab')) messages.push('a recoverable active tab was selected')
+  if (unique.has('metadata_adjusted')) messages.push('invalid browser metadata was adjusted')
+  if (messages.length === 0) return 'Saved browser metadata was repaired.'
+  if (messages.length === 1 && unique.has('protected_title')) {
+    return 'Credential-like title metadata was protected. No browser tabs were lost.'
+  }
+  return `Browser metadata was repaired: ${messages.join('; ')}.`
 }
 
 function updateActiveLayout(workspace: WorkspaceSnapshot, update: (layout: PanelLayout) => PanelLayout) {
