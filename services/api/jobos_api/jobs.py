@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Any, Literal, Protocol
+from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl
 
@@ -108,6 +109,7 @@ class ManualOrderRequest(BaseModel):
 
     job_ids: list[str] = Field(min_length=1)
     origin: Literal["user", "mcp"]
+    idempotency_key: str = Field(default_factory=lambda: str(uuid4()), min_length=1, max_length=128)
 
 
 class JobMutationResponse(BaseModel):
@@ -129,6 +131,7 @@ class JobSelectionRequest(BaseModel):
 
     job_id: str
     origin: Literal["user", "mcp"]
+    idempotency_key: str = Field(default_factory=lambda: str(uuid4()), min_length=1, max_length=128)
 
 
 class JobSortRequest(BaseModel):
@@ -136,6 +139,7 @@ class JobSortRequest(BaseModel):
 
     sort_mode: SortMode
     origin: Literal["user", "mcp"]
+    idempotency_key: str = Field(default_factory=lambda: str(uuid4()), min_length=1, max_length=128)
 
 
 class StatusChangeRequest(BaseModel):
@@ -157,6 +161,7 @@ class StatusChangeRequest(BaseModel):
     ]
     origin: Literal["user", "mcp"]
     reason: str | None = Field(default=None, max_length=500)
+    idempotency_key: str = Field(default_factory=lambda: str(uuid4()), min_length=1, max_length=128)
 
 
 class StatusChangeResponse(BaseModel):
@@ -218,11 +223,7 @@ def list_jobs(
         jobs.append(JobListItem(**row, status_group=STATUS_GROUPS[status]))
     if query:
         normalized_query = query.casefold().strip()
-        jobs = [
-            job
-            for job in jobs
-            if normalized_query in f"{job.company} {job.title}".casefold()
-        ]
+        jobs = [job for job in jobs if normalized_query in f"{job.company} {job.title}".casefold()]
     if status_group:
         jobs = [job for job in jobs if job.status_group == status_group]
     if sort == "manual" and manual_order:

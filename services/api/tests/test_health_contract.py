@@ -64,7 +64,7 @@ def test_version_and_openapi_describe_the_shared_workspace_contract(tmp_path):
     assert version.status_code == 200
     assert version.json() == {
         "api_version": "0.1.0",
-        "contract": "jobos-v1-phase6-backend",
+        "contract": "jobos-v1-phase7-parity",
     }
     assert set(openapi.json()["paths"]) == {
         "/v1/health",
@@ -91,6 +91,10 @@ def test_version_and_openapi_describe_the_shared_workspace_contract(tmp_path):
         "/v1/conversations/current/turns/{turn_id}/cancel",
         "/v1/conversations/current/turns/{turn_id}/retry",
         "/v1/conversations/current/events/stream",
+        "/v1/desktop/capabilities",
+        "/v1/browser/commands",
+        "/v1/jobs/{job_id}/artifacts/render",
+        "/v1/activity",
     }
     schemas = openapi.json()["components"]["schemas"]
     assert set(schemas["HealthResponse"]["required"]) == {

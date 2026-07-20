@@ -2,7 +2,7 @@
 
 import { client } from './client.gen.js';
 import type { Client, ClientMeta, Options as Options2, RequestResult, TDataShape } from './client/index.js';
-import type { ArtifactContentV1ArtifactsArtifactIdContentGetData, ArtifactContentV1ArtifactsArtifactIdContentGetErrors, ArtifactContentV1ArtifactsArtifactIdContentGetResponses, ArtifactDownloadV1ArtifactsArtifactIdDownloadGetData, ArtifactDownloadV1ArtifactsArtifactIdDownloadGetErrors, ArtifactDownloadV1ArtifactsArtifactIdDownloadGetResponses, ConversationCancelV1ConversationsCurrentTurnsTurnIdCancelPostData, ConversationCancelV1ConversationsCurrentTurnsTurnIdCancelPostErrors, ConversationCancelV1ConversationsCurrentTurnsTurnIdCancelPostResponses, ConversationCurrentV1ConversationsCurrentGetData, ConversationCurrentV1ConversationsCurrentGetResponses, ConversationRetryV1ConversationsCurrentTurnsTurnIdRetryPostData, ConversationRetryV1ConversationsCurrentTurnsTurnIdRetryPostErrors, ConversationRetryV1ConversationsCurrentTurnsTurnIdRetryPostResponses, ConversationSendV1ConversationsCurrentMessagesPostData, ConversationSendV1ConversationsCurrentMessagesPostErrors, ConversationSendV1ConversationsCurrentMessagesPostResponses, ConversationStreamV1ConversationsCurrentEventsStreamGetData, ConversationStreamV1ConversationsCurrentEventsStreamGetErrors, ConversationStreamV1ConversationsCurrentEventsStreamGetResponses, DeviceSessionV1DeviceSessionGetData, DeviceSessionV1DeviceSessionGetResponses, EventsListV1EventsGetData, EventsListV1EventsGetErrors, EventsListV1EventsGetResponses, EventsStreamV1EventsStreamGetData, EventsStreamV1EventsStreamGetErrors, EventsStreamV1EventsStreamGetResponses, HealthV1HealthGetData, HealthV1HealthGetResponses, JobArtifactsV1JobsJobIdArtifactsGetData, JobArtifactsV1JobsJobIdArtifactsGetErrors, JobArtifactsV1JobsJobIdArtifactsGetResponses, JobHistoryV1JobsJobIdHistoryGetData, JobHistoryV1JobsJobIdHistoryGetErrors, JobHistoryV1JobsJobIdHistoryGetResponses, JobInspectV1JobsJobIdGetData, JobInspectV1JobsJobIdGetErrors, JobInspectV1JobsJobIdGetResponses, JobsListV1JobsGetData, JobsListV1JobsGetErrors, JobsListV1JobsGetResponses, JobsReorderV1JobsOrderPutData, JobsReorderV1JobsOrderPutErrors, JobsReorderV1JobsOrderPutResponses, JobUpdateStatusV1JobsJobIdStatusPutData, JobUpdateStatusV1JobsJobIdStatusPutErrors, JobUpdateStatusV1JobsJobIdStatusPutResponses, RefreshJobArtifactsV1JobsJobIdArtifactsRefreshPostData, RefreshJobArtifactsV1JobsJobIdArtifactsRefreshPostErrors, RefreshJobArtifactsV1JobsJobIdArtifactsRefreshPostResponses, RegisterJobArtifactV1JobsJobIdArtifactsRegisterPostData, RegisterJobArtifactV1JobsJobIdArtifactsRegisterPostErrors, RegisterJobArtifactV1JobsJobIdArtifactsRegisterPostResponses, VersionV1VersionGetData, VersionV1VersionGetResponses, WorkspaceGetV1WorkspaceGetData, WorkspaceGetV1WorkspaceGetResponses, WorkspaceJobsV1WorkspaceJobsGetData, WorkspaceJobsV1WorkspaceJobsGetResponses, WorkspacePutV1WorkspacePutData, WorkspacePutV1WorkspacePutErrors, WorkspacePutV1WorkspacePutResponses, WorkspaceSelectJobV1WorkspaceJobsSelectionPutData, WorkspaceSelectJobV1WorkspaceJobsSelectionPutErrors, WorkspaceSelectJobV1WorkspaceJobsSelectionPutResponses, WorkspaceSortJobsV1WorkspaceJobsSortPutData, WorkspaceSortJobsV1WorkspaceJobsSortPutErrors, WorkspaceSortJobsV1WorkspaceJobsSortPutResponses } from './types.gen.js';
+import type { ArtifactContentV1ArtifactsArtifactIdContentGetData, ArtifactContentV1ArtifactsArtifactIdContentGetErrors, ArtifactContentV1ArtifactsArtifactIdContentGetResponses, ArtifactDownloadV1ArtifactsArtifactIdDownloadGetData, ArtifactDownloadV1ArtifactsArtifactIdDownloadGetErrors, ArtifactDownloadV1ArtifactsArtifactIdDownloadGetResponses, BrowserCommandV1BrowserCommandsPostData, BrowserCommandV1BrowserCommandsPostErrors, BrowserCommandV1BrowserCommandsPostResponses, ConversationCancelV1ConversationsCurrentTurnsTurnIdCancelPostData, ConversationCancelV1ConversationsCurrentTurnsTurnIdCancelPostErrors, ConversationCancelV1ConversationsCurrentTurnsTurnIdCancelPostResponses, ConversationCurrentV1ConversationsCurrentGetData, ConversationCurrentV1ConversationsCurrentGetResponses, ConversationRetryV1ConversationsCurrentTurnsTurnIdRetryPostData, ConversationRetryV1ConversationsCurrentTurnsTurnIdRetryPostErrors, ConversationRetryV1ConversationsCurrentTurnsTurnIdRetryPostResponses, ConversationSendV1ConversationsCurrentMessagesPostData, ConversationSendV1ConversationsCurrentMessagesPostErrors, ConversationSendV1ConversationsCurrentMessagesPostResponses, ConversationStreamV1ConversationsCurrentEventsStreamGetData, ConversationStreamV1ConversationsCurrentEventsStreamGetErrors, ConversationStreamV1ConversationsCurrentEventsStreamGetResponses, DesktopCapabilityPresenceV1DesktopCapabilitiesGetData, DesktopCapabilityPresenceV1DesktopCapabilitiesGetResponses, DeviceSessionV1DeviceSessionGetData, DeviceSessionV1DeviceSessionGetResponses, EventsListV1EventsGetData, EventsListV1EventsGetErrors, EventsListV1EventsGetResponses, EventsStreamV1EventsStreamGetData, EventsStreamV1EventsStreamGetErrors, EventsStreamV1EventsStreamGetResponses, HealthV1HealthGetData, HealthV1HealthGetResponses, JobArtifactsV1JobsJobIdArtifactsGetData, JobArtifactsV1JobsJobIdArtifactsGetErrors, JobArtifactsV1JobsJobIdArtifactsGetResponses, JobHistoryV1JobsJobIdHistoryGetData, JobHistoryV1JobsJobIdHistoryGetErrors, JobHistoryV1JobsJobIdHistoryGetResponses, JobInspectV1JobsJobIdGetData, JobInspectV1JobsJobIdGetErrors, JobInspectV1JobsJobIdGetResponses, JobsListV1JobsGetData, JobsListV1JobsGetErrors, JobsListV1JobsGetResponses, JobsReorderV1JobsOrderPutData, JobsReorderV1JobsOrderPutErrors, JobsReorderV1JobsOrderPutResponses, JobUpdateStatusV1JobsJobIdStatusPutData, JobUpdateStatusV1JobsJobIdStatusPutErrors, JobUpdateStatusV1JobsJobIdStatusPutResponses, RefreshJobArtifactsV1JobsJobIdArtifactsRefreshPostData, RefreshJobArtifactsV1JobsJobIdArtifactsRefreshPostErrors, RefreshJobArtifactsV1JobsJobIdArtifactsRefreshPostResponses, RegisterJobArtifactV1JobsJobIdArtifactsRegisterPostData, RegisterJobArtifactV1JobsJobIdArtifactsRegisterPostErrors, RegisterJobArtifactV1JobsJobIdArtifactsRegisterPostResponses, RenderJobArtifactV1JobsJobIdArtifactsRenderPostData, RenderJobArtifactV1JobsJobIdArtifactsRenderPostErrors, RenderJobArtifactV1JobsJobIdArtifactsRenderPostResponses, ReportActivityV1ActivityPostData, ReportActivityV1ActivityPostErrors, ReportActivityV1ActivityPostResponses, VersionV1VersionGetData, VersionV1VersionGetResponses, WorkspaceGetV1WorkspaceGetData, WorkspaceGetV1WorkspaceGetErrors, WorkspaceGetV1WorkspaceGetResponses, WorkspaceJobsV1WorkspaceJobsGetData, WorkspaceJobsV1WorkspaceJobsGetResponses, WorkspacePutV1WorkspacePutData, WorkspacePutV1WorkspacePutErrors, WorkspacePutV1WorkspacePutResponses, WorkspaceSelectJobV1WorkspaceJobsSelectionPutData, WorkspaceSelectJobV1WorkspaceJobsSelectionPutErrors, WorkspaceSelectJobV1WorkspaceJobsSelectionPutResponses, WorkspaceSortJobsV1WorkspaceJobsSortPutData, WorkspaceSortJobsV1WorkspaceJobsSortPutErrors, WorkspaceSortJobsV1WorkspaceJobsSortPutResponses } from './types.gen.js';
 
 export type Options<TData extends TDataShape = TDataShape, ThrowOnError extends boolean = boolean, TResponse = unknown> = Options2<TData, ThrowOnError, TResponse> & {
     /**
@@ -17,6 +17,19 @@ export type Options<TData extends TDataShape = TDataShape, ThrowOnError extends 
      */
     meta?: keyof ClientMeta extends never ? Record<string, unknown> : ClientMeta;
 };
+
+/**
+ * Report Activity
+ */
+export const reportActivityV1ActivityPost = <ThrowOnError extends boolean = false>(options: Options<ReportActivityV1ActivityPostData, ThrowOnError>): RequestResult<ReportActivityV1ActivityPostResponses, ReportActivityV1ActivityPostErrors, ThrowOnError> => (options.client ?? client).post<ReportActivityV1ActivityPostResponses, ReportActivityV1ActivityPostErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/v1/activity',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
 
 /**
  * Artifact Content
@@ -34,6 +47,19 @@ export const artifactDownloadV1ArtifactsArtifactIdDownloadGet = <ThrowOnError ex
     security: [{ scheme: 'bearer', type: 'http' }],
     url: '/v1/artifacts/{artifact_id}/download',
     ...options
+});
+
+/**
+ * Browser Command
+ */
+export const browserCommandV1BrowserCommandsPost = <ThrowOnError extends boolean = false>(options: Options<BrowserCommandV1BrowserCommandsPostData, ThrowOnError>): RequestResult<BrowserCommandV1BrowserCommandsPostResponses, BrowserCommandV1BrowserCommandsPostErrors, ThrowOnError> => (options.client ?? client).post<BrowserCommandV1BrowserCommandsPostResponses, BrowserCommandV1BrowserCommandsPostErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/v1/browser/commands',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
 });
 
 /**
@@ -87,6 +113,15 @@ export const conversationRetryV1ConversationsCurrentTurnsTurnIdRetryPost = <Thro
         'Content-Type': 'application/json',
         ...options.headers
     }
+});
+
+/**
+ * Desktop Capability Presence
+ */
+export const desktopCapabilityPresenceV1DesktopCapabilitiesGet = <ThrowOnError extends boolean = false>(options?: Options<DesktopCapabilityPresenceV1DesktopCapabilitiesGetData, ThrowOnError>): RequestResult<DesktopCapabilityPresenceV1DesktopCapabilitiesGetResponses, unknown, ThrowOnError> => (options?.client ?? client).get<DesktopCapabilityPresenceV1DesktopCapabilitiesGetResponses, unknown, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/v1/desktop/capabilities',
+    ...options
 });
 
 /**
@@ -167,7 +202,11 @@ export const jobArtifactsV1JobsJobIdArtifactsGet = <ThrowOnError extends boolean
 export const refreshJobArtifactsV1JobsJobIdArtifactsRefreshPost = <ThrowOnError extends boolean = false>(options: Options<RefreshJobArtifactsV1JobsJobIdArtifactsRefreshPostData, ThrowOnError>): RequestResult<RefreshJobArtifactsV1JobsJobIdArtifactsRefreshPostResponses, RefreshJobArtifactsV1JobsJobIdArtifactsRefreshPostErrors, ThrowOnError> => (options.client ?? client).post<RefreshJobArtifactsV1JobsJobIdArtifactsRefreshPostResponses, RefreshJobArtifactsV1JobsJobIdArtifactsRefreshPostErrors, ThrowOnError>({
     security: [{ scheme: 'bearer', type: 'http' }],
     url: '/v1/jobs/{job_id}/artifacts/refresh',
-    ...options
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
 });
 
 /**
@@ -176,6 +215,19 @@ export const refreshJobArtifactsV1JobsJobIdArtifactsRefreshPost = <ThrowOnError 
 export const registerJobArtifactV1JobsJobIdArtifactsRegisterPost = <ThrowOnError extends boolean = false>(options: Options<RegisterJobArtifactV1JobsJobIdArtifactsRegisterPostData, ThrowOnError>): RequestResult<RegisterJobArtifactV1JobsJobIdArtifactsRegisterPostResponses, RegisterJobArtifactV1JobsJobIdArtifactsRegisterPostErrors, ThrowOnError> => (options.client ?? client).post<RegisterJobArtifactV1JobsJobIdArtifactsRegisterPostResponses, RegisterJobArtifactV1JobsJobIdArtifactsRegisterPostErrors, ThrowOnError>({
     security: [{ scheme: 'bearer', type: 'http' }],
     url: '/v1/jobs/{job_id}/artifacts/register',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * Render Job Artifact
+ */
+export const renderJobArtifactV1JobsJobIdArtifactsRenderPost = <ThrowOnError extends boolean = false>(options: Options<RenderJobArtifactV1JobsJobIdArtifactsRenderPostData, ThrowOnError>): RequestResult<RenderJobArtifactV1JobsJobIdArtifactsRenderPostResponses, RenderJobArtifactV1JobsJobIdArtifactsRenderPostErrors, ThrowOnError> => (options.client ?? client).post<RenderJobArtifactV1JobsJobIdArtifactsRenderPostResponses, RenderJobArtifactV1JobsJobIdArtifactsRenderPostErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/v1/jobs/{job_id}/artifacts/render',
     ...options,
     headers: {
         'Content-Type': 'application/json',
@@ -213,7 +265,7 @@ export const versionV1VersionGet = <ThrowOnError extends boolean = false>(option
 /**
  * Workspace Get
  */
-export const workspaceGetV1WorkspaceGet = <ThrowOnError extends boolean = false>(options?: Options<WorkspaceGetV1WorkspaceGetData, ThrowOnError>): RequestResult<WorkspaceGetV1WorkspaceGetResponses, unknown, ThrowOnError> => (options?.client ?? client).get<WorkspaceGetV1WorkspaceGetResponses, unknown, ThrowOnError>({
+export const workspaceGetV1WorkspaceGet = <ThrowOnError extends boolean = false>(options?: Options<WorkspaceGetV1WorkspaceGetData, ThrowOnError>): RequestResult<WorkspaceGetV1WorkspaceGetResponses, WorkspaceGetV1WorkspaceGetErrors, ThrowOnError> => (options?.client ?? client).get<WorkspaceGetV1WorkspaceGetResponses, WorkspaceGetV1WorkspaceGetErrors, ThrowOnError>({
     security: [{ scheme: 'bearer', type: 'http' }],
     url: '/v1/workspace',
     ...options

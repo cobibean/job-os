@@ -28,9 +28,12 @@ export function prepareBrowserRestoreState(value: unknown): BrowserRestoreState 
 
 export function registerBrowserRestoreHandler(
   ipc: Pick<IpcMain, 'handle'>,
-  trusted: (event: IpcMainInvokeEvent) => BrowserRestoreTarget
+  trusted: (event: IpcMainInvokeEvent) => BrowserRestoreTarget,
+  onRestored: () => void = () => undefined
 ): void {
-  ipc.handle('jobos:browser:restore', async (event, state: unknown) => (
-    await trusted(event).restore(prepareBrowserRestoreState(state))
-  ))
+  ipc.handle('jobos:browser:restore', async (event, state: unknown) => {
+    const restored = await trusted(event).restore(prepareBrowserRestoreState(state))
+    onRestored()
+    return restored
+  })
 }

@@ -1,4 +1,7 @@
+import json
 from dataclasses import replace
+
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from .agent_gateway import GatewayEvent
 from .redaction import redact_detail
@@ -9,6 +12,29 @@ _LABELS = {
     "write_file": "Updating file",
     "browser.open": "Using browser",
 }
+
+
+class ActivityReportRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    label: str = Field(min_length=1, max_length=160)
+    state: str = Field(pattern=r"^(working|completed|failed|waiting)$")
+    detail: dict[str, object] = Field(default_factory=dict)
+    origin: str = Field(pattern=r"^mcp$")
+    idempotency_key: str = Field(min_length=1, max_length=128)
+
+    @field_validator("detail")
+    @classmethod
+    def bounded_detail(cls, value: dict[str, object]) -> dict[str, object]:
+        if len(value) > 20 or len(json.dumps(value, default=str)) > 10_000:
+            raise ValueError("Activity detail exceeds JobOS bounds")
+        return value
+
+
+class ActivityReportResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    event_id: int
 
 
 class ActivityNormalizer:
@@ -40,9 +66,7 @@ class ActivityNormalizer:
         state = "working"
         if frame_type == "tool.complete":
             state = (
-                "completed"
-                if status in {"", "complete", "completed", "succeeded"}
-                else "failed"
+                "completed" if status in {"", "complete", "completed", "succeeded"} else "failed"
             )
         elif frame_type == "tool.output_risk":
             state = "waiting"

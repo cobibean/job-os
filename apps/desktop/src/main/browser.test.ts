@@ -78,6 +78,81 @@ test('desktop title persistence matches the shared conservative redaction fixtur
   }
 })
 
+test('new tab commands do not complete before the initial page load settles', async () => {
+  let finishLoad!: () => void
+  const loadSettled = new Promise<void>(resolve => { finishLoad = resolve })
+  const events = new EventEmitter()
+  let url = ''
+  const contents = Object.assign(events, {
+    navigationHistory: { canGoBack: () => false, canGoForward: () => false, goBack: vi.fn(), goForward: vi.fn() },
+    loadURL: vi.fn(async (next: string) => { url = next; await loadSettled }), getURL: () => url,
+    setWindowOpenHandler: vi.fn(), isDestroyed: () => false, close: vi.fn(), reload: vi.fn(), stop: vi.fn()
+  })
+  const manager = new BrowserManager({
+    window: {
+      contentView: { addChildView: vi.fn(), removeChildView: vi.fn() },
+      webContents: { send: vi.fn() }, isDestroyed: () => false
+    } as unknown as BrowserWindow,
+    browserSession: Object.assign(new EventEmitter(), {
+      setPermissionCheckHandler: vi.fn(), setPermissionRequestHandler: vi.fn()
+    }) as unknown as Session,
+    createView: () => ({ webContents: contents, setBounds: vi.fn() }) as unknown as WebContentsView,
+    dialog: { showSaveDialog: vi.fn() } as unknown as Pick<Dialog, 'showSaveDialog'>,
+    clipboard: { writeText: vi.fn() }, downloadsPath: '/tmp'
+  })
+
+  let completed = false
+  const creating = manager.create('https://example.com/jobs/1').then(state => {
+    completed = true
+    return state
+  })
+  await Promise.resolve()
+  expect(completed).toBe(false)
+  finishLoad()
+  expect((await creating).tabs[0]?.url).toBe('https://example.com/jobs/1')
+})
+
+test('restore does not complete until every initial tab load settles', async () => {
+  const finishLoads: Array<() => void> = []
+  const createView = () => {
+    const events = new EventEmitter()
+    let url = ''
+    const contents = Object.assign(events, {
+      navigationHistory: { canGoBack: () => false, canGoForward: () => false, goBack: vi.fn(), goForward: vi.fn() },
+      loadURL: vi.fn((next: string) => {
+        url = next
+        return new Promise<void>(resolve => { finishLoads.push(resolve) })
+      }),
+      getURL: () => url,
+      setWindowOpenHandler: vi.fn(), isDestroyed: () => false, close: vi.fn(), reload: vi.fn(), stop: vi.fn()
+    })
+    return { webContents: contents, setBounds: vi.fn() } as unknown as WebContentsView
+  }
+  const manager = new BrowserManager({
+    window: { contentView: { addChildView: vi.fn(), removeChildView: vi.fn() },
+      webContents: { send: vi.fn() }, isDestroyed: () => false } as unknown as BrowserWindow,
+    browserSession: Object.assign(new EventEmitter(), {
+      setPermissionCheckHandler: vi.fn(), setPermissionRequestHandler: vi.fn()
+    }) as unknown as Session,
+    createView,
+    dialog: { showSaveDialog: vi.fn() } as unknown as Pick<Dialog, 'showSaveDialog'>,
+    clipboard: { writeText: vi.fn() }, downloadsPath: '/tmp'
+  })
+
+  let completed = false
+  const restoring = manager.restore({ tabs: [
+    { tabId: 'one', url: 'https://one.example/', title: 'One', faviconUrl: null, associatedJobId: null },
+    { tabId: 'two', url: 'https://two.example/', title: 'Two', faviconUrl: null, associatedJobId: null }
+  ], activeTabId: 'two' }).then(state => { completed = true; return state })
+  await Promise.resolve()
+  expect(completed).toBe(false)
+  finishLoads[0]!()
+  await Promise.resolve()
+  expect(completed).toBe(false)
+  finishLoads[1]!()
+  expect((await restoring).activeTabId).toBe('two')
+})
+
 test('tabs reorder and bounds changes reuse the same live WebContentsView instances', async () => {
   const views: WebContentsView[] = []
   const attached: WebContentsView[] = []
@@ -290,6 +365,115 @@ test('main-process emission enforces Workspace bounds and keeps later saves viab
   expect(ordinaryRedirect.preventDefault).not.toHaveBeenCalled()
   expect(views).toHaveLength(viewsBeforeRedirects)
   manager.dispose()
+})
+
+test('agent browser operations use bounded semantic targets and fixed internal scripts', async () => {
+  const executeJavaScript = vi.fn(async (script: string) => {
+    if (script.includes('candidates.map')) {
+      return {
+        text: 'Apply now',
+        elements: [{ index: 0, role: 'button', name: 'Apply', disabled: false, type: 'button' }]
+      }
+    }
+    return { ok: true }
+  })
+  const contents = Object.assign(new EventEmitter(), {
+    navigationHistory: {
+      canGoBack: () => false, canGoForward: () => false,
+      goBack: vi.fn(), goForward: vi.fn()
+    },
+    loadURL: vi.fn(async () => undefined), getURL: () => 'https://example.com/jobs/1',
+    getTitle: () => 'Example job', executeJavaScript,
+    setWindowOpenHandler: vi.fn(), isDestroyed: () => false,
+    close: vi.fn(), reload: vi.fn(), stop: vi.fn()
+  })
+  const manager = new BrowserManager({
+    window: {
+      contentView: { addChildView: vi.fn(), removeChildView: vi.fn() },
+      webContents: { send: vi.fn() }, isDestroyed: () => false
+    } as unknown as BrowserWindow,
+    browserSession: Object.assign(new EventEmitter(), {
+      setPermissionCheckHandler: vi.fn(), setPermissionRequestHandler: vi.fn()
+    }) as unknown as Session,
+    createView: () => ({ webContents: contents, setBounds: vi.fn() }) as unknown as WebContentsView,
+    clipboard: { writeText: vi.fn() },
+    dialog: { showSaveDialog: vi.fn() } as unknown as Pick<Dialog, 'showSaveDialog'>,
+    downloadsPath: '/tmp'
+  })
+
+  await manager.restore({
+    tabs: [{ tabId: 'tab-1', url: 'https://example.com/jobs/1', title: 'Example job', faviconUrl: null, associatedJobId: null }],
+    activeTabId: 'tab-1'
+  })
+  const snapshot = await manager.snapshot('tab-1')
+  const targetId = snapshot.elements[0]!.targetId
+  await manager.click('tab-1', targetId)
+  await manager.type('tab-1', targetId, 'hello', true)
+  await manager.scroll('tab-1', 'down', 600)
+
+  expect(snapshot.elements).toEqual([
+    { targetId, role: 'button', name: 'Apply', disabled: false }
+  ])
+  expect(snapshot.text).toBe('Apply now')
+  expect(executeJavaScript).toHaveBeenCalledTimes(4)
+  const snapshotScript = String(executeJavaScript.mock.calls[0]?.[0])
+  expect(snapshotScript).toContain('getClientRects().length')
+  expect(snapshotScript).not.toContain('innerHeight')
+  const allScripts = executeJavaScript.mock.calls.flat().join('\n')
+  expect(allScripts).not.toContain('querySelector(\'button\')')
+  expect(allScripts).not.toContain('data-jobos-target-id')
+  expect(allScripts).not.toContain('__jobosTargetId')
+  expect(JSON.stringify(snapshot).length).toBeLessThan(20_000)
+})
+
+test('semantic targets are main-process owned, ignore spoofed page identity, and expire on snapshot or navigation', async () => {
+  const executeJavaScript = vi.fn(async (script: string) => {
+    if (script.includes('candidates.map')) {
+      return { text: 'Apply', elements: [
+        {
+          index: 0, targetId: 't_page_spoofed_1', role: 'button', name: 'Apply', disabled: false,
+          type: 'button', pageAttribute: 't_transferred_from_another_element'
+        }
+      ] }
+    }
+    return { ok: true }
+  })
+  const contents = Object.assign(new EventEmitter(), {
+    navigationHistory: { canGoBack: () => false, canGoForward: () => false, goBack: vi.fn(), goForward: vi.fn() },
+    loadURL: vi.fn(async () => undefined), getURL: () => 'https://example.com/jobs/1',
+    executeJavaScript, setWindowOpenHandler: vi.fn(), isDestroyed: () => false,
+    close: vi.fn(), reload: vi.fn(), stop: vi.fn()
+  })
+  const manager = new BrowserManager({
+    window: { contentView: { addChildView: vi.fn(), removeChildView: vi.fn() },
+      webContents: { send: vi.fn() }, isDestroyed: () => false } as unknown as BrowserWindow,
+    browserSession: Object.assign(new EventEmitter(), {
+      setPermissionCheckHandler: vi.fn(), setPermissionRequestHandler: vi.fn()
+    }) as unknown as Session,
+    createView: () => ({ webContents: contents, setBounds: vi.fn() }) as unknown as WebContentsView,
+    clipboard: { writeText: vi.fn() },
+    dialog: { showSaveDialog: vi.fn() } as unknown as Pick<Dialog, 'showSaveDialog'>,
+    downloadsPath: '/tmp'
+  })
+  await manager.restore({ tabs: [
+    { tabId: 'tab-1', url: 'https://example.com/jobs/1', title: 'Job', faviconUrl: null, associatedJobId: null }
+  ], activeTabId: 'tab-1' })
+
+  const first = await manager.snapshot('tab-1')
+  expect(first.elements[0]!.targetId).not.toBe('t_page_spoofed_1')
+  const second = await manager.snapshot('tab-1')
+  await expect(manager.click('tab-1', first.elements[0]!.targetId)).rejects.toThrow('capture a new snapshot')
+  await manager.click('tab-1', second.elements[0]!.targetId)
+  contents.emit('did-navigate-in-page')
+  await expect(manager.type('tab-1', second.elements[0]!.targetId, 'stale')).rejects.toThrow('capture a new snapshot')
+
+  const scripts = executeJavaScript.mock.calls.map(call => String(call[0]))
+  expect(scripts.join('\n')).not.toContain('data-jobos-target-id')
+  expect(scripts.join('\n')).not.toContain('__jobosTargetId')
+  const clickScript = scripts.find(script => script.includes('scrollIntoView')) ?? ''
+  expect(clickScript).toContain('candidates[')
+  expect(clickScript).toContain('visible(element)')
+  expect(clickScript).toContain('fingerprint')
 })
 
 test('restore validates and deduplicates before retaining fifty recoverable tabs', async () => {

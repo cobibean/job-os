@@ -16,6 +16,7 @@ import type {
   BrowserBounds,
   BrowserDownload,
   BrowserRestoreState,
+  BrowserSemanticSnapshot,
   BrowserState,
   BrowserTab,
   BrowserTabMetadata
@@ -79,6 +80,20 @@ export function isBrowserTabMetadata(value: unknown): value is BrowserTabMetadat
 interface ManagedTab {
   state: BrowserTab
   view: WebContentsView
+  targetEpoch: number
+  targets: Map<string, SemanticTarget>
+}
+
+interface SemanticTargetFingerprint {
+  role: string
+  name: string
+  disabled: boolean
+  type: string
+}
+
+interface SemanticTarget {
+  index: number
+  fingerprint: SemanticTargetFingerprint
 }
 
 interface BrowserManagerOptions {
@@ -152,24 +167,26 @@ export class BrowserManager {
       this.#synthesizedDefault = false
     }
     const recovered = recoverBrowserRestoreState(restored)
+    const initialLoads: Promise<void>[] = []
     for (const tab of recovered.tabs) {
-      this.#createTab(tab)
+      initialLoads.push(this.#createTab(tab))
     }
     if (!this.#order.length) {
       this.#synthesizedDefault = true
-      this.#createTab({
+      initialLoads.push(this.#createTab({
         tabId: randomUUID(),
         url: DEFAULT_BROWSER_URL,
         title: 'Google',
         faviconUrl: null,
         associatedJobId: null
-      })
+      }))
     }
     this.#activeTabId = recovered.activeTabId && this.#tabs.has(recovered.activeTabId)
       ? recovered.activeTabId
       : this.#order[0] ?? null
     this.#syncAttachedView()
     this.#emit()
+    await Promise.all(initialLoads)
     return this.getState()
   }
 
@@ -181,10 +198,17 @@ export class BrowserManager {
       return this.getState()
     }
     const tabId = randomUUID()
-    this.#createTab({ tabId, url: normalizeBrowserInput(url), title: 'New tab', faviconUrl: null, associatedJobId })
+    const initialLoad = this.#createTab({
+      tabId,
+      url: normalizeBrowserInput(url),
+      title: 'New tab',
+      faviconUrl: null,
+      associatedJobId
+    })
     this.#activeTabId = tabId
     this.#syncAttachedView()
     this.#emit()
+    await initialLoad
     return this.getState()
   }
 
@@ -230,6 +254,7 @@ export class BrowserManager {
   async navigate(tabId: string, input: string): Promise<BrowserState> {
     this.#hasExplicitAction = true
     const tab = this.#requireTab(tabId)
+    this.#invalidateTargets(tab)
     const url = normalizeBrowserInput(input)
     tab.state.error = null
     tab.state.crashed = false
@@ -239,14 +264,18 @@ export class BrowserManager {
 
   back(tabId: string): BrowserState {
     this.#hasExplicitAction = true
-    const contents = this.#requireTab(tabId).view.webContents
+    const tab = this.#requireTab(tabId)
+    this.#invalidateTargets(tab)
+    const contents = tab.view.webContents
     if (contents.navigationHistory.canGoBack()) contents.navigationHistory.goBack()
     return this.getState()
   }
 
   forward(tabId: string): BrowserState {
     this.#hasExplicitAction = true
-    const contents = this.#requireTab(tabId).view.webContents
+    const tab = this.#requireTab(tabId)
+    this.#invalidateTargets(tab)
+    const contents = tab.view.webContents
     if (contents.navigationHistory.canGoForward()) contents.navigationHistory.goForward()
     return this.getState()
   }
@@ -254,6 +283,7 @@ export class BrowserManager {
   reload(tabId: string): BrowserState {
     this.#hasExplicitAction = true
     const tab = this.#requireTab(tabId)
+    this.#invalidateTargets(tab)
     tab.state.error = null
     tab.state.crashed = false
     tab.view.webContents.reload()
@@ -264,6 +294,154 @@ export class BrowserManager {
   stop(tabId: string): BrowserState {
     this.#hasExplicitAction = true
     this.#requireTab(tabId).view.webContents.stop()
+    return this.getState()
+  }
+
+  inspect(): BrowserState {
+    return this.getState()
+  }
+
+  async snapshot(tabId: string): Promise<BrowserSemanticSnapshot> {
+    const tab = this.#requireTab(tabId)
+    this.#invalidateTargets(tab)
+    const targetEpoch = tab.targetEpoch
+    const targetPrefix = randomUUID().replaceAll('-', '').slice(0, 20)
+    const raw = await tab.view.webContents.executeJavaScript(`(() => {
+      const visible = (element) => {
+        const style = getComputedStyle(element);
+        return !element.hidden && style.visibility !== 'hidden'
+          && style.display !== 'none' && element.getClientRects().length > 0;
+      };
+      const candidates = [...document.querySelectorAll(
+        'a,button,input,textarea,select,[role="button"],[role="link"],[contenteditable="true"],[tabindex]'
+      )].slice(0, 100);
+      const elements = candidates.map((element, index) => {
+        if (!visible(element)) return null;
+        const name = (element.getAttribute('aria-label') || element.getAttribute('title')
+          || element.innerText || element.placeholder || '').trim().slice(0, 200);
+        const type = (element.getAttribute('type') || ('type' in element ? element.type : ''))
+          .toLowerCase().slice(0, 40);
+        return { index, role: (element.getAttribute('role') || element.tagName).toLowerCase().slice(0, 40),
+          name, disabled: Boolean(element.disabled || element.getAttribute('aria-disabled') === 'true'), type };
+      }).filter(Boolean);
+      return { text: (document.body?.innerText || '').trim().slice(0, 5000), elements };
+    })()`, true) as unknown
+    const value = raw && typeof raw === 'object' ? raw as Record<string, unknown> : {}
+    const targets = Array.isArray(value.elements)
+      ? value.elements.slice(0, 100).flatMap(item => {
+          if (!item || typeof item !== 'object') return []
+          const candidate = item as Record<string, unknown>
+          if (!Number.isInteger(candidate.index) || Number(candidate.index) < 0 || Number(candidate.index) >= 100) return []
+          const fingerprint = {
+            role: String(candidate.role ?? 'control').slice(0, 40),
+            name: String(candidate.name ?? '').slice(0, 200),
+            disabled: Boolean(candidate.disabled),
+            type: String(candidate.type ?? '').slice(0, 40)
+          }
+          return [{
+            targetId: `t_${targetPrefix}_${Number(candidate.index) + 1}`,
+            index: Number(candidate.index),
+            fingerprint
+          }]
+        })
+      : []
+    if (tab.targetEpoch === targetEpoch) {
+      tab.targets = new Map(targets.map(target => [target.targetId, {
+        index: target.index,
+        fingerprint: target.fingerprint
+      }]))
+    }
+    const elements = targets.map(target => ({
+      targetId: target.targetId,
+      role: target.fingerprint.role,
+      name: target.fingerprint.name,
+      disabled: target.fingerprint.disabled
+    }))
+    const state = this.getState().tabs.find(candidate => candidate.tabId === tabId)
+    return {
+      tabId,
+      url: state?.url ?? 'about:blank',
+      title: state?.title ?? 'Untitled',
+      text: typeof value.text === 'string' ? value.text.slice(0, 5000) : '',
+      elements
+    }
+  }
+
+  async click(tabId: string, targetId: string): Promise<BrowserState> {
+    this.#assertTargetId(targetId)
+    const tab = this.#requireTab(tabId)
+    const target = tab.targets.get(targetId)
+    if (!target) throw new Error('Browser target is stale; capture a new snapshot')
+    const fingerprint = JSON.stringify(target.fingerprint)
+    const result = await tab.view.webContents.executeJavaScript(`(() => {
+      const visible = (element) => {
+        const style = getComputedStyle(element);
+        return !element.hidden && style.visibility !== 'hidden'
+          && style.display !== 'none' && element.getClientRects().length > 0;
+      };
+      const candidates = [...document.querySelectorAll(
+        'a,button,input,textarea,select,[role="button"],[role="link"],[contenteditable="true"],[tabindex]'
+      )].slice(0, 100);
+      const element = candidates[${target.index}];
+      if (!element || !visible(element)) return { ok: false, code: 'target_not_found' };
+      const name = (element.getAttribute('aria-label') || element.getAttribute('title')
+        || element.innerText || element.placeholder || '').trim().slice(0, 200);
+      const fingerprint = { role: (element.getAttribute('role') || element.tagName).toLowerCase().slice(0, 40),
+        name, disabled: Boolean(element.disabled || element.getAttribute('aria-disabled') === 'true'),
+        type: (element.getAttribute('type') || ('type' in element ? element.type : '')).toLowerCase().slice(0, 40) };
+      if (JSON.stringify(fingerprint) !== JSON.stringify(${fingerprint})) return { ok: false, code: 'target_changed' };
+      element.scrollIntoView({ block: 'center', inline: 'center' }); element.click();
+      return { ok: true };
+    })()`, true) as { ok?: boolean }
+    if (!result?.ok) throw new Error('Browser target not found; capture a new snapshot')
+    return this.getState()
+  }
+
+  async type(tabId: string, targetId: string, text: string, clear = true): Promise<BrowserState> {
+    this.#assertTargetId(targetId)
+    if (typeof text !== 'string' || text.length > 4000) throw new Error('Invalid browser text')
+    const tab = this.#requireTab(tabId)
+    const target = tab.targets.get(targetId)
+    if (!target) throw new Error('Browser target is stale; capture a new snapshot')
+    const encodedText = JSON.stringify(text)
+    const fingerprint = JSON.stringify(target.fingerprint)
+    const result = await tab.view.webContents.executeJavaScript(`(() => {
+      const visible = (element) => {
+        const style = getComputedStyle(element);
+        return !element.hidden && style.visibility !== 'hidden'
+          && style.display !== 'none' && element.getClientRects().length > 0;
+      };
+      const candidates = [...document.querySelectorAll(
+        'a,button,input,textarea,select,[role="button"],[role="link"],[contenteditable="true"],[tabindex]'
+      )].slice(0, 100);
+      const element = candidates[${target.index}];
+      if (!element || !visible(element) || (!('value' in element) && !element.isContentEditable))
+        return { ok: false, code: 'target_not_found' };
+      const name = (element.getAttribute('aria-label') || element.getAttribute('title')
+        || element.innerText || element.placeholder || '').trim().slice(0, 200);
+      const fingerprint = { role: (element.getAttribute('role') || element.tagName).toLowerCase().slice(0, 40),
+        name, disabled: Boolean(element.disabled || element.getAttribute('aria-disabled') === 'true'),
+        type: (element.getAttribute('type') || ('type' in element ? element.type : '')).toLowerCase().slice(0, 40) };
+      if (JSON.stringify(fingerprint) !== JSON.stringify(${fingerprint})) return { ok: false, code: 'target_changed' };
+      element.focus();
+      if (element.isContentEditable) element.textContent = ${clear ? "''" : "element.textContent || ''"} + ${encodedText};
+      else element.value = ${clear ? "''" : "element.value || ''"} + ${encodedText};
+      element.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: ${encodedText} }));
+      element.dispatchEvent(new Event('change', { bubbles: true }));
+      return { ok: true };
+    })()`, true) as { ok?: boolean }
+    if (!result?.ok) throw new Error('Browser target not found; capture a new snapshot')
+    return this.getState()
+  }
+
+  async scroll(tabId: string, direction: 'up' | 'down', amount = 600): Promise<BrowserState> {
+    const tab = this.#requireTab(tabId)
+    if (!Number.isInteger(amount) || amount < 1 || amount > 2000) throw new Error('Invalid scroll amount')
+    const delta = direction === 'up' ? -amount : amount
+    await tab.view.webContents.executeJavaScript(
+      `(() => { window.scrollBy({ top: ${delta}, behavior: 'auto' }); return { ok: true }; })()`,
+      true
+    )
     return this.getState()
   }
 
@@ -304,7 +482,7 @@ export class BrowserManager {
     this.#order = []
   }
 
-  #createTab(restored: BrowserTabMetadata): void {
+  #createTab(restored: BrowserTabMetadata): Promise<void> {
     const view = this.#createView()
     const state: BrowserTab = {
       ...restored,
@@ -315,11 +493,11 @@ export class BrowserManager {
       crashed: false,
       blockedUrl: null
     }
-    const managed = { view, state }
+    const managed = { view, state, targetEpoch: 0, targets: new Map<string, SemanticTarget>() }
     this.#tabs.set(state.tabId, managed)
     this.#order.push(state.tabId)
     this.#wireTab(managed)
-    void view.webContents.loadURL(state.url).catch(() => undefined)
+    return view.webContents.loadURL(state.url).then(() => undefined, () => undefined)
   }
 
   #wireTab(tab: ManagedTab): void {
@@ -332,10 +510,10 @@ export class BrowserManager {
       tab.state.canGoForward = contents.navigationHistory.canGoForward()
       this.#emit()
     }
-    contents.on('did-start-loading', () => { tab.state.loading = true; tab.state.error = null; tab.state.blockedUrl = null; this.#notice = null; refresh() })
+    contents.on('did-start-loading', () => { this.#invalidateTargets(tab); tab.state.loading = true; tab.state.error = null; tab.state.blockedUrl = null; this.#notice = null; refresh() })
     contents.on('did-stop-loading', () => { tab.state.loading = false; refresh() })
-    contents.on('did-navigate', refresh)
-    contents.on('did-navigate-in-page', refresh)
+    contents.on('did-navigate', () => { this.#invalidateTargets(tab); refresh() })
+    contents.on('did-navigate-in-page', () => { this.#invalidateTargets(tab); refresh() })
     contents.on('page-title-updated', (_event, title) => {
       const nextTitle = title || 'Untitled'
       const safeTitle = sanitizeBrowserTitleForPersistence(nextTitle)
@@ -457,8 +635,17 @@ export class BrowserManager {
     return tab
   }
 
+  #assertTargetId(targetId: string): void {
+    if (!/^t_[A-Za-z0-9_-]{1,64}$/.test(targetId)) throw new Error('Invalid browser target')
+  }
+
   #emit(): void {
     if (!this.#window.isDestroyed()) this.#window.webContents.send('jobos:browser:state', this.getState())
+  }
+
+  #invalidateTargets(tab: ManagedTab): void {
+    tab.targetEpoch += 1
+    tab.targets.clear()
   }
 }
 

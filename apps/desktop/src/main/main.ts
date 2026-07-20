@@ -10,6 +10,7 @@ import { createMainAgentClient, startAgentEventStream } from './agent.js'
 import { registerAgentIpc } from './agentIpc.js'
 import { BROWSER_PARTITION, BrowserManager, remoteBrowserPreferences } from './browser.js'
 import { registerBrowserRestoreHandler } from './browserIpc.js'
+import { startDesktopCapabilityClient } from './capabilityClient.js'
 import { probeConnectivity } from './connectivity.js'
 import { createMainJobsClient, startJobEventStream } from './jobs.js'
 import type { JobsConfig } from './jobs.js'
@@ -22,6 +23,7 @@ const rendererRoot = path.resolve(currentDirectory, '../renderer')
 const developmentUrl = process.env.VITE_DEV_SERVER_URL
 const developmentOrigin = developmentUrl ? new URL(developmentUrl).origin : undefined
 let browserManager: BrowserManager | null = null
+let markBrowserRestored: () => void = () => undefined
 
 function disconnectedCredentialSnapshot(): ConnectivitySnapshot {
   return {
@@ -142,7 +144,7 @@ function registerBrowserInterface(): void {
     return value
   }
   ipcMain.handle('jobos:browser:get-state', event => trusted(event).getState())
-  registerBrowserRestoreHandler(ipcMain, trusted)
+  registerBrowserRestoreHandler(ipcMain, trusted, () => markBrowserRestored())
   ipcMain.handle('jobos:browser:create', (event, url?: string, jobId?: string | null) => {
     if (url !== undefined && (typeof url !== 'string' || url.length > 8192)) throw new Error('Invalid browser address')
     if (jobId !== undefined && jobId !== null && typeof jobId !== 'string') throw new Error('Invalid job association')
@@ -240,6 +242,14 @@ async function createWindow(): Promise<BrowserWindow> {
     clipboard,
     downloadsPath: app.getPath('downloads')
   })
+  const browserReady = new Promise<void>(resolve => { markBrowserRestored = resolve })
+  const capabilityConfig = jobsConfig()
+  const stopCapabilities = capabilityConfig
+    ? startDesktopCapabilityClient(browserManager, {
+        ...capabilityConfig,
+        deviceId: process.env.JOBOS_DEVICE_ID ?? 'primary-device'
+      }, { browserReady })
+    : () => undefined
 
   if (developmentUrl) {
     await window.loadURL(developmentUrl)
@@ -275,6 +285,7 @@ async function createWindow(): Promise<BrowserWindow> {
   window.once('closed', () => {
     stopJobEvents()
     stopAgentEvents()
+    stopCapabilities()
     browserManager?.dispose()
     browserManager = null
   })

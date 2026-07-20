@@ -73,6 +73,21 @@ export interface BrowserState {
   notice: string | null
 }
 
+export interface BrowserSemanticElement {
+  targetId: string
+  role: string
+  name: string
+  disabled: boolean
+}
+
+export interface BrowserSemanticSnapshot {
+  tabId: string
+  url: string
+  title: string
+  text: string
+  elements: BrowserSemanticElement[]
+}
+
 export interface BrowserRestoreState {
   tabs: BrowserTabMetadata[]
   activeTabId: string | null

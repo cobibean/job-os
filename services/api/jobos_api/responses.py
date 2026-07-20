@@ -17,7 +17,7 @@ class HealthResponse(ApiResponse):
 
 class VersionResponse(ApiResponse):
     api_version: str = Field(min_length=1)
-    contract: Literal["jobos-v1-phase6-backend"]
+    contract: Literal["jobos-v1-phase7-parity"]
 
 
 class DeviceSessionResponse(ApiResponse):
