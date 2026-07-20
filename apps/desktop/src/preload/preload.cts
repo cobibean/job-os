@@ -1,11 +1,22 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import type { IpcRendererEvent } from 'electron'
 
-import type { BrowserBounds, BrowserRestoreState, BrowserState, JobEvent, JobOsRendererBridge, JobSortMode, JobStatus, WorkspaceSnapshot } from '../shared/contracts.js'
+import type { AgentStreamUpdate, BrowserBounds, BrowserRestoreState, BrowserState, JobEvent, JobOsRendererBridge, JobSortMode, JobStatus, WorkspaceSnapshot } from '../shared/contracts.js'
 
 const bridge: JobOsRendererBridge = Object.freeze({
   connectivity: Object.freeze({
     get: () => ipcRenderer.invoke('jobos:connectivity:get')
+  }),
+  agent: Object.freeze({
+    get: () => ipcRenderer.invoke('jobos:agent:get'),
+    send: (text: string, idempotencyKey: string) => ipcRenderer.invoke('jobos:agent:send', text, idempotencyKey),
+    cancel: (turnId: string) => ipcRenderer.invoke('jobos:agent:cancel', turnId),
+    retry: (turnId: string, idempotencyKey: string) => ipcRenderer.invoke('jobos:agent:retry', turnId, idempotencyKey),
+    subscribe: (listener: (update: AgentStreamUpdate) => void) => {
+      const wrapped = (_event: IpcRendererEvent, update: AgentStreamUpdate) => listener(update)
+      ipcRenderer.on('jobos:agent:event', wrapped)
+      return () => ipcRenderer.removeListener('jobos:agent:event', wrapped)
+    }
   }),
   jobs: Object.freeze({
     getState: () => ipcRenderer.invoke('jobos:jobs:get-state'),

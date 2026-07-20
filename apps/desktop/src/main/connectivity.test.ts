@@ -1,55 +1,43 @@
 // @vitest-environment node
 
-import { createServer } from 'node:http'
-import type { AddressInfo } from 'node:net'
-
-import { afterEach, expect, test } from 'vitest'
+import { expect, test } from 'vitest'
 
 import { probeConnectivity } from './connectivity.js'
 
-const servers: Array<ReturnType<typeof createServer>> = []
-
-afterEach(async () => {
-  await Promise.all(servers.splice(0).map(server => new Promise<void>(resolve => server.close(() => resolve()))))
-})
-
 test('connectivity is healthy only after the Mini API authenticates the device', async () => {
-  const server = createServer((request, response) => {
-    response.setHeader('content-type', 'application/json')
-    if (request.url === '/v1/health') {
-      response.end(JSON.stringify({
+  const fetcher = async (input: string | URL | Request) => {
+    const request = input instanceof Request ? input : new Request(input)
+    const url = new URL(request.url)
+    if (url.pathname === '/v1/health') {
+      return Response.json({
         status: 'ready',
         service: 'jobos-api',
         version: '0.1.0',
         state_schema: 2
-      }))
-      return
+      })
     }
     if (
-      request.url === '/v1/device-session' &&
-      request.headers.authorization === 'Bearer integration-device-token'
+      url.pathname === '/v1/device-session' &&
+      request.headers.get('authorization') === 'Bearer integration-device-token'
     ) {
-      response.end(JSON.stringify({
+      return Response.json({
         authenticated: true,
         transport: 'private-tailscale',
         api_version: '0.1.0'
-      }))
-      return
+      })
     }
-    response.statusCode = 401
-    response.end(JSON.stringify({ detail: 'Device authentication required' }))
-  })
-  servers.push(server)
-  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
-  const address = server.address() as AddressInfo
+    return Response.json({ detail: 'Device authentication required' }, { status: 401 })
+  }
 
   const connected = await probeConnectivity({
-    baseUrl: `http://127.0.0.1:${address.port}`,
-    deviceToken: 'integration-device-token'
+    baseUrl: 'http://jobos.test',
+    deviceToken: 'integration-device-token',
+    fetch: fetcher
   })
   const rejected = await probeConnectivity({
-    baseUrl: `http://127.0.0.1:${address.port}`,
-    deviceToken: 'wrong-device-token'
+    baseUrl: 'http://jobos.test',
+    deviceToken: 'wrong-device-token',
+    fetch: fetcher
   })
 
   expect(connected).toMatchObject({
@@ -65,17 +53,10 @@ test('connectivity is healthy only after the Mini API authenticates the device',
 })
 
 test('a malformed 200 response never reports the Mini as connected', async () => {
-  const server = createServer((_request, response) => {
-    response.setHeader('content-type', 'application/json')
-    response.end('{}')
-  })
-  servers.push(server)
-  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
-  const address = server.address() as AddressInfo
-
   const result = await probeConnectivity({
-    baseUrl: `http://127.0.0.1:${address.port}`,
-    deviceToken: 'integration-device-token'
+    baseUrl: 'http://jobos.test',
+    deviceToken: 'integration-device-token',
+    fetch: async () => Response.json({})
   })
 
   expect(result).toMatchObject({
@@ -85,26 +66,23 @@ test('a malformed 200 response never reports the Mini as connected', async () =>
 })
 
 test('a malformed authenticated response is distinct from network unavailability', async () => {
-  const server = createServer((request, response) => {
-    response.setHeader('content-type', 'application/json')
-    if (request.url === '/v1/health') {
-      response.end(JSON.stringify({
+  const fetcher = async (input: string | URL | Request) => {
+    const request = input instanceof Request ? input : new Request(input)
+    if (new URL(request.url).pathname === '/v1/health') {
+      return Response.json({
         status: 'ready',
         service: 'jobos-api',
         version: '0.1.0',
         state_schema: 2
-      }))
-      return
+      })
     }
-    response.end('{}')
-  })
-  servers.push(server)
-  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
-  const address = server.address() as AddressInfo
+    return Response.json({})
+  }
 
   const result = await probeConnectivity({
-    baseUrl: `http://127.0.0.1:${address.port}`,
-    deviceToken: 'integration-device-token'
+    baseUrl: 'http://jobos.test',
+    deviceToken: 'integration-device-token',
+    fetch: fetcher
   })
 
   expect(result).toMatchObject({

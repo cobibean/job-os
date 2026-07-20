@@ -3,7 +3,7 @@ from jobos_api.app import create_app
 from jobos_api.settings import Settings
 
 
-def test_health_reports_a_ready_phase_five_api(tmp_path):
+def test_health_reports_ready_phase_six_api_with_agent_connectivity_separate(tmp_path):
     app = create_app(
         Settings(
             device_token="test-device-token",
@@ -19,7 +19,8 @@ def test_health_reports_a_ready_phase_five_api(tmp_path):
         "status": "ready",
         "service": "jobos-api",
         "version": "0.1.0",
-        "state_schema": 6,
+        "state_schema": 7,
+        "agent_connection": "offline",
     }
 
 
@@ -63,7 +64,7 @@ def test_version_and_openapi_describe_the_shared_workspace_contract(tmp_path):
     assert version.status_code == 200
     assert version.json() == {
         "api_version": "0.1.0",
-        "contract": "jobos-v1-phase5",
+        "contract": "jobos-v1-phase6-backend",
     }
     assert set(openapi.json()["paths"]) == {
         "/v1/health",
@@ -85,6 +86,11 @@ def test_version_and_openapi_describe_the_shared_workspace_contract(tmp_path):
         "/v1/workspace/jobs/sort",
         "/v1/events",
         "/v1/events/stream",
+        "/v1/conversations/current",
+        "/v1/conversations/current/messages",
+        "/v1/conversations/current/turns/{turn_id}/cancel",
+        "/v1/conversations/current/turns/{turn_id}/retry",
+        "/v1/conversations/current/events/stream",
     }
     schemas = openapi.json()["components"]["schemas"]
     assert set(schemas["HealthResponse"]["required"]) == {
@@ -92,6 +98,7 @@ def test_version_and_openapi_describe_the_shared_workspace_contract(tmp_path):
         "service",
         "version",
         "state_schema",
+        "agent_connection",
     }
     assert set(schemas["VersionResponse"]["required"]) == {"api_version", "contract"}
     assert set(schemas["DeviceSessionResponse"]["required"]) == {

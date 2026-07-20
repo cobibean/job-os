@@ -7,6 +7,7 @@ dependencies = [
   "fastapi==0.139.2",
   "pydantic==2.13.4",
   "uvicorn[standard]==0.51.0",
+  "websockets==16.1.1",
 ]
 
 [dependency-groups]

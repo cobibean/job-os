@@ -17,3 +17,7 @@ class Settings(BaseModel):
     state_db_path: Path
     job_hunter_db_path: Path | None = None
     artifact_roots: tuple[Path, ...] = ()
+    hermes_dashboard_url: str | None = None
+    hermes_dashboard_token: str | None = Field(default=None, min_length=16, repr=False)
+    hermes_job_hunter_cwd: Path | None = None
+    hermes_request_timeout: float = Field(default=5.0, gt=0, le=30)

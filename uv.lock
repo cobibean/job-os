@@ -283,6 +283,7 @@ dependencies = [
     { name = "fastapi" },
     { name = "pydantic" },
     { name = "uvicorn", extra = ["standard"] },
+    { name = "websockets" },
 ]
 
 [package.dev-dependencies]
@@ -297,6 +298,7 @@ requires-dist = [
     { name = "fastapi", specifier = "==0.139.2" },
     { name = "pydantic", specifier = "==2.13.4" },
     { name = "uvicorn", extras = ["standard"], specifier = "==0.51.0" },
+    { name = "websockets", specifier = "==16.1.1" },
 ]
 
 [package.metadata.requires-dev]

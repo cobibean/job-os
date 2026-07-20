@@ -9,6 +9,7 @@ import type { ConnectivitySnapshot } from '../shared/contracts.js'
 export interface ConnectivityConfig {
   baseUrl: string
   deviceToken: string
+  fetch?: typeof fetch
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -45,6 +46,7 @@ function isDeviceSessionResponse(value: unknown): value is {
 export async function probeConnectivity(config: ConnectivityConfig): Promise<ConnectivitySnapshot> {
   const checkedAt = new Date().toISOString()
   const client = createJobOsApiClient(config.baseUrl, config.deviceToken)
+  if (config.fetch) client.setConfig({ fetch: config.fetch })
 
   try {
     const health = await healthV1HealthGet({ client })
