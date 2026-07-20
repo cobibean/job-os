@@ -272,12 +272,16 @@ class JobOsStateStore:
         return JobWorkspaceState(row[0], str(row[1]), list(json.loads(row[2])))
 
     def workspace_snapshot(self, device_id: str) -> WorkspaceSnapshotRecord:
-        selected_job_id = self.job_workspace_state().selected_job_id
         with sqlite3.connect(f"file:{self._path}?mode=ro", uri=True) as connection:
+            connection.execute("BEGIN")
+            selection_row = connection.execute(
+                "SELECT selected_job_id FROM job_workspace WHERE workspace_id = 1"
+            ).fetchone()
             row = connection.execute(
                 "SELECT revision, snapshot_json FROM workspace_snapshots WHERE device_id = ?",
                 (device_id,),
             ).fetchone()
+        selected_job_id = selection_row[0] if selection_row else None
         if row is None:
             return WorkspaceSnapshotRecord(0, canonical_workspace_snapshot(selected_job_id))
         try:
@@ -294,14 +298,14 @@ class JobOsStateStore:
         expected_revision: int,
         snapshot: dict[str, object],
     ) -> WorkspaceSnapshotRecord:
-        selected_job_id = snapshot.get("selected_job_id")
-        normalized, repaired = normalize_workspace_snapshot(
-            snapshot,
-            selected_job_id if isinstance(selected_job_id, str) else None,
-        )
-        payload = json.dumps(normalized, separators=(",", ":"), sort_keys=True)
         with sqlite3.connect(self._path) as connection:
             connection.execute("BEGIN IMMEDIATE")
+            selection_row = connection.execute(
+                "SELECT selected_job_id FROM job_workspace WHERE workspace_id = 1"
+            ).fetchone()
+            selected_job_id = selection_row[0] if selection_row else None
+            normalized, repaired = normalize_workspace_snapshot(snapshot, selected_job_id)
+            payload = json.dumps(normalized, separators=(",", ":"), sort_keys=True)
             row = connection.execute(
                 "SELECT revision FROM workspace_snapshots WHERE device_id = ?",
                 (device_id,),
@@ -321,14 +325,6 @@ class JobOsStateStore:
                     updated_at = CURRENT_TIMESTAMP
                 """,
                 (device_id, revision, payload),
-            )
-            connection.execute(
-                """
-                UPDATE job_workspace
-                SET selected_job_id = ?, updated_at = CURRENT_TIMESTAMP
-                WHERE workspace_id = 1
-                """,
-                (normalized["selected_job_id"],),
             )
             connection.commit()
         return WorkspaceSnapshotRecord(revision, normalized, repaired)

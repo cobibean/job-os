@@ -300,10 +300,14 @@ def test_workspace_snapshot_round_trip_and_revision_conflict(tmp_path):
     facade.jobs = facade.jobs[:2]
 
     with make_client(tmp_path, facade) as client:
+        client.put(
+            "/v1/workspace/jobs/selection",
+            headers=auth_headers(),
+            json={"job_id": "job-1", "origin": "user"},
+        )
         initial = client.get("/v1/workspace", headers=auth_headers())
         body = initial.json()
         body["selected_preset"] = "agent-focus"
-        body["selected_job_id"] = "job-1"
         saved = client.put("/v1/workspace", headers=auth_headers(), json=body)
         stale = client.put("/v1/workspace", headers=auth_headers(), json=body)
         restored = client.get("/v1/workspace", headers=auth_headers())
@@ -315,3 +319,28 @@ def test_workspace_snapshot_round_trip_and_revision_conflict(tmp_path):
     assert stale.json()["detail"] == "Workspace revision conflict; current revision is 1"
     assert restored.json()["selected_preset"] == "agent-focus"
     assert restored.json()["selected_job_id"] == "job-1"
+
+
+def test_layout_save_cannot_overwrite_a_newer_user_or_mcp_selection(tmp_path):
+    facade = FakeJobHunterFacade()
+    facade.jobs = facade.jobs[:2]
+
+    with make_client(tmp_path, facade) as client:
+        client.put(
+            "/v1/workspace/jobs/selection",
+            headers=auth_headers(),
+            json={"job_id": "job-0", "origin": "user"},
+        )
+        stale_layout = client.get("/v1/workspace", headers=auth_headers()).json()
+        client.put(
+            "/v1/workspace/jobs/selection",
+            headers=auth_headers(),
+            json={"job_id": "job-1", "origin": "mcp"},
+        )
+        stale_layout["selected_preset"] = "research"
+        saved = client.put("/v1/workspace", headers=auth_headers(), json=stale_layout)
+        job_state = client.get("/v1/workspace/jobs", headers=auth_headers())
+
+    assert saved.status_code == 200
+    assert saved.json()["selected_job_id"] == "job-1"
+    assert job_state.json()["selected_job_id"] == "job-1"

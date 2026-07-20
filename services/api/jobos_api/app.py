@@ -138,10 +138,6 @@ def create_app(settings: Settings, *, job_facade: JobFacade | None = None) -> Fa
         command: WorkspaceSnapshotCommand,
         identity: Annotated[DeviceIdentity, Depends(authenticated_device)],
     ) -> WorkspaceSnapshotResponse:
-        if command.selected_job_id is not None:
-            known_ids = {str(job["job_id"]) for job in jobs.list_jobs()}
-            if command.selected_job_id not in known_ids:
-                raise HTTPException(status_code=404, detail="Job not found")
         try:
             record = state_store.save_workspace_snapshot(
                 identity.device_id,
