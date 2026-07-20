@@ -4,7 +4,8 @@ from copy import deepcopy
 from dataclasses import dataclass
 from hashlib import sha256
 from pathlib import Path
-from urllib.parse import parse_qsl, urlsplit
+
+from .browser_policy import BROWSER_TAB_LIMIT, BROWSER_TITLE_LIMIT, safe_browser_url
 
 
 class IncompatibleSchemaError(RuntimeError):
@@ -156,27 +157,6 @@ def canonical_workspace_snapshot(selected_job_id: str | None = None) -> dict[str
     }
 
 
-def _safe_browser_url(value: object, *, allow_blank: bool) -> bool:
-    if value == "about:blank":
-        return allow_blank
-    if not isinstance(value, str) or len(value) > 8192:
-        return False
-    parsed = urlsplit(value)
-    sensitive = {
-        "access_token", "auth_token", "authorization", "bearer_token", "code",
-        "credential", "id_token", "jwt", "password", "refresh_token",
-        "samlresponse", "secret", "session", "session_id",
-    }
-    return (
-        parsed.scheme in ("http", "https")
-        and bool(parsed.hostname)
-        and not parsed.username
-        and not parsed.password
-        and not parsed.fragment
-        and not any(key.lower() in sensitive for key, _ in parse_qsl(parsed.query))
-    )
-
-
 def _valid_browser_tab(value: object) -> bool:
     if not isinstance(value, dict):
         return False
@@ -188,13 +168,13 @@ def _valid_browser_tab(value: object) -> bool:
     return (
         isinstance(tab_id, str)
         and 0 < len(tab_id) <= 128
-        and _safe_browser_url(url, allow_blank=True)
+        and safe_browser_url(url, allow_blank=True)
         and isinstance(title, str)
-        and len(title) <= 512
+        and len(title) <= BROWSER_TITLE_LIMIT
         and (
             favicon_url is None
             or (
-                _safe_browser_url(favicon_url, allow_blank=False)
+                safe_browser_url(favicon_url, allow_blank=False)
             )
         )
         and (
@@ -261,23 +241,40 @@ def normalize_workspace_snapshot(
     browser_tabs = value.get("browser_tabs", [])
     active_tab_id = value.get("active_browser_tab_id")
     repaired_browser = False
-    if (
-        isinstance(browser_tabs, list)
-        and len(browser_tabs) <= 50
-        and all(_valid_browser_tab(tab) for tab in browser_tabs)
-    ):
-        tab_ids = [tab["tab_id"] for tab in browser_tabs]
-        if len(tab_ids) == len(set(tab_ids)):
-            canonical["browser_tabs"] = deepcopy(browser_tabs)
-            if active_tab_id is None or (
-                isinstance(active_tab_id, str) and active_tab_id in tab_ids
-            ):
-                canonical["active_browser_tab_id"] = active_tab_id
-            else:
+    recovered_tabs: list[dict[str, object]] = []
+    seen_tab_ids: set[str] = set()
+    if isinstance(browser_tabs, list):
+        for index, tab in enumerate(browser_tabs):
+            if index >= BROWSER_TAB_LIMIT or not _valid_browser_tab(tab):
                 repaired_browser = True
-        else:
-            repaired_browser = True
+                continue
+            tab_id = tab["tab_id"]
+            if tab_id in seen_tab_ids:
+                repaired_browser = True
+                continue
+            seen_tab_ids.add(tab_id)
+            if set(tab).difference(
+                {"tab_id", "url", "title", "favicon_url", "associated_job_id"}
+            ):
+                repaired_browser = True
+            recovered_tabs.append(
+                {
+                    "tab_id": tab_id,
+                    "url": tab["url"],
+                    "title": tab["title"],
+                    "favicon_url": tab.get("favicon_url"),
+                    "associated_job_id": tab.get("associated_job_id"),
+                }
+            )
     else:
+        repaired_browser = True
+    canonical["browser_tabs"] = recovered_tabs
+    if active_tab_id is None and not recovered_tabs:
+        canonical["active_browser_tab_id"] = None
+    elif isinstance(active_tab_id, str) and active_tab_id in seen_tab_ids:
+        canonical["active_browser_tab_id"] = active_tab_id
+    else:
+        canonical["active_browser_tab_id"] = recovered_tabs[0]["tab_id"] if recovered_tabs else None
         repaired_browser = True
     canonical["_repaired_browser"] = repaired_browser
     canonical["selected_job_id"] = selected_job_id

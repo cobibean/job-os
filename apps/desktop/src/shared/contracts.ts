@@ -53,6 +53,7 @@ export interface BrowserTab extends BrowserTabMetadata {
   canGoForward: boolean
   error: string | null
   crashed: boolean
+  blockedUrl: string | null
 }
 
 export interface BrowserDownload {
@@ -137,6 +138,7 @@ export interface JobOsRendererBridge {
     reload: (tabId: string) => Promise<BrowserState>
     stop: (tabId: string) => Promise<BrowserState>
     associate: (tabId: string, jobId: string | null) => Promise<BrowserState>
+    copyBlockedUrl: (tabId: string) => Promise<BrowserState>
     setBounds: (bounds: BrowserBounds) => Promise<void>
     subscribe: (listener: (state: BrowserState) => void) => () => void
   }

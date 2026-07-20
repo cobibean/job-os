@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState, type KeyboardEvent } from 'react'
 import { ArrowLeft, ArrowRight, Download, FileText, Globe2, LoaderCircle, Plus, RefreshCw, Search, Square, X } from 'lucide-react'
 
 import type { BrowserRestoreState, JobListItem } from '../../shared/contracts'
@@ -7,6 +7,7 @@ import { useBrowser } from '../hooks/useBrowser'
 interface CenterWorkspaceProps {
   activeSurface: 'browser' | 'document'
   browserState: BrowserRestoreState
+  browserRepaired: boolean
   browserVisible: boolean
   jobs: JobListItem[]
   layoutSignal: string
@@ -23,6 +24,7 @@ export function CenterWorkspace(props: CenterWorkspaceProps) {
     props.onBrowserPersist
   )
   const [address, setAddress] = useState('')
+  const tabRefs = useRef(new Map<string, HTMLButtonElement>())
   const active = browser.activeTab
 
   useEffect(() => setAddress(active?.url ?? ''), [active?.tabId, active?.url])
@@ -50,33 +52,73 @@ export function CenterWorkspace(props: CenterWorkspaceProps) {
     browser.reorder(order)
   }
 
+  const focusAndSelectTab = (index: number) => {
+    const tab = browser.state.tabs[index]
+    if (!tab) return
+    browser.select(tab.tabId)
+    tabRefs.current.get(tab.tabId)?.focus()
+  }
+
+  const onTabKeyDown = (event: KeyboardEvent<HTMLButtonElement>, index: number) => {
+    const last = browser.state.tabs.length - 1
+    const target = event.key === 'ArrowRight' ? Math.min(last, index + 1)
+      : event.key === 'ArrowLeft' ? Math.max(0, index - 1)
+        : event.key === 'Home' ? 0
+          : event.key === 'End' ? last
+            : null
+    if (target !== null) {
+      event.preventDefault()
+      focusAndSelectTab(target)
+    } else if (event.key === 'Delete') {
+      event.preventDefault()
+      const closing = browser.state.tabs[index]
+      if (!closing) return
+      const next = browser.state.tabs[index === last ? index - 1 : index + 1]
+      browser.close(closing.tabId)
+      if (next) tabRefs.current.get(next.tabId)?.focus()
+    }
+  }
+
+  const activeIndex = browser.state.tabs.findIndex(tab => tab.tabId === browser.state.activeTabId)
+
   return (
     <main className="browser-workspace panel-region">
-      <div className="browser-tabs" role="tablist" aria-label="Browser tabs">
-        {browser.state.tabs.map((tab, index) => (
-          <div
+      <div className="browser-tabs">
+        <div className="browser-tab-list" role="tablist" aria-label="Browser tabs">
+          {browser.state.tabs.map((tab, index) => (
+          <button
+            aria-controls="browser-tabpanel"
             aria-selected={tab.tabId === browser.state.activeTabId}
+            aria-label={`Select ${tab.title}`}
             className={`browser-tab${tab.tabId === browser.state.activeTabId ? ' active' : ''}`}
+            data-tooltip={`Select ${tab.title}`}
+            id={`browser-tab-${tab.tabId}`}
             key={tab.tabId}
+            onClick={() => browser.select(tab.tabId)}
+            onKeyDown={event => onTabKeyDown(event, index)}
+            ref={element => { if (element) tabRefs.current.set(tab.tabId, element); else tabRefs.current.delete(tab.tabId) }}
             role="tab"
+            tabIndex={tab.tabId === browser.state.activeTabId ? 0 : -1}
+            type="button"
           >
-            <button aria-label={`Select ${tab.title}`} className="browser-tab-select" onClick={() => browser.select(tab.tabId)} type="button">
-              {tab.faviconUrl ? <img alt="" src={tab.faviconUrl} /> : <Globe2 aria-hidden="true" size={14} />}
-              <span>{tab.title || 'New tab'}</span>
-              {tab.loading ? <LoaderCircle aria-hidden="true" className="spin" size={12} /> : null}
-            </button>
-            <button aria-label={`Move ${tab.title} left`} className="tab-order" disabled={index === 0} onClick={() => moveTab(tab.tabId, -1)} type="button"><ArrowLeft aria-hidden="true" size={11} /></button>
-            <button aria-label={`Move ${tab.title} right`} className="tab-order" disabled={index === browser.state.tabs.length - 1} onClick={() => moveTab(tab.tabId, 1)} type="button"><ArrowRight aria-hidden="true" size={11} /></button>
-            <button aria-label={`Close ${tab.title}`} className="tab-close" onClick={() => browser.close(tab.tabId)} type="button"><X aria-hidden="true" size={13} /></button>
-          </div>
-        ))}
-        <button aria-label="Open a new tab" className="icon-button browser-tab-add" disabled={!browser.bridgeAvailable} onClick={() => browser.create()} type="button"><Plus aria-hidden="true" size={16} /></button>
+            {tab.faviconUrl ? <img alt="" src={tab.faviconUrl} /> : <Globe2 aria-hidden="true" size={14} />}
+            <span>{tab.title || 'New tab'}</span>
+            {tab.loading ? <LoaderCircle aria-hidden="true" className="spin" size={12} /> : null}
+          </button>
+          ))}
+        </div>
+        {active ? <div className="browser-tab-actions" aria-label={`Actions for ${active.title}`} role="group">
+          <button aria-label={`Move ${active.title} left`} className="tab-order" data-tooltip={`Move ${active.title} left`} disabled={activeIndex <= 0} onClick={() => moveTab(active.tabId, -1)} type="button"><ArrowLeft aria-hidden="true" size={11} /></button>
+          <button aria-label={`Move ${active.title} right`} className="tab-order" data-tooltip={`Move ${active.title} right`} disabled={activeIndex === browser.state.tabs.length - 1} onClick={() => moveTab(active.tabId, 1)} type="button"><ArrowRight aria-hidden="true" size={11} /></button>
+          <button aria-label={`Close ${active.title}`} className="tab-close" data-tooltip={`Close ${active.title}`} onClick={() => browser.close(active.tabId)} type="button"><X aria-hidden="true" size={13} /></button>
+        </div> : null}
+        <button aria-label="Open a new tab" className="icon-button browser-tab-add" data-tooltip="Open a new tab" disabled={!browser.bridgeAvailable} onClick={() => browser.create()} type="button"><Plus aria-hidden="true" size={16} /></button>
       </div>
 
       <div className="browser-toolbar">
-        <button aria-label="Back" className="icon-button" disabled={!active?.canGoBack} onClick={() => active && browser.back(active.tabId)} type="button"><ArrowLeft aria-hidden="true" size={15} /></button>
-        <button aria-label="Forward" className="icon-button" disabled={!active?.canGoForward} onClick={() => active && browser.forward(active.tabId)} type="button"><ArrowRight aria-hidden="true" size={15} /></button>
-        <button aria-label={active?.loading ? 'Stop loading' : 'Reload'} className="icon-button" disabled={!active} onClick={() => active && (active.loading ? browser.stop(active.tabId) : browser.reload(active.tabId))} type="button">
+        <button aria-label="Back" className="icon-button" data-tooltip="Back" disabled={!active?.canGoBack} onClick={() => active && browser.back(active.tabId)} type="button"><ArrowLeft aria-hidden="true" size={15} /></button>
+        <button aria-label="Forward" className="icon-button" data-tooltip="Forward" disabled={!active?.canGoForward} onClick={() => active && browser.forward(active.tabId)} type="button"><ArrowRight aria-hidden="true" size={15} /></button>
+        <button aria-label={active?.loading ? 'Stop loading' : 'Reload'} className="icon-button" data-tooltip={active?.loading ? 'Stop loading' : 'Reload'} disabled={!active} onClick={() => active && (active.loading ? browser.stop(active.tabId) : browser.reload(active.tabId))} type="button">
           {active?.loading ? <Square aria-hidden="true" size={13} /> : <RefreshCw aria-hidden="true" size={14} />}
         </button>
         <form className="address-form" onSubmit={event => { event.preventDefault(); if (active) browser.navigate(active.tabId, address) }}>
@@ -102,8 +144,9 @@ export function CenterWorkspace(props: CenterWorkspaceProps) {
         </div>
       ) : null}
       {browser.state.notice ? <div className="browser-notice" role="status">{browser.state.notice}</div> : null}
+      {props.browserRepaired ? <div className="browser-notice" role="status">Some saved browser tabs could not be restored. JobOS kept every valid tab and selected the nearest recoverable tab.</div> : null}
 
-      <div className="browser-viewport" ref={browser.viewportRef}>
+      <div aria-labelledby={active ? `browser-tab-${active.tabId}` : undefined} className="browser-viewport" id="browser-tabpanel" ref={browser.viewportRef} role="tabpanel">
         {!browser.bridgeAvailable ? (
           <section className="workspace-empty browser-fallback">
             <span className="empty-orbit"><Search aria-hidden="true" size={23} /></span>
@@ -115,7 +158,8 @@ export function CenterWorkspace(props: CenterWorkspaceProps) {
             <Globe2 aria-hidden="true" size={26} />
             <h1>{active.crashed ? 'Page stopped working' : 'Page unavailable'}</h1>
             <p>{active.error}</p>
-            <div><button onClick={() => browser.reload(active.tabId)} type="button">Reload page</button><button onClick={() => browser.close(active.tabId)} type="button">Close tab</button></div>
+            {active.blockedUrl ? <p className="blocked-link">{active.blockedUrl}</p> : null}
+            <div>{active.blockedUrl ? <button onClick={() => browser.copyBlockedUrl(active.tabId)} type="button">Copy link</button> : <button onClick={() => browser.reload(active.tabId)} type="button">Reload page</button>}<button onClick={() => browser.close(active.tabId)} type="button">Close tab</button></div>
           </section>
         ) : null}
       </div>

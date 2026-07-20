@@ -81,6 +81,8 @@ export function useWorkspace(selectedJobId: string | null) {
       setWorkspace(reconciled)
       if (restored.repairedPresets.length) {
         setAnnouncement(`Recovered ${restored.repairedPresets.join(', ')} layout`)
+      } else if (restored.repairedBrowser) {
+        setAnnouncement('Recovered valid browser tabs from partially damaged saved metadata')
       }
       if (pending.length) {
         recoveringStartup.current = true

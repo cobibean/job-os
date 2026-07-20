@@ -3,6 +3,7 @@ import path from 'node:path'
 
 import type {
   BrowserWindow,
+  Clipboard,
   Dialog,
   DownloadItem,
   Session,
@@ -19,6 +20,11 @@ import type {
   BrowserTab,
   BrowserTabMetadata
 } from '../shared/contracts.js'
+import {
+  BROWSER_PERSISTENCE_LIMITS,
+  sanitizeBrowserMetadata,
+  sanitizeBrowserUrlForPersistence
+} from '../shared/browserPersistence.js'
 
 export const BROWSER_PARTITION = 'persist:jobos-browser-v1'
 export const DEFAULT_BROWSER_URL = 'https://www.google.com/'
@@ -68,13 +74,13 @@ export function isBrowserTabMetadata(value: unknown): value is BrowserTabMetadat
   return (
     typeof tab.tabId === 'string'
     && tab.tabId.length > 0
-    && tab.tabId.length <= 128
+    && tab.tabId.length <= BROWSER_PERSISTENCE_LIMITS.tabId
     && typeof tab.url === 'string'
     && isOrdinaryWebUrl(tab.url)
     && typeof tab.title === 'string'
-    && tab.title.length <= 512
+    && tab.title.length <= BROWSER_PERSISTENCE_LIMITS.title
     && (tab.faviconUrl === null || (typeof tab.faviconUrl === 'string' && isOrdinaryWebUrl(tab.faviconUrl)))
-    && (tab.associatedJobId === null || (typeof tab.associatedJobId === 'string' && tab.associatedJobId.length <= 512))
+    && (tab.associatedJobId === null || (typeof tab.associatedJobId === 'string' && tab.associatedJobId.length <= BROWSER_PERSISTENCE_LIMITS.associatedJobId))
   )
 }
 
@@ -89,6 +95,7 @@ interface BrowserManagerOptions {
   createView: () => WebContentsView
   dialog: Pick<Dialog, 'showSaveDialog'>
   downloadsPath: string
+  clipboard: Pick<Clipboard, 'writeText'>
 }
 
 export class BrowserManager {
@@ -97,6 +104,7 @@ export class BrowserManager {
   readonly #createView: () => WebContentsView
   readonly #dialog: Pick<Dialog, 'showSaveDialog'>
   readonly #downloadsPath: string
+  readonly #clipboard: Pick<Clipboard, 'writeText'>
   readonly #tabs = new Map<string, ManagedTab>()
   #order: string[] = []
   #activeTabId: string | null = null
@@ -104,6 +112,8 @@ export class BrowserManager {
   #bounds: BrowserBounds = { x: 0, y: 0, width: 0, height: 0, visible: false }
   #download: BrowserDownload | null = null
   #notice: string | null = null
+  #synthesizedDefault = false
+  #hasExplicitAction = false
   readonly #downloadHandler = (_event: Electron.Event, item: DownloadItem, contents: WebContents) => this.#handleDownload(item, contents)
 
   constructor(options: BrowserManagerOptions) {
@@ -112,6 +122,7 @@ export class BrowserManager {
     this.#createView = options.createView
     this.#dialog = options.dialog
     this.#downloadsPath = options.downloadsPath
+    this.#clipboard = options.clipboard
     this.#installSessionPolicies()
   }
 
@@ -119,7 +130,15 @@ export class BrowserManager {
     return {
       tabs: this.#order.flatMap(tabId => {
         const tab = this.#tabs.get(tabId)
-        return tab ? [{ ...tab.state }] : []
+        if (!tab) return []
+        const metadata = sanitizeBrowserMetadata(tab.state)
+        if (
+          metadata.url !== tab.state.url
+          || metadata.title !== tab.state.title
+          || metadata.faviconUrl !== tab.state.faviconUrl
+          || metadata.associatedJobId !== tab.state.associatedJobId
+        ) this.#notice = 'Browser metadata was adjusted to fit Workspace security and size limits.'
+        return [{ ...tab.state, ...metadata }]
       }),
       activeTabId: this.#activeTabId,
       download: this.#download ? { ...this.#download } : null,
@@ -128,20 +147,34 @@ export class BrowserManager {
   }
 
   async restore(restored: BrowserRestoreState): Promise<BrowserState> {
-    if (this.#order.length) return this.getState()
+    if (this.#order.length) {
+      if (!this.#synthesizedDefault || this.#hasExplicitAction || !restored.tabs.length) return this.getState()
+      for (const tab of this.#tabs.values()) {
+        if (this.#attachedTabId === tab.state.tabId) this.#window.contentView.removeChildView(tab.view)
+        tab.view.webContents.close({ waitForBeforeUnload: false })
+      }
+      this.#tabs.clear()
+      this.#order = []
+      this.#activeTabId = null
+      this.#attachedTabId = null
+      this.#synthesizedDefault = false
+    }
     const unique = new Set<string>()
-    for (const tab of restored.tabs.slice(0, 50)) {
+    for (const tab of restored.tabs.slice(0, BROWSER_PERSISTENCE_LIMITS.tabs)) {
       if (!isBrowserTabMetadata(tab) || unique.has(tab.tabId)) continue
       unique.add(tab.tabId)
       this.#createTab(tab)
     }
-    if (!this.#order.length) this.#createTab({
-      tabId: randomUUID(),
-      url: DEFAULT_BROWSER_URL,
-      title: 'Google',
-      faviconUrl: null,
-      associatedJobId: null
-    })
+    if (!this.#order.length) {
+      this.#synthesizedDefault = true
+      this.#createTab({
+        tabId: randomUUID(),
+        url: DEFAULT_BROWSER_URL,
+        title: 'Google',
+        faviconUrl: null,
+        associatedJobId: null
+      })
+    }
     this.#activeTabId = restored.activeTabId && this.#tabs.has(restored.activeTabId)
       ? restored.activeTabId
       : this.#order[0] ?? null
@@ -151,6 +184,12 @@ export class BrowserManager {
   }
 
   async create(url = DEFAULT_BROWSER_URL, associatedJobId: string | null = null): Promise<BrowserState> {
+    this.#hasExplicitAction = true
+    if (this.#order.length >= BROWSER_PERSISTENCE_LIMITS.tabs) {
+      this.#notice = `Tab limit reached (${BROWSER_PERSISTENCE_LIMITS.tabs}). Close a tab before opening another.`
+      this.#emit()
+      return this.getState()
+    }
     const tabId = randomUUID()
     this.#createTab({ tabId, url: normalizeBrowserInput(url), title: 'New tab', faviconUrl: null, associatedJobId })
     this.#activeTabId = tabId
@@ -160,6 +199,7 @@ export class BrowserManager {
   }
 
   select(tabId: string): BrowserState {
+    this.#hasExplicitAction = true
     this.#requireTab(tabId)
     this.#activeTabId = tabId
     this.#syncAttachedView()
@@ -168,6 +208,7 @@ export class BrowserManager {
   }
 
   async close(tabId: string): Promise<BrowserState> {
+    this.#hasExplicitAction = true
     const index = this.#order.indexOf(tabId)
     const tab = this.#requireTab(tabId)
     if (this.#attachedTabId === tabId) {
@@ -187,6 +228,7 @@ export class BrowserManager {
   }
 
   reorder(tabIds: string[]): BrowserState {
+    this.#hasExplicitAction = true
     if (tabIds.length !== this.#order.length || new Set(tabIds).size !== tabIds.length || tabIds.some(id => !this.#tabs.has(id))) {
       throw new Error('Tab order must contain every open tab exactly once')
     }
@@ -196,6 +238,7 @@ export class BrowserManager {
   }
 
   async navigate(tabId: string, input: string): Promise<BrowserState> {
+    this.#hasExplicitAction = true
     const tab = this.#requireTab(tabId)
     const url = normalizeBrowserInput(input)
     tab.state.error = null
@@ -205,18 +248,21 @@ export class BrowserManager {
   }
 
   back(tabId: string): BrowserState {
+    this.#hasExplicitAction = true
     const contents = this.#requireTab(tabId).view.webContents
     if (contents.navigationHistory.canGoBack()) contents.navigationHistory.goBack()
     return this.getState()
   }
 
   forward(tabId: string): BrowserState {
+    this.#hasExplicitAction = true
     const contents = this.#requireTab(tabId).view.webContents
     if (contents.navigationHistory.canGoForward()) contents.navigationHistory.goForward()
     return this.getState()
   }
 
   reload(tabId: string): BrowserState {
+    this.#hasExplicitAction = true
     const tab = this.#requireTab(tabId)
     tab.state.error = null
     tab.state.crashed = false
@@ -226,13 +272,24 @@ export class BrowserManager {
   }
 
   stop(tabId: string): BrowserState {
+    this.#hasExplicitAction = true
     this.#requireTab(tabId).view.webContents.stop()
     return this.getState()
   }
 
   associate(tabId: string, jobId: string | null): BrowserState {
+    this.#hasExplicitAction = true
     const tab = this.#requireTab(tabId)
     tab.state.associatedJobId = jobId
+    this.#emit()
+    return this.getState()
+  }
+
+  copyBlockedUrl(tabId: string): BrowserState {
+    const tab = this.#requireTab(tabId)
+    if (!tab.state.blockedUrl) throw new Error('No blocked link is available to copy')
+    this.#clipboard.writeText(tab.state.blockedUrl)
+    this.#notice = 'Blocked link copied. JobOS did not open it.'
     this.#emit()
     return this.getState()
   }
@@ -265,7 +322,8 @@ export class BrowserManager {
       canGoBack: false,
       canGoForward: false,
       error: null,
-      crashed: false
+      crashed: false,
+      blockedUrl: null
     }
     const managed = { view, state }
     this.#tabs.set(state.tabId, managed)
@@ -284,11 +342,18 @@ export class BrowserManager {
       tab.state.canGoForward = contents.navigationHistory.canGoForward()
       this.#emit()
     }
-    contents.on('did-start-loading', () => { tab.state.loading = true; tab.state.error = null; this.#notice = null; refresh() })
+    contents.on('did-start-loading', () => { tab.state.loading = true; tab.state.error = null; tab.state.blockedUrl = null; this.#notice = null; refresh() })
     contents.on('did-stop-loading', () => { tab.state.loading = false; refresh() })
     contents.on('did-navigate', refresh)
     contents.on('did-navigate-in-page', refresh)
-    contents.on('page-title-updated', (_event, title) => { tab.state.title = title || 'Untitled'; this.#emit() })
+    contents.on('page-title-updated', (_event, title) => {
+      const nextTitle = title || 'Untitled'
+      if (nextTitle.length > BROWSER_PERSISTENCE_LIMITS.title) {
+        this.#notice = 'A page title was shortened to keep Workspace saves reliable.'
+      }
+      tab.state.title = nextTitle.slice(0, BROWSER_PERSISTENCE_LIMITS.title)
+      this.#emit()
+    })
     contents.on('page-favicon-updated', (_event, favicons) => {
       tab.state.faviconUrl = favicons.find(isOrdinaryWebUrl) ?? null
       this.#emit()
@@ -311,14 +376,20 @@ export class BrowserManager {
     contents.on('will-navigate', (event, url) => {
       if (!isOrdinaryWebUrl(url)) {
         event.preventDefault()
-        tab.state.error = 'External protocols are blocked. Copy the link and open it in the appropriate app.'
+        tab.state.blockedUrl = safeBlockedExternalUrl(url)
+        tab.state.error = tab.state.blockedUrl
+          ? 'JobOS blocked an external protocol. Copy the link if you want to open it yourself.'
+          : 'JobOS blocked an unsafe external protocol.'
         this.#emit()
       }
     })
     contents.setWindowOpenHandler(({ url }) => {
       if (isOrdinaryWebUrl(url)) void this.create(url, tab.state.associatedJobId)
       else {
-        tab.state.error = 'This site requested an external protocol, which JobOS blocked.'
+        tab.state.blockedUrl = safeBlockedExternalUrl(url)
+        tab.state.error = tab.state.blockedUrl
+          ? 'This site requested an external protocol. JobOS blocked it; you may copy the link.'
+          : 'This site requested an unsafe external protocol, which JobOS blocked.'
         this.#emit()
       }
       return { action: 'deny' }
@@ -396,5 +467,16 @@ export class BrowserManager {
 
   #emit(): void {
     if (!this.#window.isDestroyed()) this.#window.webContents.send('jobos:browser:state', this.getState())
+  }
+}
+
+export function safeBlockedExternalUrl(value: string): string | null {
+  try {
+    const parsed = new URL(value)
+    if (['http:', 'https:', 'about:', 'javascript:', 'data:', 'file:', 'blob:'].includes(parsed.protocol)) return null
+    const sanitized = sanitizeBrowserUrlForPersistence(value)
+    return sanitized.length <= 2048 ? sanitized : null
+  } catch {
+    return null
   }
 }

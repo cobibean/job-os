@@ -47,3 +47,31 @@
 
 - Implementation and implementor verification are complete; PM owns the visible MacBook acceptance gate, issue acceptance, and closure.
 - Leave `CLO-50` in `Building`. The implementation owner should comment that the candidate is complete and awaiting PM review after push.
+
+## PM blocker correction - 2026-07-20
+
+### Corrected behavior
+
+- Startup recovery now treats synthesized Google initialization as local browser setup, not user intent. Only an explicit browser action can enter Workspace persistence. If the initial Workspace GET failed and conflict recovery later supplies authoritative tabs, an untouched synthesized default is replaced without replaying it over those tabs.
+- Corrupt browser metadata is repaired entry-by-entry. Valid tabs remain in stable order, duplicates/malformed entries and entries beyond 50 are removed, and an invalid active tab resolves to the first recoverable tab. Layouts, preset, and selected job remain independent.
+- The renderer now visibly and accessibly reports browser metadata repair instead of silently replacing it.
+- One conservative URL persistence policy is mirrored in `apps/desktop/src/shared/browserPersistence.ts` and `services/api/jobos_api/browser_policy.py`: userinfo, fragments, OAuth/SAML assertions, capability/session credentials, and signed-download parameters are removed before desktop emission and rejected by the API. Ordinary query parameters remain intact.
+- `BrowserManager` now enforces the Workspace boundary before emission: 50 tabs, 512-character titles, 8192-character URL/favicon bounds, and bounded IDs/associations. Limit or metadata adjustment feedback is shown without breaking later atomic saves.
+- Browser tabs now use a valid `tablist`/`tab`/`tabpanel` pattern with roving focus and Arrow/Home/End/Delete keyboard behavior. Select, reorder, close, add, back, forward, and reload/stop controls have accessible names and focus/hover tooltips.
+- Blocked external protocols retain only a sanitized, displayable URL and expose explicit `Copy link`; JobOS never launches the protocol automatically. Both `will-navigate` and new-window paths use this recovery.
+
+### Correction verification
+
+- Focused desktop: `PATH=/Users/cobibean/Library/pnpm/nodejs/26.5.0/bin:$PATH pnpm --filter @jobos/desktop test -- --run` passed 37 tests across 9 files.
+- Focused API: `uv run --project services/api pytest services/api/tests/test_state_store.py services/api/tests/test_jobs_contract.py -q` passed 28 tests.
+- Full pinned gate: `PATH=/Users/cobibean/Library/pnpm/nodejs/26.5.0/bin:$PATH pnpm check` passed lint, generated contracts/type checks, 37 desktop tests, 33 Python tests, production Electron/Vite build, and packaged-renderer verification.
+- Contract drift: `PATH=/Users/cobibean/Library/pnpm/nodejs/26.5.0/bin:$PATH pnpm contracts:check` passed.
+- Secret scan: `gitleaks detect --source . --no-banner --redact --verbose` with gitleaks 8.30.0 scanned 11 commits / about 697 KB and found no leaks.
+- Renderer proof: Playwright CLI loaded the production renderer with a proof bridge, exposed a two-tab browser plus repaired-metadata notice, and ArrowRight moved focus/selection from Gmail to Product Manager. The accessibility snapshot showed only true tabs inside the tablist and adjacent tab actions; console errors/warnings were zero. Screenshot: `output/playwright/jobos-phase4-corrections-accessibility.png`.
+- Detached final-commit clean room: `/tmp/jobos-phase4-correction-final-clean` was created from `git archive HEAD`; `pnpm install --frozen-lockfile`, `uv sync --all-packages --frozen`, and the full pinned `pnpm check` passed with 37 desktop and 33 Python tests plus production/package verification.
+
+### Remaining human gate and constraints
+
+- A native programmatic rerun was attempted with a disposable `/tmp/jobos-phase4-correction-proof-profile`, but Electron did not complete while the Mac was locked and was stopped. The script and profile were moved to Trash; no proof is claimed from that attempt.
+- Native visible MacBook acceptance and authenticated Gmail continuity remain explicitly open. The earlier native Phase 4 baseline remains recorded above, but it is not substituted for this human gate.
+- No Mac Mini, job-hunter/Hermes, Phase 5, or unrelated planning work was touched. Preserve the unrelated `docs/planning/.DS_Store` modification.
