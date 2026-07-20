@@ -36,6 +36,7 @@ from jobos_api.device_auth import DeviceAuthenticator, DeviceIdentity
 from jobos_api.documents import (
     ARTIFACT_ID_PATTERN,
     PDF_MEDIA_TYPE,
+    ArtifactApprovalRequest,
     ArtifactRefreshRequest,
     ArtifactRegistrationRequest,
     ArtifactTrustError,
@@ -88,7 +89,10 @@ def create_app(
     capability_broker: CapabilityBroker | None = None,
 ) -> FastAPI:
     state_store = JobOsStateStore(settings.state_db_path)
-    jobs = job_facade or create_job_hunter_adapter(settings.job_hunter_db_path)
+    jobs = job_facade or create_job_hunter_adapter(
+        settings.job_hunter_db_path,
+        settings.hermes_job_hunter_cwd,
+    )
     device_authenticator = DeviceAuthenticator(settings.device_token, settings.device_id)
     bearer = HTTPBearer(auto_error=False)
     configured_gateway = agent_gateway
@@ -903,7 +907,9 @@ def create_app(
             raise HTTPException(status_code=404, detail="Job not found") from error
 
     def artifact_list(job_id: str) -> JobArtifactsResponse:
-        rows, current_id, last_successful_id = state_store.list_document_artifacts(job_id)
+        rows, current_id, last_successful_id, approved_id = (
+            state_store.list_document_artifacts(job_id)
+        )
         return JobArtifactsResponse(
             job_id=job_id,
             artifacts=[
@@ -911,11 +917,13 @@ def create_app(
                     row,
                     current_id=current_id,
                     last_successful_id=last_successful_id,
+                    approved_id=approved_id,
                 )
                 for row in rows
             ],
             current_artifact_id=current_id,
             last_successful_artifact_id=last_successful_id,
+            approved_artifact_id=approved_id,
         )
 
     @app.get("/v1/jobs/{job_id}/artifacts", tags=["documents"])
@@ -934,6 +942,54 @@ def create_app(
             command_name="document.list",
             label="Inspected resume artifacts",
             detail={"job_id": job_id, "count": len(result.artifacts)},
+        )
+        return result
+
+    @app.post(
+        "/v1/jobs/{job_id}/artifacts/{artifact_id}/approve",
+        tags=["documents"],
+    )
+    @serialized_mutation_route
+    def approve_job_artifact(
+        job_id: str,
+        artifact_id: str,
+        identity: Annotated[DeviceIdentity, Depends(authenticated_device)],
+        command: ArtifactApprovalRequest | None = None,
+    ) -> JobArtifactsResponse:
+        command = command or ArtifactApprovalRequest()
+        ensure_job(job_id)
+        request_hash = mutation_hash(
+            "document.approve",
+            {"job_id": job_id, "artifact_id": artifact_id, "origin": command.origin},
+        )
+        try:
+            replay = mutation_replay(
+                identity=identity,
+                target=f"jobs/{job_id}/artifacts/{artifact_id}",
+                command_name="document.approve",
+                idempotency_key=command.idempotency_key,
+                request_hash=request_hash,
+            )
+        except IdempotencyConflict as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
+        if replay is not None:
+            return JobArtifactsResponse.model_validate(replay)
+        try:
+            state_store.approve_document_artifact(job_id, artifact_id)
+        except ValueError as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
+        result = artifact_list(job_id)
+        record_mutation(
+            identity=identity,
+            target=f"jobs/{job_id}/artifacts/{artifact_id}",
+            command_name="document.approve",
+            origin=command.origin,
+            idempotency_key=command.idempotency_key,
+            request_hash=request_hash,
+            result=result.model_dump(mode="json"),
+            label="Approved resume revision",
+            job_id=job_id,
+            detail={"artifact_id": artifact_id},
         )
         return result
 
@@ -1019,6 +1075,7 @@ def create_app(
         except (ArtifactTrustError, ValueError) as error:
             raise HTTPException(status_code=422, detail=str(error)) from error
         result = artifact_list(job_id)
+        render_succeeded = verified.render_status == "succeeded"
         record_mutation(
             identity=identity,
             target=f"jobs/{job_id}/artifacts",
@@ -1027,7 +1084,8 @@ def create_app(
             idempotency_key=command.idempotency_key,
             request_hash=request_hash,
             result=result.model_dump(mode="json"),
-            label="Rendered resume artifact",
+            label=("Rendered resume artifact" if render_succeeded else "Resume render failed"),
+            outcome="completed" if render_succeeded else "failed",
             job_id=job_id,
             detail={"source_id": command.source_id, "artifact_id": result.current_artifact_id},
         )

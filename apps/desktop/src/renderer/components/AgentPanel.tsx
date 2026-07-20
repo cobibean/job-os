@@ -1,5 +1,5 @@
 import { Bot, BriefcaseBusiness, ChevronDown, CircleAlert, LoaderCircle, RotateCcw, Send, SlidersHorizontal, Square, UserRound, WifiOff } from 'lucide-react'
-import { useLayoutEffect, useMemo, useRef } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef } from 'react'
 
 import type { ConnectivityState, ConversationEntryState, ConversationEvent } from '../../shared/contracts'
 import { useAgentConversation } from '../hooks/useAgentConversation'
@@ -8,6 +8,7 @@ import { ActivityRow } from './ActivityRow'
 interface AgentPanelProps {
   contextLabel: string
   apiState?: ConnectivityState
+  onArtifactRendered?: () => void
 }
 
 type TerminalState = Extract<ConversationEntryState, 'completed' | 'failed' | 'interrupted'>
@@ -35,17 +36,38 @@ function ConnectionNotice({ apiState, connection }: { apiState: ConnectivityStat
   return null
 }
 
-export function AgentPanel({ contextLabel, apiState = 'connected' }: AgentPanelProps) {
+export function AgentPanel({ contextLabel, apiState = 'connected', onArtifactRendered }: AgentPanelProps) {
   const conversation = useAgentConversation()
   const terminalByTurn = useMemo(() => terminalStateByTurn(conversation.entries), [conversation.entries])
   const scrollRef = useRef<HTMLDivElement>(null)
   const pinnedToBottom = useRef(true)
+  const observedEventId = useRef<number | null>(null)
   const canSend = Boolean(
     conversation.draft.trim()
     && !conversation.activeTurn
     && !conversation.restoring
     && apiState === 'connected'
   )
+
+  useEffect(() => {
+    if (conversation.restoring) return
+    const latestEventId = conversation.entries.reduce(
+      (latest, entry) => Math.max(latest, entry.eventId),
+      0
+    )
+    if (observedEventId.current === null) {
+      observedEventId.current = latestEventId
+      return
+    }
+    const rendered = conversation.entries.some(entry => (
+      entry.eventId > (observedEventId.current ?? 0)
+      && entry.type === 'activity'
+      && entry.state === 'completed'
+      && entry.detail.command === 'document.render'
+    ))
+    observedEventId.current = Math.max(observedEventId.current, latestEventId)
+    if (rendered) onArtifactRendered?.()
+  }, [conversation.entries, conversation.restoring, onArtifactRendered])
 
   useLayoutEffect(() => {
     const transcript = scrollRef.current

@@ -203,6 +203,9 @@ function registerDocumentsInterface(): void {
   }
   ipcMain.handle('jobos:documents:list', (event, id: string) => trusted(event).list(jobId(id)))
   ipcMain.handle('jobos:documents:refresh', (event, id: string) => trusted(event).refresh(jobId(id)))
+  ipcMain.handle('jobos:documents:approve', (event, owner: string, id: string) => (
+    trusted(event).approve(jobId(owner), artifactId(id))
+  ))
   ipcMain.handle('jobos:documents:load-pdf', (event, id: string) => trusted(event).loadPdf(artifactId(id)))
   ipcMain.handle('jobos:documents:export', (event, id: string) => trusted(event).exportArtifact(artifactId(id)))
   ipcMain.handle('jobos:documents:reveal', (event, id: string) => trusted(event).reveal(artifactId(id)))

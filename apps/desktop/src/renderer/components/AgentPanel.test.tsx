@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, expect, test, vi } from 'vitest'
 
 import type { AgentConversationSnapshot, ConversationEvent } from '../../shared/contracts'
@@ -101,6 +101,24 @@ test('API-online users can use Send to reconnect an initially offline agent', as
   expect(screen.getByText('Send to reconnect the agent')).not.toBeNull()
   fireEvent.click(send)
   await waitFor(() => expect(agent.send).toHaveBeenCalledOnce())
+})
+
+test('focuses the document surface when a live resume render completes', async () => {
+  let stream!: (update: unknown) => void
+  installAgent(
+    { conversationId: 'conv-current', connection: 'online', activeTurn: null, latestEventId: 0, entries: [] },
+    { subscribe: vi.fn((listener: (update: unknown) => void) => { stream = listener; return () => undefined }) }
+  )
+  const onArtifactRendered = vi.fn()
+  render(<AgentPanel apiState="connected" contextLabel="Northstar" onArtifactRendered={onArtifactRendered} />)
+  await screen.findByRole('textbox', { name: 'Message the agent' })
+
+  act(() => stream({
+    kind: 'event',
+    event: event(1, { detail: { command: 'document.render', outcome: 'completed' } })
+  }))
+
+  await waitFor(() => expect(onArtifactRendered).toHaveBeenCalledOnce())
 })
 
 test('settles a working assistant placeholder before a later interrupted terminal card', async () => {

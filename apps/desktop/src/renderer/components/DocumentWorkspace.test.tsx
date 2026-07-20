@@ -47,6 +47,7 @@ function artifact(overrides: Partial<DocumentArtifact> = {}): DocumentArtifact {
     createdAt: '2026-07-20T00:00:00Z',
     isCurrent: true,
     isLastSuccessful: true,
+    isApproved: false,
     previewAvailable: true,
     ...overrides
   }
@@ -57,7 +58,8 @@ function state(artifacts: DocumentArtifact[]): JobArtifactsState {
     jobId: job.jobId,
     artifacts,
     currentArtifactId: artifacts.find(item => item.isCurrent)?.artifactId ?? null,
-    lastSuccessfulArtifactId: artifacts.find(item => item.isLastSuccessful)?.artifactId ?? null
+    lastSuccessfulArtifactId: artifacts.find(item => item.isLastSuccessful)?.artifactId ?? null,
+    approvedArtifactId: artifacts.find(item => item.isApproved)?.artifactId ?? null
   }
 }
 
@@ -76,6 +78,7 @@ function installDocuments(overrides: Partial<JobOsRendererBridge['documents']> =
   const documents: JobOsRendererBridge['documents'] = {
     list: vi.fn(async () => successful),
     refresh: vi.fn(async () => successful),
+    approve: vi.fn(async () => successful),
     loadPdf: vi.fn(async artifactId => ({
       artifactId,
       artifactRevision: 'render-2',
@@ -118,6 +121,23 @@ describe('trusted document workspace', () => {
     await waitFor(() => expect(onViewChange).toHaveBeenLastCalledWith(
       'art_ABCDEFGHIJKLMNOPQRSTUVWX', 2, 1.1
     ))
+  })
+
+  it('approves the exact visible successful revision and shows its durable state', async () => {
+    const pending = artifact()
+    const approved = artifact({ isApproved: true })
+    const documents = installDocuments({
+      list: vi.fn(async () => state([pending])),
+      refresh: vi.fn(async () => state([pending])),
+      approve: vi.fn(async () => state([approved]))
+    })
+    render(<DocumentWorkspace hydrated job={job} onViewChange={vi.fn()} restoredArtifactId={null} restoredPage={1} restoredZoom={1} />)
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Approve this revision' }))
+
+    await waitFor(() => expect(documents.approve).toHaveBeenCalledWith(job.jobId, pending.artifactId))
+    expect(await screen.findByText('Approved revision')).not.toBeNull()
+    expect((screen.getByRole('button', { name: 'Approved revision' }) as HTMLButtonElement).disabled).toBe(true)
   })
 
   it('keeps the last successful preview when the newest render fails', async () => {
@@ -256,6 +276,57 @@ describe('trusted document workspace', () => {
     await waitFor(() => expect(documents.refresh).toHaveBeenCalledOnce())
     expect((screen.getByRole('combobox', { name: 'Resume revision' }) as HTMLSelectElement).value).toBe(older.artifactId)
     expect(screen.queryByText(/PDF bytes 4/)).toBeNull()
+  })
+
+  it('does not reload artifacts when workspace persistence rerenders the same job', async () => {
+    const documents = installDocuments()
+    const onViewChange = vi.fn()
+    const view = render(
+      <DocumentWorkspace hydrated job={job} onViewChange={onViewChange} restoredArtifactId={null} restoredPage={1} restoredZoom={1} />
+    )
+
+    await waitFor(() => expect(onViewChange).toHaveBeenCalledWith(artifact().artifactId, 1, 1))
+    view.rerender(
+      <DocumentWorkspace hydrated job={{ ...job }} onViewChange={onViewChange} restoredArtifactId={artifact().artifactId} restoredPage={1} restoredZoom={1} />
+    )
+
+    await waitFor(() => expect(documents.list).toHaveBeenCalledOnce())
+    expect(documents.refresh).toHaveBeenCalledOnce()
+  })
+
+  it('keeps loaded PDF bytes when refresh returns the same artifact', async () => {
+    const current = state([artifact()])
+    const refreshed = deferred<JobArtifactsState>()
+    installDocuments({
+      list: vi.fn(async () => current),
+      refresh: vi.fn(() => refreshed.promise)
+    })
+    render(
+      <DocumentWorkspace hydrated job={job} onViewChange={vi.fn()} restoredArtifactId={null} restoredPage={1} restoredZoom={1} />
+    )
+
+    expect(await screen.findByText('PDF bytes 2 · page 1 at 100%')).not.toBeNull()
+    refreshed.resolve(current)
+
+    await screen.findByText('Artifact registry is current')
+    expect(screen.getByText('PDF bytes 2 · page 1 at 100%')).not.toBeNull()
+  })
+
+  it('captures the context bridge once across renderer state updates', async () => {
+    const documents = installDocuments()
+    Object.defineProperty(window, 'jobos', {
+      configurable: true,
+      get: () => ({ documents: { ...documents } } as JobOsRendererBridge)
+    })
+
+    render(
+      <DocumentWorkspace hydrated job={job} onViewChange={vi.fn()} restoredArtifactId={null} restoredPage={1} restoredZoom={1} />
+    )
+
+    expect(await screen.findByText('PDF bytes 2 · page 1 at 100%')).not.toBeNull()
+    await waitFor(() => expect(documents.list).toHaveBeenCalledOnce())
+    expect(documents.refresh).toHaveBeenCalledOnce()
+    expect(documents.loadPdf).toHaveBeenCalledOnce()
   })
 
   it('falls back deterministically and resets view when the selected revision disappears', async () => {

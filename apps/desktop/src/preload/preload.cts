@@ -59,6 +59,9 @@ const bridge: JobOsRendererBridge = Object.freeze({
   documents: Object.freeze({
     list: (jobId: string) => ipcRenderer.invoke('jobos:documents:list', jobId),
     refresh: (jobId: string) => ipcRenderer.invoke('jobos:documents:refresh', jobId),
+    approve: (jobId: string, artifactId: string) => (
+      ipcRenderer.invoke('jobos:documents:approve', jobId, artifactId)
+    ),
     loadPdf: (artifactId: string) => ipcRenderer.invoke('jobos:documents:load-pdf', artifactId),
     export: (artifactId: string) => ipcRenderer.invoke('jobos:documents:export', artifactId),
     reveal: (artifactId: string) => ipcRenderer.invoke('jobos:documents:reveal', artifactId),

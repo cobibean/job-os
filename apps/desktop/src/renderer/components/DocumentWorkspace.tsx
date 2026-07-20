@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
+  CheckCircle2,
   ChevronLeft,
   ChevronRight,
   Download,
@@ -27,11 +28,12 @@ const emptyState = (jobId = ''): JobArtifactsState => ({
   jobId,
   artifacts: [],
   currentArtifactId: null,
-  lastSuccessfulArtifactId: null
+  lastSuccessfulArtifactId: null,
+  approvedArtifactId: null
 })
 
 export function DocumentWorkspace(props: DocumentWorkspaceProps) {
-  const bridge = window.jobos?.documents
+  const bridge = useRef(window.jobos?.documents).current
   const [state, setState] = useState<JobArtifactsState>(emptyState(props.job?.jobId))
   const [activeId, setActiveId] = useState<string | null>(props.restoredArtifactId)
   const [page, setPage] = useState(Math.max(1, props.restoredPage))
@@ -44,6 +46,9 @@ export function DocumentWorkspace(props: DocumentWorkspaceProps) {
     `${props.restoredArtifactId ?? ''}:${props.restoredPage}:${props.restoredZoom}`
   )
   const selectedId = useRef<string | null>(props.restoredArtifactId)
+  const restoredArtifactId = useRef(props.restoredArtifactId)
+  restoredArtifactId.current = props.restoredArtifactId
+  const jobId = props.job?.jobId ?? null
 
   useEffect(() => {
     if (!props.hydrated) return
@@ -90,34 +95,34 @@ export function DocumentWorkspace(props: DocumentWorkspaceProps) {
     const changed = selectedId.current !== nextId
     selectedId.current = nextId
     setActiveId(nextId)
-    setPayload(null)
-    if (changed && nextId !== props.restoredArtifactId) {
+    if (changed) setPayload(null)
+    if (changed && nextId !== restoredArtifactId.current) {
       setPage(1)
       setZoom(1)
       setPageCount(0)
     }
     return nextId
-  }, [props.restoredArtifactId])
+  }, [])
 
   useEffect(() => {
-    if (!props.job || !bridge) {
-      setState(emptyState(props.job?.jobId))
+    if (!jobId || !bridge) {
+      setState(emptyState(jobId ?? undefined))
       setActiveId(null)
       setPayload(null)
       return
     }
     let active = true
-    setState(emptyState(props.job.jobId))
+    setState(emptyState(jobId))
     selectedId.current = null
     setActiveId(null)
     setPayload(null)
     setLoading(true)
     setMessage('Loading registered artifacts…')
-    bridge.list(props.job.jobId).then(listed => {
+    bridge.list(jobId).then(listed => {
       if (!active) return
       setState(listed)
-      const listedId = choosePreview(listed, props.restoredArtifactId)
-      return bridge.refresh(props.job!.jobId)
+      const listedId = choosePreview(listed, restoredArtifactId.current)
+      return bridge.refresh(jobId)
         .then(refreshed => ({ refreshed, listedId }))
     }).then(result => {
       if (!active || !result) return
@@ -131,7 +136,7 @@ export function DocumentWorkspace(props: DocumentWorkspaceProps) {
       if (active) setLoading(false)
     })
     return () => { active = false }
-  }, [bridge, choosePreview, props.job])
+  }, [bridge, choosePreview, jobId])
 
   useEffect(() => {
     setPayload(null)
@@ -191,6 +196,23 @@ export function DocumentWorkspace(props: DocumentWorkspaceProps) {
     }
   }
 
+  const approve = async () => {
+    const presentedArtifact = activeArtifact
+    if (!props.job || !presentedArtifact || !bridge || presentedArtifact.renderStatus !== 'succeeded') {
+      return
+    }
+    setLoading(true)
+    try {
+      const approved = await bridge.approve(props.job.jobId, presentedArtifact.artifactId)
+      setState(approved)
+      setMessage(`Approved revision ${presentedArtifact.artifactRevision}`)
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : 'Resume approval failed')
+    } finally {
+      setLoading(false)
+    }
+  }
+
   if (!props.job) {
     return (
       <main className="document-workspace panel-region">
@@ -226,7 +248,8 @@ export function DocumentWorkspace(props: DocumentWorkspaceProps) {
           <option value="">No artifact</option>
           {state.artifacts.map(artifact => (
             <option key={artifact.artifactId} value={artifact.artifactId}>
-              {artifact.artifactRevision} · {artifact.renderStatus}{artifact.isCurrent ? ' · newest' : ''}
+              {artifact.artifactRevision} · {artifact.renderStatus}
+              {artifact.isApproved ? ' · approved' : artifact.isCurrent ? ' · newest' : ''}
             </option>
           ))}
         </select>
@@ -237,6 +260,15 @@ export function DocumentWorkspace(props: DocumentWorkspaceProps) {
         <button disabled={!activeArtifact || !bridge} onClick={() => action('open')} type="button"><ExternalLink aria-hidden="true" size={14} /> Open</button>
         <button disabled={!activeArtifact || !bridge} onClick={() => action('reveal')} type="button"><FolderOpen aria-hidden="true" size={14} /> Reveal</button>
         <button disabled={!activeArtifact || !bridge} onClick={() => action('export')} type="button"><Download aria-hidden="true" size={14} /> Export</button>
+        <button
+          className="approve-revision"
+          disabled={!activeArtifact || activeArtifact.renderStatus !== 'succeeded' || activeArtifact.isApproved || !bridge || loading}
+          onClick={approve}
+          type="button"
+        >
+          <CheckCircle2 aria-hidden="true" size={14} />
+          {activeArtifact?.isApproved ? 'Approved revision' : 'Approve this revision'}
+        </button>
         <span className="document-toolbar-spacer" />
         <button aria-label="Previous page" disabled={page <= 1 || !payload} onClick={() => setPage(value => Math.max(1, value - 1))} type="button"><ChevronLeft aria-hidden="true" size={14} /></button>
         <span className="page-count">Page {page} of {pageCount || '—'}</span>

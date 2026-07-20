@@ -897,6 +897,124 @@ def test_newer_success_and_failed_render_preserve_last_successful_preview(tmp_pa
     assert retained["preview_available"] is True
 
 
+def test_approval_persists_the_exact_successful_artifact_for_the_job(tmp_path):
+    facade = FakeJobHunterFacade()
+    facade.jobs = facade.jobs[:1]
+    pdf = tmp_path / "resume.pdf"
+    pdf.write_bytes(b"%PDF-1.7\napproved resume\n%%EOF\n")
+    facade.artifacts["job-0"] = [artifact_metadata(pdf)]
+
+    with make_client(tmp_path, facade) as client:
+        registered = client.post(
+            "/v1/jobs/job-0/artifacts/refresh", headers=auth_headers()
+        ).json()
+        artifact_id = registered["last_successful_artifact_id"]
+        approved = client.post(
+            f"/v1/jobs/job-0/artifacts/{artifact_id}/approve",
+            headers=auth_headers(),
+            json={
+                "origin": "user",
+                "idempotency_key": "approve-artifact-1",
+            },
+        )
+
+    with make_client(tmp_path, facade) as restarted:
+        restored = restarted.get(
+            "/v1/jobs/job-0/artifacts", headers=auth_headers()
+        ).json()
+
+    assert approved.status_code == 200
+    assert approved.json()["approved_artifact_id"] == artifact_id
+    approved_artifact = next(
+        item for item in approved.json()["artifacts"] if item["artifact_id"] == artifact_id
+    )
+    assert approved_artifact["is_approved"] is True
+    assert restored["approved_artifact_id"] == artifact_id
+
+
+def test_failed_or_cross_job_artifact_cannot_be_approved(tmp_path):
+    facade = FakeJobHunterFacade()
+    facade.jobs = facade.jobs[:2]
+    failed = {
+        "job_id": "job-0",
+        "source_revision": "source-failed",
+        "artifact_revision": "render-failed",
+        "media_type": "application/pdf",
+        "render_status": "failed",
+        "render_sequence": 1,
+        "failure_message": "fixture failed",
+    }
+    facade.artifacts["job-0"] = [failed]
+    pdf = tmp_path / "other.pdf"
+    pdf.write_bytes(b"%PDF-1.7\nother job\n%%EOF\n")
+    facade.artifacts["job-1"] = [artifact_metadata(pdf, job_id="job-1")]
+
+    with make_client(tmp_path, facade) as client:
+        failed_id = client.post(
+            "/v1/jobs/job-0/artifacts/refresh", headers=auth_headers()
+        ).json()["current_artifact_id"]
+        other_id = client.post(
+            "/v1/jobs/job-1/artifacts/refresh", headers=auth_headers()
+        ).json()["current_artifact_id"]
+        failed_approval = client.post(
+            f"/v1/jobs/job-0/artifacts/{failed_id}/approve",
+            headers=auth_headers(),
+            json={"origin": "user", "idempotency_key": "approve-failed"},
+        )
+        cross_job = client.post(
+            f"/v1/jobs/job-0/artifacts/{other_id}/approve",
+            headers=auth_headers(),
+            json={"origin": "user", "idempotency_key": "approve-cross-job"},
+        )
+
+    assert failed_approval.status_code == 409
+    assert cross_job.status_code == 409
+
+
+def test_failed_render_records_failed_agent_activity(tmp_path):
+    class FailedRenderFacade(FakeJobHunterFacade):
+        def render_resume(self, job_id, source_id, output_options):
+            return {
+                "job_id": job_id,
+                "source_revision": "source-failed",
+                "artifact_revision": "render-failed",
+                "media_type": "application/pdf",
+                "render_status": "failed",
+                "render_sequence": 1,
+                "failure_message": "fixture render failed",
+            }
+
+    with make_client(tmp_path, FailedRenderFacade()) as client:
+        response = client.post(
+            "/v1/jobs/job-0/artifacts/render",
+            headers=auth_headers(),
+            json={
+                "source_id": "job-0-tailored",
+                "output_format": "pdf",
+                "origin": "mcp",
+                "idempotency_key": "failed-render-activity",
+            },
+        )
+
+    assert response.status_code == 200
+    assert response.json()["artifacts"][0]["render_status"] == "failed"
+    with sqlite3.connect(tmp_path / "jobos.db") as connection:
+        state, detail_json = connection.execute(
+            "SELECT state, detail_json FROM conversation_events "
+            "WHERE source_event_id = ?",
+            (
+                mutation_activity_source_id(
+                    actor_id="primary-device",
+                    target_resource="jobs/job-0/artifacts",
+                    command_name="document.render",
+                    idempotency_key="failed-render-activity",
+                ),
+            ),
+        ).fetchone()
+    assert state == "failed"
+    assert json.loads(detail_json)["outcome"] == "failed"
+
+
 @pytest.mark.parametrize("manifest_order", ["oldest-first", "newest-first"])
 def test_facade_render_sequence_determines_current_and_last_successful(
     tmp_path, manifest_order
