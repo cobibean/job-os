@@ -6,7 +6,7 @@ export function AgentPanel() {
       <div className="agent-context">
         <span><BriefcaseBusiness aria-hidden="true" size={16} strokeWidth={1.5} /> No active job</span>
         <ChevronDown aria-hidden="true" size={14} strokeWidth={1.5} />
-        <button aria-label="Agent context settings" className="icon-button context-settings" type="button">
+        <button aria-label="Agent context settings" className="icon-button context-settings placeholder-control" disabled title="Available in a later phase" type="button">
           <SlidersHorizontal aria-hidden="true" size={16} strokeWidth={1.5} />
         </button>
       </div>
@@ -19,7 +19,7 @@ export function AgentPanel() {
 
       <div className="composer" aria-label="Agent message composer">
         <span className="composer-placeholder">Message the agent…</span>
-        <button aria-label="Send message" className="send-button" disabled type="button">
+        <button aria-label="Send message" className="send-button placeholder-control" disabled title="Available in Phase 6" type="button">
           <Send aria-hidden="true" size={17} strokeWidth={1.5} />
         </button>
       </div>

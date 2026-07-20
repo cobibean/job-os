@@ -19,7 +19,7 @@ def test_health_reports_a_ready_phase_one_api(tmp_path):
         "status": "ready",
         "service": "jobos-api",
         "version": "0.1.0",
-        "state_schema": 1,
+        "state_schema": 2,
     }
 
 
@@ -69,4 +69,17 @@ def test_version_and_openapi_describe_the_connected_shell_contract(tmp_path):
         "/v1/health",
         "/v1/version",
         "/v1/device-session",
+    }
+    schemas = openapi.json()["components"]["schemas"]
+    assert set(schemas["HealthResponse"]["required"]) == {
+        "status",
+        "service",
+        "version",
+        "state_schema",
+    }
+    assert set(schemas["VersionResponse"]["required"]) == {"api_version", "contract"}
+    assert set(schemas["DeviceSessionResponse"]["required"]) == {
+        "authenticated",
+        "transport",
+        "api_version",
     }

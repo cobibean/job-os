@@ -1,5 +1,88 @@
 {
   "components": {
+    "schemas": {
+      "DeviceSessionResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "api_version": {
+            "minLength": 1,
+            "title": "Api Version",
+            "type": "string"
+          },
+          "authenticated": {
+            "const": true,
+            "title": "Authenticated",
+            "type": "boolean"
+          },
+          "transport": {
+            "const": "private-tailscale",
+            "title": "Transport",
+            "type": "string"
+          }
+        },
+        "required": [
+          "authenticated",
+          "transport",
+          "api_version"
+        ],
+        "title": "DeviceSessionResponse",
+        "type": "object"
+      },
+      "HealthResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "service": {
+            "const": "jobos-api",
+            "title": "Service",
+            "type": "string"
+          },
+          "state_schema": {
+            "minimum": 1.0,
+            "title": "State Schema",
+            "type": "integer"
+          },
+          "status": {
+            "const": "ready",
+            "title": "Status",
+            "type": "string"
+          },
+          "version": {
+            "minLength": 1,
+            "title": "Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "service",
+          "version",
+          "state_schema"
+        ],
+        "title": "HealthResponse",
+        "type": "object"
+      },
+      "VersionResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "api_version": {
+            "minLength": 1,
+            "title": "Api Version",
+            "type": "string"
+          },
+          "contract": {
+            "const": "jobos-v1-phase1",
+            "title": "Contract",
+            "type": "string"
+          }
+        },
+        "required": [
+          "api_version",
+          "contract"
+        ],
+        "title": "VersionResponse",
+        "type": "object"
+      }
+    },
     "securitySchemes": {
       "HTTPBearer": {
         "scheme": "bearer",
@@ -21,18 +104,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": {
-                    "anyOf": [
-                      {
-                        "type": "string"
-                      },
-                      {
-                        "type": "boolean"
-                      }
-                    ]
-                  },
-                  "title": "Response Device Session V1 Device Session Get",
-                  "type": "object"
+                  "$ref": "#/components/schemas/DeviceSessionResponse"
                 }
               }
             },
@@ -58,18 +130,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": {
-                    "anyOf": [
-                      {
-                        "type": "string"
-                      },
-                      {
-                        "type": "integer"
-                      }
-                    ]
-                  },
-                  "title": "Response Health V1 Health Get",
-                  "type": "object"
+                  "$ref": "#/components/schemas/HealthResponse"
                 }
               }
             },
@@ -90,11 +151,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": {
-                    "type": "string"
-                  },
-                  "title": "Response Version V1 Version Get",
-                  "type": "object"
+                  "$ref": "#/components/schemas/VersionResponse"
                 }
               }
             },

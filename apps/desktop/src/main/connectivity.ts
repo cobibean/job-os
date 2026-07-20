@@ -11,8 +11,35 @@ export interface ConnectivityConfig {
   deviceToken: string
 }
 
-function recordValue(value: unknown, key: string): unknown {
-  return value && typeof value === 'object' ? (value as Record<string, unknown>)[key] : undefined
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object'
+}
+
+function isHealthResponse(value: unknown): value is {
+  status: 'ready'
+  service: 'jobos-api'
+  version: string
+  state_schema: number
+} {
+  return isRecord(value)
+    && value.status === 'ready'
+    && value.service === 'jobos-api'
+    && typeof value.version === 'string'
+    && value.version.length > 0
+    && Number.isInteger(value.state_schema)
+    && Number(value.state_schema) >= 1
+}
+
+function isDeviceSessionResponse(value: unknown): value is {
+  authenticated: true
+  transport: 'private-tailscale'
+  api_version: string
+} {
+  return isRecord(value)
+    && value.authenticated === true
+    && value.transport === 'private-tailscale'
+    && typeof value.api_version === 'string'
+    && value.api_version.length > 0
 }
 
 export async function probeConnectivity(config: ConnectivityConfig): Promise<ConnectivitySnapshot> {
@@ -28,6 +55,13 @@ export async function probeConnectivity(config: ConnectivityConfig): Promise<Con
         message: 'JobOS API unavailable'
       }
     }
+    if (!isHealthResponse(health.data)) {
+      return {
+        state: 'disconnected',
+        checkedAt,
+        message: 'JobOS API returned an invalid health response'
+      }
+    }
 
     const deviceSession = await deviceSessionV1DeviceSessionGet({ client })
     if (deviceSession.error || deviceSession.response?.status !== 200) {
@@ -37,11 +71,17 @@ export async function probeConnectivity(config: ConnectivityConfig): Promise<Con
         message: 'Device authentication failed'
       }
     }
+    if (!isDeviceSessionResponse(deviceSession.data)) {
+      return {
+        state: 'degraded',
+        checkedAt,
+        message: 'Device authentication response invalid'
+      }
+    }
 
-    const apiVersion = recordValue(deviceSession.data, 'api_version')
     return {
       state: 'connected',
-      apiVersion: typeof apiVersion === 'string' ? apiVersion : undefined,
+      apiVersion: deviceSession.data.api_version,
       checkedAt,
       message: 'Private API authenticated'
     }

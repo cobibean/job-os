@@ -4,6 +4,60 @@ export type ClientOptions = {
     baseUrl: `${string}://${string}` | (string & {});
 };
 
+/**
+ * DeviceSessionResponse
+ */
+export type DeviceSessionResponse = {
+    /**
+     * Api Version
+     */
+    api_version: string;
+    /**
+     * Authenticated
+     */
+    authenticated: true;
+    /**
+     * Transport
+     */
+    transport: 'private-tailscale';
+};
+
+/**
+ * HealthResponse
+ */
+export type HealthResponse = {
+    /**
+     * Service
+     */
+    service: 'jobos-api';
+    /**
+     * State Schema
+     */
+    state_schema: number;
+    /**
+     * Status
+     */
+    status: 'ready';
+    /**
+     * Version
+     */
+    version: string;
+};
+
+/**
+ * VersionResponse
+ */
+export type VersionResponse = {
+    /**
+     * Api Version
+     */
+    api_version: string;
+    /**
+     * Contract
+     */
+    contract: 'jobos-v1-phase1';
+};
+
 export type DeviceSessionV1DeviceSessionGetData = {
     body?: never;
     path?: never;
@@ -13,13 +67,9 @@ export type DeviceSessionV1DeviceSessionGetData = {
 
 export type DeviceSessionV1DeviceSessionGetResponses = {
     /**
-     * Response Device Session V1 Device Session Get
-     *
      * Successful Response
      */
-    200: {
-        [key: string]: string | boolean;
-    };
+    200: DeviceSessionResponse;
 };
 
 export type DeviceSessionV1DeviceSessionGetResponse = DeviceSessionV1DeviceSessionGetResponses[keyof DeviceSessionV1DeviceSessionGetResponses];
@@ -33,13 +83,9 @@ export type HealthV1HealthGetData = {
 
 export type HealthV1HealthGetResponses = {
     /**
-     * Response Health V1 Health Get
-     *
      * Successful Response
      */
-    200: {
-        [key: string]: string | number;
-    };
+    200: HealthResponse;
 };
 
 export type HealthV1HealthGetResponse = HealthV1HealthGetResponses[keyof HealthV1HealthGetResponses];
@@ -53,13 +99,9 @@ export type VersionV1VersionGetData = {
 
 export type VersionV1VersionGetResponses = {
     /**
-     * Response Version V1 Version Get
-     *
      * Successful Response
      */
-    200: {
-        [key: string]: string;
-    };
+    200: VersionResponse;
 };
 
 export type VersionV1VersionGetResponse = VersionV1VersionGetResponses[keyof VersionV1VersionGetResponses];
