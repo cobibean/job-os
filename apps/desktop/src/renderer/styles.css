@@ -180,6 +180,7 @@ button:focus-visible {
 }
 .collapsed-panels button { padding: 6px 10px; border: 1px solid #51436f; border-radius: 5px; color: #ded9ea; background: #191721; cursor: pointer; font-size: 11px; }
 .layout-announcement { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 
 .panel-region { min-width: 0; min-height: 0; background: var(--surface); }
 
@@ -517,26 +518,68 @@ button:focus-visible {
 }
 
 .agent-context > span { display: flex; align-items: center; gap: 10px; }
+.agent-context > span > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .context-settings { height: 34px; border-left: 1px solid var(--border); }
 .agent-empty { max-width: 250px; gap: 9px; }
 .agent-avatar { width: 44px; height: 44px; display: grid; place-items: center; margin-bottom: 6px; border: 1px solid #3a3d45; border-radius: 50%; color: var(--muted); }
 
+.agent-body { min-height: 0; overflow: auto; overscroll-behavior: contain; scrollbar-gutter: stable; }
+.agent-restore { height: 100%; display: flex; align-items: center; justify-content: center; gap: 9px; color: var(--muted); font-size: 12px; }
+.agent-connection { display: flex; align-items: center; gap: 7px; margin: 10px 16px 0; padding: 7px 9px; border: 1px solid var(--border); border-radius: 5px; color: var(--muted); background: #14171c; font-size: 11px; }
+.agent-connection.offline { color: #d7aaa2; border-color: #493538; }
+.agent-transcript { display: flex; flex-direction: column; gap: 8px; padding: 18px 16px 22px; }
+.message { padding: 2px 4px 7px; color: #d8d6d0; }
+.message header { display: flex; align-items: center; gap: 7px; margin-bottom: 7px; color: var(--muted); font-size: 11px; font-weight: 580; }
+.message header span { margin-left: auto; color: var(--violet); font-size: 10px; font-weight: 500; }
+.message p { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 13px; line-height: 1.58; }
+.user-message { margin-left: 18px; padding: 10px 12px; border-radius: 7px; background: #191c22; }
+.assistant-message.working p::after { content: ""; display: inline-block; width: 5px; height: 1em; margin-left: 3px; vertical-align: -2px; background: var(--violet); animation: cursor-blink 900ms step-end infinite; }
+@keyframes cursor-blink { 50% { opacity: 0; } }
+
+.activity-row { overflow: hidden; border: 1px solid #30343b; border-radius: 5px; background: #14171b; }
+.activity-summary { width: 100%; min-height: 38px; display: grid; grid-template-columns: 14px 18px minmax(0, 1fr) auto; align-items: center; gap: 6px; padding: 0 10px; border: 0; color: #bfc1c7; background: transparent; text-align: left; cursor: pointer; }
+.activity-summary[aria-expanded="true"] .activity-chevron { transform: rotate(90deg); }
+.activity-chevron { color: var(--quiet); transition: transform 120ms ease; }
+.activity-state { display: grid; place-items: center; color: var(--muted); }
+.activity-row.completed .activity-state { color: var(--green); }
+.activity-row.failed .activity-state { color: var(--danger); }
+.activity-row.waiting .activity-state { color: #c9aa72; }
+.activity-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
+.activity-status { color: var(--quiet); font-size: 9px; text-transform: uppercase; letter-spacing: 0.06em; }
+.activity-details { padding: 8px 12px 10px 48px; border-top: 1px solid var(--border-soft); color: var(--muted); font-size: 10px; }
+.activity-detail { display: grid; grid-template-columns: 72px minmax(0, 1fr); gap: 8px; padding: 3px 0; }
+.activity-detail > span { color: var(--quiet); }
+.activity-detail code { overflow-wrap: anywhere; color: #b8bbc4; font-family: ui-monospace, "SFMono-Regular", Consolas, monospace; white-space: pre-wrap; }
+.redaction-note { margin: 7px 0 0; color: #c0a982; }
+
+.agent-notice { padding: 10px 12px; border: 1px solid #44373a; border-radius: 5px; background: #191619; color: #d4c8c6; }
+.agent-notice.waiting { border-color: #514630; background: #1a1814; }
+.agent-notice strong { display: flex; align-items: center; gap: 7px; font-size: 11px; }
+.agent-notice p { margin: 6px 0 0; font-size: 12px; line-height: 1.45; }
+.retry-button, .stop-button { display: inline-flex; align-items: center; justify-content: center; gap: 5px; height: 28px; margin-top: 8px; padding: 0 9px; border: 1px solid #4b454d; border-radius: 4px; color: #d1ced4; background: #1b1d22; font-size: 11px; cursor: pointer; }
+.agent-inline-error { margin: 0 16px 12px; color: var(--danger); font-size: 11px; }
+
 .composer {
-  height: 108px;
-  display: grid;
-  grid-template-columns: 1fr 34px;
-  align-items: end;
+  min-height: 112px;
+  display: flex;
+  flex-direction: column;
   margin: 0 18px 18px;
-  padding: 15px 13px 12px 15px;
+  padding: 11px 11px 9px 13px;
   border: 1px solid #3a3d45;
   border-radius: 7px;
   color: var(--quiet);
-  font-size: 13px;
   background: #14171c;
 }
 
-.composer-placeholder { align-self: start; }
-.send-button { width: 32px; height: 32px; display: grid; place-items: center; border: 1px solid #5e4e87; border-radius: 5px; color: #77727f; background: transparent; }
+.composer:focus-within { border-color: #66538f; }
+.composer textarea { width: 100%; min-height: 55px; flex: 1; resize: none; padding: 0; border: 0; outline: 0; color: var(--text); background: transparent; font: inherit; font-size: 13px; line-height: 1.45; }
+.composer textarea::placeholder { color: var(--quiet); }
+.composer-footer { display: flex; align-items: end; justify-content: space-between; gap: 8px; }
+.composer-footer > span { max-width: 210px; color: var(--quiet); font-size: 9px; line-height: 1.3; }
+.composer-actions { display: flex; align-items: center; gap: 6px; }
+.stop-button { height: 30px; margin: 0; }
+.send-button { width: 30px; height: 30px; display: grid; place-items: center; border: 1px solid #7058a6; border-radius: 5px; color: #eee9f7; background: #2c2340; cursor: pointer; }
+.send-button:disabled { color: #6f6b75; border-color: #45404d; background: transparent; cursor: not-allowed; }
 
 .status-bar {
   display: grid;

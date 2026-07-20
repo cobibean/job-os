@@ -12,11 +12,12 @@ class HealthResponse(ApiResponse):
     service: Literal["jobos-api"]
     version: str = Field(min_length=1)
     state_schema: int = Field(ge=1)
+    agent_connection: Literal["online", "connecting", "offline"]
 
 
 class VersionResponse(ApiResponse):
     api_version: str = Field(min_length=1)
-    contract: Literal["jobos-v1-phase5"]
+    contract: Literal["jobos-v1-phase6-backend"]
 
 
 class DeviceSessionResponse(ApiResponse):

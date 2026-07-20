@@ -11,6 +11,15 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from jobos_api import __version__
 from jobos_api.adapters import create_job_hunter_adapter
+from jobos_api.agent_gateway import AgentGateway, OfflineAgentGateway
+from jobos_api.conversations import (
+    ConversationResponse,
+    ConversationService,
+    RetryTurnRequest,
+    SendMessageRequest,
+    TurnMutationResponse,
+    conversation_event_source,
+)
 from jobos_api.device_auth import DeviceAuthenticator, DeviceIdentity
 from jobos_api.documents import (
     ARTIFACT_ID_PATTERN,
@@ -24,6 +33,7 @@ from jobos_api.documents import (
     verify_facade_artifacts,
     verify_source_artifact,
 )
+from jobos_api.hermes_adapter import HermesWebSocketGateway
 from jobos_api.jobs import (
     JobDetail,
     JobEventsResponse,
@@ -44,6 +54,7 @@ from jobos_api.jobs import (
 from jobos_api.responses import DeviceSessionResponse, HealthResponse, VersionResponse
 from jobos_api.settings import Settings
 from jobos_api.state_store import (
+    ConversationBusy,
     IdempotencyConflict,
     JobOsStateStore,
     WorkspaceRevisionConflict,
@@ -51,16 +62,42 @@ from jobos_api.state_store import (
 from jobos_api.workspace import WorkspaceSnapshotCommand, WorkspaceSnapshotResponse
 
 
-def create_app(settings: Settings, *, job_facade: JobFacade | None = None) -> FastAPI:
+def create_app(
+    settings: Settings,
+    *,
+    job_facade: JobFacade | None = None,
+    agent_gateway: AgentGateway | None = None,
+) -> FastAPI:
     state_store = JobOsStateStore(settings.state_db_path)
     jobs = job_facade or create_job_hunter_adapter(settings.job_hunter_db_path)
     device_authenticator = DeviceAuthenticator(settings.device_token, settings.device_id)
     bearer = HTTPBearer(auto_error=False)
+    configured_gateway = agent_gateway
+    if configured_gateway is None and all(
+        (
+            settings.hermes_dashboard_url,
+            settings.hermes_dashboard_token,
+            settings.hermes_job_hunter_cwd,
+        )
+    ):
+        configured_gateway = HermesWebSocketGateway(
+            url=str(settings.hermes_dashboard_url),
+            token=str(settings.hermes_dashboard_token),
+            cwd=settings.hermes_job_hunter_cwd,  # type: ignore[arg-type]
+            request_timeout=settings.hermes_request_timeout,
+        )
+    conversation_service = ConversationService(
+        state_store, configured_gateway or OfflineAgentGateway()
+    )
 
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         state_store.initialize()
-        yield
+        await conversation_service.start()
+        try:
+            yield
+        finally:
+            await conversation_service.close()
 
     app = FastAPI(
         title="JobOS API",
@@ -76,11 +113,12 @@ def create_app(settings: Settings, *, job_facade: JobFacade | None = None) -> Fa
             service="jobos-api",
             version=__version__,
             state_schema=state_health.schema_version,
+            agent_connection=conversation_service.gateway.connection_state,
         )
 
     @app.get("/v1/version", tags=["system"])
     def version() -> VersionResponse:
-        return VersionResponse(api_version=__version__, contract="jobos-v1-phase5")
+        return VersionResponse(api_version=__version__, contract="jobos-v1-phase6-backend")
 
     def authenticated_device(
         credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer)],
@@ -95,6 +133,107 @@ def create_app(settings: Settings, *, job_facade: JobFacade | None = None) -> Fa
             authenticated=True,
             transport="private-tailscale",
             api_version=__version__,
+        )
+
+    @app.get("/v1/conversations/current", tags=["agent"])
+    def conversation_current(
+        _: Annotated[DeviceIdentity, Depends(authenticated_device)],
+    ) -> ConversationResponse:
+        return conversation_service.snapshot()
+
+    def conversation_context(identity: DeviceIdentity) -> dict[str, object]:
+        selection = state_store.job_workspace_state().selected_job_id
+        workspace = state_store.workspace_snapshot(identity.device_id).snapshot
+        return {
+            "selected_job_id": selection,
+            "workspace": {
+                key: workspace.get(key)
+                for key in (
+                    "selected_preset",
+                    "active_center_surface",
+                    "active_browser_tab_id",
+                    "active_artifact_id",
+                    "active_artifact_page",
+                    "active_artifact_zoom",
+                )
+            },
+        }
+
+    @app.post(
+        "/v1/conversations/current/messages",
+        tags=["agent"],
+        status_code=201,
+    )
+    async def conversation_send(
+        command: SendMessageRequest,
+        identity: Annotated[DeviceIdentity, Depends(authenticated_device)],
+    ) -> TurnMutationResponse:
+        try:
+            return await conversation_service.send(
+                command,
+                actor_id=identity.device_id,
+                context=conversation_context(identity),
+            )
+        except ConversationBusy as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
+        except IdempotencyConflict as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
+
+    @app.post("/v1/conversations/current/turns/{turn_id}/cancel", tags=["agent"])
+    async def conversation_cancel(
+        turn_id: str,
+        _: Annotated[DeviceIdentity, Depends(authenticated_device)],
+    ) -> TurnMutationResponse:
+        result = await conversation_service.cancel(turn_id)
+        if result is None:
+            raise HTTPException(status_code=404, detail="Turn not found")
+        return result
+
+    @app.post(
+        "/v1/conversations/current/turns/{turn_id}/retry",
+        tags=["agent"],
+        status_code=201,
+    )
+    async def conversation_retry(
+        turn_id: str,
+        command: RetryTurnRequest,
+        identity: Annotated[DeviceIdentity, Depends(authenticated_device)],
+    ) -> TurnMutationResponse:
+        try:
+            result = await conversation_service.retry(turn_id, command, actor_id=identity.device_id)
+        except ConversationBusy as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
+        except IdempotencyConflict as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
+        except ValueError as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
+        if result is None:
+            raise HTTPException(status_code=404, detail="Turn not found")
+        return result
+
+    @app.get("/v1/conversations/current/events/stream", tags=["agent"])
+    async def conversation_stream(
+        request: Request,
+        _: Annotated[DeviceIdentity, Depends(authenticated_device)],
+        after: int | None = None,
+        once: bool = False,
+    ) -> StreamingResponse:
+        header_cursor = request.headers.get("last-event-id")
+        try:
+            cursor = after if after is not None else int(header_cursor or 0)
+        except ValueError as error:
+            raise HTTPException(status_code=422, detail="Invalid event cursor") from error
+
+        async def event_source() -> AsyncIterator[str]:
+            async for frame in conversation_event_source(
+                state_store, request, cursor=cursor, once=once
+            ):
+                yield frame
+
+        return StreamingResponse(
+            event_source(),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
         )
 
     @app.get("/v1/jobs", tags=["jobs"])

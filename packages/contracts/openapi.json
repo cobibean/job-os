@@ -169,6 +169,70 @@
         "title": "BrowserTabMetadata",
         "type": "object"
       },
+      "ConnectionResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "state": {
+            "enum": [
+              "online",
+              "connecting",
+              "offline"
+            ],
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "state"
+        ],
+        "title": "ConnectionResponse",
+        "type": "object"
+      },
+      "ConversationResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "active_turn": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Active Turn"
+          },
+          "connection": {
+            "$ref": "#/components/schemas/ConnectionResponse"
+          },
+          "conversation_id": {
+            "title": "Conversation Id",
+            "type": "string"
+          },
+          "entries": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Entries",
+            "type": "array"
+          },
+          "latest_event_id": {
+            "title": "Latest Event Id",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "conversation_id",
+          "entries",
+          "active_turn",
+          "connection",
+          "latest_event_id"
+        ],
+        "title": "ConversationResponse",
+        "type": "object"
+      },
       "DeviceSessionResponse": {
         "additionalProperties": false,
         "properties": {
@@ -212,6 +276,15 @@
       "HealthResponse": {
         "additionalProperties": false,
         "properties": {
+          "agent_connection": {
+            "enum": [
+              "online",
+              "connecting",
+              "offline"
+            ],
+            "title": "Agent Connection",
+            "type": "string"
+          },
           "service": {
             "const": "jobos-api",
             "title": "Service",
@@ -237,7 +310,8 @@
           "status",
           "service",
           "version",
-          "state_schema"
+          "state_schema",
+          "agent_connection"
         ],
         "title": "HealthResponse",
         "type": "object"
@@ -772,6 +846,45 @@
         "title": "PanelLayout",
         "type": "object"
       },
+      "RetryTurnRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "idempotency_key": {
+            "maxLength": 200,
+            "minLength": 8,
+            "title": "Idempotency Key",
+            "type": "string"
+          }
+        },
+        "required": [
+          "idempotency_key"
+        ],
+        "title": "RetryTurnRequest",
+        "type": "object"
+      },
+      "SendMessageRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "idempotency_key": {
+            "maxLength": 200,
+            "minLength": 8,
+            "title": "Idempotency Key",
+            "type": "string"
+          },
+          "text": {
+            "maxLength": 12000,
+            "minLength": 1,
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "text",
+          "idempotency_key"
+        ],
+        "title": "SendMessageRequest",
+        "type": "object"
+      },
       "StatusChangeRequest": {
         "additionalProperties": false,
         "properties": {
@@ -839,6 +952,53 @@
         "title": "StatusChangeResponse",
         "type": "object"
       },
+      "TurnMutationResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "message_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Message Id"
+          },
+          "source_turn_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Turn Id"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Status"
+          },
+          "turn_id": {
+            "title": "Turn Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "turn_id"
+        ],
+        "title": "TurnMutationResponse",
+        "type": "object"
+      },
       "ValidationError": {
         "properties": {
           "ctx": {
@@ -888,7 +1048,7 @@
             "type": "string"
           },
           "contract": {
-            "const": "jobos-v1-phase5",
+            "const": "jobos-v1-phase6-backend",
             "title": "Contract",
             "type": "string"
           }
@@ -1303,6 +1463,244 @@
         "summary": "Artifact Download",
         "tags": [
           "documents"
+        ]
+      }
+    },
+    "/v1/conversations/current": {
+      "get": {
+        "operationId": "conversation_current_v1_conversations_current_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConversationResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Conversation Current",
+        "tags": [
+          "agent"
+        ]
+      }
+    },
+    "/v1/conversations/current/events/stream": {
+      "get": {
+        "operationId": "conversation_stream_v1_conversations_current_events_stream_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "after",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "After"
+            }
+          },
+          {
+            "in": "query",
+            "name": "once",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Once",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Conversation Stream",
+        "tags": [
+          "agent"
+        ]
+      }
+    },
+    "/v1/conversations/current/messages": {
+      "post": {
+        "operationId": "conversation_send_v1_conversations_current_messages_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SendMessageRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TurnMutationResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Conversation Send",
+        "tags": [
+          "agent"
+        ]
+      }
+    },
+    "/v1/conversations/current/turns/{turn_id}/cancel": {
+      "post": {
+        "operationId": "conversation_cancel_v1_conversations_current_turns__turn_id__cancel_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "turn_id",
+            "required": true,
+            "schema": {
+              "title": "Turn Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TurnMutationResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Conversation Cancel",
+        "tags": [
+          "agent"
+        ]
+      }
+    },
+    "/v1/conversations/current/turns/{turn_id}/retry": {
+      "post": {
+        "operationId": "conversation_retry_v1_conversations_current_turns__turn_id__retry_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "turn_id",
+            "required": true,
+            "schema": {
+              "title": "Turn Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RetryTurnRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TurnMutationResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Conversation Retry",
+        "tags": [
+          "agent"
         ]
       }
     },

@@ -274,6 +274,36 @@ test('filtering the list never clears the active job context', async () => {
   expect(screen.getByText('Northstar · Product Manager')).not.toBeNull()
 })
 
+test('changing selected jobs preserves one mounted durable agent conversation and draft', async () => {
+  const jobs = [
+    { jobId: 'job-1', company: 'Northstar', title: 'Staff PM', status: 'reviewed' as const, statusGroup: 'Inbox', canonicalUrl: 'https://example.com/1', discoveredAt: '', lastSeenAt: '' },
+    { jobId: 'job-2', company: 'Daybreak', title: 'Platform PM', status: 'shortlisted' as const, statusGroup: 'Considering', canonicalUrl: 'https://example.com/2', discoveredAt: '', lastSeenAt: '' }
+  ]
+  const conversationGet = vi.fn().mockResolvedValue({
+    conversationId: 'conv-current', activeTurn: null, connection: 'online', latestEventId: 1,
+    entries: [{ eventId: 1, turnId: 'turn-1', type: 'assistant_message', state: 'completed', summary: 'Persistent response', detail: { type: 'message.complete' }, occurredAt: '2026-07-20T10:00:00Z' }]
+  })
+  Object.defineProperty(window, 'jobos', { configurable: true, value: {
+    connectivity: { get: vi.fn().mockResolvedValue({ state: 'connected', apiVersion: '0.1.0', checkedAt: '', message: 'Private API authenticated' }) },
+    jobs: {
+      getState: vi.fn().mockResolvedValue({ jobs, selectedJobId: 'job-1', sortMode: 'manual', manualOrder: ['job-1', 'job-2'] }),
+      list: vi.fn().mockResolvedValue(jobs), select: vi.fn().mockResolvedValue({ eventId: 2 }), reorder: vi.fn(), setSort: vi.fn(), updateStatus: vi.fn(), subscribe: vi.fn(() => () => undefined)
+    },
+    agent: { get: conversationGet, send: vi.fn(), cancel: vi.fn(), retry: vi.fn(), subscribe: vi.fn(() => () => undefined) }
+  } })
+
+  render(<App />)
+  expect(await screen.findByText('Persistent response')).not.toBeNull()
+  const composer = screen.getByRole('textbox', { name: 'Message the agent' })
+  fireEvent.change(composer, { target: { value: 'Keep this draft' } })
+  fireEvent.click(screen.getByRole('button', { name: 'Select Daybreak Platform PM' }))
+
+  await waitFor(() => expect(screen.getByText('Daybreak · Platform PM')).not.toBeNull())
+  expect(screen.getByText('Persistent response')).not.toBeNull()
+  expect((screen.getByRole('textbox', { name: 'Message the agent' }) as HTMLTextAreaElement).value).toBe('Keep this draft')
+  expect(conversationGet).toHaveBeenCalledOnce()
+})
+
 test('primary panels resize, collapse, reopen, and reorder with keyboard alternatives', async () => {
   Object.defineProperty(window, 'jobos', {
     configurable: true,

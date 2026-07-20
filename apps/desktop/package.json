@@ -6,11 +6,11 @@
   "main": "dist/main/main.js",
   "scripts": {
     "build": "pnpm build:electron && vite build",
-    "build:electron": "tsc -p tsconfig.electron.json",
+    "build:electron": "tsc -p tsconfig.electron.json && node scripts/verify-preload-artifact.mjs",
     "dev": "pnpm build:electron && concurrently --kill-others --success first \"vite --host 127.0.0.1\" \"wait-on http://127.0.0.1:5173 && VITE_DEV_SERVER_URL=http://127.0.0.1:5173 electron dist/main/main.js\"",
     "lint": "oxlint src vite.config.ts",
     "start": "electron dist/main/main.js",
-    "test": "vitest run",
+    "test": "pnpm build:electron && vitest run",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.electron.json --noEmit"
   },
   "dependencies": {

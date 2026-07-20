@@ -147,9 +147,60 @@ export interface ConnectivitySnapshot {
   message: string
 }
 
+export type AgentConnectionState = 'online' | 'connecting' | 'offline' | 'reconnecting'
+export type ConversationEntryType = 'user_message' | 'turn' | 'activity' | 'assistant_message' | 'status' | 'error'
+export type ConversationEntryState = 'queued' | 'working' | 'waiting' | 'completed' | 'failed' | 'interrupted'
+
+export type SafeConversationDetailValue = string | number | boolean | null | SafeConversationDetailValue[] | { [key: string]: SafeConversationDetailValue }
+
+export interface ConversationEvent {
+  eventId: number
+  turnId: string | null
+  type: ConversationEntryType
+  state: ConversationEntryState
+  summary: string
+  detail: Record<string, SafeConversationDetailValue>
+  occurredAt: string
+  messageId?: string
+  text?: string
+  sourceTurnId?: string | null
+}
+
+export interface AgentTurn {
+  turnId: string
+  status: 'queued' | 'running' | 'waiting'
+  cancelRequested: boolean
+}
+
+export interface AgentConversationSnapshot {
+  conversationId: string
+  entries: ConversationEvent[]
+  activeTurn: AgentTurn | null
+  connection: Exclude<AgentConnectionState, 'reconnecting'>
+  latestEventId: number
+}
+
+export interface AgentTurnMutation {
+  turnId: string
+  messageId?: string | null
+  sourceTurnId?: string | null
+  status?: string | null
+}
+
+export type AgentStreamUpdate =
+  | { kind: 'event'; event: ConversationEvent }
+  | { kind: 'connection'; state: AgentConnectionState }
+
 export interface JobOsRendererBridge {
   connectivity: {
     get: () => Promise<ConnectivitySnapshot>
+  }
+  agent: {
+    get: () => Promise<AgentConversationSnapshot>
+    send: (text: string, idempotencyKey: string) => Promise<AgentTurnMutation>
+    cancel: (turnId: string) => Promise<AgentTurnMutation>
+    retry: (turnId: string, idempotencyKey: string) => Promise<AgentTurnMutation>
+    subscribe: (listener: (update: AgentStreamUpdate) => void) => () => void
   }
   jobs: {
     getState: () => Promise<JobWorkspaceSnapshot>

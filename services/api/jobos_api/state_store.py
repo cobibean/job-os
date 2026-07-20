@@ -13,6 +13,7 @@ from .browser_policy import (
     sanitize_browser_title,
 )
 from .documents import VerifiedArtifact
+from .redaction import redact_detail, sanitize_summary, sanitize_user_text
 
 
 class IncompatibleSchemaError(RuntimeError):
@@ -27,6 +28,10 @@ class WorkspaceRevisionConflict(RuntimeError):
 
 class IdempotencyConflict(RuntimeError):
     """An idempotency key was reused for a different command payload."""
+
+
+class ConversationBusy(RuntimeError):
+    """A serialized agent turn is already active."""
 
 
 @dataclass(frozen=True)
@@ -138,6 +143,52 @@ MIGRATIONS = (
                 updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY(current_artifact_id) REFERENCES document_artifacts(artifact_id),
                 FOREIGN KEY(last_successful_artifact_id) REFERENCES document_artifacts(artifact_id)
+            )
+            """,
+        ),
+    ),
+    Migration(
+        version=7,
+        statements=(
+            """
+            CREATE TABLE conversations (
+                singleton_id INTEGER PRIMARY KEY CHECK (singleton_id = 1),
+                conversation_id TEXT NOT NULL UNIQUE,
+                stored_session_id TEXT,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+            """,
+            "INSERT INTO conversations(singleton_id, conversation_id) VALUES (1, 'conv_current')",
+            """
+            CREATE TABLE conversation_turns (
+                turn_id TEXT PRIMARY KEY,
+                message_id TEXT NOT NULL,
+                source_turn_id TEXT,
+                text TEXT NOT NULL,
+                context_json TEXT NOT NULL,
+                status TEXT NOT NULL,
+                cancel_requested INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                CHECK (
+                    status IN ('queued', 'running', 'waiting', 'completed', 'failed', 'interrupted')
+                ),
+                FOREIGN KEY(source_turn_id) REFERENCES conversation_turns(turn_id)
+            )
+            """,
+            "CREATE INDEX conversation_turns_status ON conversation_turns(status, created_at)",
+            """
+            CREATE TABLE conversation_events (
+                event_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                turn_id TEXT,
+                event_type TEXT NOT NULL,
+                state TEXT NOT NULL,
+                summary TEXT NOT NULL,
+                detail_json TEXT NOT NULL DEFAULT '{}',
+                source_event_id TEXT UNIQUE,
+                occurred_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY(turn_id) REFERENCES conversation_turns(turn_id)
             )
             """,
         ),
@@ -595,6 +646,452 @@ class JobOsStateStore:
             browser_repair_reasons,
         )
 
+    def stored_session_id(self) -> str | None:
+        with sqlite3.connect(f"file:{self._path}?mode=ro", uri=True) as connection:
+            row = connection.execute(
+                "SELECT stored_session_id FROM conversations WHERE singleton_id = 1"
+            ).fetchone()
+        return row[0] if row else None
+
+    def save_stored_session_id(self, stored_session_id: str) -> None:
+        with sqlite3.connect(self._path) as connection:
+            connection.execute(
+                "UPDATE conversations SET stored_session_id = ?, updated_at = CURRENT_TIMESTAMP "
+                "WHERE singleton_id = 1",
+                (stored_session_id[:256],),
+            )
+
+    def save_stored_session_id_if_current(
+        self, expected_session_id: str | None, stored_session_id: str
+    ) -> bool:
+        with sqlite3.connect(self._path) as connection:
+            cursor = connection.execute(
+                "UPDATE conversations SET stored_session_id = ?, "
+                "updated_at = CURRENT_TIMESTAMP "
+                "WHERE singleton_id = 1 AND stored_session_id IS ?",
+                (stored_session_id[:256], expected_session_id),
+            )
+        return cursor.rowcount == 1
+
+    def prepare_turn_submission(
+        self,
+        turn_id: str,
+        expected_session_id: str | None,
+        stored_session_id: str,
+    ) -> bool:
+        """Persist attachment identity iff this is still the active working turn."""
+        with sqlite3.connect(self._path) as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            active = connection.execute(
+                "SELECT 1 FROM conversation_turns "
+                "WHERE turn_id = ? AND status = 'running' AND cancel_requested = 0",
+                (turn_id,),
+            ).fetchone()
+            if not active:
+                connection.rollback()
+                return False
+            current = connection.execute(
+                "SELECT stored_session_id FROM conversations WHERE singleton_id = 1"
+            ).fetchone()
+            if not current:
+                connection.rollback()
+                return False
+            if current[0] == expected_session_id:
+                connection.execute(
+                    "UPDATE conversations SET stored_session_id = ?, "
+                    "updated_at = CURRENT_TIMESTAMP WHERE singleton_id = 1",
+                    (stored_session_id[:256],),
+                )
+            elif current[0] != stored_session_id:
+                connection.rollback()
+                return False
+            connection.commit()
+        return True
+
+    def recovery_turn_id(self) -> str | None:
+        with sqlite3.connect(f"file:{self._path}?mode=ro", uri=True) as connection:
+            row = connection.execute(
+                "SELECT value FROM jobos_metadata WHERE key = 'agent_recovery_turn_id'"
+            ).fetchone()
+        return row[0] if row else None
+
+    def clear_recovery_turn_if_current(self, turn_id: str) -> bool:
+        with sqlite3.connect(self._path) as connection:
+            cursor = connection.execute(
+                "DELETE FROM jobos_metadata WHERE key = 'agent_recovery_turn_id' AND value = ?",
+                (turn_id,),
+            )
+        return cursor.rowcount == 1
+
+    def create_conversation_turn(
+        self,
+        *,
+        text: str,
+        context: dict[str, object],
+        idempotency_key: str,
+        actor_id: str,
+        source_turn_id: str | None = None,
+    ) -> dict[str, str | None]:
+        safe_text = sanitize_user_text(text)
+        command_name = (
+            "conversation.message.submit" if source_turn_id is None else "conversation.turn.retry"
+        )
+        target_resource = "conversation/current"
+        request_hash = sha256(
+            json.dumps(
+                {"text": safe_text, "context": context, "source_turn_id": source_turn_id},
+                separators=(",", ":"),
+                sort_keys=True,
+            ).encode()
+        ).hexdigest()
+        with sqlite3.connect(self._path) as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            prior = connection.execute(
+                """
+                SELECT request_hash, result_json FROM job_events
+                WHERE actor_id = ? AND target_resource = ? AND command_name = ?
+                    AND idempotency_key = ?
+                """,
+                (actor_id, target_resource, command_name, idempotency_key),
+            ).fetchone()
+            if prior:
+                if prior[0] != request_hash:
+                    connection.rollback()
+                    raise IdempotencyConflict(
+                        "Idempotency key was already used for a different conversation command"
+                    )
+                result = json.loads(prior[1])
+                connection.rollback()
+                return result
+            active = connection.execute(
+                """
+                SELECT turn_id FROM conversation_turns
+                WHERE status IN ('queued', 'running', 'waiting') LIMIT 1
+                """
+            ).fetchone()
+            if active:
+                connection.rollback()
+                raise ConversationBusy("An agent turn is already active")
+            recovery = connection.execute(
+                "SELECT value FROM jobos_metadata WHERE key = 'agent_recovery_turn_id'"
+            ).fetchone()
+            if recovery:
+                connection.rollback()
+                raise ConversationBusy("Remote agent cleanup must be confirmed before new work")
+            message_id = f"msg_{secrets.token_urlsafe(16)}"
+            turn_id = f"turn_{secrets.token_urlsafe(16)}"
+            safe_context = redact_detail(context)
+            safe_context.pop("redacted", None)
+            connection.execute(
+                """
+                INSERT INTO conversation_turns(
+                    turn_id, message_id, source_turn_id, text, context_json, status
+                ) VALUES (?, ?, ?, ?, ?, 'running')
+                """,
+                (
+                    turn_id,
+                    message_id,
+                    source_turn_id,
+                    safe_text,
+                    json.dumps(safe_context, separators=(",", ":"), sort_keys=True),
+                ),
+            )
+            user_cursor = connection.execute(
+                """
+                INSERT INTO conversation_events(turn_id, event_type, state, summary, detail_json)
+                VALUES (?, 'user_message', 'completed', ?, ?)
+                """,
+                (
+                    turn_id,
+                    safe_text,
+                    json.dumps(
+                        {"message_id": message_id, "text": safe_text}, separators=(",", ":")
+                    ),
+                ),
+            )
+            turn_cursor = connection.execute(
+                """
+                INSERT INTO conversation_events(turn_id, event_type, state, summary, detail_json)
+                VALUES (?, 'turn', 'working', 'Agent working', ?)
+                """,
+                (
+                    turn_id,
+                    json.dumps(
+                        {"context": safe_context, "source_turn_id": source_turn_id},
+                        separators=(",", ":"),
+                        sort_keys=True,
+                    ),
+                ),
+            )
+            result: dict[str, str | None] = {
+                "turn_id": turn_id,
+                "message_id": message_id,
+                "source_turn_id": source_turn_id,
+            }
+            connection.execute(
+                """
+                INSERT INTO job_events(
+                    event_type, origin, payload_json, actor_id, target_resource,
+                    command_name, outcome, idempotency_key, request_hash, result_json
+                ) VALUES ('conversation_turn_created', 'user', '{}', ?, ?, ?, 'succeeded', ?, ?, ?)
+                """,
+                (
+                    actor_id,
+                    target_resource,
+                    command_name,
+                    idempotency_key,
+                    request_hash,
+                    json.dumps(result, separators=(",", ":"), sort_keys=True),
+                ),
+            )
+            connection.commit()
+        assert user_cursor.lastrowid and turn_cursor.lastrowid
+        return result
+
+    def append_conversation_event(
+        self,
+        *,
+        turn_id: str | None,
+        event_type: str,
+        state: str,
+        summary: str,
+        detail: dict[str, object] | None = None,
+        source_event_id: str | None = None,
+    ) -> int | None:
+        safe_detail = redact_detail(detail or {})
+        with sqlite3.connect(self._path) as connection:
+            try:
+                cursor = connection.execute(
+                    """
+                    INSERT INTO conversation_events(
+                        turn_id, event_type, state, summary, detail_json, source_event_id
+                    ) VALUES (?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        turn_id,
+                        event_type[:50],
+                        state[:30],
+                        sanitize_summary(summary),
+                        json.dumps(safe_detail, separators=(",", ":"), sort_keys=True),
+                        source_event_id[:256] if source_event_id else None,
+                    ),
+                )
+            except sqlite3.IntegrityError:
+                return None
+        return int(cursor.lastrowid)
+
+    def recover_active_conversation_turns(self) -> int:
+        """Interrupt turns whose remote execution state cannot survive an API restart."""
+        with sqlite3.connect(self._path) as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            active = connection.execute(
+                """
+                SELECT turn_id FROM conversation_turns
+                WHERE status IN ('queued', 'running', 'waiting')
+                ORDER BY created_at, rowid
+                """
+            ).fetchall()
+            for (turn_id,) in active:
+                connection.execute(
+                    """
+                    UPDATE conversation_turns
+                    SET status = 'interrupted', updated_at = CURRENT_TIMESTAMP
+                    WHERE turn_id = ? AND status IN ('queued', 'running', 'waiting')
+                    """,
+                    (turn_id,),
+                )
+                connection.execute(
+                    """
+                    INSERT INTO conversation_events(
+                        turn_id, event_type, state, summary, detail_json
+                    ) VALUES (?, 'status', 'interrupted', ?, ?)
+                    """,
+                    (
+                        turn_id,
+                        "Turn interrupted by API restart; retry to continue",
+                        json.dumps(
+                            {"actionable": True, "reason": "api_restart", "retry": True},
+                            separators=(",", ":"),
+                            sort_keys=True,
+                        ),
+                    ),
+                )
+            connection.commit()
+        return len(active)
+
+    def update_turn_status(
+        self, turn_id: str, status: str, *, cancel_requested: bool = False
+    ) -> bool:
+        with sqlite3.connect(self._path) as connection:
+            cursor = connection.execute(
+                """
+                UPDATE conversation_turns
+                SET status = ?, cancel_requested = MAX(cancel_requested, ?),
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE turn_id = ?
+                """,
+                (status, int(cancel_requested), turn_id),
+            )
+        return cursor.rowcount > 0
+
+    def transition_active_turn_status(
+        self, turn_id: str, status: str, *, expected: tuple[str, ...]
+    ) -> bool:
+        placeholders = ",".join("?" for _ in expected)
+        with sqlite3.connect(self._path) as connection:
+            cursor = connection.execute(
+                f"""
+                UPDATE conversation_turns
+                SET status = ?, updated_at = CURRENT_TIMESTAMP
+                WHERE turn_id = ? AND status IN ({placeholders})
+                """,
+                (status, turn_id, *expected),
+            )
+        return cursor.rowcount == 1
+
+    def request_turn_cancel(self, turn_id: str) -> bool:
+        with sqlite3.connect(self._path) as connection:
+            cursor = connection.execute(
+                "UPDATE conversation_turns SET cancel_requested = 1, "
+                "updated_at = CURRENT_TIMESTAMP "
+                "WHERE turn_id = ? AND status IN ('queued', 'running', 'waiting')",
+                (turn_id,),
+            )
+        return cursor.rowcount == 1
+
+    def settle_active_turn(
+        self,
+        turn_id: str,
+        status: str,
+        *,
+        event_type: str,
+        summary: str,
+        detail: dict[str, object] | None = None,
+        source_event_id: str | None = None,
+        cancel_requested: bool = False,
+        quarantine: bool = False,
+    ) -> bool:
+        """Atomically let exactly one terminal status and durable event win."""
+        if status not in {"completed", "failed", "interrupted"}:
+            raise ValueError("Turn settlement must be terminal")
+        safe_detail = redact_detail(detail or {})
+        with sqlite3.connect(self._path) as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            cursor = connection.execute(
+                """
+                UPDATE conversation_turns
+                SET status = ?, cancel_requested = MAX(cancel_requested, ?),
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE turn_id = ? AND status IN ('queued', 'running', 'waiting')
+                """,
+                (status, int(cancel_requested), turn_id),
+            )
+            if cursor.rowcount != 1:
+                connection.rollback()
+                return False
+            try:
+                connection.execute(
+                    """
+                    INSERT INTO conversation_events(
+                        turn_id, event_type, state, summary, detail_json, source_event_id
+                    ) VALUES (?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        turn_id,
+                        event_type[:50],
+                        status,
+                        sanitize_summary(summary),
+                        json.dumps(safe_detail, separators=(",", ":"), sort_keys=True),
+                        source_event_id[:256] if source_event_id else None,
+                    ),
+                )
+            except sqlite3.IntegrityError:
+                connection.rollback()
+                return False
+            if quarantine:
+                connection.execute(
+                    """
+                    INSERT INTO jobos_metadata(key, value, updated_at)
+                    VALUES ('agent_recovery_turn_id', ?, CURRENT_TIMESTAMP)
+                    ON CONFLICT(key) DO UPDATE SET
+                        value = excluded.value, updated_at = CURRENT_TIMESTAMP
+                    """,
+                    (turn_id,),
+                )
+            connection.commit()
+        return True
+
+    def turn_record(self, turn_id: str) -> dict[str, object] | None:
+        with sqlite3.connect(f"file:{self._path}?mode=ro", uri=True) as connection:
+            connection.row_factory = sqlite3.Row
+            row = connection.execute(
+                "SELECT * FROM conversation_turns WHERE turn_id = ?", (turn_id,)
+            ).fetchone()
+        if not row:
+            return None
+        result = dict(row)
+        result["context"] = json.loads(str(result.pop("context_json")))
+        return result
+
+    def conversation_events_after(self, after: int) -> list[dict[str, object]]:
+        with sqlite3.connect(f"file:{self._path}?mode=ro", uri=True) as connection:
+            connection.row_factory = sqlite3.Row
+            rows = connection.execute(
+                "SELECT * FROM conversation_events WHERE event_id > ? ORDER BY event_id",
+                (after,),
+            ).fetchall()
+        entries: list[dict[str, object]] = []
+        for row in rows:
+            detail = json.loads(row["detail_json"])
+            entry: dict[str, object] = {
+                "event_id": int(row["event_id"]),
+                "turn_id": row["turn_id"],
+                "type": row["event_type"],
+                "state": row["state"],
+                "summary": row["summary"],
+                "detail": detail,
+                "occurred_at": row["occurred_at"],
+            }
+            if row["event_type"] == "user_message":
+                entry.update({"message_id": detail.get("message_id"), "text": detail.get("text")})
+            elif row["event_type"] == "turn":
+                entry.update(
+                    {
+                        "context": detail.get("context", {}),
+                        "source_turn_id": detail.get("source_turn_id"),
+                    }
+                )
+            entries.append(entry)
+        return entries
+
+    def conversation_snapshot(self) -> dict[str, object]:
+        with sqlite3.connect(f"file:{self._path}?mode=ro", uri=True) as connection:
+            conversation = connection.execute(
+                "SELECT conversation_id FROM conversations WHERE singleton_id = 1"
+            ).fetchone()
+            connection.row_factory = sqlite3.Row
+            active = connection.execute(
+                """
+                SELECT turn_id, status, cancel_requested FROM conversation_turns
+                WHERE status IN ('queued', 'running', 'waiting') ORDER BY created_at LIMIT 1
+                """
+            ).fetchone()
+        entries = self.conversation_events_after(0)
+        return {
+            "conversation_id": conversation[0] if conversation else "conv_current",
+            "entries": entries,
+            "active_turn": (
+                {
+                    "turn_id": active["turn_id"],
+                    "status": active["status"],
+                    "cancel_requested": bool(active["cancel_requested"]),
+                }
+                if active
+                else None
+            ),
+            "latest_event_id": entries[-1]["event_id"] if entries else 0,
+        }
+
     def register_document_artifacts(
         self, job_id: str, artifacts: list[VerifiedArtifact]
     ) -> tuple[str | None, str | None]:
@@ -652,9 +1149,7 @@ class JobOsStateStore:
                     if status == "succeeded"
                 ]
                 last_successful_id = (
-                    ids_by_sequence[max(successful_sequences)][0]
-                    if successful_sequences
-                    else None
+                    ids_by_sequence[max(successful_sequences)][0] if successful_sequences else None
                 )
                 connection.execute(
                     """
@@ -682,8 +1177,7 @@ class JobOsStateStore:
                 (job_id,),
             ).fetchone()
             rows = connection.execute(
-                "SELECT * FROM document_artifacts WHERE job_id = ? "
-                "ORDER BY rowid DESC",
+                "SELECT * FROM document_artifacts WHERE job_id = ? ORDER BY rowid DESC",
                 (job_id,),
             ).fetchall()
         return (

@@ -99,6 +99,43 @@ export type BrowserTabMetadata = {
 };
 
 /**
+ * ConnectionResponse
+ */
+export type ConnectionResponse = {
+    /**
+     * State
+     */
+    state: 'online' | 'connecting' | 'offline';
+};
+
+/**
+ * ConversationResponse
+ */
+export type ConversationResponse = {
+    /**
+     * Active Turn
+     */
+    active_turn: {
+        [key: string]: unknown;
+    } | null;
+    connection: ConnectionResponse;
+    /**
+     * Conversation Id
+     */
+    conversation_id: string;
+    /**
+     * Entries
+     */
+    entries: Array<{
+        [key: string]: unknown;
+    }>;
+    /**
+     * Latest Event Id
+     */
+    latest_event_id: number;
+};
+
+/**
  * DeviceSessionResponse
  */
 export type DeviceSessionResponse = {
@@ -130,6 +167,10 @@ export type HttpValidationError = {
  * HealthResponse
  */
 export type HealthResponse = {
+    /**
+     * Agent Connection
+     */
+    agent_connection: 'online' | 'connecting' | 'offline';
     /**
      * Service
      */
@@ -433,6 +474,30 @@ export type PanelLayout = {
 };
 
 /**
+ * RetryTurnRequest
+ */
+export type RetryTurnRequest = {
+    /**
+     * Idempotency Key
+     */
+    idempotency_key: string;
+};
+
+/**
+ * SendMessageRequest
+ */
+export type SendMessageRequest = {
+    /**
+     * Idempotency Key
+     */
+    idempotency_key: string;
+    /**
+     * Text
+     */
+    text: string;
+};
+
+/**
  * StatusChangeRequest
  */
 export type StatusChangeRequest = {
@@ -459,6 +524,28 @@ export type StatusChangeResponse = {
      */
     event_id: number;
     job: JobDetail;
+};
+
+/**
+ * TurnMutationResponse
+ */
+export type TurnMutationResponse = {
+    /**
+     * Message Id
+     */
+    message_id?: string | null;
+    /**
+     * Source Turn Id
+     */
+    source_turn_id?: string | null;
+    /**
+     * Status
+     */
+    status?: string | null;
+    /**
+     * Turn Id
+     */
+    turn_id: string;
 };
 
 /**
@@ -500,7 +587,7 @@ export type VersionResponse = {
     /**
      * Contract
      */
-    contract: 'jobos-v1-phase5';
+    contract: 'jobos-v1-phase6-backend';
 };
 
 /**
@@ -692,6 +779,139 @@ export type ArtifactDownloadV1ArtifactsArtifactIdDownloadGetResponses = {
      */
     200: unknown;
 };
+
+export type ConversationCurrentV1ConversationsCurrentGetData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/v1/conversations/current';
+};
+
+export type ConversationCurrentV1ConversationsCurrentGetResponses = {
+    /**
+     * Successful Response
+     */
+    200: ConversationResponse;
+};
+
+export type ConversationCurrentV1ConversationsCurrentGetResponse = ConversationCurrentV1ConversationsCurrentGetResponses[keyof ConversationCurrentV1ConversationsCurrentGetResponses];
+
+export type ConversationStreamV1ConversationsCurrentEventsStreamGetData = {
+    body?: never;
+    path?: never;
+    query?: {
+        /**
+         * After
+         */
+        after?: number | null;
+        /**
+         * Once
+         */
+        once?: boolean;
+    };
+    url: '/v1/conversations/current/events/stream';
+};
+
+export type ConversationStreamV1ConversationsCurrentEventsStreamGetErrors = {
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type ConversationStreamV1ConversationsCurrentEventsStreamGetError = ConversationStreamV1ConversationsCurrentEventsStreamGetErrors[keyof ConversationStreamV1ConversationsCurrentEventsStreamGetErrors];
+
+export type ConversationStreamV1ConversationsCurrentEventsStreamGetResponses = {
+    /**
+     * Successful Response
+     */
+    200: unknown;
+};
+
+export type ConversationSendV1ConversationsCurrentMessagesPostData = {
+    body: SendMessageRequest;
+    path?: never;
+    query?: never;
+    url: '/v1/conversations/current/messages';
+};
+
+export type ConversationSendV1ConversationsCurrentMessagesPostErrors = {
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type ConversationSendV1ConversationsCurrentMessagesPostError = ConversationSendV1ConversationsCurrentMessagesPostErrors[keyof ConversationSendV1ConversationsCurrentMessagesPostErrors];
+
+export type ConversationSendV1ConversationsCurrentMessagesPostResponses = {
+    /**
+     * Successful Response
+     */
+    201: TurnMutationResponse;
+};
+
+export type ConversationSendV1ConversationsCurrentMessagesPostResponse = ConversationSendV1ConversationsCurrentMessagesPostResponses[keyof ConversationSendV1ConversationsCurrentMessagesPostResponses];
+
+export type ConversationCancelV1ConversationsCurrentTurnsTurnIdCancelPostData = {
+    body?: never;
+    path: {
+        /**
+         * Turn Id
+         */
+        turn_id: string;
+    };
+    query?: never;
+    url: '/v1/conversations/current/turns/{turn_id}/cancel';
+};
+
+export type ConversationCancelV1ConversationsCurrentTurnsTurnIdCancelPostErrors = {
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type ConversationCancelV1ConversationsCurrentTurnsTurnIdCancelPostError = ConversationCancelV1ConversationsCurrentTurnsTurnIdCancelPostErrors[keyof ConversationCancelV1ConversationsCurrentTurnsTurnIdCancelPostErrors];
+
+export type ConversationCancelV1ConversationsCurrentTurnsTurnIdCancelPostResponses = {
+    /**
+     * Successful Response
+     */
+    200: TurnMutationResponse;
+};
+
+export type ConversationCancelV1ConversationsCurrentTurnsTurnIdCancelPostResponse = ConversationCancelV1ConversationsCurrentTurnsTurnIdCancelPostResponses[keyof ConversationCancelV1ConversationsCurrentTurnsTurnIdCancelPostResponses];
+
+export type ConversationRetryV1ConversationsCurrentTurnsTurnIdRetryPostData = {
+    body: RetryTurnRequest;
+    path: {
+        /**
+         * Turn Id
+         */
+        turn_id: string;
+    };
+    query?: never;
+    url: '/v1/conversations/current/turns/{turn_id}/retry';
+};
+
+export type ConversationRetryV1ConversationsCurrentTurnsTurnIdRetryPostErrors = {
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type ConversationRetryV1ConversationsCurrentTurnsTurnIdRetryPostError = ConversationRetryV1ConversationsCurrentTurnsTurnIdRetryPostErrors[keyof ConversationRetryV1ConversationsCurrentTurnsTurnIdRetryPostErrors];
+
+export type ConversationRetryV1ConversationsCurrentTurnsTurnIdRetryPostResponses = {
+    /**
+     * Successful Response
+     */
+    201: TurnMutationResponse;
+};
+
+export type ConversationRetryV1ConversationsCurrentTurnsTurnIdRetryPostResponse = ConversationRetryV1ConversationsCurrentTurnsTurnIdRetryPostResponses[keyof ConversationRetryV1ConversationsCurrentTurnsTurnIdRetryPostResponses];
 
 export type DeviceSessionV1DeviceSessionGetData = {
     body?: never;

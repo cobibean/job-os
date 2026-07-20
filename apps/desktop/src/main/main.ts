@@ -6,6 +6,8 @@ import { app, BrowserWindow, clipboard, dialog, ipcMain, session, shell, WebCont
 import type { IpcMainInvokeEvent } from 'electron'
 
 import type { BrowserBounds, ConnectivitySnapshot, JobSortMode, JobStatus, WorkspaceSnapshot } from '../shared/contracts.js'
+import { createMainAgentClient, startAgentEventStream } from './agent.js'
+import { registerAgentIpc } from './agentIpc.js'
 import { BROWSER_PARTITION, BrowserManager, remoteBrowserPreferences } from './browser.js'
 import { registerBrowserRestoreHandler } from './browserIpc.js'
 import { probeConnectivity } from './connectivity.js'
@@ -60,6 +62,16 @@ function registerConnectivityInterface(): void {
       console.info('[JobOS capture] connectivity', JSON.stringify(snapshot))
     }
     return snapshot
+  })
+}
+
+function registerAgentInterface(): void {
+  const config = jobsConfig()
+  const agent = config ? createMainAgentClient(config) : null
+  registerAgentIpc(ipcMain, event => {
+    assertTrustedRenderer(event)
+    if (!agent) throw new Error('Device credential unavailable')
+    return agent
   })
 }
 
@@ -247,8 +259,22 @@ async function createWindow(): Promise<BrowserWindow> {
         config
       )
     : () => undefined
+  let stopAgentEvents: () => void = () => undefined
+  if (config) {
+    stopAgentEvents = startAgentEventStream(
+      {
+        isDestroyed: () => window.isDestroyed(),
+        send: (channel, update) => window.webContents.send(channel, update)
+      },
+      config,
+      { connectedState: 'connecting' }
+    )
+  } else {
+    window.webContents.send('jobos:agent:event', { kind: 'connection', state: 'offline' })
+  }
   window.once('closed', () => {
     stopJobEvents()
+    stopAgentEvents()
     browserManager?.dispose()
     browserManager = null
   })
@@ -274,6 +300,7 @@ app.whenReady().then(async () => {
     callback(false)
   })
   registerConnectivityInterface()
+  registerAgentInterface()
   registerJobsInterface()
   registerWorkspaceInterface()
   registerBrowserInterface()

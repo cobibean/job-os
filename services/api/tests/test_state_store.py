@@ -82,9 +82,9 @@ def test_initialization_applies_every_migration_once(tmp_path):
     first = store.initialize()
     second = store.initialize()
 
-    assert first.schema_version == SCHEMA_VERSION == 6
+    assert first.schema_version == SCHEMA_VERSION == 7
     assert second.schema_version == SCHEMA_VERSION
-    assert applied_versions(database) == [1, 2, 3, 4, 5, 6]
+    assert applied_versions(database) == [1, 2, 3, 4, 5, 6, 7]
     assert metadata_columns(database) == {"key", "value", "updated_at"}
 
 
@@ -99,11 +99,11 @@ def test_initialization_upgrades_a_behind_database(tmp_path):
     result = JobOsStateStore(database).initialize()
 
     assert result.schema_version == SCHEMA_VERSION
-    assert applied_versions(database) == [1, 2, 3, 4, 5, 6]
+    assert applied_versions(database) == [1, 2, 3, 4, 5, 6, 7]
     assert metadata_columns(database) == {"key", "value", "updated_at"}
 
 
-@pytest.mark.parametrize("versions", ([1, 2, 3, 4, 5, 6, 7], [2]))
+@pytest.mark.parametrize("versions", ([1, 2, 3, 4, 5, 6, 7, 8], [2]))
 def test_initialization_rejects_ahead_or_incompatible_history(tmp_path, versions):
     database = tmp_path / "jobos.db"
     with sqlite3.connect(database) as connection:
@@ -143,6 +143,148 @@ def test_a_failed_migration_rolls_back_its_schema_and_ledger_entry(tmp_path):
         }
         assert "partial_change" not in tables
         assert connection.execute("SELECT COUNT(*) FROM schema_migrations").fetchone() == (0,)
+
+
+def test_conversation_message_turn_and_context_are_atomic_and_idempotent(tmp_path):
+    database = tmp_path / "jobos.db"
+    store = JobOsStateStore(database)
+    store.initialize()
+    store.save_job_selection("job-7", "user")
+    context = {
+        "selected_job_id": "job-7",
+        "workspace": {"selected_preset": "review", "active_artifact_id": "art-safe"},
+    }
+
+    first = store.create_conversation_turn(
+        text="Review this role",
+        context=context,
+        idempotency_key="conversation-message-1",
+        actor_id="device-a",
+    )
+    replay = store.create_conversation_turn(
+        text="Review this role",
+        context=context,
+        idempotency_key="conversation-message-1",
+        actor_id="device-a",
+    )
+
+    assert first == replay
+    snapshot = store.conversation_snapshot()
+    assert snapshot["latest_event_id"] == 2
+    assert [entry["type"] for entry in snapshot["entries"]] == ["user_message", "turn"]
+    assert snapshot["entries"][1]["context"] == context
+    assert len(store.list_mutation_audit()) == 1
+
+
+def test_conversation_events_restore_in_monotonic_order_from_fresh_store(tmp_path):
+    database = tmp_path / "jobos.db"
+    store = JobOsStateStore(database)
+    store.initialize()
+    created = store.create_conversation_turn(
+        text="Start",
+        context={"selected_job_id": None, "workspace": {}},
+        idempotency_key="conversation-message-2",
+        actor_id="device-a",
+    )
+    store.append_conversation_event(
+        turn_id=created["turn_id"],
+        event_type="activity",
+        state="working",
+        summary="Running command",
+        detail={"activity_id": "tool-1"},
+    )
+    store.update_turn_status(created["turn_id"], "completed")
+
+    restored = JobOsStateStore(database).conversation_snapshot()
+
+    ids = [entry["event_id"] for entry in restored["entries"]]
+    assert ids == sorted(ids) == [1, 2, 3]
+    assert restored["active_turn"] is None
+    assert restored["entries"][1]["context"]["selected_job_id"] is None
+
+
+def test_conversation_persistence_never_stores_raw_secret_fields(tmp_path):
+    database = tmp_path / "jobos.db"
+    store = JobOsStateStore(database)
+    store.initialize()
+    created = store.create_conversation_turn(
+        text="Safe user text",
+        context={"selected_job_id": None, "workspace": {}},
+        idempotency_key="conversation-message-3",
+        actor_id="device-a",
+    )
+    store.append_conversation_event(
+        turn_id=created["turn_id"],
+        event_type="error",
+        state="failed",
+        summary="Agent connection unavailable",
+        detail={"authorization": "Bearer raw-secret", "safe": "retry"},
+    )
+
+    database_bytes = database.read_bytes().lower()
+    assert b"raw-secret" not in database_bytes
+    assert b"authorization" not in database_bytes
+
+
+def test_conversation_user_text_is_sanitized_before_any_persistence_or_snapshot(tmp_path):
+    database = tmp_path / "jobos.db"
+    store = JobOsStateStore(database)
+    store.initialize()
+    raw_secret = "sk-live-never-persist-this-value"
+
+    created = store.create_conversation_turn(
+        text=f"Draft a normal follow-up; api_key={raw_secret} and keep the prose.",
+        context={"selected_job_id": None, "workspace": {}},
+        idempotency_key="conversation-message-secret-text",
+        actor_id="device-a",
+    )
+
+    record = store.turn_record(str(created["turn_id"]))
+    snapshot_json = json.dumps(store.conversation_snapshot())
+    assert record["text"] == "Draft a normal follow-up; [redacted] and keep the prose."
+    assert raw_secret not in database.read_bytes().decode(errors="ignore")
+    assert raw_secret not in snapshot_json
+    assert "Draft a normal follow-up" in snapshot_json
+
+
+@pytest.mark.parametrize("stale_status", ["queued", "running", "waiting"])
+def test_startup_recovery_interrupts_stale_active_turn_once_without_deleting_history(
+    tmp_path, stale_status
+):
+    database = tmp_path / "jobos.db"
+    store = JobOsStateStore(database)
+    store.initialize()
+    created = store.create_conversation_turn(
+        text="Preserve this transcript",
+        context={"selected_job_id": "job-7", "workspace": {}},
+        idempotency_key=f"stale-{stale_status}-turn",
+        actor_id="device-a",
+    )
+    store.append_conversation_event(
+        turn_id=str(created["turn_id"]),
+        event_type="activity",
+        state="working",
+        summary="Existing activity",
+        detail={"activity_id": "existing-action"},
+    )
+    store.update_turn_status(str(created["turn_id"]), stale_status)
+    before = store.conversation_snapshot()["entries"]
+
+    assert store.recover_active_conversation_turns() == 1
+    assert store.recover_active_conversation_turns() == 0
+
+    after = store.conversation_snapshot()
+    assert after["active_turn"] is None
+    assert after["entries"][: len(before)] == before
+    recovery = [
+        entry
+        for entry in after["entries"]
+        if entry["type"] == "status" and entry["state"] == "interrupted"
+    ]
+    assert len(recovery) == 1
+    assert recovery[0]["turn_id"] == created["turn_id"]
+    assert recovery[0]["detail"]["actionable"] is True
+    assert recovery[0]["detail"]["retry"] is True
 
 
 def test_workspace_snapshot_is_atomic_revisioned_and_preserves_job_selection(tmp_path):
