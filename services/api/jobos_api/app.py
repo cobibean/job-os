@@ -135,6 +135,7 @@ def create_app(settings: Settings, *, job_facade: JobFacade | None = None) -> Fa
             revision=record.revision,
             repaired_presets=list(record.repaired_presets),
             repaired_browser=record.repaired_browser,
+            browser_repair_reasons=list(record.browser_repair_reasons),
             **record.snapshot,
         )
 
@@ -147,9 +148,7 @@ def create_app(settings: Settings, *, job_facade: JobFacade | None = None) -> Fa
             record = state_store.save_workspace_snapshot(
                 identity.device_id,
                 expected_revision=command.revision,
-                snapshot=command.model_dump(
-                    exclude={"revision", "origin", "idempotency_key"}
-                ),
+                snapshot=command.model_dump(exclude={"revision", "origin", "idempotency_key"}),
                 idempotency_key=command.idempotency_key,
                 origin=command.origin,
                 actor_id=identity.device_id,
@@ -160,14 +159,14 @@ def create_app(settings: Settings, *, job_facade: JobFacade | None = None) -> Fa
             raise HTTPException(
                 status_code=409,
                 detail=(
-                    "Workspace revision conflict; current revision is "
-                    f"{error.current_revision}"
+                    f"Workspace revision conflict; current revision is {error.current_revision}"
                 ),
             ) from error
         return WorkspaceSnapshotResponse(
             revision=record.revision,
             repaired_presets=list(record.repaired_presets),
             repaired_browser=record.repaired_browser,
+            browser_repair_reasons=list(record.browser_repair_reasons),
             **record.snapshot,
         )
 

@@ -111,9 +111,9 @@ def test_list_filters_then_applies_the_requested_calculated_order(tmp_path):
 
     with make_client(tmp_path, facade) as client:
         recent = client.get("/v1/jobs?sort=recent", headers=auth_headers()).json()["jobs"]
-        alphabetical = client.get(
-            "/v1/jobs?sort=alphabetical", headers=auth_headers()
-        ).json()["jobs"]
+        alphabetical = client.get("/v1/jobs?sort=alphabetical", headers=auth_headers()).json()[
+            "jobs"
+        ]
         status = client.get("/v1/jobs?sort=status", headers=auth_headers()).json()["jobs"]
         filtered = client.get(
             "/v1/jobs?query=alpha&status_group=Inbox",
@@ -140,9 +140,9 @@ def test_manual_order_survives_switching_to_calculated_sort_modes(tmp_path):
             headers=auth_headers(),
             json={"job_ids": ["job-2", "job-0", "job-1"], "origin": "user"},
         )
-        alphabetical = client.get(
-            "/v1/jobs?sort=alphabetical", headers=auth_headers()
-        ).json()["jobs"]
+        alphabetical = client.get("/v1/jobs?sort=alphabetical", headers=auth_headers()).json()[
+            "jobs"
+        ]
         manual = client.get("/v1/jobs?sort=manual", headers=auth_headers()).json()["jobs"]
 
     assert reordered.status_code == 200
@@ -318,6 +318,7 @@ def test_workspace_snapshot_round_trip_and_revision_conflict(tmp_path):
         body = initial.json()
         body.pop("repaired_presets")
         body.pop("repaired_browser")
+        body.pop("browser_repair_reasons")
         body.update({"origin": "user", "idempotency_key": "workspace-round-trip-1"})
         body["selected_preset"] = "agent-focus"
         saved = client.put("/v1/workspace", headers=auth_headers(), json=body)
@@ -341,6 +342,7 @@ def test_workspace_snapshot_idempotent_retry_returns_original_revision(tmp_path)
         body = client.get("/v1/workspace", headers=auth_headers()).json()
         body.pop("repaired_presets")
         body.pop("repaired_browser")
+        body.pop("browser_repair_reasons")
         body.update(
             {
                 "selected_preset": "research",
@@ -375,6 +377,7 @@ def test_workspace_rejects_credential_bearing_browser_metadata(tmp_path):
         body = client.get("/v1/workspace", headers=auth_headers()).json()
         body.pop("repaired_presets")
         body.pop("repaired_browser")
+        body.pop("browser_repair_reasons")
         body.update(
             {
                 "origin": "user",
@@ -400,7 +403,8 @@ def test_workspace_get_drops_malformed_url_and_favicon_without_losing_valid_tabs
         snapshot = {
             key: value
             for key, value in initial.items()
-            if key not in {"revision", "repaired_presets", "repaired_browser"}
+            if key
+            not in {"revision", "repaired_presets", "repaired_browser", "browser_repair_reasons"}
         }
         snapshot["browser_tabs"] = [
             {
@@ -441,15 +445,94 @@ def test_workspace_get_drops_malformed_url_and_favicon_without_losing_valid_tabs
     assert response.status_code == 200
     body = response.json()
     assert body["repaired_browser"] is True
+    assert body["browser_repair_reasons"] == ["dropped_tabs"]
     assert [tab["tab_id"] for tab in body["browser_tabs"]] == ["before", "after"]
     assert body["active_browser_tab_id"] == "after"
+
+
+@pytest.mark.parametrize(
+    ("tabs", "active_tab_id", "expected_reasons"),
+    [
+        (
+            [
+                {
+                    "tab_id": "safe",
+                    "url": "https://example.com/",
+                    "title": "%ZZPRIVATE%5FKEY%3Aexample-value",
+                }
+            ],
+            "safe",
+            ["protected_title"],
+        ),
+        (
+            [
+                {"tab_id": "safe", "url": "https://example.com/", "title": "Safe"},
+                {"tab_id": "bad", "url": "file:///bad", "title": "Bad"},
+            ],
+            "safe",
+            ["dropped_tabs"],
+        ),
+        (
+            [{"tab_id": "safe", "url": "https://example.com/", "title": "Safe"}],
+            "missing",
+            ["reselected_active_tab"],
+        ),
+        (
+            [
+                {
+                    "tab_id": "safe",
+                    "url": "https://example.com/",
+                    "title": "AWS_SECRET_ACCESS_KEY=example-value",
+                },
+                {"tab_id": "bad", "url": "file:///bad", "title": "Bad"},
+            ],
+            "bad",
+            ["protected_title", "dropped_tabs", "reselected_active_tab"],
+        ),
+    ],
+)
+def test_workspace_get_reports_exact_browser_repair_reasons(
+    tmp_path, tabs, active_tab_id, expected_reasons
+):
+    with make_client(tmp_path) as client:
+        initial = client.get("/v1/workspace", headers=auth_headers()).json()
+        snapshot = {
+            key: value
+            for key, value in initial.items()
+            if key
+            not in {"revision", "repaired_presets", "repaired_browser", "browser_repair_reasons"}
+        }
+        snapshot["browser_tabs"] = tabs
+        snapshot["active_browser_tab_id"] = active_tab_id
+        with sqlite3.connect(tmp_path / "jobos.db") as connection:
+            connection.execute(
+                "INSERT INTO workspace_snapshots(device_id, revision, snapshot_json) "
+                "VALUES (?, ?, ?)",
+                ("primary-device", 3, json.dumps(snapshot)),
+            )
+
+        response = client.get("/v1/workspace", headers=auth_headers())
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["browser_repair_reasons"] == expected_reasons
+    assert body["repaired_browser"] is True
+    assert len(body["browser_tabs"]) == 1
+    if "protected_title" in expected_reasons:
+        assert body["browser_tabs"][0]["title"] == "Protected page"
 
 
 def test_workspace_rejects_capability_session_and_signed_url_variants(tmp_path):
     facade = FakeJobHunterFacade()
     sensitive_parameters = [
-        "ticket", "assertion", "sig", "sessionid", "oauth_verifier",
-        "X-Amz-Credential", "X-Amz-Signature", "X-Goog-Signature",
+        "ticket",
+        "assertion",
+        "sig",
+        "sessionid",
+        "oauth_verifier",
+        "X-Amz-Credential",
+        "X-Amz-Signature",
+        "X-Goog-Signature",
     ]
 
     with make_client(tmp_path, facade) as client:
@@ -457,6 +540,7 @@ def test_workspace_rejects_capability_session_and_signed_url_variants(tmp_path):
             body = client.get("/v1/workspace", headers=auth_headers()).json()
             body.pop("repaired_presets")
             body.pop("repaired_browser")
+            body.pop("browser_repair_reasons")
             body.update(
                 {
                     "origin": "user",
@@ -498,6 +582,7 @@ def test_workspace_rejects_remaining_browser_credential_carriers(
         body = client.get("/v1/workspace", headers=auth_headers()).json()
         body.pop("repaired_presets")
         body.pop("repaired_browser")
+        body.pop("browser_repair_reasons")
         tab = {
             "tab_id": "unsafe",
             "url": "https://example.com/jobs?view=safe",
@@ -508,8 +593,7 @@ def test_workspace_rejects_remaining_browser_credential_carriers(
             {
                 "origin": "user",
                 "idempotency_key": (
-                    f"workspace-final-carrier-{metadata_field}-"
-                    f"{abs(hash(unsafe_url))}"
+                    f"workspace-final-carrier-{metadata_field}-{abs(hash(unsafe_url))}"
                 ),
                 "browser_tabs": [tab],
                 "active_browser_tab_id": "unsafe",
@@ -524,14 +608,13 @@ def test_workspace_rejects_remaining_browser_credential_carriers(
     "unsafe_title",
     [fixture["title"] for fixture in TITLE_POLICY_FIXTURES if fixture["unsafe"]],
 )
-def test_workspace_rejects_credential_bearing_remote_page_titles(
-    tmp_path, unsafe_title
-):
+def test_workspace_rejects_credential_bearing_remote_page_titles(tmp_path, unsafe_title):
     facade = FakeJobHunterFacade()
     with make_client(tmp_path, facade) as client:
         body = client.get("/v1/workspace", headers=auth_headers()).json()
         body.pop("repaired_presets")
         body.pop("repaired_browser")
+        body.pop("browser_repair_reasons")
         body.update(
             {
                 "origin": "user",
@@ -557,6 +640,7 @@ def test_workspace_preserves_safe_ordinary_remote_page_titles(tmp_path):
         body = client.get("/v1/workspace", headers=auth_headers()).json()
         body.pop("repaired_presets")
         body.pop("repaired_browser")
+        body.pop("browser_repair_reasons")
         body.update(
             {
                 "origin": "user",
@@ -583,6 +667,7 @@ def test_workspace_preserves_ordinary_browser_query_parameters(tmp_path):
         body = client.get("/v1/workspace", headers=auth_headers()).json()
         body.pop("repaired_presets")
         body.pop("repaired_browser")
+        body.pop("browser_repair_reasons")
         body.update(
             {
                 "origin": "user",
@@ -618,9 +703,8 @@ def test_layout_save_cannot_overwrite_a_newer_user_or_mcp_selection(tmp_path):
         stale_layout = client.get("/v1/workspace", headers=auth_headers()).json()
         stale_layout.pop("repaired_presets")
         stale_layout.pop("repaired_browser")
-        stale_layout.update(
-            {"origin": "user", "idempotency_key": "workspace-selection-race-1"}
-        )
+        stale_layout.pop("browser_repair_reasons")
+        stale_layout.update({"origin": "user", "idempotency_key": "workspace-selection-race-1"})
         client.put(
             "/v1/workspace/jobs/selection",
             headers=auth_headers(),

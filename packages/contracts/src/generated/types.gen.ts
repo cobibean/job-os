@@ -488,6 +488,10 @@ export type WorkspaceSnapshotResponse = {
      */
     active_center_surface: 'browser' | 'document';
     /**
+     * Browser Repair Reasons
+     */
+    browser_repair_reasons?: Array<'protected_title' | 'dropped_tabs' | 'reselected_active_tab' | 'metadata_adjusted'>;
+    /**
      * Browser Tabs
      */
     browser_tabs?: Array<BrowserTabMetadata>;

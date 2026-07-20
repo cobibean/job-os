@@ -129,6 +129,7 @@ class WorkspaceSnapshotRecord:
     snapshot: dict[str, object]
     repaired_presets: tuple[str, ...] = ()
     repaired_browser: bool = False
+    browser_repair_reasons: tuple[str, ...] = ()
 
 
 PANEL_IDS = ("jobs", "center", "agent")
@@ -176,12 +177,7 @@ def _valid_browser_tab(value: object) -> bool:
         and safe_browser_url(url, allow_blank=True)
         and isinstance(title, str)
         and len(title) <= BROWSER_TITLE_LIMIT
-        and (
-            favicon_url is None
-            or (
-                safe_browser_url(favicon_url, allow_blank=False)
-            )
-        )
+        and (favicon_url is None or (safe_browser_url(favicon_url, allow_blank=False)))
         and (
             associated_job_id is None
             or (isinstance(associated_job_id, str) and len(associated_job_id) <= 512)
@@ -203,8 +199,7 @@ def _valid_layout(value: object) -> bool:
         and isinstance(widths, dict)
         and set(widths) == set(PANEL_IDS)
         and all(
-            isinstance(widths[panel], int) and 180 <= widths[panel] <= 1600
-            for panel in PANEL_IDS
+            isinstance(widths[panel], int) and 180 <= widths[panel] <= 1600 for panel in PANEL_IDS
         )
         and isinstance(collapsed, list)
         and all(isinstance(panel, str) for panel in collapsed)
@@ -219,6 +214,7 @@ def normalize_workspace_snapshot(
     canonical = canonical_workspace_snapshot(selected_job_id)
     if not isinstance(value, dict):
         canonical["_repaired_browser"] = True
+        canonical["_browser_repair_reasons"] = ["metadata_adjusted"]
         return canonical, tuple(PRESET_DEFAULTS)
     selected_preset = value.get("selected_preset")
     canonical["selected_preset"] = (
@@ -245,29 +241,27 @@ def normalize_workspace_snapshot(
         repaired.extend(PRESET_DEFAULTS)
     browser_tabs = value.get("browser_tabs", [])
     active_tab_id = value.get("active_browser_tab_id")
-    repaired_browser = False
+    browser_repair_reasons: set[str] = set()
     recovered_tabs: list[dict[str, object]] = []
     seen_tab_ids: set[str] = set()
     if isinstance(browser_tabs, list):
         for tab in browser_tabs:
             if not _valid_browser_tab(tab):
-                repaired_browser = True
+                browser_repair_reasons.add("dropped_tabs")
                 continue
             tab_id = tab["tab_id"]
             if tab_id in seen_tab_ids:
-                repaired_browser = True
+                browser_repair_reasons.add("dropped_tabs")
                 continue
             if len(recovered_tabs) >= BROWSER_TAB_LIMIT:
-                repaired_browser = True
+                browser_repair_reasons.add("dropped_tabs")
                 continue
             seen_tab_ids.add(tab_id)
-            if set(tab).difference(
-                {"tab_id", "url", "title", "favicon_url", "associated_job_id"}
-            ):
-                repaired_browser = True
+            if set(tab).difference({"tab_id", "url", "title", "favicon_url", "associated_job_id"}):
+                browser_repair_reasons.add("metadata_adjusted")
             safe_title = sanitize_browser_title(tab["title"])
             if safe_title != tab["title"]:
-                repaired_browser = True
+                browser_repair_reasons.add("protected_title")
             recovered_tabs.append(
                 {
                     "tab_id": tab_id,
@@ -278,7 +272,7 @@ def normalize_workspace_snapshot(
                 }
             )
     else:
-        repaired_browser = True
+        browser_repair_reasons.add("dropped_tabs")
     canonical["browser_tabs"] = recovered_tabs
     if active_tab_id is None and not recovered_tabs:
         canonical["active_browser_tab_id"] = None
@@ -286,8 +280,19 @@ def normalize_workspace_snapshot(
         canonical["active_browser_tab_id"] = active_tab_id
     else:
         canonical["active_browser_tab_id"] = recovered_tabs[0]["tab_id"] if recovered_tabs else None
-        repaired_browser = True
-    canonical["_repaired_browser"] = repaired_browser
+        browser_repair_reasons.add("reselected_active_tab")
+    ordered_reasons = [
+        reason
+        for reason in (
+            "protected_title",
+            "dropped_tabs",
+            "reselected_active_tab",
+            "metadata_adjusted",
+        )
+        if reason in browser_repair_reasons
+    ]
+    canonical["_repaired_browser"] = bool(ordered_reasons)
+    canonical["_browser_repair_reasons"] = ordered_reasons
     canonical["selected_job_id"] = selected_job_id
     return canonical, tuple(repaired)
 
@@ -401,7 +406,10 @@ class JobOsStateStore:
             raw = None
         snapshot, repaired = normalize_workspace_snapshot(raw, selected_job_id)
         repaired_browser = bool(snapshot.pop("_repaired_browser", False))
-        return WorkspaceSnapshotRecord(int(row[0]), snapshot, repaired, repaired_browser)
+        browser_repair_reasons = tuple(snapshot.pop("_browser_repair_reasons", ()))
+        return WorkspaceSnapshotRecord(
+            int(row[0]), snapshot, repaired, repaired_browser, browser_repair_reasons
+        )
 
     def save_workspace_snapshot(
         self,
@@ -450,6 +458,7 @@ class JobOsStateStore:
                     result["snapshot"],
                     tuple(result["repaired_presets"]),
                     bool(result.get("repaired_browser", False)),
+                    tuple(result.get("browser_repair_reasons", ())),
                 )
             selection_row = connection.execute(
                 "SELECT selected_job_id FROM job_workspace WHERE workspace_id = 1"
@@ -457,6 +466,7 @@ class JobOsStateStore:
             selected_job_id = selection_row[0] if selection_row else None
             normalized, repaired = normalize_workspace_snapshot(snapshot, selected_job_id)
             repaired_browser = bool(normalized.pop("_repaired_browser", False))
+            browser_repair_reasons = tuple(normalized.pop("_browser_repair_reasons", ()))
             payload = json.dumps(normalized, separators=(",", ":"), sort_keys=True)
             row = connection.execute(
                 "SELECT revision FROM workspace_snapshots WHERE device_id = ?",
@@ -484,6 +494,7 @@ class JobOsStateStore:
                     "snapshot": normalized,
                     "repaired_presets": repaired,
                     "repaired_browser": repaired_browser,
+                    "browser_repair_reasons": browser_repair_reasons,
                 },
                 separators=(",", ":"),
                 sort_keys=True,
@@ -518,7 +529,13 @@ class JobOsStateStore:
                 ),
             )
             connection.commit()
-        return WorkspaceSnapshotRecord(revision, normalized, repaired, repaired_browser)
+        return WorkspaceSnapshotRecord(
+            revision,
+            normalized,
+            repaired,
+            repaired_browser,
+            browser_repair_reasons,
+        )
 
     def list_mutation_audit(self) -> list[dict[str, object]]:
         with sqlite3.connect(f"file:{self._path}?mode=ro", uri=True) as connection:

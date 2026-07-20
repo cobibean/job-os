@@ -1,11 +1,21 @@
 import { expect, test } from 'vitest'
 
 import {
+  browserRepairMessage,
   canonicalWorkspace,
   movePanel,
   resetActivePreset,
   resizeAdjacentPanels
 } from './workspaceLayout'
+
+test.each([
+  [['protected_title'], 'Credential-like title metadata was protected. No browser tabs were lost.'],
+  [['dropped_tabs'], 'Browser metadata was repaired: invalid saved tabs were skipped.'],
+  [['reselected_active_tab'], 'Browser metadata was repaired: a recoverable active tab was selected.'],
+  [['protected_title', 'dropped_tabs', 'reselected_active_tab'], 'Browser metadata was repaired: credential-like title metadata was protected; invalid saved tabs were skipped; a recoverable active tab was selected.']
+] as const)('describes browser repair reasons accurately', (reasons, expected) => {
+  expect(browserRepairMessage([...reasons], true)).toBe(expected)
+})
 
 test('presets encode the locked dominant surfaces', () => {
   const workspace = canonicalWorkspace()

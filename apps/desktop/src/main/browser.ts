@@ -366,25 +366,24 @@ export class BrowserManager {
     })
     contents.on('unresponsive', () => { tab.state.error = 'This page is not responding. Reload or close the tab.'; this.#emit() })
     contents.on('responsive', () => { if (!tab.state.crashed) tab.state.error = null; this.#emit() })
-    contents.on('will-navigate', (event, url) => {
+    const blockExternalProtocol = (url: string) => {
+      tab.state.blockedUrl = safeBlockedExternalUrl(url)
+      tab.state.error = tab.state.blockedUrl
+        ? 'JobOS blocked an external protocol. Copy the link if you want to open it yourself.'
+        : 'JobOS blocked an unsafe external protocol.'
+      this.#emit()
+    }
+    const handleCancellableNavigation = (event: Electron.Event, url: string) => {
       if (!isOrdinaryWebUrl(url)) {
         event.preventDefault()
-        tab.state.blockedUrl = safeBlockedExternalUrl(url)
-        tab.state.error = tab.state.blockedUrl
-          ? 'JobOS blocked an external protocol. Copy the link if you want to open it yourself.'
-          : 'JobOS blocked an unsafe external protocol.'
-        this.#emit()
+        blockExternalProtocol(url)
       }
-    })
+    }
+    contents.on('will-navigate', handleCancellableNavigation)
+    contents.on('will-redirect', handleCancellableNavigation)
     contents.setWindowOpenHandler(({ url }) => {
       if (isOrdinaryWebUrl(url)) void this.create(url, tab.state.associatedJobId)
-      else {
-        tab.state.blockedUrl = safeBlockedExternalUrl(url)
-        tab.state.error = tab.state.blockedUrl
-          ? 'This site requested an external protocol. JobOS blocked it; you may copy the link.'
-          : 'This site requested an unsafe external protocol, which JobOS blocked.'
-        this.#emit()
-      }
+      else blockExternalProtocol(url)
       return { action: 'deny' }
     })
   }

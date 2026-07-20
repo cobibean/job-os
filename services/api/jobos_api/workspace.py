@@ -13,6 +13,12 @@ from .browser_policy import (
 PanelId = Literal["jobs", "center", "agent"]
 LayoutPreset = Literal["research", "review", "agent-focus"]
 CenterSurface = Literal["browser", "document"]
+BrowserRepairReason = Literal[
+    "protected_title",
+    "dropped_tabs",
+    "reselected_active_tab",
+    "metadata_adjusted",
+]
 
 
 class BrowserTabMetadata(BaseModel):
@@ -105,3 +111,4 @@ class WorkspaceSnapshotResponse(WorkspaceSnapshotBase):
     revision: int = Field(ge=0)
     repaired_presets: list[LayoutPreset] = Field(default_factory=list)
     repaired_browser: bool = False
+    browser_repair_reasons: list[BrowserRepairReason] = Field(default_factory=list, max_length=4)

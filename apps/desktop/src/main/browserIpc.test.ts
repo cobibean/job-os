@@ -36,7 +36,7 @@ test('actual IPC restore handler repairs candidates before the fifty-tab cap', a
     tabId: `tab-${index}`,
     url: `https://example.com/${index}`,
     title: index === 0
-      ? 'authorization_code=title-secret PHPSESSID=session-secret SAMLart=saml-secret'
+      ? '%ZZPRIVATE%5FKEY%3Aexample-value'
       : `Tab ${index}`,
     faviconUrl: null,
     associatedJobId: null

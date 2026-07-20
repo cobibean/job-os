@@ -175,3 +175,31 @@
 - No Mac Mini, Mini runtime, job-hunter/Hermes, Phase 5, or unrelated planning work was touched.
 - The unrelated `docs/planning/.DS_Store` modification remains unstaged and unmodified by this correction.
 - `CLO-50` remains in `Building`; PM owns acceptance and closure.
+
+## Final tolerant-title, redirect, and repair-semantics correction - 2026-07-20
+
+### Corrected behavior and decisions
+
+- Title-policy percent decoding is now tolerant and bounded in both runtimes: each implementation accepts at most its metadata limit, performs at most three decoding passes, replaces malformed percent runs without aborting later valid triplets, and never persists a decoded expansion. The shared fixture proves malformed escapes before, between, and after single- and double-encoded assignments while preserving safe ordinary percent text.
+- The deterministic title assignment vocabulary now includes normalized `awssecretaccesskey`, `awsaccesskeyid`, `accesskey`, and `privatekey` carriers. Explicit assignments such as `AWS_SECRET_ACCESS_KEY=`, `Aws-Access-Key-Id :`, `access.key=`, and `PRIVATE KEY:` are protected; ordinary unassigned phrases such as `AWS Secret Access Key Rotation Guide` remain unchanged.
+- The main process handles cancellable `will-redirect` events with the same non-auto-launch external-protocol policy as `will-navigate` and `window-open`. Custom protocols retain only a sanitized, copyable link; `file:` and `data:` are blocked without exposing an unsafe URL; ordinary HTTP(S) redirects continue.
+- Browser repair responses now carry a bounded, generated-contract-backed reason list: `protected_title`, `dropped_tabs`, `reselected_active_tab`, and `metadata_adjusted`. The renderer maps those reasons to accurate accessible status copy. A title-only repair explicitly says the title metadata was protected and that no browser tabs were lost; dropped-tab and active-selection statements appear only for their corresponding repairs.
+- Repair reason metadata is response-only and is cleared after the renderer persists a subsequently healthy browser snapshot. Existing startup conflict reconciliation, tab recovery order/caps, browser persistence, and unrelated workspace state remain unchanged.
+
+### Boundary and regression proof
+
+- Shared `tests/fixtures/browser-title-policy.json` cases execute in Vitest and pytest. Built JavaScript and Python direct reproductions produced identical `Protected page` results for malformed-percent OAuth assignments and every new AWS/access/private-key assignment, while preserving the safe rotation-guide title.
+- The real main-process `page-title-updated` event protects a malformed-percent AWS assignment. Renderer persistence and the actual IPC restore handler independently apply the same fallback before metadata can reach Workspace.
+- Workspace mutation rejects every unsafe shared fixture. Corrupted stored-state restoration replaces only the unsafe title, preserves the recoverable tab and coherent active tab, and reports exact repair reasons through the API response.
+- Real event-emitter coverage proves custom, `file:`, and `data:` redirects call `preventDefault`; HTTPS redirects do not. The sanitized custom URL remains copyable and no external application is auto-launched.
+- API contract and renderer live-region regressions separately cover title-only, dropped-tab, active-tab-reselection, and mixed repair summaries.
+
+### Final verification and handoff state
+
+- Focused desktop boundary suites: `PATH=/Users/cobibean/Library/pnpm/nodejs/26.5.0/bin:$PATH pnpm --filter @jobos/desktop exec vitest run src/main/browser.test.ts src/main/browserIpc.test.ts src/renderer/hooks/useBrowser.test.ts src/renderer/App.test.tsx src/renderer/workspaceLayout.test.ts` passed 42 tests across 5 files.
+- Focused API/state suites: `uv run --project services/api pytest services/api/tests/test_state_store.py services/api/tests/test_jobs_contract.py` passed 141 tests.
+- Full pinned source-tree gate: `PATH=/Users/cobibean/Library/pnpm/nodejs/26.5.0/bin:$PATH pnpm check` passed lint, generated contracts and type checks, 52 desktop tests across 11 files, 146 Python tests, the production Electron/Vite build, and packaged-renderer verification.
+- Generated contract consistency is rechecked from the committed candidate, followed by an exact-commit detached frozen clean room and gitleaks 8.30.0 scan of the complete 16-commit history. These final closeout gates use the committed bytes, not the dirty source tree.
+- Native visible MacBook acceptance and authenticated Gmail continuity remain explicitly open while the Mac is locked. No new native visual or authenticated acceptance is claimed.
+- No Mac Mini, Mini runtime, job-hunter/Hermes, Phase 5, or unrelated planning work was touched. The unrelated `docs/planning/.DS_Store` modification remains unstaged and unmodified by this correction.
+- `CLO-50` remains in `Building`; PM owns acceptance and closure. This section's 52-desktop/146-Python counts supersede the earlier Phase 4 section counts for the final candidate while preserving those older entries as historical evidence.

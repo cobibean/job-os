@@ -227,6 +227,12 @@ test('main-process emission enforces Workspace bounds and keeps later saves viab
   )
   expect(manager.getState().tabs[0]?.title).toBe(BROWSER_SAFE_TITLE_FALLBACK)
   expect(manager.getState().notice).toContain('credential-like metadata was hidden')
+  firstContents.emit(
+    'page-title-updated',
+    {},
+    '%ZZAWS%5FSECRET%5FACCESS%5FKEY%3Dexample-value'
+  )
+  expect(manager.getState().tabs[0]?.title).toBe(BROWSER_SAFE_TITLE_FALLBACK)
   firstContents.emit('page-title-updated', {}, 'Planning Session: Q3')
   expect(manager.getState().tabs[0]?.title).toBe('Planning Session: Q3')
 
@@ -263,6 +269,26 @@ test('main-process emission enforces Workspace bounds and keeps later saves viab
   if (!openHandler) throw new Error('Window-open policy was not installed')
   openHandler({ url: 'slack://channel/open?ticket=secret&team=safe' })
   expect(manager.getState().tabs[0]?.blockedUrl).toBe('slack://channel/open?team=safe')
+
+  const viewsBeforeRedirects = views.length
+  const customRedirect = { preventDefault: vi.fn() }
+  firstContents.emit('will-redirect', customRedirect, 'slack://channel/open?ticket=secret&team=safe')
+  expect(customRedirect.preventDefault).toHaveBeenCalledTimes(1)
+  expect(manager.getState().tabs[0]?.blockedUrl).toBe('slack://channel/open?team=safe')
+  manager.copyBlockedUrl('authoritative')
+  expect(clipboard.writeText).toHaveBeenLastCalledWith('slack://channel/open?team=safe')
+
+  for (const unsafeRedirect of ['file:///etc/passwd', 'data:text/html,unsafe']) {
+    const redirectEvent = { preventDefault: vi.fn() }
+    firstContents.emit('will-redirect', redirectEvent, unsafeRedirect)
+    expect(redirectEvent.preventDefault).toHaveBeenCalledTimes(1)
+    expect(manager.getState().tabs[0]?.blockedUrl).toBeNull()
+    expect(manager.getState().tabs[0]?.error).toContain('unsafe external protocol')
+  }
+  const ordinaryRedirect = { preventDefault: vi.fn() }
+  firstContents.emit('will-redirect', ordinaryRedirect, 'https://example.com/redirected?view=safe')
+  expect(ordinaryRedirect.preventDefault).not.toHaveBeenCalled()
+  expect(views).toHaveLength(viewsBeforeRedirects)
   manager.dispose()
 })
 

@@ -4,11 +4,13 @@ import { ArrowLeft, ArrowRight, Download, FileText, Globe2, LoaderCircle, Plus, 
 
 import type { BrowserRestoreState, JobListItem } from '../../shared/contracts'
 import { useBrowser } from '../hooks/useBrowser'
+import { browserRepairMessage, type BrowserRepairReason } from '../workspaceLayout'
 
 interface CenterWorkspaceProps {
   activeSurface: 'browser' | 'document'
   browserState: BrowserRestoreState
   browserRepaired: boolean
+  browserRepairReasons: BrowserRepairReason[]
   browserVisible: boolean
   jobs: JobListItem[]
   layoutSignal: string
@@ -162,7 +164,7 @@ export function CenterWorkspace(props: CenterWorkspaceProps) {
         </div>
       ) : null}
       {browser.state.notice ? <div className="browser-notice" role="status">{browser.state.notice}</div> : null}
-      {props.browserRepaired ? <div className="browser-notice" role="status">Some saved browser tabs could not be restored. JobOS kept every valid tab and selected the nearest recoverable tab.</div> : null}
+      {browserRepairMessage(props.browserRepairReasons, props.browserRepaired) ? <div className="browser-notice" role="status">{browserRepairMessage(props.browserRepairReasons, props.browserRepaired)}</div> : null}
 
       <div aria-labelledby={active ? `browser-tab-${active.tabId}` : undefined} className="browser-viewport" id="browser-tabpanel" ref={browser.viewportRef} role="tabpanel">
         {!browser.bridgeAvailable ? (

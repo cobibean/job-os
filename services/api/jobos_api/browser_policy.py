@@ -16,27 +16,96 @@ BROWSER_TITLE_LIMIT = 512
 BROWSER_SAFE_TITLE_FALLBACK = "Protected page"
 
 _SENSITIVE_PARAMETER_NAMES = {
-    "accesstoken", "apikey", "assertion", "authorization", "authorizationcode",
-    "authcode", "authtoken", "bearertoken", "capability", "capabilitytoken",
-    "code", "codeverifier", "credential", "idtoken", "jsessionid", "jwt",
-    "macaroon", "oauthcode", "oauthstate", "oauthtoken", "oauthverifier",
-    "password", "phpsessid", "refreshtoken", "relaystate", "samlart",
-    "samlrequest", "samlresponse", "secret", "session", "sessionid",
-    "sessionkey", "sid", "sig", "signature", "signedurl", "state", "ticket",
+    "accesstoken",
+    "apikey",
+    "assertion",
+    "authorization",
+    "authorizationcode",
+    "authcode",
+    "authtoken",
+    "bearertoken",
+    "capability",
+    "capabilitytoken",
+    "code",
+    "codeverifier",
+    "credential",
+    "idtoken",
+    "jsessionid",
+    "jwt",
+    "macaroon",
+    "oauthcode",
+    "oauthstate",
+    "oauthtoken",
+    "oauthverifier",
+    "password",
+    "phpsessid",
+    "refreshtoken",
+    "relaystate",
+    "samlart",
+    "samlrequest",
+    "samlresponse",
+    "secret",
+    "session",
+    "sessionid",
+    "sessionkey",
+    "sid",
+    "sig",
+    "signature",
+    "signedurl",
+    "state",
+    "ticket",
     "token",
 }
 
 _TITLE_CREDENTIAL_CARRIER_NAMES = (
-    "accesstoken", "apikey", "assertion", "authorization", "authorizationcode", "authcode",
-    "authtoken", "bearertoken", "capability", "capabilitytoken", "codeverifier",
-    "credential", "idtoken", "jsessionid", "jwt", "macaroon", "oauthcode",
-    "oauthstate", "oauthtoken", "oauthverifier", "password", "phpsessid",
-    "refreshtoken", "relaystate", "samlart", "samlrequest", "samlresponse",
-    "sessionid", "sessionkey", "signature", "signedurl", "ticket",
-    "xamzcredential", "xamzsignature", "xgoogsignature",
+    "accesskey",
+    "accesstoken",
+    "apikey",
+    "assertion",
+    "authorization",
+    "authorizationcode",
+    "authcode",
+    "awsaccesskeyid",
+    "awssecretaccesskey",
+    "authtoken",
+    "bearertoken",
+    "capability",
+    "capabilitytoken",
+    "codeverifier",
+    "credential",
+    "idtoken",
+    "jsessionid",
+    "jwt",
+    "macaroon",
+    "oauthcode",
+    "oauthstate",
+    "oauthtoken",
+    "oauthverifier",
+    "password",
+    "phpsessid",
+    "privatekey",
+    "refreshtoken",
+    "relaystate",
+    "samlart",
+    "samlrequest",
+    "samlresponse",
+    "sessionid",
+    "sessionkey",
+    "signature",
+    "signedurl",
+    "ticket",
+    "xamzcredential",
+    "xamzsignature",
+    "xgoogsignature",
 )
 _TITLE_EQUALS_ONLY_CARRIER_NAMES = (
-    "code", "secret", "session", "sid", "sig", "state", "token",
+    "code",
+    "secret",
+    "session",
+    "sid",
+    "sig",
+    "state",
+    "token",
 )
 
 
@@ -50,24 +119,28 @@ def _title_carrier_pattern(name: str, delimiter: str) -> re.Pattern[str]:
 
 
 _TITLE_CREDENTIAL_PATTERNS = (
-    *(
-        _title_carrier_pattern(name, r"(?:=|:)")
-        for name in _TITLE_CREDENTIAL_CARRIER_NAMES
-    ),
-    *(
-        _title_carrier_pattern(name, "=")
-        for name in _TITLE_EQUALS_ONLY_CARRIER_NAMES
-    ),
+    *(_title_carrier_pattern(name, r"(?:=|:)") for name in _TITLE_CREDENTIAL_CARRIER_NAMES),
+    *(_title_carrier_pattern(name, "=") for name in _TITLE_EQUALS_ONLY_CARRIER_NAMES),
 )
 
 
-def is_sensitive_browser_parameter(name: str) -> bool:
-    decoded = name
+def tolerant_percent_decode(value: str, *, limit: int = BROWSER_URL_LIMIT) -> str:
+    decoded = value[:limit]
     for _attempt in range(3):
-        next_value = unquote(decoded)
+        next_value = re.sub(
+            r"%(?![0-9a-f]{2})[^\s%]{0,2}",
+            " ",
+            unquote(decoded, errors="replace"),
+            flags=re.IGNORECASE,
+        )[:limit]
         if next_value == decoded:
             break
         decoded = next_value
+    return decoded
+
+
+def is_sensitive_browser_parameter(name: str) -> bool:
+    decoded = tolerant_percent_decode(name)
     normalized = re.sub(r"[^a-z0-9]", "", decoded.lower())
     return (
         normalized in _SENSITIVE_PARAMETER_NAMES
@@ -81,12 +154,7 @@ def is_sensitive_browser_parameter(name: str) -> bool:
 def browser_title_contains_credentials(value: object) -> bool:
     if not isinstance(value, str):
         return False
-    decoded = value
-    for _attempt in range(3):
-        next_value = unquote(decoded)
-        if next_value == decoded:
-            break
-        decoded = next_value
+    decoded = tolerant_percent_decode(value, limit=BROWSER_TITLE_LIMIT * 4)
     return any(pattern.search(decoded) for pattern in _TITLE_CREDENTIAL_PATTERNS)
 
 
@@ -95,12 +163,7 @@ def sanitize_browser_title(value: str) -> str:
 
 
 def _has_sensitive_path_parameter(path: str) -> bool:
-    decoded_path = path
-    for _attempt in range(3):
-        next_value = unquote(decoded_path)
-        if next_value == decoded_path:
-            break
-        decoded_path = next_value
+    decoded_path = tolerant_percent_decode(path)
     for segment in decoded_path.split("/"):
         parts = segment.split(";")
         for parameter in parts[1:]:

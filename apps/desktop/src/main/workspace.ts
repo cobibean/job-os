@@ -45,7 +45,8 @@ function fromApi(value: WorkspaceSnapshotResponse): WorkspaceSnapshot {
       associatedJobId: tab.associated_job_id ?? null
     })) satisfies BrowserTabMetadata[],
     activeBrowserTabId: value.active_browser_tab_id ?? null,
-    repairedBrowser: value.repaired_browser ?? false
+    repairedBrowser: value.repaired_browser ?? false,
+    browserRepairReasons: value.browser_repair_reasons ?? []
   }
 }
 

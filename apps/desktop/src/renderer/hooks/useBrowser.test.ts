@@ -27,13 +27,11 @@ function browserState(title: string): BrowserState {
 
 test('renderer persistence redacts remote-controlled credential assignments in titles', () => {
   const persisted = browserStateForPersistence(browserState(
-    'authorization_code=title-secret PHPSESSID=session-secret SAMLart=saml-secret'
+    '%ZZAWS%5FSECRET%5FACCESS%5FKEY%3Dexample-value'
   ))
 
   expect(persisted.tabs[0]?.title).toBe(BROWSER_SAFE_TITLE_FALLBACK)
-  expect(JSON.stringify(persisted)).not.toContain('title-secret')
-  expect(JSON.stringify(persisted)).not.toContain('session-secret')
-  expect(JSON.stringify(persisted)).not.toContain('saml-secret')
+  expect(JSON.stringify(persisted)).not.toContain('example-value')
 })
 
 test('renderer persistence preserves safe ordinary page titles', () => {

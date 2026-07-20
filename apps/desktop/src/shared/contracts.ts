@@ -38,6 +38,7 @@ export interface JobEvent {
 export type PanelId = 'jobs' | 'center' | 'agent'
 export type LayoutPreset = 'research' | 'review' | 'agent-focus'
 export type CenterSurface = 'browser' | 'document'
+export type BrowserRepairReason = 'protected_title' | 'dropped_tabs' | 'reselected_active_tab' | 'metadata_adjusted'
 
 export interface BrowserTabMetadata {
   tabId: string
@@ -99,6 +100,7 @@ export interface WorkspaceSnapshot {
   browserTabs?: BrowserTabMetadata[]
   activeBrowserTabId?: string | null
   repairedBrowser?: boolean
+  browserRepairReasons?: BrowserRepairReason[]
 }
 
 export interface ConnectivitySnapshot {

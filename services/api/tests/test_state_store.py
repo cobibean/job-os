@@ -350,8 +350,7 @@ def test_mixed_browser_restore_repairs_entries_and_active_tab_without_resetting_
                 "tab_id": "unsafe-title",
                 "url": "https://example.com/account?view=safe",
                 "title": (
-                    "authorization_code=title-secret "
-                    "PHPSESSID=session-secret SAMLart=saml-secret"
+                    "authorization_code=title-secret PHPSESSID=session-secret SAMLart=saml-secret"
                 ),
                 "favicon_url": None,
                 "associated_job_id": None,
@@ -392,6 +391,7 @@ def test_mixed_browser_restore_repairs_entries_and_active_tab_without_resetting_
 
     assert restored.revision == 6
     assert restored.repaired_browser is True
+    assert restored.browser_repair_reasons == ("protected_title", "dropped_tabs")
     assert [tab["tab_id"] for tab in restored.snapshot["browser_tabs"]] == [
         "gmail",
         "unsafe-title",
@@ -403,6 +403,83 @@ def test_mixed_browser_restore_repairs_entries_and_active_tab_without_resetting_
     assert restored.snapshot["selected_preset"] == "research"
     assert restored.snapshot["layouts"] == initial.snapshot["layouts"]
     assert restored.snapshot["selected_job_id"] == "job-9"
+
+
+@pytest.mark.parametrize(
+    ("tabs", "active_tab_id", "expected_reasons", "expected_active"),
+    [
+        (
+            [
+                {
+                    "tab_id": "safe",
+                    "url": "https://example.com/",
+                    "title": "%ZZAWS%5FSECRET%5FACCESS%5FKEY%3Dexample-value",
+                }
+            ],
+            "safe",
+            ("protected_title",),
+            "safe",
+        ),
+        (
+            [
+                {"tab_id": "safe", "url": "https://example.com/", "title": "Safe"},
+                {"tab_id": "bad", "url": "file:///bad", "title": "Bad"},
+            ],
+            "safe",
+            ("dropped_tabs",),
+            "safe",
+        ),
+        (
+            [{"tab_id": "safe", "url": "https://example.com/", "title": "Safe"}],
+            "missing",
+            ("reselected_active_tab",),
+            "safe",
+        ),
+        (
+            [
+                {
+                    "tab_id": "safe",
+                    "url": "https://example.com/",
+                    "title": "PRIVATE KEY: example-value",
+                },
+                {"tab_id": "bad", "url": "file:///bad", "title": "Bad"},
+            ],
+            "bad",
+            ("protected_title", "dropped_tabs", "reselected_active_tab"),
+            "safe",
+        ),
+    ],
+)
+def test_browser_repair_reports_exact_bounded_reasons(
+    tmp_path, tabs, active_tab_id, expected_reasons, expected_active
+):
+    database = tmp_path / "jobos.db"
+    store = JobOsStateStore(database)
+    store.initialize()
+    initial = store.workspace_snapshot("device-a")
+    with sqlite3.connect(database) as connection:
+        connection.execute(
+            "INSERT INTO workspace_snapshots(device_id, revision, snapshot_json) VALUES (?, ?, ?)",
+            (
+                "device-a",
+                1,
+                json.dumps(
+                    {
+                        **initial.snapshot,
+                        "browser_tabs": tabs,
+                        "active_browser_tab_id": active_tab_id,
+                    }
+                ),
+            ),
+        )
+
+    restored = store.workspace_snapshot("device-a")
+
+    assert restored.browser_repair_reasons == expected_reasons
+    assert restored.snapshot["active_browser_tab_id"] == expected_active
+    assert len(restored.snapshot["browser_tabs"]) == 1
+    if "protected_title" in expected_reasons:
+        assert restored.snapshot["browser_tabs"][0]["title"] == "Protected page"
 
 
 def test_browser_repair_keeps_first_fifty_valid_tabs_in_stable_order(tmp_path):
