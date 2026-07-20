@@ -4,11 +4,11 @@ export function CenterWorkspace() {
   return (
     <main className="center-workspace panel-region">
       <div className="workspace-tabs" role="tablist" aria-label="Open workspace surfaces">
-        <button aria-selected="true" className="surface-tab active" role="tab" type="button">
+        <button aria-selected="true" className="surface-tab active placeholder-control" disabled role="tab" title="Available in a later phase" type="button">
           <Globe2 aria-hidden="true" size={15} strokeWidth={1.5} />
           Browser
         </button>
-        <button aria-label="Open a new surface" className="icon-button tab-add" type="button">
+        <button aria-label="Open a new surface" className="icon-button tab-add placeholder-control" disabled title="Available in a later phase" type="button">
           <Plus aria-hidden="true" size={16} strokeWidth={1.5} />
         </button>
       </div>

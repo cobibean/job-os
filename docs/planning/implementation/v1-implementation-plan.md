@@ -32,7 +32,7 @@ Replace the remaining Mac Mini and Hermes assumptions with a short, verified run
 
 - Restore SSH access from the development MacBook to the Mini over private Tailscale.
 - Confirm the authoritative checkout, branch, commit, Python version, environment manager, data paths, artifact paths, and writable boundaries.
-- Inspect the running Hermes job-hunter profile and determine how to start a turn, stream output, recover conversation identity, cancel work, and configure MCP.
+- Inspect the running Hermes job-hunter profile and verify its gateway availability, session listing, protocol surface, and safe connectivity without requiring an agent turn from the development MacBook.
 - Confirm whether local stdio MCP is supported; record the fallback transport only if necessary.
 - Identify the service manager, restart workflow, log locations, and safe development instance strategy.
 - Run read-only smoke checks against real jobs and one existing resume artifact.
@@ -43,7 +43,7 @@ Replace the remaining Mac Mini and Hermes assumptions with a short, verified run
 - A concise runtime inventory is committed to project documentation.
 - The GitHub checkout and Mini checkout are reconciled.
 - One read-only job query and one existing artifact lookup succeed on the Mini.
-- A disposable Hermes turn proves the actual message and event interface without modifying job-search data.
+- The Mini-hosted gateway responds safely, session listing succeeds, and the submit/stream/cancel/recovery protocol surface is identified. The integrated live-turn proof is intentionally deferred to Phase 6.
 - The chosen MCP transport is demonstrated.
 
 Implementation does not proceed past this gate if the live topology differs materially from the architecture.
@@ -186,6 +186,7 @@ The user can talk to the existing Hermes agent in one continuous conversation an
 ### Work
 
 - Implement the Phase 0 Hermes Adapter behind `AgentGateway`.
+- On the Mini-hosted Hermes runtime, execute one harmless disposable turn that makes no job/workspace tool calls or data changes; prove submit acknowledgement, streamed events, completion, cancellation where safely testable, and session recovery before enabling the UI path.
 - Persist one current conversation, messages, turn state, and cancellation state.
 - Include selected job and active workspace context in each turn without creating per-job conversations.
 - Normalize text deltas, tool starts, tool completions, file changes, render events, errors, and final responses.
@@ -197,6 +198,7 @@ The user can talk to the existing Hermes agent in one continuous conversation an
 ### Verification gate: Observable Agent
 
 - A user message reaches the real Hermes agent and streams back into JobOS.
+- The Mini-hosted disposable proof records submit, stream, completion, safe cancellation behavior, and session recovery without job/workspace mutations.
 - Fifteen sequential tool calls appear as fifteen ordered, concise events.
 - Expanding an event shows useful safe detail; collapsing it preserves chronology.
 - Relaunching restores the conversation and final activity state.

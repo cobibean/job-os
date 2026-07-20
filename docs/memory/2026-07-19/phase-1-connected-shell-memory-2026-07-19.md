@@ -72,3 +72,12 @@ The implementation issue is Linear `CLO-47 — JobOS V1 Phase 1 — Application 
 
 - Have the PM agent validate the screenshot, clean-room evidence, security boundary, and issue acceptance criteria.
 - After PM acceptance, Phase 2 real jobs and Phase 3 persistent layout can proceed from the connected shell without changing the Phase 1 architecture boundaries.
+
+## Correction note — 2026-07-19 PM review
+
+- The Phase 0/1 baseline was committed and pushed to `origin/main` as `7dafb43eb111a44517a1474a371ae5748f5c73e1`. The earlier statement that nothing was staged, committed, or pushed records the state at the time of the original implementation session; it is no longer the repository's current provenance.
+- The user-visible proof was a production-built native Electron launch from `dist/main/main.js`, not an installed or packaged `.app`. Packaging, signing, notarization, and deployment remain outside Phase 1. The temporary Mini API was removed, so the no-deployment caveat remains true.
+- PM reclassified the Hermes live-turn requirement after confirming the job-hunter/Hermes agent runtime belongs on the Mac Mini. Phase 0 proves topology, gateway availability, session listing, the protocol surface, and safe connectivity. Submit/stream/complete/cancel/recovery proof now belongs to Phase 6 on the Mini-hosted Hermes Adapter integration; it is not an unresolved Phase 1 failure.
+- Disposable review sessions and processes were cleaned up. A final read-only check found `matching_disposable_sessions=0` and `matching_disposable_processes=0`; no additional MacBook-side Hermes turn attempts are permitted for this checkpoint.
+- The PM correction strengthens the existing Phase 1 slice without changing its accepted visual direction: periodic/focus connectivity recovery, strict health/auth response validation, ordered SQLite migrations, selected-preset Reset semantics, restrictive production renderer CSP, visibly disabled future controls, and CI detection of both tracked and untracked contract drift.
+- Correction verification passed on Node.js 26.5.0 with TypeScript 7.0.2: the full local `pnpm check` (10 renderer/Electron tests and 8 Python tests), a clean-room frozen pnpm/uv install and full check, and a production-built native Electron launch with the restrictive CSP active. The final GitHub Actions result and correction commit are recorded in repository/issue history after publication rather than predicted here.

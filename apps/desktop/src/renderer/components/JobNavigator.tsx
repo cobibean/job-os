@@ -4,11 +4,11 @@ export function JobNavigator() {
   return (
     <aside aria-label="Job navigation" className="job-navigator panel-region">
       <div className="sort-row">
-        <button aria-label="Job ordering: Manual" className="sort-control" type="button">
+        <button aria-label="Job ordering: Manual" className="sort-control placeholder-control" disabled title="Available in a later phase" type="button">
           <span>Manual</span>
           <ChevronDown aria-hidden="true" size={14} strokeWidth={1.5} />
         </button>
-        <button aria-label="Reverse job order" className="icon-button sort-direction" type="button">
+        <button aria-label="Reverse job order" className="icon-button sort-direction placeholder-control" disabled title="Available in a later phase" type="button">
           <ArrowDownUp aria-hidden="true" size={16} strokeWidth={1.5} />
         </button>
       </div>

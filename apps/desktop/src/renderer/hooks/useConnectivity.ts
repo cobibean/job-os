@@ -10,11 +10,14 @@ type ConnectivityView = Omit<Partial<ConnectivitySnapshot>, 'state'> & {
 const initialConnectivity: ConnectivityView = { state: 'connecting' }
 
 
-export function useConnectivity(): ConnectivityView {
+const defaultRefreshMs = 15_000
+
+export function useConnectivity(refreshMs = defaultRefreshMs): ConnectivityView {
   const [connectivity, setConnectivity] = useState<ConnectivityView>(initialConnectivity)
 
   useEffect(() => {
     let active = true
+    let probeInFlight = false
 
     if (!window.jobos?.connectivity) {
       setConnectivity({
@@ -25,11 +28,13 @@ export function useConnectivity(): ConnectivityView {
       return undefined
     }
 
-    window.jobos.connectivity.get().then(
-      snapshot => {
+    const refresh = async () => {
+      if (!active || probeInFlight) return
+      probeInFlight = true
+      try {
+        const snapshot = await window.jobos.connectivity.get()
         if (active) setConnectivity(snapshot)
-      },
-      error => {
+      } catch (error) {
         if (active) {
           setConnectivity({
             state: 'disconnected',
@@ -37,13 +42,27 @@ export function useConnectivity(): ConnectivityView {
             message: error instanceof Error ? error.message : 'Mac Mini unavailable'
           })
         }
+      } finally {
+        probeInFlight = false
       }
-    )
+    }
+
+    const refreshOnVisibility = () => {
+      if (document.visibilityState === 'visible') void refresh()
+    }
+    const refreshOnFocus = () => void refresh()
+    const interval = window.setInterval(() => void refresh(), refreshMs)
+    window.addEventListener('focus', refreshOnFocus)
+    document.addEventListener('visibilitychange', refreshOnVisibility)
+    void refresh()
 
     return () => {
       active = false
+      window.clearInterval(interval)
+      window.removeEventListener('focus', refreshOnFocus)
+      document.removeEventListener('visibilitychange', refreshOnVisibility)
     }
-  }, [])
+  }, [refreshMs])
 
   return connectivity
 }

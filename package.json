@@ -10,6 +10,7 @@
     "api:export": "uv run python scripts/export_openapi.py",
     "build": "pnpm contracts:generate && pnpm --filter @jobos/contracts build && pnpm --filter @jobos/desktop build && node scripts/verify-packaged-renderer.mjs",
     "check": "pnpm lint && pnpm typecheck && pnpm test && pnpm build",
+    "contracts:check": "pnpm contracts:generate && node scripts/verify-contract-drift.mjs",
     "contracts:generate": "pnpm api:export && pnpm --filter @jobos/openapi-generator generate",
     "dev": "pnpm --filter @jobos/desktop dev",
     "lint": "pnpm --filter @jobos/contracts lint && pnpm --filter @jobos/desktop lint && uv run ruff check services scripts",

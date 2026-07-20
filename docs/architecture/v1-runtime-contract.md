@@ -2,7 +2,7 @@
 
 ## Status
 
-Verified read-only on July 19, 2026. This closes the substantive Phase 0 runtime gate. The implementation plan asks for this inventory to be committed, but the active task explicitly forbids staging or committing, so this file intentionally remains an uncommitted workspace change.
+Verified read-only on July 19, 2026. This closes the Phase 0 runtime-topology gate. The Phase 0/1 baseline was committed and pushed as `7dafb43eb111a44517a1474a371ae5748f5c73e1`; subsequent PM corrections remain additive to that history.
 
 ## Authoritative Mini Route
 
@@ -70,7 +70,13 @@ The verified Hermes implementation supports the JobOS `AgentGateway` Interface:
 
 `prompt.submit` acknowledges with `{"status": "streaming"}`. Completion is event-driven rather than carried by the request response. `message.complete` includes final text and a `complete`, `interrupted`, or `error` status.
 
-The profile's session store was healthy during the spike and reported 60 sessions and 3,587 messages. Phase 0 did not create a disposable turn because the active task required read-only live inspection; the existing live gateway, persisted session store, exact runtime implementation, and successful WebSocket request jointly prove the interface without mutating the transcript.
+The profile's session store was healthy during the spike and reported 60 sessions and 3,587 messages. Phase 0 proves the Mini-hosted topology, gateway availability, session listing, protocol surface, and safe connectivity. It does not require an agent turn from the MacBook development device.
+
+### Phase boundary for live turn proof
+
+The actual Hermes submit, streamed-event, completion, cancellation, and session-recovery proof is deferred to Phase 6, when the Mini-hosted Hermes Adapter is integrated behind `AgentGateway`. That proof must execute on the Mac Mini runtime and must not call job/workspace tools or change job-search data. This is a PM-approved reclassification of the gate, not a Phase 0 failure.
+
+All disposable diagnostic sessions and processes created while reviewing this boundary were cleaned up. The final read-only check found zero matching disposable sessions and zero matching disposable processes. No further MacBook-side turn attempts are permitted for this Phase 1 checkpoint.
 
 ## MCP Contract
 

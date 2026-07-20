@@ -29,4 +29,4 @@ jobs:
       - run: uv sync --all-packages --frozen
       - run: pnpm check
       - name: Verify generated contracts are current
-        run: git diff --exit-code -- packages/contracts/openapi.json packages/contracts/src/generated
+        run: pnpm contracts:check

@@ -18,14 +18,14 @@ export function App() {
       <WorkspaceBar
         activePreset={activePreset}
         onPresetChange={setActivePreset}
-        onReset={() => setActivePreset(defaultPreset)}
+        onReset={() => undefined}
       />
       <div className="workbench">
         <JobNavigator />
         <CenterWorkspace />
         <AgentPanel />
       </div>
-      <StatusBar apiVersion={connectivity.apiVersion} state={connectivity.state} />
+      <StatusBar apiVersion={connectivity.apiVersion} message={connectivity.message} state={connectivity.state} />
     </div>
   )
 }
