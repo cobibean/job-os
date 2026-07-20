@@ -5,7 +5,7 @@ import { sanitizeBrowserMetadata } from '../../shared/browserPersistence'
 
 const emptyState: BrowserState = { tabs: [], activeTabId: null, download: null, notice: null }
 
-function persisted(state: BrowserState): BrowserRestoreState {
+export function browserStateForPersistence(state: BrowserState): BrowserRestoreState {
   return {
     tabs: state.tabs.map(tab => sanitizeBrowserMetadata({
       tabId: tab.tabId,
@@ -38,7 +38,7 @@ export function useBrowser(
     setState(next)
     if (explicit) explicitBrowserAction.current = true
     if (!restored.current || !explicitBrowserAction.current) return
-    const durable = persisted(next)
+    const durable = browserStateForPersistence(next)
     const key = JSON.stringify(durable)
     if (key !== persistedKey.current) {
       persistedKey.current = key
@@ -55,7 +55,7 @@ export function useBrowser(
     requestedRestoreKey.current = JSON.stringify(restoredState)
     void bridge.restore(restoredState).then(next => {
       setState(next)
-      persistedKey.current = JSON.stringify(persisted(next))
+      persistedKey.current = JSON.stringify(browserStateForPersistence(next))
     }).catch(error => {
       setMessage(error instanceof Error ? error.message : 'Browser restore failed')
     })
@@ -68,7 +68,7 @@ export function useBrowser(
     requestedRestoreKey.current = requestedKey
     void bridge.restore(restoredState).then(next => {
       setState(next)
-      persistedKey.current = JSON.stringify(persisted(next))
+      persistedKey.current = JSON.stringify(browserStateForPersistence(next))
     }).catch(error => setMessage(error instanceof Error ? error.message : 'Browser recovery failed'))
   }, [bridge, restoredState])
 

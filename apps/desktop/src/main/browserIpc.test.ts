@@ -4,6 +4,7 @@ import type { IpcMain, IpcMainInvokeEvent } from 'electron'
 import { expect, test, vi } from 'vitest'
 
 import type { BrowserRestoreState, BrowserState } from '../shared/contracts.js'
+import { BROWSER_SAFE_TITLE_FALLBACK } from '../shared/browserPersistence.js'
 import {
   BROWSER_RESTORE_CANDIDATE_LIMIT,
   registerBrowserRestoreHandler
@@ -34,7 +35,9 @@ test('actual IPC restore handler repairs candidates before the fifty-tab cap', a
   const validTabs = Array.from({ length: 50 }, (_, index) => ({
     tabId: `tab-${index}`,
     url: `https://example.com/${index}`,
-    title: `Tab ${index}`,
+    title: index === 0
+      ? 'authorization_code=title-secret PHPSESSID=session-secret SAMLart=saml-secret'
+      : `Tab ${index}`,
     faviconUrl: null,
     associatedJobId: null
   }))
@@ -59,6 +62,7 @@ test('actual IPC restore handler repairs candidates before the fifty-tab cap', a
     Array.from({ length: 50 }, (_, index) => `tab-${index}`)
   )
   expect(restore.mock.calls[0]?.[0].activeTabId).toBe('tab-49')
+  expect(restore.mock.calls[0]?.[0].tabs[0]?.title).toBe(BROWSER_SAFE_TITLE_FALLBACK)
 })
 
 test('IPC restore handler keeps the raw candidate stream bounded', async () => {

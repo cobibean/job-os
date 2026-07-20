@@ -3,7 +3,11 @@ import sqlite3
 from pathlib import Path
 
 import pytest
-from jobos_api.browser_policy import safe_browser_url
+from jobos_api.browser_policy import (
+    browser_title_contains_credentials,
+    safe_browser_url,
+    sanitize_browser_title,
+)
 from jobos_api.state_store import (
     SCHEMA_VERSION,
     IncompatibleSchemaError,
@@ -13,6 +17,9 @@ from jobos_api.state_store import (
 
 BROWSER_URL_POLICY_FIXTURES = json.loads(
     (Path(__file__).parents[3] / "tests/fixtures/browser-url-policy.json").read_text()
+)
+BROWSER_TITLE_POLICY_FIXTURES = json.loads(
+    (Path(__file__).parents[3] / "tests/fixtures/browser-title-policy.json").read_text()
 )
 
 
@@ -45,6 +52,20 @@ def test_browser_url_policy_accepts_electron_compatible_ipv6_and_ordinary_hosts(
 )
 def test_browser_url_policy_matches_shared_credential_host_and_port_fixtures(url, expected):
     assert safe_browser_url(url, allow_blank=False) is expected
+
+
+@pytest.mark.parametrize(
+    ("title", "expected", "unsafe"),
+    [
+        (fixture["title"], fixture["expected"], fixture["unsafe"])
+        for fixture in BROWSER_TITLE_POLICY_FIXTURES
+    ],
+)
+def test_browser_title_policy_matches_shared_conservative_redaction_fixtures(
+    title, expected, unsafe
+):
+    assert browser_title_contains_credentials(title) is unsafe
+    assert sanitize_browser_title(title) == expected
 
 
 def metadata_columns(path):
@@ -325,6 +346,16 @@ def test_mixed_browser_restore_repairs_entries_and_active_tab_without_resetting_
                 "favicon_url": None,
                 "associated_job_id": None,
             },
+            {
+                "tab_id": "unsafe-title",
+                "url": "https://example.com/account?view=safe",
+                "title": (
+                    "authorization_code=title-secret "
+                    "PHPSESSID=session-secret SAMLart=saml-secret"
+                ),
+                "favicon_url": None,
+                "associated_job_id": None,
+            },
             {"tab_id": "bad", "url": "file:///etc/passwd", "title": "Bad"},
             {"tab_id": "bad-ipv6", "url": "https://[::1", "title": "Bad IPv6"},
             {
@@ -349,7 +380,7 @@ def test_mixed_browser_restore_repairs_entries_and_active_tab_without_resetting_
                 "associated_job_id": "job-9",
             },
         ],
-        "active_browser_tab_id": "bad",
+        "active_browser_tab_id": "unsafe-title",
     }
     with sqlite3.connect(database) as connection:
         connection.execute(
@@ -363,9 +394,12 @@ def test_mixed_browser_restore_repairs_entries_and_active_tab_without_resetting_
     assert restored.repaired_browser is True
     assert [tab["tab_id"] for tab in restored.snapshot["browser_tabs"]] == [
         "gmail",
+        "unsafe-title",
         "listing",
     ]
-    assert restored.snapshot["active_browser_tab_id"] == "gmail"
+    assert restored.snapshot["active_browser_tab_id"] == "unsafe-title"
+    assert restored.snapshot["browser_tabs"][1]["title"] == "Protected page"
+    assert "title-secret" not in json.dumps(restored.snapshot)
     assert restored.snapshot["selected_preset"] == "research"
     assert restored.snapshot["layouts"] == initial.snapshot["layouts"]
     assert restored.snapshot["selected_job_id"] == "job-9"

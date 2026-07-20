@@ -11,7 +11,9 @@ import { vi } from 'vitest'
 import { BrowserManager, DEFAULT_BROWSER_URL, isOrdinaryWebUrl, normalizeBrowserInput, remoteBrowserPreferences, safeBlockedExternalUrl } from './browser.js'
 import {
   BROWSER_PERSISTENCE_LIMITS,
+  BROWSER_SAFE_TITLE_FALLBACK,
   normalizeBrowserUrlForPersistence,
+  sanitizeBrowserTitleForPersistence,
   sanitizeBrowserUrlForPersistence
 } from '../shared/browserPersistence.js'
 
@@ -19,6 +21,10 @@ const browserUrlPolicyFixtures = JSON.parse(readFileSync(
   new URL('../../../../tests/fixtures/browser-url-policy.json', import.meta.url),
   'utf8'
 )) as Array<{ url: string, desktop: string, api_safe: boolean }>
+const browserTitlePolicyFixtures = JSON.parse(readFileSync(
+  new URL('../../../../tests/fixtures/browser-title-policy.json', import.meta.url),
+  'utf8'
+)) as Array<{ title: string, expected: string, unsafe: boolean }>
 
 test('browser input keeps ordinary sites free and turns plain text into a search', () => {
   expect(normalizeBrowserInput('https://mail.google.com/mail/u/0/')).toBe('https://mail.google.com/mail/u/0/')
@@ -63,6 +69,12 @@ test('persisted browser URLs remove credentials, auth parameters, and fragments'
 test('desktop URL persistence matches the shared credential, host, and port fixtures', () => {
   for (const fixture of browserUrlPolicyFixtures) {
     expect(normalizeBrowserUrlForPersistence(fixture.url), fixture.url).toBe(fixture.desktop)
+  }
+})
+
+test('desktop title persistence matches the shared conservative redaction fixtures', () => {
+  for (const fixture of browserTitlePolicyFixtures) {
+    expect(sanitizeBrowserTitleForPersistence(fixture.title), fixture.title).toBe(fixture.expected)
   }
 })
 
@@ -203,6 +215,20 @@ test('main-process emission enforces Workspace bounds and keeps later saves viab
   expect(durable.tabs[0]?.title).toHaveLength(BROWSER_PERSISTENCE_LIMITS.title)
   expect(durable.tabs[0]?.faviconUrl).toBe('https://example.com/')
   expect(JSON.stringify({ tabs: durable.tabs, activeTabId: durable.activeTabId }).length).toBeGreaterThan(0)
+
+  await manager.navigate('authoritative', 'https://example.com/safe-title-test')
+  firstContents.emit('did-start-loading')
+  firstContents.emit('did-navigate')
+  firstContents.emit('page-favicon-updated', {}, ['https://example.com/favicon.ico'])
+  firstContents.emit(
+    'page-title-updated',
+    {},
+    'authorization_code=title-secret PHPSESSID=session-secret SAMLart=saml-secret'
+  )
+  expect(manager.getState().tabs[0]?.title).toBe(BROWSER_SAFE_TITLE_FALLBACK)
+  expect(manager.getState().notice).toContain('credential-like metadata was hidden')
+  firstContents.emit('page-title-updated', {}, 'Planning Session: Q3')
+  expect(manager.getState().tabs[0]?.title).toBe('Planning Session: Q3')
 
   await manager.navigate(
     'authoritative',

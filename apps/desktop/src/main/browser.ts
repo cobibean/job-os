@@ -22,9 +22,11 @@ import type {
 } from '../shared/contracts.js'
 import {
   BROWSER_PERSISTENCE_LIMITS,
+  BROWSER_SAFE_TITLE_FALLBACK,
   recoverBrowserRestoreState,
   recoverBrowserTabMetadata,
   sanitizeBrowserMetadata,
+  sanitizeBrowserTitleForPersistence,
   sanitizeBrowserUrlForPersistence
 } from '../shared/browserPersistence.js'
 
@@ -336,10 +338,13 @@ export class BrowserManager {
     contents.on('did-navigate-in-page', refresh)
     contents.on('page-title-updated', (_event, title) => {
       const nextTitle = title || 'Untitled'
-      if (nextTitle.length > BROWSER_PERSISTENCE_LIMITS.title) {
+      const safeTitle = sanitizeBrowserTitleForPersistence(nextTitle)
+      if (safeTitle !== nextTitle && safeTitle === BROWSER_SAFE_TITLE_FALLBACK) {
+        this.#notice = 'A page title containing credential-like metadata was hidden.'
+      } else if (nextTitle.length > BROWSER_PERSISTENCE_LIMITS.title) {
         this.#notice = 'A page title was shortened to keep Workspace saves reliable.'
       }
-      tab.state.title = nextTitle.slice(0, BROWSER_PERSISTENCE_LIMITS.title)
+      tab.state.title = safeTitle
       this.#emit()
     })
     contents.on('page-favicon-updated', (_event, favicons) => {
