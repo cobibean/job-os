@@ -48,8 +48,36 @@
 
 ## Exact handoff state
 
-- Implementation candidate: `ec8fcf424f5eef36ca5e1c87a504a9bd98d5644e` (`feat: add trusted document workspace`).
-- The closeout commit containing these exact verification results is documentation-only; resolve it as the commit containing this memory file after the final push. The final response and Linear comment record its exact SHA and confirmed `origin/main` equality.
-- Remote: pending the final documentation-only closeout commit and push to `origin/main`.
-- Frozen implementation-commit clean room, generated-contract drift, and gitleaks are complete and green. The documentation-only closeout commit receives a final exact-commit contract/status gate before push.
-- Implementation and implementor verification are otherwise complete. Leave `CLO-51` in `Building`; PM owns acceptance and closure.
+- Final correction implementation: `51602b07870dda220fb81512a541d63324a1f205` (`fix: align trusted artifact identity`), based on reviewed Phase 5 tip `11c05b405c34c9167512962e09515f9560d14e52`.
+- `origin/main` was fetched without divergence, pushed, and confirmed byte-for-byte at `51602b07870dda220fb81512a541d63324a1f205`. The documentation-only closeout commit containing this section is the remote tip recorded in the final Linear comment and implementor response.
+- The obsolete pre-review “pending” state is fully superseded by this block. Implementation and implementor verification are complete; `CLO-51` remains in `Building` for PM acceptance and closure.
+- The only working-tree difference outside the committed candidate is the user's preserved, unstaged `docs/planning/.DS_Store`.
+
+## PM artifact-trust correction - 2026-07-20
+
+### Corrected behavior
+
+- Job and revision changes immediately invalidate prior payload state. The renderer only mounts `PdfPreview` when `payload.artifactId` exactly equals the active artifact, remounts the PDF canvas when artifact identity changes, and clears canvas pixels before a new PDF render.
+- Failed or delayed loads never leave prior bytes displayed under a new job/revision. Viewed filename, artifact/source revision, media type, render status, preview behavior, and Open/Reveal/Export target all derive from the same active artifact. Newest-render state is a separate banner.
+- Initial restoration and automatic refresh preserve an older deliberate selection while it remains successful. An identity fallback occurs only when the selected artifact disappeared or became unusable, and then page/zoom reset to page 1 / 100%; restored page values are not prematurely clamped before the PDF page count arrives.
+- A failed newest render with a last-successful DOCX and older PDF selects the DOCX, exposes only its external/export actions, and never presents the older PDF as the DOCX revision.
+- The facade artifact manifest is explicitly order-independent: each item must carry a unique non-negative `render_sequence`; highest sequence is current and highest successful sequence is last-successful. Oldest-first and newest-first inputs yield identical pointers, and duplicate sequences are rejected.
+- Artifact content responses now hash, validate, and return one byte buffer from one filesystem read. Metadata headers and response bytes cannot diverge through a replacement between verification and response construction.
+- The two App test bridges that previously returned `undefined` during the delayed jobs refresh now return deterministic job arrays.
+
+### Correction verification
+
+- Focused renderer/main-process/App suite ran three consecutive times: `PATH=/Users/cobibean/.nvm/versions/node/v26.5.0/bin:$PATH pnpm --filter @jobos/desktop exec vitest run src/renderer/components/DocumentWorkspace.test.tsx src/main/documents.test.ts src/renderer/App.test.tsx`; each run passed 34 tests across 3 files.
+- Focused API/state/contract suite: `uv run pytest services/api/tests/test_jobs_contract.py services/api/tests/test_state_store.py services/api/tests/test_health_contract.py -q` passed.
+- Full pinned source-tree gate: `PATH=/Users/cobibean/.nvm/versions/node/v26.5.0/bin:$PATH pnpm check` passed lint, contract generation, TypeScript, 64 desktop tests across 13 files, 157 Python tests, production Electron/Vite build, PDF worker packaging, and packaged-renderer verification.
+- Generated contract drift: `PATH=/Users/cobibean/.nvm/versions/node/v26.5.0/bin:$PATH pnpm contracts:check` passed.
+- Frozen exact-correction clean room: `/tmp/jobos-phase5-correction-clean.NAn1uK` was created from `git archive 51602b07870dda220fb81512a541d63324a1f205`, given a disposable local Git baseline, and passed `pnpm install --frozen-lockfile`, `uv sync --all-packages --frozen`, full `pnpm check`, and `pnpm contracts:check` with the same 64 desktop / 157 Python counts plus production/package verification.
+- The documentation-only closeout commit containing this section also passed the frozen exact-final full gate and contract drift check before its final push.
+- Gitleaks 8.30.0 scanned the final 20-commit history / about 953 KB and found no leaks.
+- In-app-browser production-renderer proof showed a failed-newest banner separately from `Viewing northstar-resume.docx · revision render-2 · source source-2`, no older-PDF active identity, DOCX external-only behavior, Export targeting the DOCX opaque ID, and no application console errors or warnings.
+
+### Remaining Mini/native defers
+
+- No Mac Mini, live job-hunter database/render process, or Hermes runtime was contacted or changed. PM/Mini acceptance still needs one live facade manifest using the documented `render_sequence` contract and one live render/refresh.
+- PM should still click Export, Reveal in Finder, and Open in Default App on the native target desktop. Automated and rendered proofs verify identity targeting, but do not claim this human native-shell acceptance.
+- No hosted CI-green claim is made; pinned local and frozen exact-commit gates are the correction evidence.
