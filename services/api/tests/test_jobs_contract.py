@@ -109,7 +109,14 @@ def auth_headers():
     return {"Authorization": "Bearer test-device-token"}
 
 
-def artifact_metadata(path, *, job_id="job-0", source="source-1", revision="render-1"):
+def artifact_metadata(
+    path,
+    *,
+    job_id="job-0",
+    source="source-1",
+    revision="render-1",
+    sequence=1,
+):
     content = path.read_bytes()
     return {
         "job_id": job_id,
@@ -118,6 +125,7 @@ def artifact_metadata(path, *, job_id="job-0", source="source-1", revision="rend
         "media_type": "application/pdf",
         "sha256": sha256(content).hexdigest(),
         "render_status": "succeeded",
+        "render_sequence": sequence,
         "path": str(path),
     }
 
@@ -848,8 +856,10 @@ def test_newer_success_and_failed_render_preserve_last_successful_preview(tmp_pa
             "/v1/jobs/job-0/artifacts/refresh", headers=auth_headers()
         ).json()
         facade.artifacts["job-0"] = [
-            artifact_metadata(first),
-            artifact_metadata(second, source="source-2", revision="render-2"),
+            artifact_metadata(first, sequence=1),
+            artifact_metadata(
+                second, source="source-2", revision="render-2", sequence=2
+            ),
         ]
         newer = client.post(
             "/v1/jobs/job-0/artifacts/refresh", headers=auth_headers()
@@ -861,6 +871,7 @@ def test_newer_success_and_failed_render_preserve_last_successful_preview(tmp_pa
                 "artifact_revision": "render-3",
                 "media_type": "application/pdf",
                 "render_status": "failed",
+                "render_sequence": 3,
                 "failure_message": "PDF render failed in fixture",
             }
         )
@@ -881,6 +892,122 @@ def test_newer_success_and_failed_render_preserve_last_successful_preview(tmp_pa
     assert current["failure_message"] == "PDF render failed in fixture"
     assert retained["artifact_revision"] == "render-2"
     assert retained["preview_available"] is True
+
+
+@pytest.mark.parametrize("manifest_order", ["oldest-first", "newest-first"])
+def test_facade_render_sequence_determines_current_and_last_successful(
+    tmp_path, manifest_order
+):
+    facade = FakeJobHunterFacade()
+    facade.jobs = facade.jobs[:1]
+    older_pdf = tmp_path / "resume-old.pdf"
+    last_good_docx = tmp_path / "resume-current.docx"
+    older_pdf.write_bytes(b"%PDF-1.7\nolder PDF\n%%EOF\n")
+    last_good_docx.write_bytes(b"PK\x03\x04last successful DOCX")
+    artifacts = [
+        artifact_metadata(
+            older_pdf, source="source-1", revision="render-1", sequence=1
+        ),
+        {
+            **artifact_metadata(
+                last_good_docx,
+                source="source-2",
+                revision="render-2",
+                sequence=2,
+            ),
+            "media_type": (
+                "application/vnd.openxmlformats-officedocument."
+                "wordprocessingml.document"
+            ),
+        },
+        {
+            "job_id": "job-0",
+            "source_revision": "source-3",
+            "artifact_revision": "render-3",
+            "render_sequence": 3,
+            "media_type": "application/pdf",
+            "render_status": "failed",
+            "failure_message": "newest render failed",
+        },
+    ]
+    facade.artifacts["job-0"] = (
+        artifacts if manifest_order == "oldest-first" else list(reversed(artifacts))
+    )
+
+    with make_client(tmp_path, facade) as client:
+        response = client.post(
+            "/v1/jobs/job-0/artifacts/refresh", headers=auth_headers()
+        )
+
+    assert response.status_code == 200
+    body = response.json()
+    current = next(item for item in body["artifacts"] if item["is_current"])
+    last_successful = next(
+        item for item in body["artifacts"] if item["is_last_successful"]
+    )
+    assert current["artifact_revision"] == "render-3"
+    assert current["render_status"] == "failed"
+    assert last_successful["artifact_revision"] == "render-2"
+    assert last_successful["media_type"].endswith(
+        "openxmlformats-officedocument.wordprocessingml.document"
+    )
+    assert last_successful["preview_available"] is False
+
+
+def test_duplicate_facade_render_sequences_are_rejected(tmp_path):
+    facade = FakeJobHunterFacade()
+    facade.jobs = facade.jobs[:1]
+    first = tmp_path / "resume-1.pdf"
+    second = tmp_path / "resume-2.pdf"
+    first.write_bytes(b"%PDF-1.7\nfirst\n%%EOF\n")
+    second.write_bytes(b"%PDF-1.7\nsecond\n%%EOF\n")
+    facade.artifacts["job-0"] = [
+        artifact_metadata(first, revision="render-1", sequence=7),
+        artifact_metadata(second, revision="render-2", sequence=7),
+    ]
+
+    with make_client(tmp_path, facade) as client:
+        response = client.post(
+            "/v1/jobs/job-0/artifacts/refresh", headers=auth_headers()
+        )
+
+    assert response.status_code == 422
+    assert "sequences must be unique" in response.json()["detail"]
+
+
+def test_artifact_response_hashes_and_serves_one_byte_snapshot(tmp_path, monkeypatch):
+    facade = FakeJobHunterFacade()
+    facade.jobs = facade.jobs[:1]
+    pdf = tmp_path / "resume.pdf"
+    original_bytes = b"%PDF-1.7\ntrusted snapshot\n%%EOF\n"
+    replacement_bytes = b"%PDF-1.7\nreplacement snapshot\n%%EOF\n"
+    pdf.write_bytes(original_bytes)
+    facade.artifacts["job-0"] = [artifact_metadata(pdf)]
+
+    with make_client(tmp_path, facade) as client:
+        artifact = client.post(
+            "/v1/jobs/job-0/artifacts/refresh", headers=auth_headers()
+        ).json()["artifacts"][0]
+        original_read_bytes = Path.read_bytes
+        calls = 0
+
+        def replacing_read_bytes(path):
+            nonlocal calls
+            calls += 1
+            return original_bytes if calls == 1 else replacement_bytes
+
+        monkeypatch.setattr(Path, "read_bytes", replacing_read_bytes)
+        streamed = client.get(
+            f"/v1/artifacts/{artifact['artifact_id']}/content",
+            headers=auth_headers(),
+        )
+        monkeypatch.setattr(Path, "read_bytes", original_read_bytes)
+
+    assert calls == 1
+    assert streamed.status_code == 200
+    assert streamed.content == original_bytes
+    assert streamed.headers["x-content-sha256"] == sha256(original_bytes).hexdigest()
+    assert streamed.headers["x-artifact-revision"] == "render-1"
 
 
 @pytest.mark.parametrize("attack", ["root_escape", "wrong_media", "hash_mismatch"])

@@ -2,7 +2,6 @@ import asyncio
 import json
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from pathlib import Path
 from typing import Annotated
 from urllib.parse import quote
 
@@ -21,6 +20,8 @@ from jobos_api.documents import (
     JobArtifactsResponse,
     artifact_record,
     content_headers,
+    read_source_artifact,
+    verify_facade_artifacts,
     verify_source_artifact,
 )
 from jobos_api.jobs import (
@@ -285,9 +286,7 @@ def create_app(settings: Settings, *, job_facade: JobFacade | None = None) -> Fa
         ensure_job(job_id)
         try:
             raw_artifacts = jobs.list_job_artifacts(job_id)
-            verified = [
-                verify_source_artifact(raw, settings.artifact_roots) for raw in raw_artifacts
-            ]
+            verified = verify_facade_artifacts(raw_artifacts, settings.artifact_roots)
             state_store.register_document_artifacts(job_id, verified)
         except (ArtifactTrustError, ValueError) as error:
             raise HTTPException(status_code=422, detail=str(error)) from error
@@ -324,7 +323,7 @@ def create_app(settings: Settings, *, job_facade: JobFacade | None = None) -> Fa
                 detail="Only authoritative PDF artifacts can be previewed in JobOS",
             )
         try:
-            verified = verify_source_artifact(
+            verified, payload = read_source_artifact(
                 {
                     "job_id": record["job_id"],
                     "source_revision": record["source_revision"],
@@ -332,6 +331,9 @@ def create_app(settings: Settings, *, job_facade: JobFacade | None = None) -> Fa
                     "media_type": record["media_type"],
                     "sha256": record["sha256"],
                     "render_status": record["render_status"],
+                    # Registry identity is already fixed; sequence is only used to
+                    # select facade current/last-successful pointers during refresh.
+                    "render_sequence": 0,
                     "path": record["canonical_path"],
                 },
                 settings.artifact_roots,
@@ -341,8 +343,8 @@ def create_app(settings: Settings, *, job_facade: JobFacade | None = None) -> Fa
                 status_code=409,
                 detail="Registered artifact no longer matches trusted metadata",
             ) from error
-        path = Path(verified.canonical_path or "")
-        payload = path.read_bytes()
+        if payload is None:
+            raise HTTPException(status_code=409, detail="Artifact render is not available")
         headers = content_headers(record)
         disposition = "inline" if preview else "attachment"
         filename = quote(headers.filename, safe="")

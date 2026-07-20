@@ -15,6 +15,13 @@ export function PdfPreview({ bytes, page, zoom, onPageCount }: PdfPreviewProps) 
   useEffect(() => {
     let active = true
     let task: import('pdfjs-dist').PDFDocumentLoadingTask | null = null
+    const canvas = canvasRef.current
+    if (canvas) {
+      canvas.width = 0
+      canvas.height = 0
+      canvas.style.width = '0'
+      canvas.style.height = '0'
+    }
     import('pdfjs-dist').then(pdfjs => {
       pdfjs.GlobalWorkerOptions.workerSrc = pdfWorker
       task = pdfjs.getDocument({ data: new Uint8Array(bytes.slice(0)) })
