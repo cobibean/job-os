@@ -80,6 +80,7 @@ async def test_mcp_server_exposes_phase_seven_parity_tools_while_retaining_job_t
         "document_refresh",
         "document_render",
         "document_register",
+        "document_approve",
         "document_select",
         "browser_tabs_inspect",
         "browser_tab_create",
@@ -120,17 +121,22 @@ async def test_parity_mutations_are_thin_authenticated_api_calls_with_idempotenc
         idempotency_key="click-1",
     )
     await client.render_document("job-1", "resume-main", idempotency_key="render-1")
+    await client.approve_document(
+        "job-1", "art_1234567890abcdef", idempotency_key="approve-1"
+    )
     await client.report_activity("Reviewed listing", "completed", idempotency_key="activity-1")
     await client.aclose()
 
     assert [(item.method, item.url.path) for item in requests] == [
         ("POST", "/v1/browser/commands"),
         ("POST", "/v1/jobs/job-1/artifacts/render"),
+        ("POST", "/v1/jobs/job-1/artifacts/art_1234567890abcdef/approve"),
         ("POST", "/v1/activity"),
     ]
     assert [json.loads(item.content)["idempotency_key"] for item in requests] == [
         "click-1",
         "render-1",
+        "approve-1",
         "activity-1",
     ]
 

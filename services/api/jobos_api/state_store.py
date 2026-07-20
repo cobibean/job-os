@@ -203,6 +203,13 @@ MIGRATIONS = (
             """,
         ),
     ),
+    Migration(
+        version=8,
+        statements=(
+            "ALTER TABLE job_document_state ADD COLUMN approved_artifact_id TEXT",
+            "ALTER TABLE job_document_state ADD COLUMN approved_at TEXT",
+        ),
+    ),
 )
 SCHEMA_VERSION = MIGRATIONS[-1].version
 
@@ -1207,11 +1214,11 @@ class JobOsStateStore:
 
     def list_document_artifacts(
         self, job_id: str
-    ) -> tuple[list[dict[str, object]], str | None, str | None]:
+    ) -> tuple[list[dict[str, object]], str | None, str | None, str | None]:
         with sqlite3.connect(f"file:{self._path}?mode=ro", uri=True) as connection:
             connection.row_factory = sqlite3.Row
             state = connection.execute(
-                "SELECT current_artifact_id, last_successful_artifact_id "
+                "SELECT current_artifact_id, last_successful_artifact_id, approved_artifact_id "
                 "FROM job_document_state WHERE job_id = ?",
                 (job_id,),
             ).fetchone()
@@ -1223,7 +1230,37 @@ class JobOsStateStore:
             [dict(row) for row in rows],
             state["current_artifact_id"] if state else None,
             state["last_successful_artifact_id"] if state else None,
+            state["approved_artifact_id"] if state else None,
         )
+
+    def approve_document_artifact(self, job_id: str, artifact_id: str) -> None:
+        with sqlite3.connect(self._path) as connection:
+            artifact = connection.execute(
+                "SELECT job_id, render_status, sha256 "
+                "FROM document_artifacts WHERE artifact_id = ?",
+                (artifact_id,),
+            ).fetchone()
+            if (
+                artifact is None
+                or artifact[0] != job_id
+                or artifact[1] != "succeeded"
+                or not artifact[2]
+            ):
+                raise ValueError(
+                    "Only a successful artifact registered for this job can be approved"
+                )
+            updated = connection.execute(
+                """
+                UPDATE job_document_state
+                SET approved_artifact_id = ?, approved_at = CURRENT_TIMESTAMP,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE job_id = ?
+                """,
+                (artifact_id, job_id),
+            )
+            if updated.rowcount != 1:
+                raise ValueError("Artifact state is not registered for this job")
+            connection.commit()
 
     def get_document_artifact(self, artifact_id: str) -> dict[str, object] | None:
         with sqlite3.connect(f"file:{self._path}?mode=ro", uri=True) as connection:

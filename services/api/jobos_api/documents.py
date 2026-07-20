@@ -73,6 +73,7 @@ class ArtifactRecord(BaseModel):
     created_at: str
     is_current: bool
     is_last_successful: bool
+    is_approved: bool
     preview_available: bool
 
 
@@ -83,6 +84,7 @@ class JobArtifactsResponse(BaseModel):
     artifacts: list[ArtifactRecord]
     current_artifact_id: str | None
     last_successful_artifact_id: str | None
+    approved_artifact_id: str | None
 
 
 class ArtifactRegistrationRequest(BaseModel):
@@ -94,6 +96,13 @@ class ArtifactRegistrationRequest(BaseModel):
 
 
 class ArtifactRefreshRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    origin: Literal["user", "mcp"] = "user"
+    idempotency_key: str = Field(default_factory=lambda: str(uuid4()), min_length=1, max_length=128)
+
+
+class ArtifactApprovalRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     origin: Literal["user", "mcp"] = "user"
@@ -204,7 +213,8 @@ def verify_facade_artifacts(
 
 
 def artifact_record(
-    row: dict[str, Any], *, current_id: str | None, last_successful_id: str | None
+    row: dict[str, Any], *, current_id: str | None, last_successful_id: str | None,
+    approved_id: str | None
 ) -> ArtifactRecord:
     artifact_id = str(row["artifact_id"])
     return ArtifactRecord(
@@ -220,6 +230,7 @@ def artifact_record(
         created_at=str(row["created_at"]),
         is_current=artifact_id == current_id,
         is_last_successful=artifact_id == last_successful_id,
+        is_approved=artifact_id == approved_id,
         preview_available=(
             row["render_status"] == "succeeded" and row["media_type"] == PDF_MEDIA_TYPE
         ),

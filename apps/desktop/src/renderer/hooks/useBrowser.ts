@@ -25,7 +25,7 @@ export function useBrowser(
   layoutSignal: string,
   onPersist: (state: BrowserRestoreState) => void
 ) {
-  const bridge = window.jobos?.browser
+  const bridge = useRef(window.jobos?.browser).current
   const [state, setState] = useState<BrowserState>(emptyState)
   const [message, setMessage] = useState('Browser ready')
   const viewportRef = useRef<HTMLDivElement | null>(null)

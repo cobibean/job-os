@@ -50,6 +50,7 @@ describe('trusted document client', () => {
         job_id: 'job-7',
         current_artifact_id: artifactId,
         last_successful_artifact_id: artifactId,
+        approved_artifact_id: artifactId,
         artifacts: [{
           artifact_id: artifactId,
           job_id: 'job-7',
@@ -63,6 +64,7 @@ describe('trusted document client', () => {
           created_at: '2026-07-20T00:00:00Z',
           is_current: true,
           is_last_successful: true,
+          is_approved: true,
           preview_available: true
         }]
       }), { status: 200, headers: { 'Content-Type': 'application/json' } })
@@ -71,7 +73,25 @@ describe('trusted document client', () => {
     const state = await client().list('job-7')
 
     expect(state.currentArtifactId).toBe(artifactId)
+    expect(state.approvedArtifactId).toBe(artifactId)
+    expect(state.artifacts[0]?.isApproved).toBe(true)
     expect(state.artifacts[0]?.previewAvailable).toBe(true)
+  })
+
+  it('approves an exact artifact through its owning job route', async () => {
+    globalThis.fetch = vi.fn(async input => {
+      expect(String(input)).toBe(
+        `http://127.0.0.1:8766/v1/jobs/job-7/artifacts/${artifactId}/approve`
+      )
+      return new Response(JSON.stringify({
+        job_id: 'job-7', artifacts: [], current_artifact_id: artifactId,
+        last_successful_artifact_id: artifactId, approved_artifact_id: artifactId
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+    }) as typeof fetch
+
+    const result = await client().approve('job-7', artifactId)
+
+    expect(result.approvedArtifactId).toBe(artifactId)
   })
 
   it('accepts only matching registered PDF bytes and headers', async () => {

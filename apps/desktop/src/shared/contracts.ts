@@ -137,6 +137,7 @@ export interface DocumentArtifact {
   createdAt: string
   isCurrent: boolean
   isLastSuccessful: boolean
+  isApproved: boolean
   previewAvailable: boolean
 }
 
@@ -145,6 +146,7 @@ export interface JobArtifactsState {
   artifacts: DocumentArtifact[]
   currentArtifactId: string | null
   lastSuccessfulArtifactId: string | null
+  approvedArtifactId: string | null
 }
 
 export interface PdfArtifactPayload {
@@ -250,6 +252,7 @@ export interface JobOsRendererBridge {
   documents: {
     list: (jobId: string) => Promise<JobArtifactsState>
     refresh: (jobId: string) => Promise<JobArtifactsState>
+    approve: (jobId: string, artifactId: string) => Promise<JobArtifactsState>
     loadPdf: (artifactId: string) => Promise<PdfArtifactPayload>
     export: (artifactId: string) => Promise<string>
     reveal: (artifactId: string) => Promise<string>

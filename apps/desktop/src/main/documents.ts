@@ -23,6 +23,7 @@ interface ApiArtifact {
   created_at: string
   is_current: boolean
   is_last_successful: boolean
+  is_approved: boolean
   preview_available: boolean
 }
 
@@ -31,6 +32,7 @@ interface ApiArtifactList {
   artifacts: ApiArtifact[]
   current_artifact_id: string | null
   last_successful_artifact_id: string | null
+  approved_artifact_id: string | null
 }
 
 function toArtifact(value: ApiArtifact): DocumentArtifact {
@@ -47,6 +49,7 @@ function toArtifact(value: ApiArtifact): DocumentArtifact {
     createdAt: value.created_at,
     isCurrent: value.is_current,
     isLastSuccessful: value.is_last_successful,
+    isApproved: value.is_approved,
     previewAvailable: value.preview_available
   }
 }
@@ -56,7 +59,8 @@ function toState(value: ApiArtifactList): JobArtifactsState {
     jobId: value.job_id,
     artifacts: value.artifacts.map(toArtifact),
     currentArtifactId: value.current_artifact_id,
-    lastSuccessfulArtifactId: value.last_successful_artifact_id
+    lastSuccessfulArtifactId: value.last_successful_artifact_id,
+    approvedArtifactId: value.approved_artifact_id
   }
 }
 
@@ -149,6 +153,13 @@ export function createMainDocumentsClient(
     },
     async refresh(jobId: string): Promise<JobArtifactsState> {
       return toState(await apiJson<ApiArtifactList>(config, `/v1/jobs/${encodeURIComponent(safeJobId(jobId))}/artifacts/refresh`, 'POST'))
+    },
+    async approve(jobId: string, artifactId: string): Promise<JobArtifactsState> {
+      return toState(await apiJson<ApiArtifactList>(
+        config,
+        `/v1/jobs/${encodeURIComponent(safeJobId(jobId))}/artifacts/${encodeURIComponent(safeId(artifactId))}/approve`,
+        'POST'
+      ))
     },
     async loadPdf(artifactId: string): Promise<PdfArtifactPayload> {
       const artifact = await artifactBytes(config, artifactId, true)

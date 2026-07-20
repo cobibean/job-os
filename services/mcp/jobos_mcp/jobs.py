@@ -153,6 +153,15 @@ class JobOsMcpClient:
             },
         )
 
+    async def approve_document(
+        self, job_id: str, artifact_id: str, *, idempotency_key: str | None = None
+    ) -> dict[str, Any]:
+        return await self._request(
+            "POST",
+            f"/v1/jobs/{job_id}/artifacts/{artifact_id}/approve",
+            json={"origin": "mcp", "idempotency_key": self._key(idempotency_key)},
+        )
+
     async def select_document(
         self, artifact_id: str, *, idempotency_key: str | None = None
     ) -> dict[str, Any]:

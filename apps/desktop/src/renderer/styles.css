@@ -396,7 +396,7 @@ button:focus-visible {
 
 .document-workspace {
   display: grid;
-  grid-template-rows: 54px 44px auto minmax(0, 1fr) 26px;
+  grid-template-rows: 54px 44px auto auto minmax(0, 1fr) 26px;
   overflow: hidden;
   background: #0e1013;
 }
@@ -422,6 +422,8 @@ button:focus-visible {
 .document-toolbar button { height: 30px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 0 9px; border: 0; border-radius: 4px; color: var(--muted); background: transparent; cursor: pointer; font-size: 10px; white-space: nowrap; }
 .document-toolbar button:hover:not(:disabled) { color: var(--text); background: #1b1e24; }
 .document-toolbar button:disabled { opacity: 0.3; cursor: default; }
+.document-toolbar .approve-revision { color: var(--green); }
+.document-toolbar .approve-revision:disabled { opacity: 0.72; }
 .document-toolbar-spacer { min-width: 8px; flex: 1; }
 .page-count, .zoom-value { color: #c3c1bb; font-size: 10px; white-space: nowrap; }
 .zoom-value { width: 38px; text-align: center; }

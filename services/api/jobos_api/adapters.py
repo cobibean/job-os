@@ -5,7 +5,9 @@ from pathlib import Path
 from jobos_api.jobs import EmptyJobFacade, JobFacade
 
 
-def create_job_hunter_adapter(database_path: Path | None) -> JobFacade:
+def create_job_hunter_adapter(
+    database_path: Path | None, workspace_root: Path | None = None
+) -> JobFacade:
     """Compose the reviewed job-hunter Facade without exposing its storage to JobOS."""
     if database_path is None:
         return EmptyJobFacade()
@@ -13,4 +15,7 @@ def create_job_hunter_adapter(database_path: Path | None) -> JobFacade:
     from job_hunter.facade import JobHunterFacade
     from job_hunter.storage import JobStorage
 
-    return JobHunterFacade(JobStorage(database_path, initialize=False))
+    return JobHunterFacade(
+        JobStorage(database_path, initialize=False),
+        workspace_root=workspace_root,
+    )

@@ -20,7 +20,7 @@ export function useWorkspace(selectedJobId: string | null) {
   const revision = useRef(0)
   const latest = useRef(workspace)
   const queue = useRef(Promise.resolve())
-  const bridge = window.jobos?.workspace
+  const bridge = useRef(window.jobos?.workspace).current
   const hydrating = useRef(Boolean(bridge))
   const pendingHydrationUpdates = useRef<WorkspaceUpdate[]>([])
   const startupRecoveryUpdates = useRef<WorkspaceUpdate[]>([])
@@ -160,7 +160,12 @@ export function useWorkspace(selectedJobId: string | null) {
     activeArtifactZoom: zoom
   }), ''), [commit])
 
-  return { workspace, announcement, hydrated, selectPreset, resize, collapse, move, reset, updateBrowserState, updateDocumentState }
+  const showDocument = useCallback(() => commit(current => ({
+    ...current,
+    activeCenterSurface: 'document'
+  }), 'Newest resume opened for review'), [commit])
+
+  return { workspace, announcement, hydrated, selectPreset, resize, collapse, move, reset, updateBrowserState, updateDocumentState, showDocument }
 }
 
 function panelLabel(panel: PanelId) {

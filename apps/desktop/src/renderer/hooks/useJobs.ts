@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 
 import type { JobListItem, JobSortMode, JobStatus } from '../../shared/contracts'
 
@@ -14,7 +14,7 @@ export function useJobs() {
   const [error, setError] = useState<string | null>(null)
   const [feedback, setFeedback] = useState<string | null>(null)
 
-  const bridge = window.jobos?.jobs
+  const bridge = useRef(window.jobos?.jobs).current
 
   const refresh = useCallback(async () => {
     if (!bridge) return

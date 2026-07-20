@@ -43,6 +43,20 @@ export type ActivityReportResponse = {
 };
 
 /**
+ * ArtifactApprovalRequest
+ */
+export type ArtifactApprovalRequest = {
+    /**
+     * Idempotency Key
+     */
+    idempotency_key?: string;
+    /**
+     * Origin
+     */
+    origin?: 'user' | 'mcp';
+};
+
+/**
  * ArtifactRecord
  */
 export type ArtifactRecord = {
@@ -66,6 +80,10 @@ export type ArtifactRecord = {
      * Filename
      */
     filename: string | null;
+    /**
+     * Is Approved
+     */
+    is_approved: boolean;
     /**
      * Is Current
      */
@@ -338,6 +356,10 @@ export type HealthResponse = {
  * JobArtifactsResponse
  */
 export type JobArtifactsResponse = {
+    /**
+     * Approved Artifact Id
+     */
+    approved_artifact_id: string | null;
     /**
      * Artifacts
      */
@@ -1497,6 +1519,43 @@ export type RenderJobArtifactV1JobsJobIdArtifactsRenderPostResponses = {
 };
 
 export type RenderJobArtifactV1JobsJobIdArtifactsRenderPostResponse = RenderJobArtifactV1JobsJobIdArtifactsRenderPostResponses[keyof RenderJobArtifactV1JobsJobIdArtifactsRenderPostResponses];
+
+export type ApproveJobArtifactV1JobsJobIdArtifactsArtifactIdApprovePostData = {
+    /**
+     * Command
+     */
+    body?: ArtifactApprovalRequest | null;
+    path: {
+        /**
+         * Job Id
+         */
+        job_id: string;
+        /**
+         * Artifact Id
+         */
+        artifact_id: string;
+    };
+    query?: never;
+    url: '/v1/jobs/{job_id}/artifacts/{artifact_id}/approve';
+};
+
+export type ApproveJobArtifactV1JobsJobIdArtifactsArtifactIdApprovePostErrors = {
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type ApproveJobArtifactV1JobsJobIdArtifactsArtifactIdApprovePostError = ApproveJobArtifactV1JobsJobIdArtifactsArtifactIdApprovePostErrors[keyof ApproveJobArtifactV1JobsJobIdArtifactsArtifactIdApprovePostErrors];
+
+export type ApproveJobArtifactV1JobsJobIdArtifactsArtifactIdApprovePostResponses = {
+    /**
+     * Successful Response
+     */
+    200: JobArtifactsResponse;
+};
+
+export type ApproveJobArtifactV1JobsJobIdArtifactsArtifactIdApprovePostResponse = ApproveJobArtifactV1JobsJobIdArtifactsArtifactIdApprovePostResponses[keyof ApproveJobArtifactV1JobsJobIdArtifactsArtifactIdApprovePostResponses];
 
 export type JobHistoryV1JobsJobIdHistoryGetData = {
     body?: never;

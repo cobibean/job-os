@@ -23,7 +23,11 @@ export function App() {
         onReset={layoutState.reset}
       />
       <WorkbenchLayout
-        agent={<AgentPanel apiState={connectivity.state} contextLabel={jobState.selectedJob ? `${jobState.selectedJob.company} · ${jobState.selectedJob.title}` : 'No active job'} />}
+        agent={<AgentPanel
+          apiState={connectivity.state}
+          contextLabel={jobState.selectedJob ? `${jobState.selectedJob.company} · ${jobState.selectedJob.title}` : 'No active job'}
+          onArtifactRendered={layoutState.showDocument}
+        />}
         center={<CenterWorkspace
           activeSurface={layoutState.workspace.activeCenterSurface}
           activeJob={jobState.selectedJob}

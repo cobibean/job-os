@@ -55,6 +55,28 @@
         "title": "ActivityReportResponse",
         "type": "object"
       },
+      "ArtifactApprovalRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "idempotency_key": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Idempotency Key",
+            "type": "string"
+          },
+          "origin": {
+            "default": "user",
+            "enum": [
+              "user",
+              "mcp"
+            ],
+            "title": "Origin",
+            "type": "string"
+          }
+        },
+        "title": "ArtifactApprovalRequest",
+        "type": "object"
+      },
       "ArtifactRecord": {
         "additionalProperties": false,
         "properties": {
@@ -91,6 +113,10 @@
               }
             ],
             "title": "Filename"
+          },
+          "is_approved": {
+            "title": "Is Approved",
+            "type": "boolean"
           },
           "is_current": {
             "title": "Is Current",
@@ -150,6 +176,7 @@
           "created_at",
           "is_current",
           "is_last_successful",
+          "is_approved",
           "preview_available"
         ],
         "title": "ArtifactRecord",
@@ -565,6 +592,17 @@
       "JobArtifactsResponse": {
         "additionalProperties": false,
         "properties": {
+          "approved_artifact_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Approved Artifact Id"
+          },
           "artifacts": {
             "items": {
               "$ref": "#/components/schemas/ArtifactRecord"
@@ -603,7 +641,8 @@
           "job_id",
           "artifacts",
           "current_artifact_id",
-          "last_successful_artifact_id"
+          "last_successful_artifact_id",
+          "approved_artifact_id"
         ],
         "title": "JobArtifactsResponse",
         "type": "object"
@@ -2784,6 +2823,79 @@
           }
         ],
         "summary": "Render Job Artifact",
+        "tags": [
+          "documents"
+        ]
+      }
+    },
+    "/v1/jobs/{job_id}/artifacts/{artifact_id}/approve": {
+      "post": {
+        "operationId": "approve_job_artifact_v1_jobs__job_id__artifacts__artifact_id__approve_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "title": "Job Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "artifact_id",
+            "required": true,
+            "schema": {
+              "title": "Artifact Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/ArtifactApprovalRequest"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Command"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobArtifactsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Approve Job Artifact",
         "tags": [
           "documents"
         ]
