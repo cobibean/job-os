@@ -13,5 +13,6 @@ class Settings(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     device_token: str = Field(min_length=16)
+    device_id: str = Field(default="primary-device", min_length=1, max_length=100)
     state_db_path: Path
     job_hunter_db_path: Path | None = None

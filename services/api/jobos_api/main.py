@@ -13,6 +13,7 @@ def settings_from_environment() -> Settings:
     job_hunter_db = os.environ.get("JOBOS_JOB_HUNTER_DB_PATH")
     return Settings(
         device_token=token,
+        device_id=os.environ.get("JOBOS_DEVICE_ID", "primary-device"),
         state_db_path=state_db_path,
         job_hunter_db_path=Path(job_hunter_db) if job_hunter_db else None,
     )

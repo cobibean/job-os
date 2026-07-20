@@ -1,6 +1,5 @@
 import { PanelLeft, RotateCcw } from 'lucide-react'
-
-export type LayoutPreset = 'research' | 'review' | 'agent-focus'
+import type { LayoutPreset } from '../workspaceLayout'
 
 interface WorkspaceBarProps {
   activePreset: LayoutPreset

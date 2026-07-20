@@ -8,13 +8,15 @@ from fastapi.security import HTTPAuthorizationCredentials
 @dataclass(frozen=True)
 class DeviceIdentity:
     authenticated: bool = True
+    device_id: str = "authenticated-device"
 
 
 class DeviceAuthenticator:
     """Validates one revocable device credential without exposing it downstream."""
 
-    def __init__(self, expected_token: str) -> None:
+    def __init__(self, expected_token: str, device_id: str = "primary-device") -> None:
         self._expected_token = expected_token
+        self._device_id = device_id
 
     def authenticate(
         self,
@@ -31,4 +33,4 @@ class DeviceAuthenticator:
                 detail="Device authentication required",
                 headers={"WWW-Authenticate": "Bearer"},
             )
-        return DeviceIdentity()
+        return DeviceIdentity(device_id=self._device_id)

@@ -2,7 +2,7 @@
 
 import { client } from './client.gen.js';
 import type { Client, ClientMeta, Options as Options2, RequestResult, TDataShape } from './client/index.js';
-import type { DeviceSessionV1DeviceSessionGetData, DeviceSessionV1DeviceSessionGetResponses, EventsListV1EventsGetData, EventsListV1EventsGetErrors, EventsListV1EventsGetResponses, EventsStreamV1EventsStreamGetData, EventsStreamV1EventsStreamGetErrors, EventsStreamV1EventsStreamGetResponses, HealthV1HealthGetData, HealthV1HealthGetResponses, JobHistoryV1JobsJobIdHistoryGetData, JobHistoryV1JobsJobIdHistoryGetErrors, JobHistoryV1JobsJobIdHistoryGetResponses, JobInspectV1JobsJobIdGetData, JobInspectV1JobsJobIdGetErrors, JobInspectV1JobsJobIdGetResponses, JobsListV1JobsGetData, JobsListV1JobsGetErrors, JobsListV1JobsGetResponses, JobsReorderV1JobsOrderPutData, JobsReorderV1JobsOrderPutErrors, JobsReorderV1JobsOrderPutResponses, JobUpdateStatusV1JobsJobIdStatusPutData, JobUpdateStatusV1JobsJobIdStatusPutErrors, JobUpdateStatusV1JobsJobIdStatusPutResponses, VersionV1VersionGetData, VersionV1VersionGetResponses, WorkspaceJobsV1WorkspaceJobsGetData, WorkspaceJobsV1WorkspaceJobsGetResponses, WorkspaceSelectJobV1WorkspaceJobsSelectionPutData, WorkspaceSelectJobV1WorkspaceJobsSelectionPutErrors, WorkspaceSelectJobV1WorkspaceJobsSelectionPutResponses, WorkspaceSortJobsV1WorkspaceJobsSortPutData, WorkspaceSortJobsV1WorkspaceJobsSortPutErrors, WorkspaceSortJobsV1WorkspaceJobsSortPutResponses } from './types.gen.js';
+import type { DeviceSessionV1DeviceSessionGetData, DeviceSessionV1DeviceSessionGetResponses, EventsListV1EventsGetData, EventsListV1EventsGetErrors, EventsListV1EventsGetResponses, EventsStreamV1EventsStreamGetData, EventsStreamV1EventsStreamGetErrors, EventsStreamV1EventsStreamGetResponses, HealthV1HealthGetData, HealthV1HealthGetResponses, JobHistoryV1JobsJobIdHistoryGetData, JobHistoryV1JobsJobIdHistoryGetErrors, JobHistoryV1JobsJobIdHistoryGetResponses, JobInspectV1JobsJobIdGetData, JobInspectV1JobsJobIdGetErrors, JobInspectV1JobsJobIdGetResponses, JobsListV1JobsGetData, JobsListV1JobsGetErrors, JobsListV1JobsGetResponses, JobsReorderV1JobsOrderPutData, JobsReorderV1JobsOrderPutErrors, JobsReorderV1JobsOrderPutResponses, JobUpdateStatusV1JobsJobIdStatusPutData, JobUpdateStatusV1JobsJobIdStatusPutErrors, JobUpdateStatusV1JobsJobIdStatusPutResponses, VersionV1VersionGetData, VersionV1VersionGetResponses, WorkspaceGetV1WorkspaceGetData, WorkspaceGetV1WorkspaceGetResponses, WorkspaceJobsV1WorkspaceJobsGetData, WorkspaceJobsV1WorkspaceJobsGetResponses, WorkspacePutV1WorkspacePutData, WorkspacePutV1WorkspacePutErrors, WorkspacePutV1WorkspacePutResponses, WorkspaceSelectJobV1WorkspaceJobsSelectionPutData, WorkspaceSelectJobV1WorkspaceJobsSelectionPutErrors, WorkspaceSelectJobV1WorkspaceJobsSelectionPutResponses, WorkspaceSortJobsV1WorkspaceJobsSortPutData, WorkspaceSortJobsV1WorkspaceJobsSortPutErrors, WorkspaceSortJobsV1WorkspaceJobsSortPutResponses } from './types.gen.js';
 
 export type Options<TData extends TDataShape = TDataShape, ThrowOnError extends boolean = boolean, TResponse = unknown> = Options2<TData, ThrowOnError, TResponse> & {
     /**
@@ -107,6 +107,28 @@ export const jobUpdateStatusV1JobsJobIdStatusPut = <ThrowOnError extends boolean
  * Version
  */
 export const versionV1VersionGet = <ThrowOnError extends boolean = false>(options?: Options<VersionV1VersionGetData, ThrowOnError>): RequestResult<VersionV1VersionGetResponses, unknown, ThrowOnError> => (options?.client ?? client).get<VersionV1VersionGetResponses, unknown, ThrowOnError>({ url: '/v1/version', ...options });
+
+/**
+ * Workspace Get
+ */
+export const workspaceGetV1WorkspaceGet = <ThrowOnError extends boolean = false>(options?: Options<WorkspaceGetV1WorkspaceGetData, ThrowOnError>): RequestResult<WorkspaceGetV1WorkspaceGetResponses, unknown, ThrowOnError> => (options?.client ?? client).get<WorkspaceGetV1WorkspaceGetResponses, unknown, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/v1/workspace',
+    ...options
+});
+
+/**
+ * Workspace Put
+ */
+export const workspacePutV1WorkspacePut = <ThrowOnError extends boolean = false>(options: Options<WorkspacePutV1WorkspacePutData, ThrowOnError>): RequestResult<WorkspacePutV1WorkspacePutResponses, WorkspacePutV1WorkspacePutErrors, ThrowOnError> => (options.client ?? client).put<WorkspacePutV1WorkspacePutResponses, WorkspacePutV1WorkspacePutErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/v1/workspace',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
 
 /**
  * Workspace Jobs

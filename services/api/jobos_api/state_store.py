@@ -1,11 +1,18 @@
 import json
 import sqlite3
+from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
 
 
 class IncompatibleSchemaError(RuntimeError):
     """The state database cannot be safely opened by this JobOS build."""
+
+
+class WorkspaceRevisionConflict(RuntimeError):
+    def __init__(self, current_revision: int) -> None:
+        self.current_revision = current_revision
+        super().__init__(f"workspace revision conflict; current revision is {current_revision}")
 
 
 @dataclass(frozen=True)
@@ -58,6 +65,19 @@ MIGRATIONS = (
             """,
         ),
     ),
+    Migration(
+        version=4,
+        statements=(
+            """
+            CREATE TABLE workspace_snapshots (
+                device_id TEXT PRIMARY KEY,
+                revision INTEGER NOT NULL CHECK (revision >= 1),
+                snapshot_json TEXT NOT NULL,
+                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+            """,
+        ),
+    ),
 )
 SCHEMA_VERSION = MIGRATIONS[-1].version
 
@@ -72,6 +92,93 @@ class JobWorkspaceState:
     selected_job_id: str | None
     sort_mode: str
     manual_order: list[str]
+
+
+@dataclass(frozen=True)
+class WorkspaceSnapshotRecord:
+    revision: int
+    snapshot: dict[str, object]
+    repaired_presets: tuple[str, ...] = ()
+
+
+PANEL_IDS = ("jobs", "center", "agent")
+PRESET_DEFAULTS: dict[str, dict[str, object]] = {
+    "research": {
+        "order": ["jobs", "center", "agent"],
+        "widths": {"jobs": 260, "center": 760, "agent": 350},
+        "collapsed": [],
+    },
+    "review": {
+        "order": ["jobs", "center", "agent"],
+        "widths": {"jobs": 280, "center": 700, "agent": 380},
+        "collapsed": [],
+    },
+    "agent-focus": {
+        "order": ["jobs", "center", "agent"],
+        "widths": {"jobs": 220, "center": 420, "agent": 650},
+        "collapsed": [],
+    },
+}
+
+
+def canonical_workspace_snapshot(selected_job_id: str | None = None) -> dict[str, object]:
+    return {
+        "selected_preset": "review",
+        "layouts": deepcopy(PRESET_DEFAULTS),
+        "selected_job_id": selected_job_id,
+        "active_center_surface": "document",
+    }
+
+
+def _valid_layout(value: object) -> bool:
+    if not isinstance(value, dict):
+        return False
+    order = value.get("order")
+    widths = value.get("widths")
+    collapsed = value.get("collapsed")
+    return (
+        isinstance(order, list)
+        and len(order) == 3
+        and set(order) == set(PANEL_IDS)
+        and isinstance(widths, dict)
+        and set(widths) == set(PANEL_IDS)
+        and all(
+            isinstance(widths[panel], int) and 180 <= widths[panel] <= 1600
+            for panel in PANEL_IDS
+        )
+        and isinstance(collapsed, list)
+        and len(collapsed) == len(set(collapsed))
+        and set(collapsed).issubset(PANEL_IDS)
+    )
+
+
+def normalize_workspace_snapshot(
+    value: object, selected_job_id: str | None
+) -> tuple[dict[str, object], tuple[str, ...]]:
+    canonical = canonical_workspace_snapshot(selected_job_id)
+    if not isinstance(value, dict):
+        return canonical, tuple(PRESET_DEFAULTS)
+    selected_preset = value.get("selected_preset")
+    canonical["selected_preset"] = (
+        selected_preset if selected_preset in PRESET_DEFAULTS else "review"
+    )
+    active_surface = value.get("active_center_surface")
+    canonical["active_center_surface"] = (
+        active_surface if active_surface in ("browser", "document") else "document"
+    )
+    layouts = value.get("layouts")
+    repaired: list[str] = []
+    if isinstance(layouts, dict):
+        for preset in PRESET_DEFAULTS:
+            layout = layouts.get(preset)
+            if _valid_layout(layout):
+                canonical["layouts"][preset] = deepcopy(layout)  # type: ignore[index]
+            else:
+                repaired.append(preset)
+    else:
+        repaired.extend(PRESET_DEFAULTS)
+    canonical["selected_job_id"] = selected_job_id
+    return canonical, tuple(repaired)
 
 
 class JobOsStateStore:
@@ -163,6 +270,68 @@ class JobOsStateStore:
         if row is None:
             return JobWorkspaceState(None, "manual", [])
         return JobWorkspaceState(row[0], str(row[1]), list(json.loads(row[2])))
+
+    def workspace_snapshot(self, device_id: str) -> WorkspaceSnapshotRecord:
+        selected_job_id = self.job_workspace_state().selected_job_id
+        with sqlite3.connect(f"file:{self._path}?mode=ro", uri=True) as connection:
+            row = connection.execute(
+                "SELECT revision, snapshot_json FROM workspace_snapshots WHERE device_id = ?",
+                (device_id,),
+            ).fetchone()
+        if row is None:
+            return WorkspaceSnapshotRecord(0, canonical_workspace_snapshot(selected_job_id))
+        try:
+            raw: object = json.loads(row[1])
+        except (TypeError, json.JSONDecodeError):
+            raw = None
+        snapshot, repaired = normalize_workspace_snapshot(raw, selected_job_id)
+        return WorkspaceSnapshotRecord(int(row[0]), snapshot, repaired)
+
+    def save_workspace_snapshot(
+        self,
+        device_id: str,
+        *,
+        expected_revision: int,
+        snapshot: dict[str, object],
+    ) -> WorkspaceSnapshotRecord:
+        selected_job_id = snapshot.get("selected_job_id")
+        normalized, repaired = normalize_workspace_snapshot(
+            snapshot,
+            selected_job_id if isinstance(selected_job_id, str) else None,
+        )
+        payload = json.dumps(normalized, separators=(",", ":"), sort_keys=True)
+        with sqlite3.connect(self._path) as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute(
+                "SELECT revision FROM workspace_snapshots WHERE device_id = ?",
+                (device_id,),
+            ).fetchone()
+            current_revision = int(row[0]) if row else 0
+            if current_revision != expected_revision:
+                connection.rollback()
+                raise WorkspaceRevisionConflict(current_revision)
+            revision = current_revision + 1
+            connection.execute(
+                """
+                INSERT INTO workspace_snapshots(device_id, revision, snapshot_json)
+                VALUES (?, ?, ?)
+                ON CONFLICT(device_id) DO UPDATE SET
+                    revision = excluded.revision,
+                    snapshot_json = excluded.snapshot_json,
+                    updated_at = CURRENT_TIMESTAMP
+                """,
+                (device_id, revision, payload),
+            )
+            connection.execute(
+                """
+                UPDATE job_workspace
+                SET selected_job_id = ?, updated_at = CURRENT_TIMESTAMP
+                WHERE workspace_id = 1
+                """,
+                (normalized["selected_job_id"],),
+            )
+            connection.commit()
+        return WorkspaceSnapshotRecord(revision, normalized, repaired)
 
     def save_job_selection(self, job_id: str, origin: str) -> int:
         payload = json.dumps({"selected_job_id": job_id}, separators=(",", ":"))
