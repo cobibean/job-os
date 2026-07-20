@@ -414,15 +414,19 @@ export type WorkspaceSnapshotCommand = {
      */
     active_center_surface: 'browser' | 'document';
     /**
+     * Idempotency Key
+     */
+    idempotency_key: string;
+    /**
      * Layouts
      */
     layouts: {
         [key: string]: PanelLayout;
     };
     /**
-     * Repaired Presets
+     * Origin
      */
-    repaired_presets?: Array<'research' | 'review' | 'agent-focus'>;
+    origin: 'user' | 'mcp' | 'system';
     /**
      * Revision
      */

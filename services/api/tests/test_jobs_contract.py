@@ -307,8 +307,11 @@ def test_workspace_snapshot_round_trip_and_revision_conflict(tmp_path):
         )
         initial = client.get("/v1/workspace", headers=auth_headers())
         body = initial.json()
+        body.pop("repaired_presets")
+        body.update({"origin": "user", "idempotency_key": "workspace-round-trip-1"})
         body["selected_preset"] = "agent-focus"
         saved = client.put("/v1/workspace", headers=auth_headers(), json=body)
+        body["idempotency_key"] = "workspace-stale-write-1"
         stale = client.put("/v1/workspace", headers=auth_headers(), json=body)
         restored = client.get("/v1/workspace", headers=auth_headers())
 
@@ -319,6 +322,39 @@ def test_workspace_snapshot_round_trip_and_revision_conflict(tmp_path):
     assert stale.json()["detail"] == "Workspace revision conflict; current revision is 1"
     assert restored.json()["selected_preset"] == "agent-focus"
     assert restored.json()["selected_job_id"] == "job-1"
+
+
+def test_workspace_snapshot_idempotent_retry_returns_original_revision(tmp_path):
+    facade = FakeJobHunterFacade()
+
+    with make_client(tmp_path, facade) as client:
+        body = client.get("/v1/workspace", headers=auth_headers()).json()
+        body.pop("repaired_presets")
+        body.update(
+            {
+                "selected_preset": "research",
+                "active_center_surface": "browser",
+                "origin": "user",
+                "idempotency_key": "workspace-api-save-1",
+            }
+        )
+        first = client.put("/v1/workspace", headers=auth_headers(), json=body)
+        retry = client.put("/v1/workspace", headers=auth_headers(), json=body)
+        changed = client.put(
+            "/v1/workspace",
+            headers=auth_headers(),
+            json={**body, "selected_preset": "review"},
+        )
+        restored = client.get("/v1/workspace", headers=auth_headers())
+
+    assert first.status_code == 200
+    assert retry.status_code == 200
+    assert retry.json() == first.json()
+    assert changed.status_code == 409
+    assert changed.json()["detail"] == (
+        "Idempotency key was already used for a different workspace command"
+    )
+    assert restored.json()["revision"] == 1
 
 
 def test_layout_save_cannot_overwrite_a_newer_user_or_mcp_selection(tmp_path):
@@ -332,6 +368,10 @@ def test_layout_save_cannot_overwrite_a_newer_user_or_mcp_selection(tmp_path):
             json={"job_id": "job-0", "origin": "user"},
         )
         stale_layout = client.get("/v1/workspace", headers=auth_headers()).json()
+        stale_layout.pop("repaired_presets")
+        stale_layout.update(
+            {"origin": "user", "idempotency_key": "workspace-selection-race-1"}
+        )
         client.put(
             "/v1/workspace/jobs/selection",
             headers=auth_headers(),

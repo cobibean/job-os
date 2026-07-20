@@ -271,7 +271,7 @@ test('an early layout action is rebased onto delayed startup restoration and per
   expect(save.mock.calls.at(-1)?.[0]).toMatchObject({ revision: 7, selectedPreset: 'research' })
 })
 
-test('failed startup hydration replays early intent over remote state after a save conflict', async () => {
+test('a first action after failed startup hydration replays over remote state after a save conflict', async () => {
   let rejectInitialGet!: (error: Error) => void
   const remote = remoteWorkspace(11)
   const get = vi.fn()
@@ -289,8 +289,10 @@ test('failed startup hydration replays early intent over remote state after a sa
   })
 
   render(<App />)
-  fireEvent.click(screen.getByRole('button', { name: 'Research' }))
   await act(async () => rejectInitialGet(new Error('startup unavailable')))
+  await waitFor(() => expect(screen.getByText('Using safe default layout')).not.toBeNull())
+
+  fireEvent.click(screen.getByRole('button', { name: 'Move Agent chat left' }))
   await waitFor(() => expect(save).toHaveBeenCalledTimes(2))
 
   const recoveredSave = save.mock.calls[1]?.[0]
@@ -298,12 +300,17 @@ test('failed startup hydration replays early intent over remote state after a sa
   expect(get).toHaveBeenCalledTimes(2)
   expect(recoveredSave).toMatchObject({
     revision: 11,
-    selectedPreset: 'research',
-    activeCenterSurface: 'browser',
+    selectedPreset: 'agent-focus',
+    activeCenterSurface: 'document',
     selectedJobId: 'remote-job'
   })
-  expect(recoveredSave.layouts).toEqual(remote.layouts)
-  expect(screen.getByRole('button', { name: 'Research' }).getAttribute('aria-pressed')).toBe('true')
+  expect(recoveredSave.layouts.research).toEqual(remote.layouts.research)
+  expect(recoveredSave.layouts.review).toEqual(remote.layouts.review)
+  expect(recoveredSave.layouts['agent-focus']).toEqual({
+    ...remote.layouts['agent-focus'],
+    order: ['center', 'agent', 'jobs']
+  })
+  expect(panelDomOrder()).toEqual(['center', 'agent', 'jobs'])
 })
 
 test('layout changes preserve mounted content surface identities', async () => {

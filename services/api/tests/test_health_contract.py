@@ -19,7 +19,7 @@ def test_health_reports_a_ready_phase_three_api(tmp_path):
         "status": "ready",
         "service": "jobos-api",
         "version": "0.1.0",
-        "state_schema": 4,
+        "state_schema": 5,
     }
 
 
@@ -104,3 +104,14 @@ def test_version_and_openapi_describe_the_shared_workspace_contract(tmp_path):
         "discovered_at",
         "last_seen_at",
     }
+    assert set(schemas["WorkspaceSnapshotCommand"]["required"]) == {
+        "revision",
+        "origin",
+        "idempotency_key",
+        "selected_preset",
+        "layouts",
+        "selected_job_id",
+        "active_center_surface",
+    }
+    assert "idempotency_key" not in schemas["WorkspaceSnapshotResponse"]["properties"]
+    assert "origin" not in schemas["WorkspaceSnapshotResponse"]["properties"]

@@ -2,6 +2,7 @@ import json
 import sqlite3
 from copy import deepcopy
 from dataclasses import dataclass
+from hashlib import sha256
 from pathlib import Path
 
 
@@ -13,6 +14,10 @@ class WorkspaceRevisionConflict(RuntimeError):
     def __init__(self, current_revision: int) -> None:
         self.current_revision = current_revision
         super().__init__(f"workspace revision conflict; current revision is {current_revision}")
+
+
+class IdempotencyConflict(RuntimeError):
+    """An idempotency key was reused for a different command payload."""
 
 
 @dataclass(frozen=True)
@@ -75,6 +80,23 @@ MIGRATIONS = (
                 snapshot_json TEXT NOT NULL,
                 updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
             )
+            """,
+        ),
+    ),
+    Migration(
+        version=5,
+        statements=(
+            "ALTER TABLE job_events ADD COLUMN actor_id TEXT",
+            "ALTER TABLE job_events ADD COLUMN target_resource TEXT",
+            "ALTER TABLE job_events ADD COLUMN command_name TEXT",
+            "ALTER TABLE job_events ADD COLUMN outcome TEXT",
+            "ALTER TABLE job_events ADD COLUMN idempotency_key TEXT",
+            "ALTER TABLE job_events ADD COLUMN request_hash TEXT",
+            "ALTER TABLE job_events ADD COLUMN result_json TEXT",
+            """
+            CREATE UNIQUE INDEX job_events_mutation_idempotency
+            ON job_events(actor_id, target_resource, command_name, idempotency_key)
+            WHERE idempotency_key IS NOT NULL
             """,
         ),
     ),
@@ -297,9 +319,47 @@ class JobOsStateStore:
         *,
         expected_revision: int,
         snapshot: dict[str, object],
+        idempotency_key: str,
+        origin: str,
+        actor_id: str,
     ) -> WorkspaceSnapshotRecord:
+        target_resource = f"workspace/{device_id}"
+        command_name = "workspace_snapshot.save"
+        request_hash = sha256(
+            json.dumps(
+                {
+                    "expected_revision": expected_revision,
+                    "snapshot": snapshot,
+                    "origin": origin,
+                },
+                separators=(",", ":"),
+                sort_keys=True,
+            ).encode()
+        ).hexdigest()
         with sqlite3.connect(self._path) as connection:
             connection.execute("BEGIN IMMEDIATE")
+            prior = connection.execute(
+                """
+                SELECT request_hash, result_json
+                FROM job_events
+                WHERE actor_id = ? AND target_resource = ? AND command_name = ?
+                    AND idempotency_key = ?
+                """,
+                (actor_id, target_resource, command_name, idempotency_key),
+            ).fetchone()
+            if prior is not None:
+                if prior[0] != request_hash:
+                    connection.rollback()
+                    raise IdempotencyConflict(
+                        "Idempotency key was already used for a different workspace command"
+                    )
+                result = json.loads(prior[1])
+                connection.rollback()
+                return WorkspaceSnapshotRecord(
+                    int(result["revision"]),
+                    result["snapshot"],
+                    tuple(result["repaired_presets"]),
+                )
             selection_row = connection.execute(
                 "SELECT selected_job_id FROM job_workspace WHERE workspace_id = 1"
             ).fetchone()
@@ -326,8 +386,71 @@ class JobOsStateStore:
                 """,
                 (device_id, revision, payload),
             )
+            result_json = json.dumps(
+                {
+                    "revision": revision,
+                    "snapshot": normalized,
+                    "repaired_presets": repaired,
+                },
+                separators=(",", ":"),
+                sort_keys=True,
+            )
+            detail = json.dumps(
+                {
+                    "revision": revision,
+                    "selected_preset": normalized["selected_preset"],
+                    "active_center_surface": normalized["active_center_surface"],
+                    "repaired_presets": repaired,
+                },
+                separators=(",", ":"),
+                sort_keys=True,
+            )
+            connection.execute(
+                """
+                INSERT INTO job_events(
+                    event_type, origin, payload_json, actor_id, target_resource,
+                    command_name, outcome, idempotency_key, request_hash, result_json
+                )
+                VALUES ('workspace_snapshot_saved', ?, ?, ?, ?, ?, 'succeeded', ?, ?, ?)
+                """,
+                (
+                    origin,
+                    detail,
+                    actor_id,
+                    target_resource,
+                    command_name,
+                    idempotency_key,
+                    request_hash,
+                    result_json,
+                ),
+            )
             connection.commit()
         return WorkspaceSnapshotRecord(revision, normalized, repaired)
+
+    def list_mutation_audit(self) -> list[dict[str, object]]:
+        with sqlite3.connect(f"file:{self._path}?mode=ro", uri=True) as connection:
+            connection.row_factory = sqlite3.Row
+            rows = connection.execute(
+                """
+                SELECT origin, actor_id, target_resource, command_name, outcome,
+                    occurred_at, payload_json
+                FROM job_events
+                WHERE command_name IS NOT NULL
+                ORDER BY event_id
+                """
+            ).fetchall()
+        return [
+            {
+                "origin": row["origin"],
+                "actor_id": row["actor_id"],
+                "target_resource": row["target_resource"],
+                "command_name": row["command_name"],
+                "outcome": row["outcome"],
+                "occurred_at": row["occurred_at"],
+                "detail": json.loads(row["payload_json"]),
+            }
+            for row in rows
+        ]
 
     def save_job_selection(self, job_id: str, origin: str) -> int:
         payload = json.dumps({"selected_job_id": job_id}, separators=(",", ":"))
@@ -425,7 +548,7 @@ class JobOsStateStore:
                 """
                 SELECT event_id, event_type, job_id, origin, occurred_at, payload_json
                 FROM job_events
-                WHERE event_id > ?
+                WHERE event_id > ? AND command_name IS NULL
                 ORDER BY event_id
                 """,
                 (after,),

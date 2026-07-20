@@ -90,9 +90,9 @@ export function useWorkspace(selectedJobId: string | null) {
       pendingHydrationUpdates.current = []
       hydrating.current = false
       setAnnouncement('Using safe default layout')
+      recoveringStartup.current = true
+      startupRecoveryUpdates.current = pending
       if (pending.length) {
-        recoveringStartup.current = true
-        startupRecoveryUpdates.current = pending
         persist(latest.current)
       }
     })
