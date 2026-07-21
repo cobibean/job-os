@@ -10,6 +10,7 @@ class AgentContext:
     turn_id: str
     selected_job_id: str | None
     workspace: dict[str, object]
+    selected_job: dict[str, str] | None = None
 
 
 @dataclass(frozen=True)

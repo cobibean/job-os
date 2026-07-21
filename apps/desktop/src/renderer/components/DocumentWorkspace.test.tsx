@@ -311,6 +311,84 @@ describe('trusted document workspace', () => {
     expect(screen.queryByText(/PDF bytes 4/)).toBeNull()
   })
 
+  it('does not clear a valid restored document view while its artifact registry loads', async () => {
+    const restored = artifact({ isApproved: true })
+    const restoredState = state([restored])
+    const pendingList = deferred<JobArtifactsState>()
+    const onViewChange = vi.fn()
+    const documents = installDocuments({
+      list: vi.fn(() => pendingList.promise),
+      refresh: vi.fn(async () => restoredState)
+    })
+
+    render(
+      <DocumentWorkspace
+        hydrated
+        job={job}
+        onViewChange={onViewChange}
+        restoredArtifactId={restored.artifactId}
+        restoredPage={2}
+        restoredZoom={1.1}
+      />
+    )
+
+    await waitFor(() => expect(documents.list).toHaveBeenCalledOnce())
+    expect(onViewChange).not.toHaveBeenCalled()
+
+    pendingList.resolve(restoredState)
+
+    expect(await screen.findByText('PDF bytes 2 · page 2 at 110%')).not.toBeNull()
+    expect(onViewChange).not.toHaveBeenCalled()
+    expect(documents.loadPdf).toHaveBeenCalledOnce()
+  })
+
+  it('preserves a restored document while the selected job is still hydrating', async () => {
+    const restoredArtifactId = artifact().artifactId
+    const onViewChange = vi.fn()
+    const documents = installDocuments()
+    const view = render(
+      <DocumentWorkspace
+        hydrated={false}
+        job={null}
+        onViewChange={onViewChange}
+        restoredArtifactId={null}
+        restoredPage={1}
+        restoredZoom={1}
+      />
+    )
+
+    view.rerender(
+      <DocumentWorkspace
+        hydrated
+        job={null}
+        onViewChange={onViewChange}
+        restoredArtifactId={restoredArtifactId}
+        restoredPage={2}
+        restoredZoom={1.1}
+      />
+    )
+
+    await waitFor(() => expect(screen.getByText('Select a job to review its resume')).not.toBeNull())
+    expect(onViewChange).not.toHaveBeenCalled()
+
+    view.rerender(
+      <DocumentWorkspace
+        hydrated
+        job={job}
+        onViewChange={onViewChange}
+        restoredArtifactId={restoredArtifactId}
+        restoredPage={2}
+        restoredZoom={1.1}
+      />
+    )
+
+    expect(await screen.findByText('PDF bytes 2 · page 2 at 110%')).not.toBeNull()
+    expect(await screen.findByText('Page 2 of 3')).not.toBeNull()
+    expect(screen.getByText('110%')).not.toBeNull()
+    expect(documents.loadPdf).toHaveBeenCalledOnce()
+    expect(onViewChange).not.toHaveBeenCalled()
+  })
+
   it('does not reload artifacts when workspace persistence rerenders the same job', async () => {
     const documents = installDocuments()
     const onViewChange = vi.fn()

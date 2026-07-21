@@ -197,8 +197,8 @@ function identifier(prefix: string): string {
   return `desktop-${prefix}${random}`
 }
 
-function safeError(error: unknown, fallback: string): string {
-  return error instanceof Error && error.message ? error.message.slice(0, 500) : fallback
+function safeError(_error: unknown, fallback: string): string {
+  return fallback
 }
 
 export function useAgentConversation() {
