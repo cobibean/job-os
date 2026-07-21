@@ -60,16 +60,18 @@ assert.equal(typeof bridge, 'object')
 assert.equal(Object.isFrozen(bridge.agent), true, 'bridge.agent must be frozen')
 assert.deepEqual(
   Object.keys(bridge.agent).sort(),
-  ['cancel', 'get', 'retry', 'send', 'subscribe'],
+  ['cancel', 'get', 'reset', 'retry', 'send', 'subscribe'],
   'bridge.agent must expose only fixed methods'
 )
 
 await bridge.agent.get()
+await bridge.agent.reset()
 await bridge.agent.send('Hello', 'idempotency-0001')
 await bridge.agent.cancel('turn-1')
 await bridge.agent.retry('turn-1', 'idempotency-0002')
 assert.deepEqual(invokeCalls, [
   ['jobos:agent:get'],
+  ['jobos:agent:reset'],
   ['jobos:agent:send', 'Hello', 'idempotency-0001'],
   ['jobos:agent:cancel', 'turn-1'],
   ['jobos:agent:retry', 'turn-1', 'idempotency-0002']

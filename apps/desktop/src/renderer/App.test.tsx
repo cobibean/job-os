@@ -57,7 +57,7 @@ test('later-phase controls stay disabled while the browser surface is recoverabl
   render(<App />)
 
   for (const name of [
-    'Agent context settings',
+    'Start new agent session',
     'Send message',
     'Open settings'
   ]) {

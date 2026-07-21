@@ -1,7 +1,7 @@
 import { act, cleanup, renderHook, waitFor } from '@testing-library/react'
 import { afterEach, expect, test, vi } from 'vitest'
 
-import type { AgentConversationSnapshot, ConversationEvent } from '../../shared/contracts'
+import type { AgentConversationSnapshot, AgentStreamUpdate, ConversationEvent } from '../../shared/contracts'
 import {
   agentConversationReducer,
   initialAgentConversationState,
@@ -26,6 +26,12 @@ const snapshot = (entries: ConversationEvent[] = []): AgentConversationSnapshot 
   conversationId: 'conv-current', entries, activeTurn: null,
   connection: 'online', latestEventId: entries.at(-1)?.eventId ?? 0
 })
+
+function deferred<T>() {
+  let resolve!: (value: T) => void
+  const promise = new Promise<T>(next => { resolve = next })
+  return { promise, resolve }
+}
 
 test('hydration merges snapshot and early stream delivery once by durable event id', () => {
   const streamed = agentConversationReducer(initialAgentConversationState, { type: 'event', event: event(3) })
@@ -133,6 +139,86 @@ test('an initially offline agent can reconnect through Send while the API remain
 
   expect(send).toHaveBeenCalledOnce()
   expect(result.current.activeTurn?.turnId).toBe('turn-2')
+})
+
+test('starting a new session clears the transcript and ignores buffered events from the old session', async () => {
+  let stream: ((update: AgentStreamUpdate) => void) | undefined
+  const reset = vi.fn().mockResolvedValue({
+    ...snapshot(), conversationId: 'conv-fresh', entries: [], latestEventId: 7
+  })
+  Object.defineProperty(window, 'jobos', { configurable: true, value: {
+    agent: {
+      get: vi.fn().mockResolvedValue(snapshot([event(1)])), reset,
+      send: vi.fn(), cancel: vi.fn(), retry: vi.fn(),
+      subscribe: vi.fn(listener => { stream = listener; return () => undefined })
+    }
+  } })
+  const { result } = renderHook(() => useAgentConversation())
+  await waitFor(() => expect(result.current.restoring).toBe(false))
+  act(() => result.current.setDraft('Do not carry this into fresh context'))
+
+  await act(async () => result.current.reset())
+  act(() => stream?.({ kind: 'event', event: event(6, { summary: 'Old buffered context' }) }))
+
+  expect(reset).toHaveBeenCalledOnce()
+  expect(result.current.conversationId).toBe('conv-fresh')
+  expect(result.current.entries).toEqual([])
+  expect(result.current.draft).toBe('')
+})
+
+test('a new-session response preserves newer streamed events that arrived while reset was pending', async () => {
+  const pendingReset = deferred<AgentConversationSnapshot>()
+  let stream: ((update: AgentStreamUpdate) => void) | undefined
+  Object.defineProperty(window, 'jobos', { configurable: true, value: {
+    agent: {
+      get: vi.fn().mockResolvedValue(snapshot([event(1)])),
+      reset: vi.fn(() => pendingReset.promise),
+      send: vi.fn(), cancel: vi.fn(), retry: vi.fn(),
+      subscribe: vi.fn(listener => { stream = listener; return () => undefined })
+    }
+  } })
+  const { result } = renderHook(() => useAgentConversation())
+  await waitFor(() => expect(result.current.restoring).toBe(false))
+
+  let resetResult!: Promise<boolean>
+  act(() => { resetResult = result.current.reset() })
+  act(() => stream?.({
+    kind: 'event',
+    event: event(8, { type: 'turn', state: 'working', turnId: 'turn-fresh', summary: 'Fresh turn started' })
+  }))
+  await act(async () => {
+    pendingReset.resolve({ ...snapshot(), conversationId: 'conv-fresh', latestEventId: 7 })
+    await resetResult
+  })
+
+  expect(result.current.entries.map(item => item.eventId)).toEqual([8])
+  expect(result.current.activeTurn?.turnId).toBe('turn-fresh')
+})
+
+test('an in-flight send cannot overlap a reset before the send mutation is visible', async () => {
+  const pendingSend = deferred<{ turnId: string; status: 'running' }>()
+  const reset = vi.fn()
+  Object.defineProperty(window, 'jobos', { configurable: true, value: {
+    agent: {
+      get: vi.fn().mockResolvedValue(snapshot()), reset,
+      send: vi.fn(() => pendingSend.promise), cancel: vi.fn(), retry: vi.fn(),
+      subscribe: vi.fn(() => () => undefined)
+    }
+  } })
+  const { result } = renderHook(() => useAgentConversation())
+  await waitFor(() => expect(result.current.restoring).toBe(false))
+  act(() => result.current.setDraft('Send without racing reset'))
+
+  let sendResult!: Promise<void>
+  act(() => { sendResult = result.current.send() })
+  await act(async () => expect(await result.current.reset()).toBe(false))
+  expect(reset).not.toHaveBeenCalled()
+  await act(async () => {
+    pendingSend.resolve({ turnId: 'turn-fresh', status: 'running' })
+    await sendResult
+  })
+
+  expect(result.current.activeTurn?.turnId).toBe('turn-fresh')
 })
 
 test('stop and retry invoke only the active or actionable turn and keep failures visible', async () => {

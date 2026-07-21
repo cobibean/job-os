@@ -15,6 +15,7 @@ const event = (eventId: number, overrides: Partial<ConversationEvent> = {}): Con
 function installAgent(snapshot: AgentConversationSnapshot, overrides: Record<string, unknown> = {}) {
   const agent = {
     get: vi.fn().mockResolvedValue(snapshot), send: vi.fn().mockResolvedValue({ turnId: 'turn-new', status: 'running' }),
+    reset: vi.fn().mockResolvedValue({ ...snapshot, conversationId: 'conv-fresh', entries: [] }),
     cancel: vi.fn().mockResolvedValue({ turnId: 'turn-1', status: 'interrupted' }),
     retry: vi.fn().mockResolvedValue({ turnId: 'turn-retry', status: 'running' }),
     subscribe: vi.fn(() => () => undefined), ...overrides
@@ -22,6 +23,27 @@ function installAgent(snapshot: AgentConversationSnapshot, overrides: Record<str
   Object.defineProperty(window, 'jobos', { configurable: true, value: { agent } })
   return agent
 }
+
+test('starts a fresh agent session only after an explicit inline confirmation', async () => {
+  const agent = installAgent({
+    conversationId: 'conv-current', activeTurn: null, connection: 'online', latestEventId: 1,
+    entries: [event(1, { type: 'assistant_message', summary: 'Old context', detail: { type: 'message.complete' } })]
+  })
+  render(<AgentPanel apiState="connected" contextLabel="Northstar" />)
+
+  expect(await screen.findByText('Old context')).not.toBeNull()
+  fireEvent.change(screen.getByRole('textbox', { name: 'Message the agent' }), { target: { value: 'Draft for next session' } })
+  expect((screen.getByRole('button', { name: 'Send message' }) as HTMLButtonElement).disabled).toBe(false)
+  fireEvent.click(screen.getByRole('button', { name: 'Start new agent session' }))
+  expect(agent.reset).not.toHaveBeenCalled()
+  expect(screen.getByText('Start with fresh context?')).not.toBeNull()
+  expect((screen.getByRole('button', { name: 'Send message' }) as HTMLButtonElement).disabled).toBe(true)
+  fireEvent.click(screen.getByRole('button', { name: 'Confirm new session' }))
+
+  await waitFor(() => expect(agent.reset).toHaveBeenCalledOnce())
+  expect(screen.queryByText('Old context')).toBeNull()
+  expect(screen.getByText('Fresh conversation')).not.toBeNull()
+})
 
 test('renders transcript and exactly fifteen chronological compact activity rows with accessible disclosure', async () => {
   installAgent({

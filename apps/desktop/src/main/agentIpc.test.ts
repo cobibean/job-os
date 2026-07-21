@@ -9,7 +9,7 @@ test('agent IPC exposes only fixed validated conversation operations', async () 
   const handlers = new Map<string, (...args: unknown[]) => unknown>()
   const ipc = { handle: vi.fn((channel: string, handler: (...args: unknown[]) => unknown) => handlers.set(channel, handler)) } as unknown as Pick<IpcMain, 'handle'>
   const client = {
-    get: vi.fn(), send: vi.fn(), cancel: vi.fn(), retry: vi.fn()
+    get: vi.fn(), reset: vi.fn(), send: vi.fn(), cancel: vi.fn(), retry: vi.fn()
   }
   registerAgentIpc(ipc, () => client)
   const event = {} as IpcMainInvokeEvent
@@ -17,6 +17,7 @@ test('agent IPC exposes only fixed validated conversation operations', async () 
   expect([...handlers.keys()].sort()).toEqual([
     'jobos:agent:cancel',
     'jobos:agent:get',
+    'jobos:agent:reset',
     'jobos:agent:retry',
     'jobos:agent:send'
   ])
@@ -25,4 +26,6 @@ test('agent IPC exposes only fixed validated conversation operations', async () 
   expect(() => handlers.get('jobos:agent:cancel')?.(event, '../turn')).toThrow('Invalid agent turn')
   handlers.get('jobos:agent:retry')?.(event, 'turn-1', 'idempotency-0002')
   expect(client.retry).toHaveBeenCalledWith('turn-1', 'idempotency-0002')
+  handlers.get('jobos:agent:reset')?.(event)
+  expect(client.reset).toHaveBeenCalledOnce()
 })

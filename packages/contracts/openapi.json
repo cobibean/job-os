@@ -2038,6 +2038,32 @@
         ]
       }
     },
+    "/v1/conversations/current/reset": {
+      "post": {
+        "operationId": "conversation_reset_v1_conversations_current_reset_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConversationResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Conversation Reset",
+        "tags": [
+          "agent"
+        ]
+      }
+    },
     "/v1/conversations/current/turns/{turn_id}/cancel": {
       "post": {
         "operationId": "conversation_cancel_v1_conversations_current_turns__turn_id__cancel_post",

@@ -48,8 +48,10 @@ class FakeGateway:
     def __init__(self, *, online=True) -> None:
         self.online = online
         self.submissions: list[tuple[str, AgentContext]] = []
+        self.session_requests: list[str | None] = []
         self.interruptions: list[str] = []
         self._events: list[GatewayEvent] = []
+        self.detaches = 0
         self.started = False
         self.closed = False
 
@@ -61,6 +63,7 @@ class FakeGateway:
         self.started = True
 
     async def create_or_resume_conversation(self, stored_session_id):
+        self.session_requests.append(stored_session_id)
         if not self.online:
             raise ConnectionError("dashboard unavailable with Authorization: secret-value")
         return "stored-session", "live-session"
@@ -69,6 +72,10 @@ class FakeGateway:
         if not self.online:
             raise ConnectionError("dashboard unavailable with token=secret-value")
         self.submissions.append((text, context))
+
+    async def detach_conversation(self):
+        self.detaches += 1
+        self._events.clear()
 
     async def stream_events(self):
         for event in self._events:
@@ -219,6 +226,42 @@ def test_empty_current_conversation_is_authenticated_and_stable(tmp_path):
         "latest_event_id": 0,
     }
     assert gateway.started and gateway.closed
+
+
+def test_new_session_rejects_active_work_then_rotates_and_clears_the_conversation(tmp_path):
+    gateway = FakeGateway()
+    with make_client(tmp_path, gateway) as client:
+        before = client.get("/v1/conversations/current", headers=headers()).json()
+        created = send_message(client).json()
+
+        blocked = client.post("/v1/conversations/current/reset", headers=headers())
+        client.post(
+            f"/v1/conversations/current/turns/{created['turn_id']}/cancel",
+            headers=headers(),
+        )
+        reset = client.post("/v1/conversations/current/reset", headers=headers())
+        restored = client.get("/v1/conversations/current", headers=headers())
+        fresh_turn = send_message(client, text="Fresh context, same delivery key")
+
+    assert blocked.status_code == 409
+    assert blocked.json()["detail"] == (
+        "Finish or stop the active turn before starting a new session"
+    )
+    assert reset.status_code == 200
+    assert restored.json() == reset.json()
+    assert reset.json() == {
+        "conversation_id": reset.json()["conversation_id"],
+        "entries": [],
+        "active_turn": None,
+        "connection": {"state": "online"},
+        "latest_event_id": reset.json()["latest_event_id"],
+    }
+    assert reset.json()["latest_event_id"] > 0
+    assert reset.json()["conversation_id"] != before["conversation_id"]
+    assert fresh_turn.status_code == 201
+    assert fresh_turn.json()["turn_id"] != created["turn_id"]
+    assert gateway.detaches == 1
+    assert gateway.session_requests == [None, None]
 
 
 def test_message_validation_idempotency_and_running_turn_serialization(tmp_path):

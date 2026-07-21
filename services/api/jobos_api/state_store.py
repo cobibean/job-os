@@ -690,6 +690,57 @@ class JobOsStateStore:
             )
         return cursor.rowcount == 1
 
+    def reset_conversation(self, *, actor_id: str) -> str:
+        """Rotate the current conversation and detach its Hermes session atomically."""
+        conversation_id = f"conv_{secrets.token_urlsafe(16)}"
+        with sqlite3.connect(self._path) as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            active = connection.execute(
+                "SELECT 1 FROM conversation_turns "
+                "WHERE status IN ('queued', 'running', 'waiting') LIMIT 1"
+            ).fetchone()
+            if active:
+                connection.rollback()
+                raise ConversationBusy(
+                    "Finish or stop the active turn before starting a new session"
+                )
+            recovery = connection.execute(
+                "SELECT 1 FROM jobos_metadata WHERE key = 'agent_recovery_turn_id'"
+            ).fetchone()
+            if recovery:
+                connection.rollback()
+                raise ConversationBusy(
+                    "Remote agent cleanup must finish before starting a new session"
+                )
+            connection.execute("DELETE FROM conversation_events")
+            connection.execute("DELETE FROM conversation_turns")
+            connection.execute(
+                "UPDATE conversations SET conversation_id = ?, stored_session_id = NULL, "
+                "updated_at = CURRENT_TIMESTAMP WHERE singleton_id = 1",
+                (conversation_id,),
+            )
+            connection.execute(
+                """
+                INSERT INTO job_events(
+                    event_type, origin, payload_json, actor_id, target_resource,
+                    command_name, outcome, result_json
+                ) VALUES (
+                    'conversation_session_reset', 'user', '{}', ?,
+                    'conversation/current', 'conversation.session.reset', 'succeeded', ?
+                )
+                """,
+                (
+                    actor_id,
+                    json.dumps(
+                        {"conversation_id": conversation_id},
+                        separators=(",", ":"),
+                        sort_keys=True,
+                    ),
+                ),
+            )
+            connection.commit()
+        return conversation_id
+
     def prepare_turn_submission(
         self,
         turn_id: str,
@@ -753,7 +804,6 @@ class JobOsStateStore:
         command_name = (
             "conversation.message.submit" if source_turn_id is None else "conversation.turn.retry"
         )
-        target_resource = "conversation/current"
         request_hash = sha256(
             json.dumps(
                 {"text": safe_text, "context": context, "source_turn_id": source_turn_id},
@@ -763,6 +813,10 @@ class JobOsStateStore:
         ).hexdigest()
         with sqlite3.connect(self._path) as connection:
             connection.execute("BEGIN IMMEDIATE")
+            conversation = connection.execute(
+                "SELECT conversation_id FROM conversations WHERE singleton_id = 1"
+            ).fetchone()
+            target_resource = f"conversation/{conversation[0] if conversation else 'current'}"
             prior = connection.execute(
                 """
                 SELECT request_hash, result_json FROM job_events
@@ -1115,6 +1169,9 @@ class JobOsStateStore:
             conversation = connection.execute(
                 "SELECT conversation_id FROM conversations WHERE singleton_id = 1"
             ).fetchone()
+            allocated = connection.execute(
+                "SELECT seq FROM sqlite_sequence WHERE name = 'conversation_events'"
+            ).fetchone()
             connection.row_factory = sqlite3.Row
             active = connection.execute(
                 """
@@ -1135,7 +1192,10 @@ class JobOsStateStore:
                 if active
                 else None
             ),
-            "latest_event_id": entries[-1]["event_id"] if entries else 0,
+            "latest_event_id": max(
+                int(str(entries[-1]["event_id"])) if entries else 0,
+                int(allocated[0]) if allocated else 0,
+            ),
         }
 
     def register_document_artifacts(

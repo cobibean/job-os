@@ -9,6 +9,7 @@ const bridge: JobOsRendererBridge = Object.freeze({
   }),
   agent: Object.freeze({
     get: () => ipcRenderer.invoke('jobos:agent:get'),
+    reset: () => ipcRenderer.invoke('jobos:agent:reset'),
     send: (text: string, idempotencyKey: string) => ipcRenderer.invoke('jobos:agent:send', text, idempotencyKey),
     cancel: (turnId: string) => ipcRenderer.invoke('jobos:agent:cancel', turnId),
     retry: (turnId: string, idempotencyKey: string) => ipcRenderer.invoke('jobos:agent:retry', turnId, idempotencyKey),

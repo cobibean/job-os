@@ -88,6 +88,7 @@ def test_version_and_openapi_describe_the_shared_workspace_contract(tmp_path):
         "/v1/events",
         "/v1/events/stream",
         "/v1/conversations/current",
+        "/v1/conversations/current/reset",
         "/v1/conversations/current/messages",
         "/v1/conversations/current/turns/{turn_id}/cancel",
         "/v1/conversations/current/turns/{turn_id}/retry",

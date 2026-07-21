@@ -214,6 +214,7 @@ export interface JobOsRendererBridge {
   }
   agent: {
     get: () => Promise<AgentConversationSnapshot>
+    reset: () => Promise<AgentConversationSnapshot>
     send: (text: string, idempotencyKey: string) => Promise<AgentTurnMutation>
     cancel: (turnId: string) => Promise<AgentTurnMutation>
     retry: (turnId: string, idempotencyKey: string) => Promise<AgentTurnMutation>

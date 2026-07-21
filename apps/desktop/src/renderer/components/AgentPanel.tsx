@@ -1,5 +1,5 @@
-import { Bot, BriefcaseBusiness, ChevronDown, CircleAlert, LoaderCircle, RotateCcw, Send, SlidersHorizontal, Square, UserRound, WifiOff } from 'lucide-react'
-import { useEffect, useLayoutEffect, useMemo, useRef } from 'react'
+import { Bot, BriefcaseBusiness, CircleAlert, LoaderCircle, MessageSquarePlus, RotateCcw, Send, Square, UserRound, WifiOff } from 'lucide-react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 
 import type { ConnectivityState, ConversationEntryState, ConversationEvent } from '../../shared/contracts'
 import { useAgentConversation } from '../hooks/useAgentConversation'
@@ -39,6 +39,7 @@ function ConnectionNotice({ apiState, connection }: { apiState: ConnectivityStat
 export function AgentPanel({ contextLabel, apiState = 'connected', onArtifactRendered }: AgentPanelProps) {
   const conversation = useAgentConversation()
   const terminalByTurn = useMemo(() => terminalStateByTurn(conversation.entries), [conversation.entries])
+  const [confirmingReset, setConfirmingReset] = useState(false)
   const scrollRef = useRef<HTMLDivElement>(null)
   const pinnedToBottom = useRef(true)
   const observedEventId = useRef<number | null>(null)
@@ -46,8 +47,11 @@ export function AgentPanel({ contextLabel, apiState = 'connected', onArtifactRen
     conversation.draft.trim()
     && !conversation.activeTurn
     && !conversation.restoring
+    && !conversation.operationPending
+    && !confirmingReset
     && apiState === 'connected'
   )
+  const canReset = !conversation.activeTurn && !conversation.restoring && !conversation.operationPending && apiState === 'connected'
 
   useEffect(() => {
     if (conversation.restoring || conversation.restoredEventId === null) return
@@ -94,20 +98,47 @@ export function AgentPanel({ contextLabel, apiState = 'connected', onArtifactRen
     <aside aria-label="Agent chat" className="agent-panel panel-region">
       <div className="agent-context">
         <span title={contextLabel}><BriefcaseBusiness aria-hidden="true" size={16} strokeWidth={1.5} /> <span>{contextLabel}</span></span>
-        <ChevronDown aria-hidden="true" size={14} strokeWidth={1.5} />
-        <button aria-label="Agent context settings" className="icon-button context-settings placeholder-control" disabled title="Context follows the selected job" type="button">
-          <SlidersHorizontal aria-hidden="true" size={16} strokeWidth={1.5} />
+        <button
+          aria-label="Start new agent session"
+          className="new-session-button"
+          disabled={!canReset}
+          onClick={() => setConfirmingReset(true)}
+          title={conversation.activeTurn ? 'Finish or stop the active turn first' : 'Clear this conversation and start with fresh context'}
+          type="button"
+        >
+          <MessageSquarePlus aria-hidden="true" size={14} strokeWidth={1.6} /> New session
         </button>
       </div>
 
       <div className="agent-body" onScroll={handleScroll} ref={scrollRef}>
+        {confirmingReset && (
+          <section aria-labelledby="new-session-title" className="new-session-confirm" role="alertdialog">
+            <div>
+              <strong id="new-session-title">Start with fresh context?</strong>
+              <p>This clears the visible conversation and starts a new agent session. Your selected job stays attached.</p>
+            </div>
+            <div className="new-session-actions">
+              <button onClick={() => setConfirmingReset(false)} type="button">Cancel</button>
+              <button
+                aria-label="Confirm new session"
+                className="confirm"
+                disabled={!canReset}
+                onClick={() => void conversation.reset().then(reset => { if (reset) setConfirmingReset(false) })}
+                type="button"
+              >
+                {conversation.resetting && <LoaderCircle aria-hidden="true" className="spin" size={13} />}
+                {conversation.resetting ? 'Starting…' : 'New session'}
+              </button>
+            </div>
+          </section>
+        )}
         <ConnectionNotice apiState={apiState} connection={conversation.connection} />
         {conversation.restoring && <div className="agent-restore"><LoaderCircle aria-hidden="true" className="spin" size={17} /> Restoring conversation…</div>}
         {!conversation.restoring && conversation.items.length === 0 && !conversation.error && (
           <section className="agent-empty">
             <span className="agent-avatar"><Bot aria-hidden="true" size={22} strokeWidth={1.45} /></span>
-            <h2>One continuous conversation</h2>
-            <p>Ask the agent to research, tailor, or review. This conversation stays with you as jobs change.</p>
+            <h2>Fresh conversation</h2>
+            <p>Ask the agent to research, tailor, or review. The selected job is included automatically.</p>
           </section>
         )}
         {conversation.items.length > 0 && (

@@ -34,6 +34,8 @@ class AgentGateway(Protocol):
         self, stored_session_id: str | None
     ) -> tuple[str, str]: ...
 
+    async def detach_conversation(self) -> None: ...
+
     async def submit_turn(self, text: str, context: AgentContext) -> None: ...
 
     def stream_events(self) -> AsyncIterator[GatewayEvent]: ...
@@ -55,6 +57,9 @@ class OfflineAgentGateway:
 
     async def create_or_resume_conversation(self, stored_session_id: str | None):
         raise ConnectionError("Agent gateway is not configured")
+
+    async def detach_conversation(self) -> None:
+        return None
 
     async def submit_turn(self, text: str, context: AgentContext) -> None:
         raise ConnectionError("Agent gateway is not configured")
