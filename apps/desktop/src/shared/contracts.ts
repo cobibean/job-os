@@ -88,6 +88,21 @@ export interface BrowserSemanticSnapshot {
   elements: BrowserSemanticElement[]
 }
 
+export interface BrowserJobListing {
+  companyName: string
+  title: string
+  canonicalUrl: string
+  locationText: string
+  descriptionText: string
+  applicationUrl: string
+}
+
+export interface BrowserJobSaveResult {
+  eventId: number
+  created: boolean
+  job: JobListItem
+}
+
 export interface BrowserRestoreState {
   tabs: BrowserTabMetadata[]
   activeTabId: string | null
@@ -222,6 +237,7 @@ export interface JobOsRendererBridge {
   }
   jobs: {
     getState: () => Promise<JobWorkspaceSnapshot>
+    addFromBrowser: (listing: BrowserJobListing) => Promise<BrowserJobSaveResult>
     list: (sort: JobSortMode, query?: string, statusGroup?: string) => Promise<JobListItem[]>
     select: (jobId: string) => Promise<JobMutationResult>
     reorder: (jobIds: string[]) => Promise<JobMutationResult>
@@ -245,6 +261,7 @@ export interface JobOsRendererBridge {
     forward: (tabId: string) => Promise<BrowserState>
     reload: (tabId: string) => Promise<BrowserState>
     stop: (tabId: string) => Promise<BrowserState>
+    extractJob: (tabId: string) => Promise<BrowserJobListing>
     associate: (tabId: string, jobId: string | null) => Promise<BrowserState>
     copyBlockedUrl: (tabId: string) => Promise<BrowserState>
     setBounds: (bounds: BrowserBounds) => Promise<void>

@@ -4,6 +4,8 @@ import { expect, test } from 'vitest'
 
 import { EventEmitter } from 'node:events'
 import { readFileSync } from 'node:fs'
+// @ts-expect-error jsdom does not publish TypeScript declarations.
+import { JSDOM } from 'jsdom'
 
 import type { BrowserWindow, Dialog, Session, WebContents, WebContentsView } from 'electron'
 import { vi } from 'vitest'
@@ -525,4 +527,130 @@ test('restore validates and deduplicates before retaining fifty recoverable tabs
   expect(manager.getState().activeTabId).toBe('tab-49')
   expect(views).toHaveLength(50)
   manager.dispose()
+})
+
+function extractionManager(html: string, activeUrl: string) {
+  const dom = new JSDOM(html, { url: activeUrl, runScripts: 'outside-only' })
+  let currentUrl = activeUrl
+  const executeJavaScript = vi.fn(async (script: string, _userGesture?: boolean) => dom.window.eval(script) as unknown)
+  const contents = Object.assign(new EventEmitter(), {
+    navigationHistory: { canGoBack: () => false, canGoForward: () => false, goBack: vi.fn(), goForward: vi.fn() },
+    loadURL: vi.fn(async () => undefined), getURL: () => currentUrl,
+    executeJavaScript, setWindowOpenHandler: vi.fn(), isDestroyed: () => false,
+    close: vi.fn(), reload: vi.fn(), stop: vi.fn()
+  })
+  const manager = new BrowserManager({
+    window: { contentView: { addChildView: vi.fn(), removeChildView: vi.fn() },
+      webContents: { send: vi.fn() }, isDestroyed: () => false } as unknown as BrowserWindow,
+    browserSession: Object.assign(new EventEmitter(), {
+      setPermissionCheckHandler: vi.fn(), setPermissionRequestHandler: vi.fn()
+    }) as unknown as Session,
+    createView: () => ({ webContents: contents, setBounds: vi.fn() }) as unknown as WebContentsView,
+    clipboard: { writeText: vi.fn() },
+    dialog: { showSaveDialog: vi.fn() } as unknown as Pick<Dialog, 'showSaveDialog'>,
+    downloadsPath: '/tmp'
+  })
+  return { manager, executeJavaScript, setCurrentUrl: (url: string) => { currentUrl = url } }
+}
+
+test('job extraction prefers JobPosting JSON-LD graphs and uses the live ordinary tab URL', async () => {
+  const activeUrl = 'https://jobs.example.com/roles/platform-engineer?source=workspace'
+  const { manager, executeJavaScript } = extractionManager(`<!doctype html><html><head>
+    <link rel="canonical" href="https://spoofed.example/job">
+    <script type="application/ld+json">[
+      {"@context":"https://schema.org","@graph":[
+        {"@type":"Organization","name":"Ignore me"},
+        {"@type":["Thing","https://schema.org/JobPosting"],"title":"  Senior   Platform Engineer ",
+          "hiringOrganization":{"@type":"Organization","name":" Acme &amp; Co "},
+          "jobLocation":[{"address":{"addressLocality":" New York ","addressRegion":"NY","addressCountry":"US"}}],
+          "description":"<p>Build &amp; ship.</p><span hidden>tracking copy</span><ul><li>Own reliability</li><li>Mentor peers</li></ul>",
+          "applicationUrl":"https://apply.example.com/jobs/42"}
+      ]}
+    ]</script></head><body><h1>Fallback title</h1></body></html>`, activeUrl)
+  await manager.restore({ tabs: [
+    { tabId: 'job', url: activeUrl, title: 'Job', faviconUrl: null, associatedJobId: null }
+  ], activeTabId: 'job' })
+
+  await expect(manager.extractJob('job')).resolves.toEqual({
+    companyName: 'Acme & Co',
+    title: 'Senior Platform Engineer',
+    canonicalUrl: activeUrl,
+    locationText: 'New York, NY, US',
+    descriptionText: 'Build & ship. Own reliability Mentor peers',
+    applicationUrl: 'https://apply.example.com/jobs/42'
+  })
+  await manager.extractJob('job')
+  expect(executeJavaScript).toHaveBeenCalledTimes(2)
+  expect(executeJavaScript.mock.calls[0]?.[0]).toBe(executeJavaScript.mock.calls[1]?.[0])
+  expect(executeJavaScript.mock.calls[0]?.[1]).toBe(true)
+})
+
+test('job extraction refuses to mix fields and URL across a navigation race', async () => {
+  const activeUrl = 'https://jobs.example.com/roles/platform-engineer'
+  const { manager, setCurrentUrl } = extractionManager(`<!doctype html><html><head>
+    <script type="application/ld+json">{"@type":"JobPosting","title":"Platform Engineer","hiringOrganization":{"name":"Acme"},"jobLocation":"Remote","description":"Build systems."}</script>
+  </head><body></body></html>`, activeUrl)
+  await manager.restore({ tabs: [
+    { tabId: 'job', url: activeUrl, title: 'Job', faviconUrl: null, associatedJobId: null }
+  ], activeTabId: 'job' })
+  setCurrentUrl('https://jobs.example.com/roles/product-engineer')
+
+  await expect(manager.extractJob('job')).rejects.toThrow('The page changed while JobOS was reading it. Try saving again.')
+})
+
+test('job extraction uses conservative rendered-page fallbacks and defaults application URL to canonical URL', async () => {
+  const activeUrl = 'https://careers.example.com/openings/7'
+  const { manager } = extractionManager(`<!doctype html><html><head>
+    <meta property="og:site_name" content=" Example Corp ">
+    <meta property="og:title" content=" Staff   Product Designer ">
+  </head><body>
+    <div data-testid="job-location">Remote — United States</div>
+    <section id="job-description"><p>Shape the product.</p><p>Partner with engineering.</p></section>
+    <a href="mailto:jobs@example.com">Apply by email</a>
+  </body></html>`, activeUrl)
+  await manager.restore({ tabs: [
+    { tabId: 'job', url: activeUrl, title: 'Job', faviconUrl: null, associatedJobId: null }
+  ], activeTabId: 'job' })
+
+  await expect(manager.extractJob('job')).resolves.toEqual({
+    companyName: 'Example Corp',
+    title: 'Staff Product Designer',
+    canonicalUrl: activeUrl,
+    locationText: 'Remote — United States',
+    descriptionText: 'Shape the product. Partner with engineering.',
+    applicationUrl: activeUrl
+  })
+})
+
+test('job extraction bounds every returned field', async () => {
+  const activeUrl = 'https://jobs.example.com/roles/long'
+  const { manager } = extractionManager(`<!doctype html><html><head>
+    <script type="application/ld+json">${JSON.stringify({
+      '@type': 'JobPosting', title: 'T'.repeat(600),
+      hiringOrganization: { name: 'C'.repeat(400) },
+      jobLocation: 'L'.repeat(1_100), description: 'D'.repeat(100_100),
+      applicationUrl: 'https://apply.example.com/job'
+    })}</script></head><body></body></html>`, activeUrl)
+  await manager.restore({ tabs: [
+    { tabId: 'job', url: activeUrl, title: 'Job', faviconUrl: null, associatedJobId: null }
+  ], activeTabId: 'job' })
+
+  const extracted = await manager.extractJob('job')
+  expect(extracted.companyName).toHaveLength(300)
+  expect(extracted.title).toHaveLength(500)
+  expect(extracted.locationText).toHaveLength(1_000)
+  expect(extracted.descriptionText).toHaveLength(100_000)
+  expect(extracted.canonicalUrl.length).toBeLessThanOrEqual(2_083)
+  expect(extracted.applicationUrl.length).toBeLessThanOrEqual(2_083)
+})
+
+test('job extraction rejects incomplete or non-web listings with named plain-English missing fields', async () => {
+  const { manager } = extractionManager('<html><body><h1>Only a role</h1></body></html>', 'about:blank')
+  await manager.restore({ tabs: [
+    { tabId: 'job', url: 'about:blank', title: 'Job', faviconUrl: null, associatedJobId: null }
+  ], activeTabId: 'job' })
+
+  await expect(manager.extractJob('job')).rejects.toThrow(
+    'Could not extract a complete job listing; missing company, location, description, and URL.'
+  )
 })

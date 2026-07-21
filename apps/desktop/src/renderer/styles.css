@@ -377,7 +377,34 @@ button:focus-visible {
 .address-form { min-width: 100px; flex: 1; height: 31px; display: flex; align-items: center; gap: 7px; padding: 0 10px; border: 1px solid #343841; border-radius: 6px; color: var(--quiet); background: #0f1216; }
 .address-form:focus-within { border-color: #67558f; }
 .address-form input { min-width: 0; flex: 1; border: 0; outline: 0; color: #dfddd7; background: transparent; font: inherit; font-size: 11px; }
+.save-job-button {
+  height: 31px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 0 11px;
+  border: 1px solid #7359af;
+  border-radius: 6px;
+  color: #f4efff;
+  background: linear-gradient(180deg, #654a9d, #4e387d);
+  box-shadow: inset 0 1px #ffffff16, 0 3px 10px #0005;
+  font-size: 10px;
+  font-weight: 650;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: border-color 140ms ease, background 140ms ease, box-shadow 140ms ease, transform 140ms ease;
+}
+.save-job-button:hover:not(:disabled) { border-color: #a083e4; background: linear-gradient(180deg, #7458ad, #59408b); box-shadow: inset 0 1px #ffffff1f, 0 4px 13px #0007; transform: translateY(-1px); }
+.save-job-button:active:not(:disabled) { transform: translateY(0); }
+.save-job-button:disabled { opacity: 0.48; cursor: default; }
+.save-job-button[data-state="saved"], .save-job-button[data-state="existing"] { border-color: #4f8768; color: #dff6e7; background: #234332; box-shadow: inset 0 1px #ffffff0d; }
+.save-job-button[data-state="error"] { border-color: #815757; color: #f3dcdc; background: #492d30; }
 .tab-association { width: 104px; height: 31px; padding: 0 7px; border: 1px solid var(--border); border-radius: 5px; color: var(--muted); background: #111419; font-size: 10px; }
+
+.browser-save-feedback { min-height: 28px; display: flex; align-items: center; gap: 7px; padding: 6px 12px; border-bottom: 1px solid #51436f; color: #d4c9e8; background: #191721; font-size: 10px; }
+.browser-save-feedback.saved, .browser-save-feedback.existing { border-color: #315440; color: #a9dfbd; background: #14231b; }
+.browser-save-feedback.error { border-color: #674447; color: #e3b8b8; background: #251719; }
 
 .download-status { min-height: 28px; display: flex; align-items: center; gap: 7px; padding: 0 12px; border-bottom: 1px solid var(--border); color: var(--muted); background: #13161a; font-size: 10px; }
 .download-status.completed { color: var(--green); }

@@ -62,9 +62,45 @@ class FakeJobHunterFacade:
         ]
         self.history = []
         self.artifacts = {}
+        self.add_job_calls = 0
 
     def list_jobs(self):
         return list(self.jobs)
+
+    def add_job(
+        self,
+        *,
+        company_name,
+        title,
+        canonical_url,
+        location_text,
+        description_text,
+        application_url,
+    ):
+        self.add_job_calls += 1
+        existing = next(
+            (job for job in self.jobs if job["canonical_url"] == canonical_url),
+            None,
+        )
+        if existing is not None:
+            return {"created": False, "job": self.inspect_job(existing["job_id"])}
+        job_id = f"browser-job-{len(self.jobs)}"
+        self.jobs.append(
+            {
+                "job_id": job_id,
+                "company": company_name,
+                "title": title,
+                "status": "discovered",
+                "canonical_url": canonical_url,
+                "discovered_at": "2026-07-21T16:00:00+00:00",
+                "last_seen_at": "2026-07-21T16:00:00+00:00",
+            }
+        )
+        return {"created": True, "job": {
+            **self.inspect_job(job_id),
+            "description": description_text,
+            "location": location_text,
+        }}
 
     def inspect_job(self, job_id):
         job = next((job for job in self.jobs if job["job_id"] == job_id), None)
@@ -110,6 +146,97 @@ def make_client(tmp_path, facade=None):
 
 def auth_headers():
     return {"Authorization": "Bearer test-device-token"}
+
+
+def browser_job_payload(**overrides):
+    return {
+        "company_name": "Northstar Labs",
+        "title": "Applied AI Product Builder",
+        "canonical_url": "https://jobs.example.com/northstar/applied-ai-builder",
+        "location_text": "United States · Remote",
+        "description_text": "Build useful agent workflows with operators and customers.",
+        "application_url": "https://jobs.example.com/northstar/applied-ai-builder/apply",
+        "origin": "user",
+        "idempotency_key": "browser-save-1",
+        **overrides,
+    }
+
+
+def test_browser_save_creates_selects_and_immediately_lists_the_canonical_job(tmp_path):
+    facade = FakeJobHunterFacade()
+
+    with make_client(tmp_path, facade) as client:
+        response = client.post("/v1/jobs", headers=auth_headers(), json=browser_job_payload())
+        jobs = client.get("/v1/jobs", headers=auth_headers())
+        workspace = client.get("/v1/workspace/jobs", headers=auth_headers())
+        events = client.get("/v1/events?after=0", headers=auth_headers())
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["created"] is True
+    assert body["job"]["company"] == "Northstar Labs"
+    assert body["job"]["title"] == "Applied AI Product Builder"
+    assert body["job"]["location"] == "United States · Remote"
+    assert body["job"]["description"].startswith("Build useful agent workflows")
+    assert jobs.json()["jobs"][-1]["job_id"] == body["job"]["job_id"]
+    assert workspace.json()["selected_job_id"] == body["job"]["job_id"]
+    assert events.json()["events"][-1]["event_type"] == "job_selected"
+    assert events.json()["events"][-1]["job_id"] == body["job"]["job_id"]
+
+
+def test_browser_save_replays_the_same_idempotent_result_without_a_second_ingest(tmp_path):
+    facade = FakeJobHunterFacade()
+    payload = browser_job_payload()
+
+    with make_client(tmp_path, facade) as client:
+        first = client.post("/v1/jobs", headers=auth_headers(), json=payload)
+        second = client.post("/v1/jobs", headers=auth_headers(), json=payload)
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert second.json() == first.json()
+    assert facade.add_job_calls == 1
+
+
+def test_browser_save_reuses_the_existing_job_when_the_listing_url_is_already_saved(tmp_path):
+    facade = FakeJobHunterFacade()
+    payload = browser_job_payload()
+
+    with make_client(tmp_path, facade) as client:
+        first = client.post("/v1/jobs", headers=auth_headers(), json=payload)
+        second = client.post(
+            "/v1/jobs",
+            headers=auth_headers(),
+            json={**payload, "idempotency_key": "browser-save-2"},
+        )
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert second.json()["created"] is False
+    assert second.json()["job"]["job_id"] == first.json()["job"]["job_id"]
+    assert len(facade.jobs) == len(STATUSES) + 1
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("company_name", ""),
+        ("title", "  "),
+        ("canonical_url", ""),
+        ("location_text", ""),
+        ("description_text", ""),
+        ("application_url", ""),
+    ],
+)
+def test_browser_save_requires_every_listing_field(tmp_path, field, value):
+    with make_client(tmp_path) as client:
+        response = client.post(
+            "/v1/jobs",
+            headers=auth_headers(),
+            json=browser_job_payload(**{field: value}),
+        )
+
+    assert response.status_code == 422
 
 
 def artifact_metadata(

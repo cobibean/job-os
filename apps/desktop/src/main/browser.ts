@@ -15,6 +15,7 @@ import type {
 import type {
   BrowserBounds,
   BrowserDownload,
+  BrowserJobListing,
   BrowserRestoreState,
   BrowserSemanticSnapshot,
   BrowserState,
@@ -33,6 +34,92 @@ import {
 
 export const BROWSER_PARTITION = 'persist:jobos-browser-v1'
 export const DEFAULT_BROWSER_URL = 'https://www.google.com/'
+
+const JOB_EXTRACTION_SCRIPT = `(() => {
+  const normalize = (value) => String(value ?? '').replace(/\\s+/gu, ' ').trim();
+  const decode = (value) => {
+    const textarea = document.createElement('textarea');
+    textarea.innerHTML = String(value ?? '');
+    return normalize(textarea.textContent || '');
+  };
+  const htmlText = (value) => {
+    const source = String(value ?? '')
+      .replace(/<br\\s*\\/?\\s*>/giu, ' ')
+      .replace(/<\\/(?:address|article|aside|blockquote|div|h[1-6]|li|main|p|pre|section|td|tr)>/giu, ' ');
+    const parsed = new DOMParser().parseFromString(source, 'text/html');
+    parsed.querySelectorAll('script,style,noscript,template,[hidden],[aria-hidden="true"]').forEach(element => element.remove());
+    parsed.querySelectorAll('[style]').forEach(element => {
+      if (element.style.display === 'none' || element.style.visibility === 'hidden') element.remove();
+    });
+    return normalize(parsed.body?.textContent || '');
+  };
+  const text = (selector) => normalize(document.querySelector(selector)?.textContent || '');
+  const elementHtml = (selector) => htmlText(document.querySelector(selector)?.innerHTML || '');
+  const meta = (selector) => normalize(document.querySelector(selector)?.getAttribute('content') || '');
+  const typeIsJobPosting = (value) => {
+    const types = Array.isArray(value) ? value : [value];
+    return types.some(type => String(type).toLowerCase().replace(/^.*[/#]/u, '') === 'jobposting');
+  };
+  const findPosting = (value) => {
+    if (Array.isArray(value)) {
+      for (const item of value) { const found = findPosting(item); if (found) return found; }
+      return null;
+    }
+    if (!value || typeof value !== 'object') return null;
+    if (typeIsJobPosting(value['@type'])) return value;
+    if (Array.isArray(value['@graph'])) {
+      const found = findPosting(value['@graph']);
+      if (found) return found;
+    }
+    return null;
+  };
+  let posting = null;
+  for (const script of document.querySelectorAll('script[type="application/ld+json"]')) {
+    try {
+      posting = findPosting(JSON.parse(script.textContent || ''));
+      if (posting) break;
+    } catch { /* Ignore malformed publisher metadata. */ }
+  }
+  const organization = posting?.hiringOrganization;
+  const companyName = decode(typeof organization === 'string' ? organization : organization?.name)
+    || text('[data-testid*="company" i], [itemprop="hiringOrganization"], .company-name, .job-company')
+    || meta('meta[property="og:site_name"], meta[name="application-name"]');
+  const title = decode(posting?.title)
+    || text('[data-testid*="job-title" i], [itemprop="title"], .job-title, h1')
+    || meta('meta[property="og:title"], meta[name="twitter:title"]');
+  const addressText = (location) => {
+    if (typeof location === 'string') return decode(location);
+    if (!location || typeof location !== 'object') return '';
+    const address = location.address && typeof location.address === 'object' ? location.address : location;
+    const country = typeof address.addressCountry === 'object' ? address.addressCountry?.name : address.addressCountry;
+    const parts = [address.streetAddress, address.addressLocality, address.addressRegion, address.postalCode, country]
+      .map(decode).filter(Boolean);
+    return parts.length ? parts.join(', ') : decode(location.name);
+  };
+  const locations = Array.isArray(posting?.jobLocation) ? posting.jobLocation : [posting?.jobLocation];
+  let locationText = locations.map(addressText).filter(Boolean).join('; ');
+  if (!locationText && posting?.jobLocationType) locationText = decode(posting.jobLocationType);
+  if (!locationText) locationText = text(
+    '[data-testid*="job-location" i], [itemprop="jobLocation"], .job-location, .location'
+  );
+  const descriptionText = htmlText(posting?.description)
+    || elementHtml('[data-testid*="job-description" i], [itemprop="description"], #job-description, .job-description');
+  const ordinaryUrl = (value) => {
+    if (typeof value !== 'string' || !value.trim()) return '';
+    try {
+      const url = new URL(value, document.baseURI);
+      return (url.protocol === 'http:' || url.protocol === 'https:') ? url.href : '';
+    } catch { return ''; }
+  };
+  let applicationUrl = ordinaryUrl(posting?.applicationUrl || posting?.applyUrl);
+  if (!applicationUrl) {
+    const links = [...document.querySelectorAll('a[href]')];
+    const apply = links.find(link => /\\bapply(?: now| for| here)?\\b/iu.test(normalize(link.textContent || '')))
+      || links.find(link => /(?:^|[/_-])apply(?:[/?#_-]|$)/iu.test(link.getAttribute('href') || ''));
+    applicationUrl = ordinaryUrl(apply?.getAttribute('href'));
+  }
+  return { pageUrl: location.href, companyName, title, locationText, descriptionText, applicationUrl };
+})()`
 
 export function remoteBrowserPreferences(): WebPreferences {
   return {
@@ -299,6 +386,43 @@ export class BrowserManager {
 
   inspect(): BrowserState {
     return this.getState()
+  }
+
+  async extractJob(tabId: string): Promise<BrowserJobListing> {
+    const tab = this.#requireTab(tabId)
+    const raw = await tab.view.webContents.executeJavaScript(JOB_EXTRACTION_SCRIPT, true) as unknown
+    const value = raw && typeof raw === 'object' ? raw as Record<string, unknown> : {}
+    const activeUrl = ordinaryHttpUrl(value.pageUrl)
+    const currentUrl = ordinaryHttpUrl(tab.view.webContents.getURL())
+    if (activeUrl && currentUrl && activeUrl !== currentUrl) {
+      throw new Error('The page changed while JobOS was reading it. Try saving again.')
+    }
+    const companyName = boundedText(value.companyName, 300)
+    const title = boundedText(value.title, 500)
+    const locationText = boundedText(value.locationText, 1_000)
+    const descriptionText = boundedText(value.descriptionText, 100_000)
+    const explicitApplicationUrl = ordinaryHttpUrl(value.applicationUrl)
+    const missing = [
+      companyName ? null : 'company',
+      title ? null : 'role',
+      locationText ? null : 'location',
+      descriptionText ? null : 'description',
+      activeUrl ? null : 'URL'
+    ].filter((field): field is string => field !== null)
+    if (missing.length) {
+      const fields = missing.length === 1
+        ? missing[0]
+        : `${missing.slice(0, -1).join(', ')}${missing.length > 2 ? ',' : ''} and ${missing.at(-1)}`
+      throw new Error(`Could not extract a complete job listing; missing ${fields}.`)
+    }
+    return {
+      companyName,
+      title,
+      canonicalUrl: activeUrl,
+      locationText,
+      descriptionText,
+      applicationUrl: explicitApplicationUrl || activeUrl
+    }
   }
 
   async snapshot(tabId: string): Promise<BrowserSemanticSnapshot> {
@@ -657,5 +781,19 @@ export function safeBlockedExternalUrl(value: string): string | null {
     return sanitized.length <= 2048 ? sanitized : null
   } catch {
     return null
+  }
+}
+
+function boundedText(value: unknown, limit: number): string {
+  return (typeof value === 'string' ? value : '').replace(/\s+/gu, ' ').trim().slice(0, limit)
+}
+
+function ordinaryHttpUrl(value: unknown): string {
+  if (typeof value !== 'string' || value.length > 2_083) return ''
+  try {
+    const parsed = new URL(value)
+    return parsed.protocol === 'http:' || parsed.protocol === 'https:' ? parsed.toString() : ''
+  } catch {
+    return ''
   }
 }

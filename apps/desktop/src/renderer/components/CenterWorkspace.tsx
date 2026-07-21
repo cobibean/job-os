@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState, type KeyboardEvent, type SyntheticEvent } from 'react'
 import { createPortal } from 'react-dom'
-import { ArrowLeft, ArrowRight, Download, Globe2, LoaderCircle, Plus, RefreshCw, Search, Square, X } from 'lucide-react'
+import { ArrowLeft, ArrowRight, BriefcaseBusiness, Check, Download, Globe2, LoaderCircle, Plus, RefreshCw, Search, Square, X } from 'lucide-react'
 
-import type { BrowserRestoreState, JobListItem } from '../../shared/contracts'
+import type { BrowserJobListing, BrowserJobSaveResult, BrowserRestoreState, JobListItem } from '../../shared/contracts'
 import { useBrowser } from '../hooks/useBrowser'
 import { browserRepairMessage, type BrowserRepairReason } from '../workspaceLayout'
 import { DocumentWorkspace } from './DocumentWorkspace'
@@ -17,6 +17,7 @@ interface CenterWorkspaceProps {
   layoutSignal: string
   workspaceHydrated: boolean
   onBrowserPersist: (state: BrowserRestoreState) => void
+  onJobSave: (listing: BrowserJobListing) => Promise<BrowserJobSaveResult>
   activeJob: JobListItem | null
   activeArtifactId: string | null
   activeArtifactPage: number
@@ -34,10 +35,17 @@ export function CenterWorkspace(props: CenterWorkspaceProps) {
   )
   const [address, setAddress] = useState('')
   const [tooltip, setTooltip] = useState<{ text: string, x: number, y: number } | null>(null)
+  const [saveState, setSaveState] = useState<{
+    status: 'idle' | 'saving' | 'saved' | 'existing' | 'error'
+    message: string
+  }>({ status: 'idle', message: '' })
   const tabRefs = useRef(new Map<string, HTMLButtonElement>())
   const active = browser.activeTab
 
-  useEffect(() => setAddress(active?.url ?? ''), [active?.tabId, active?.url])
+  useEffect(() => {
+    setAddress(active?.url ?? '')
+    setSaveState({ status: 'idle', message: '' })
+  }, [active?.tabId, active?.url])
 
   if (props.activeSurface === 'document') {
     return <DocumentWorkspace
@@ -48,6 +56,37 @@ export function CenterWorkspace(props: CenterWorkspaceProps) {
       restoredPage={props.activeArtifactPage}
       restoredZoom={props.activeArtifactZoom}
     />
+  }
+
+  const saveActiveJob = async () => {
+    if (!active || saveState.status === 'saving') return
+    setSaveState({ status: 'saving', message: 'Reading this listing…' })
+    try {
+      const listing = await browser.extractJob(active.tabId)
+      const result = await props.onJobSave(listing)
+      try {
+        const currentListing = await browser.extractJob(active.tabId)
+        if (currentListing.canonicalUrl !== listing.canonicalUrl) {
+          throw new Error('The page changed before JobOS could link this tab.')
+        }
+        await browser.associate(active.tabId, result.job.jobId)
+      } catch {
+        setSaveState({
+          status: result.created ? 'saved' : 'existing',
+          message: `${result.created ? 'Saved to JobOS' : 'Already in JobOS'}, but this tab could not be linked.`
+        })
+        return
+      }
+      setSaveState({
+        status: result.created ? 'saved' : 'existing',
+        message: result.created ? 'Saved to JobOS' : 'Already in JobOS'
+      })
+    } catch (error) {
+      setSaveState({
+        status: 'error',
+        message: error instanceof Error ? error.message : 'Could not read this job listing'
+      })
+    }
   }
 
   const moveTab = (tabId: string, delta: number) => {
@@ -149,6 +188,21 @@ export function CenterWorkspace(props: CenterWorkspaceProps) {
           <Globe2 aria-hidden="true" size={14} />
           <input aria-label="Address and search" disabled={!active} onChange={event => setAddress(event.target.value)} spellCheck="false" value={address} />
         </form>
+        <button
+          aria-label="Save this job to JobOS"
+          className="save-job-button"
+          data-state={saveState.status}
+          disabled={!active || active.loading || saveState.status === 'saving'}
+          onClick={() => { void saveActiveJob() }}
+          type="button"
+        >
+          {saveState.status === 'saving'
+            ? <LoaderCircle aria-hidden="true" className="spin" size={14} />
+            : saveState.status === 'saved' || saveState.status === 'existing'
+              ? <Check aria-hidden="true" size={14} />
+              : <BriefcaseBusiness aria-hidden="true" size={14} />}
+          <span>{saveState.status === 'saving' ? 'Reading…' : saveState.status === 'saved' || saveState.status === 'existing' ? 'Saved' : 'Save job'}</span>
+        </button>
         <select
           aria-label="Associate active tab with a job"
           className="tab-association"
@@ -160,6 +214,13 @@ export function CenterWorkspace(props: CenterWorkspaceProps) {
           {props.jobs.map(job => <option key={job.jobId} value={job.jobId}>{job.company}</option>)}
         </select>
       </div>
+
+      {saveState.message ? (
+        <div className={`browser-save-feedback ${saveState.status}`} role={saveState.status === 'error' ? 'alert' : 'status'}>
+          {saveState.status === 'saved' || saveState.status === 'existing' ? <Check aria-hidden="true" size={13} /> : null}
+          <span>{saveState.message}</span>
+        </div>
+      ) : null}
 
       {browser.state.download ? (
         <div className={`download-status ${browser.state.download.state}`} role="status">

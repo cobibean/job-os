@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 
-import type { JobListItem, JobSortMode, JobStatus } from '../../shared/contracts'
+import type { BrowserJobListing, BrowserJobSaveResult, JobListItem, JobSortMode, JobStatus } from '../../shared/contracts'
 
 export function useJobs() {
   const [jobs, setJobs] = useState<JobListItem[]>([])
@@ -155,6 +155,35 @@ export function useJobs() {
     }
   }, [bridge, jobs, query, sortMode, statusGroup])
 
+  const addFromBrowser = useCallback(async (listing: BrowserJobListing): Promise<BrowserJobSaveResult> => {
+    if (!bridge) throw new Error('JobOS is not connected')
+    try {
+      const result = await bridge.addFromBrowser(listing)
+      const refreshed = await bridge.list(
+        sortMode,
+        query.trim() || undefined,
+        statusGroup || undefined
+      ).catch(() => null)
+      if (refreshed) {
+        setJobs(refreshed)
+      } else {
+        setJobs(current => {
+          const existingIndex = current.findIndex(job => job.jobId === result.job.jobId)
+          if (existingIndex < 0) return [...current, result.job]
+          return current.map(job => job.jobId === result.job.jobId ? result.job : job)
+        })
+      }
+      setSelectedJobId(result.job.jobId)
+      setSelectedJob(result.job)
+      setFeedback(result.created ? 'Saved to JobOS' : 'Already in JobOS')
+      setError(null)
+      return result
+    } catch (error) {
+      setError(error instanceof Error ? error.message : 'Could not save this job')
+      throw error
+    }
+  }, [bridge, query, sortMode, statusGroup])
+
   return {
     jobs,
     selectedJob,
@@ -165,6 +194,7 @@ export function useJobs() {
     loading,
     error,
     feedback,
+    addFromBrowser,
     setQuery,
     setStatusGroup,
     selectJob,

@@ -44,6 +44,7 @@ export function App() {
           jobs={jobState.jobs}
           layoutSignal={`${activePreset}:${activeLayout.order.join(',')}:${activeLayout.collapsed.join(',')}`}
           onBrowserPersist={layoutState.updateBrowserState}
+          onJobSave={jobState.addFromBrowser}
           onDocumentPersist={layoutState.updateDocumentState}
           workspaceHydrated={layoutState.hydrated}
         />}

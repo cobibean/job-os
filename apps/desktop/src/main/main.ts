@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url'
 import { app, BrowserWindow, clipboard, dialog, ipcMain, session, shell, WebContentsView } from 'electron'
 import type { IpcMainInvokeEvent } from 'electron'
 
-import type { BrowserBounds, JobSortMode, JobStatus, WorkspaceSnapshot } from '../shared/contracts.js'
+import type { BrowserBounds, BrowserJobListing, JobSortMode, JobStatus, WorkspaceSnapshot } from '../shared/contracts.js'
 import { createMainAgentClient, startAgentEventStream } from './agent.js'
 import { registerAgentIpc } from './agentIpc.js'
 import { createApiLifecycle } from './apiLifecycle.js'
@@ -95,6 +95,23 @@ function registerJobsInterface(): void {
   const statuses = new Set<JobStatus>(['discovered', 'scored', 'reviewed', 'shortlisted', 'apply_now', 'maybe', 'stretch', 'skipped', 'applied', 'interviewing', 'closed', 'archived'])
 
   ipcMain.handle('jobos:jobs:get-state', event => trusted(event).getState())
+  ipcMain.handle('jobos:jobs:add-from-browser', (event, listing: BrowserJobListing) => {
+    const limits: Record<keyof BrowserJobListing, number> = {
+      companyName: 300,
+      title: 500,
+      canonicalUrl: 2_083,
+      locationText: 1_000,
+      descriptionText: 100_000,
+      applicationUrl: 2_083
+    }
+    if (!listing || typeof listing !== 'object' || Object.entries(limits).some(([field, limit]) => {
+      const value = listing[field as keyof BrowserJobListing]
+      return typeof value !== 'string' || !value.trim() || value.length > limit
+    })) {
+      throw new Error('Invalid browser job listing')
+    }
+    return trusted(event).addFromBrowser(listing)
+  })
   ipcMain.handle('jobos:jobs:list', (event, sort: JobSortMode, query?: string, statusGroup?: string) => {
     if (!sortModes.has(sort)) throw new Error('Invalid job ordering')
     return trusted(event).list(sort, query, statusGroup)
@@ -167,6 +184,7 @@ function registerBrowserInterface(): void {
   ipcMain.handle('jobos:browser:forward', (event, id: string) => trusted(event).forward(tabId(id)))
   ipcMain.handle('jobos:browser:reload', (event, id: string) => trusted(event).reload(tabId(id)))
   ipcMain.handle('jobos:browser:stop', (event, id: string) => trusted(event).stop(tabId(id)))
+  ipcMain.handle('jobos:browser:extract-job', (event, id: string) => trusted(event).extractJob(tabId(id)))
   ipcMain.handle('jobos:browser:associate', (event, id: string, jobId: string | null) => {
     if (jobId !== null && (typeof jobId !== 'string' || jobId.length > 512)) throw new Error('Invalid job association')
     return trusted(event).associate(tabId(id), jobId)
