@@ -374,6 +374,16 @@ class HermesWebSocketGateway:
             self._active_turn_id = None
             raise RuntimeError("Hermes did not acknowledge the turn")
 
+    async def detach_conversation(self) -> None:
+        """Forget the attached session and discard events already buffered for it."""
+        self._reset_live_session()
+        self._stored_session_id = None
+        while True:
+            try:
+                self._events.get_nowait()
+            except asyncio.QueueEmpty:
+                break
+
     async def interrupt_turn(self, turn_id: str) -> None:
         if not self._live_session_id or self._active_turn_id != turn_id:
             return

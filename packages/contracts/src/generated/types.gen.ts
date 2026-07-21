@@ -1108,6 +1108,22 @@ export type ConversationSendV1ConversationsCurrentMessagesPostResponses = {
 
 export type ConversationSendV1ConversationsCurrentMessagesPostResponse = ConversationSendV1ConversationsCurrentMessagesPostResponses[keyof ConversationSendV1ConversationsCurrentMessagesPostResponses];
 
+export type ConversationResetV1ConversationsCurrentResetPostData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/v1/conversations/current/reset';
+};
+
+export type ConversationResetV1ConversationsCurrentResetPostResponses = {
+    /**
+     * Successful Response
+     */
+    200: ConversationResponse;
+};
+
+export type ConversationResetV1ConversationsCurrentResetPostResponse = ConversationResetV1ConversationsCurrentResetPostResponses[keyof ConversationResetV1ConversationsCurrentResetPostResponses];
+
 export type ConversationCancelV1ConversationsCurrentTurnsTurnIdCancelPostData = {
     body?: never;
     path: {

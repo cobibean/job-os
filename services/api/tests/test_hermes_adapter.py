@@ -3,7 +3,7 @@ import json
 from urllib.parse import parse_qs, urlsplit
 
 import pytest
-from jobos_api.agent_gateway import AgentContext
+from jobos_api.agent_gateway import AgentContext, GatewayEvent
 from jobos_api.conversations import ConversationService, SendMessageRequest
 from jobos_api.hermes_adapter import HermesWebSocketGateway, _prompt_with_context
 from jobos_api.state_store import JobOsStateStore
@@ -235,6 +235,52 @@ def test_prompt_context_is_bounded_parseable_untrusted_reference_data():
     assert max(len(value) for value in context["selected_job"].values()) <= 200
     assert prompt.index("</jobos_untrusted_context>") < prompt.index("User request:")
     assert prompt.endswith("User request:\nReview the selected role")
+
+
+def test_detach_discards_buffered_old_session_events_and_forces_a_new_attachment(tmp_path):
+    async def scenario():
+        def responder(request):
+            if request["method"] == "session.create":
+                return [result(request, {
+                    "stored_session_id": "stored-1",
+                    "session_id": "live-1",
+                    "info": {"profile_name": "job-hunter", "cwd": str(tmp_path)},
+                })]
+            return [result(request, {})]
+
+        socket = FakeWebSocket(responder)
+        gateway = HermesWebSocketGateway(
+            url="ws://127.0.0.1:9119/api/ws",
+            token=TOKEN,
+            cwd=tmp_path,
+            request_timeout=1,
+            connector=FakeConnector(socket),
+        )
+        await gateway.start()
+        await gateway.create_or_resume_conversation(None)
+        gateway._events.put_nowait(GatewayEvent(
+            event_type="reconciliation",
+            state="idle",
+            summary="",
+            detail={"stored_session_id": "stored-old"},
+        ))
+
+        await gateway.detach_conversation()
+
+        assert gateway._events.empty()
+        assert gateway.normalize_frame(event(
+            "session.info",
+            "live-1",
+            {"profile_name": "job-hunter", "cwd": str(tmp_path), "stored_session_id": "stored-old"},
+        )) is None
+        await gateway.create_or_resume_conversation(None)
+        await gateway.close()
+        assert [request["method"] for request in socket.requests] == [
+            "session.create",
+            "session.create",
+        ]
+
+    asyncio.run(scenario())
 
 
 def test_two_serialized_service_prompts_reuse_one_verified_live_attachment(tmp_path):

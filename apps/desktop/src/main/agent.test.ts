@@ -125,6 +125,12 @@ test('the typed client maps generated contracts without returning credentials or
     if (url.pathname.endsWith('/messages')) {
       return new Response(JSON.stringify({ turn_id: 'turn-2', message_id: 'message-2', status: 'running' }), { status: 201, headers: { 'content-type': 'application/json' } })
     }
+    if (url.pathname.endsWith('/reset')) {
+      return new Response(JSON.stringify({
+        conversation_id: 'conv-fresh', entries: [], active_turn: null,
+        connection: { state: 'online' }, latest_event_id: 0
+      }), { status: 200, headers: { 'content-type': 'application/json' } })
+    }
     return new Response(JSON.stringify({
       conversation_id: 'conv-current',
       entries: [event(4, { type: 'user_message', text: 'Hello', message_id: 'message-1' })],
@@ -141,6 +147,7 @@ test('the typed client maps generated contracts without returning credentials or
 
   const snapshot = await client.get()
   const sent = await client.send('Hello', 'idempotency-0001')
+  const reset = await client.reset()
 
   expect(snapshot).toMatchObject({
     conversationId: 'conv-current',
@@ -149,6 +156,7 @@ test('the typed client maps generated contracts without returning credentials or
     entries: [{ eventId: 4, text: 'Hello' }]
   })
   expect(sent).toEqual({ turnId: 'turn-2', messageId: 'message-2', status: 'running' })
-  expect(JSON.stringify({ snapshot, sent })).not.toContain('fake-device-token')
-  expect(JSON.stringify({ snapshot, sent })).not.toContain('event_id')
+  expect(reset).toMatchObject({ conversationId: 'conv-fresh', entries: [], activeTurn: null })
+  expect(JSON.stringify({ snapshot, sent, reset })).not.toContain('fake-device-token')
+  expect(JSON.stringify({ snapshot, sent, reset })).not.toContain('event_id')
 })

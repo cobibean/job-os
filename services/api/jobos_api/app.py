@@ -474,6 +474,15 @@ def create_app(
     ) -> ConversationResponse:
         return conversation_service.snapshot()
 
+    @app.post("/v1/conversations/current/reset", tags=["agent"])
+    async def conversation_reset(
+        identity: Annotated[DeviceIdentity, Depends(authenticated_device)],
+    ) -> ConversationResponse:
+        try:
+            return await conversation_service.reset(actor_id=identity.device_id)
+        except ConversationBusy as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
+
     def conversation_context(identity: DeviceIdentity) -> dict[str, object]:
         selection = state_store.job_workspace_state().selected_job_id
         workspace = state_store.workspace_snapshot(identity.device_id).snapshot

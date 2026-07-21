@@ -122,3 +122,25 @@ Verification evidence:
 - Ruff: passed for all changed Python files.
 
 The distinction remains intentional: selected-job/workspace context is injected automatically, while full browser-page content is inspected on demand through JobOS MCP. Generic Hermes `computer_use` still targets the Mac Mini and is not the remote-browser path.
+
+## 2026-07-21 Agent New session control
+
+The Agent pane now includes a visible **New session** control with inline confirmation. A successful reset rotates the JobOS conversation, detaches the live Hermes attachment, drains buffered old-session events, and starts the next turn without a persisted Hermes session ID. The selected job and profile-level JobOS MCP/browser capabilities remain available because they are separate from conversation history.
+
+Safety and recovery behavior:
+
+- reset is rejected while a turn or renderer mutation is active;
+- transcript and draft clear only after the API returns the rotated snapshot;
+- failures leave the current conversation visible and recoverable;
+- durable event cursors fence stale buffered events while preserving newer events received during reset;
+- idempotency keys are scoped to the concrete conversation rather than the singleton `current` alias.
+
+Final verification after independent race-condition review:
+
+- `pnpm check`: lint/typecheck/build passed; 138 desktop tests passed; 314 API tests passed with one expected skip;
+- focused renderer reset/race suite: 26 tests passed;
+- independent final targeted review: passed with no security concerns or logic errors;
+- live reset proof and post-reset JobOS MCP/browser proof passed before final packaging;
+- final arm64 package passed deep strict code-signature and ZIP integrity checks;
+- private update bundle: `JobOS-New-Session-Update-2026-07-21.zip`, 143,111,316 bytes, SHA-256 `a84c80a1e3997b9c98e3dd66e0b6af40b5771106c7ff914ac80efcd7335d0ca8`;
+- the final bundle was downloaded back through the tailnet-only HTTPS route and matched the local size and SHA-256.

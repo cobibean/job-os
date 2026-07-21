@@ -149,6 +149,22 @@ class ConversationService:
             connection=ConnectionResponse(state=self.gateway.connection_state),
         )
 
+    async def reset(self, *, actor_id: str) -> ConversationResponse:
+        async with self._submission_lock:
+            event_task = self._event_task
+            self._event_task = None
+            if event_task is not None:
+                event_task.cancel()
+                await asyncio.gather(event_task, return_exceptions=True)
+            try:
+                self.store.reset_conversation(actor_id=actor_id)
+                await self.gateway.detach_conversation()
+                self._recovery_turn_id = None
+            finally:
+                if event_task is not None:
+                    self._event_task = asyncio.create_task(self._consume_gateway_events())
+        return self.snapshot()
+
     async def send(
         self,
         command: SendMessageRequest,
@@ -320,6 +336,8 @@ class ConversationService:
                         self.store.save_stored_session_id(stored_session_id)
                     continue
                 turn_id = event.turn_id
+                if turn_id and self.store.turn_record(turn_id) is None:
+                    continue
                 is_terminal = bool(
                     turn_id
                     and event.state in {"completed", "failed", "interrupted"}

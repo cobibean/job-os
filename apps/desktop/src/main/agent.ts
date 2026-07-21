@@ -1,6 +1,7 @@
 import {
   conversationCancelV1ConversationsCurrentTurnsTurnIdCancelPost,
   conversationCurrentV1ConversationsCurrentGet,
+  conversationResetV1ConversationsCurrentResetPost,
   conversationRetryV1ConversationsCurrentTurnsTurnIdRetryPost,
   conversationSendV1ConversationsCurrentMessagesPost,
   createJobOsApiClient
@@ -146,6 +147,10 @@ export function createMainAgentClient(config: AgentConfig) {
     async get(): Promise<AgentConversationSnapshot> {
       const result = await conversationCurrentV1ConversationsCurrentGet({ client })
       return normalizeSnapshot(unwrap(result, [200], 'Conversation unavailable'))
+    },
+    async reset(): Promise<AgentConversationSnapshot> {
+      const result = await conversationResetV1ConversationsCurrentResetPost({ client })
+      return normalizeSnapshot(unwrap(result, [200], 'New session could not be started'))
     },
     async send(text: string, idempotencyKey: string): Promise<AgentTurnMutation> {
       const result = await conversationSendV1ConversationsCurrentMessagesPost({ client, body: { text, idempotency_key: idempotencyKey } })

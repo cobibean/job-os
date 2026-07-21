@@ -21,6 +21,7 @@ export function registerAgentIpc(
   trusted: (event: IpcMainInvokeEvent) => AgentClient
 ): void {
   ipc.handle('jobos:agent:get', event => trusted(event).get())
+  ipc.handle('jobos:agent:reset', event => trusted(event).reset())
   ipc.handle('jobos:agent:send', (event, text: unknown, key: unknown) => {
     if (typeof text !== 'string' || !text.trim() || text.length > 12_000) throw new Error('Invalid agent message')
     return trusted(event).send(text.trim(), idempotencyKey(key))
