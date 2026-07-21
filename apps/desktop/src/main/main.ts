@@ -14,6 +14,7 @@ import { registerBrowserRestoreHandler } from './browserIpc.js'
 import { startDesktopCapabilityClient } from './capabilityClient.js'
 import { initializeDesktopRuntime } from './desktopRuntime.js'
 import type { DesktopRuntimeState } from './desktopRuntime.js'
+import { runtimeConfigPath } from './runtimeConfig.js'
 import { createMainJobsClient, startJobEventStream } from './jobs.js'
 import type { JobsConfig } from './jobs.js'
 import { createMainDocumentsClient } from './documents.js'
@@ -316,7 +317,7 @@ app.whenReady().then(async () => {
     callback(false)
   })
   desktopRuntimeState = await initializeDesktopRuntime({
-    configPath: path.join(app.getPath('userData'), 'runtime.json'),
+    configPath: runtimeConfigPath(app.getPath('appData')),
     environment: process.env,
     ensureApiReady: apiLifecycle.ensureApiReady
   })

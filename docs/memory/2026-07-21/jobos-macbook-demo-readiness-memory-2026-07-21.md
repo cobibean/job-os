@@ -67,3 +67,9 @@ Corrected private bundle proof:
 - nested app deep-signature verification: passed;
 - installer shell validation: passed;
 - private-route download and ZIP integrity: passed.
+
+## 2026-07-21 MacBook connectivity correction
+
+The first installed MacBook app displayed **JobOS API offline** even though the Mini API, Tailscale peer, and private Serve route were healthy. The installer wrote `runtime.json` to the intended stable path under `Application Support/JobOS`, but the packaged Electron app read `app.getPath('userData')`. Because the package name is `@jobos/desktop`, that resolved to a different directory on the MacBook, so the app never loaded its remote API URL.
+
+The desktop now derives its runtime configuration from `app.getPath('appData')/JobOS/runtime.json`, matching the installer and runtime architecture. A focused regression test covers this stable path. A tiny private repair bundle was also provided for the already-installed app; it copies the existing runtime config into the legacy package-derived directory and reopens JobOS, avoiding another full download.

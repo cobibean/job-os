@@ -2,7 +2,13 @@
 
 import { expect, test } from 'vitest'
 
-import { loadDesktopRuntimeConfig } from './runtimeConfig.js'
+import { loadDesktopRuntimeConfig, runtimeConfigPath } from './runtimeConfig.js'
+
+test('uses the stable JobOS Application Support directory', () => {
+  expect(runtimeConfigPath('/Users/cobi/Library/Application Support')).toBe(
+    '/Users/cobi/Library/Application Support/JobOS/runtime.json'
+  )
+})
 
 const localConfig = JSON.stringify({
   schemaVersion: 1,
