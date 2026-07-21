@@ -30,8 +30,8 @@ export function useJobs() {
         return refreshed.find(job => job.jobId === current.jobId) ?? current
       })
       setError(null)
-    } catch (refreshError) {
-      setError(refreshError instanceof Error ? refreshError.message : 'Jobs unavailable')
+    } catch {
+      setError('Jobs unavailable')
     }
   }, [bridge, query, sortMode, statusGroup])
 
@@ -51,9 +51,9 @@ export function useJobs() {
       setSortMode(snapshot.sortMode)
       setLoading(false)
       setReady(true)
-    }).catch(loadError => {
+    }).catch(() => {
       if (!active) return
-      setError(loadError instanceof Error ? loadError.message : 'Jobs unavailable')
+      setError('Jobs unavailable')
       setLoading(false)
     })
     return () => { active = false }
@@ -87,8 +87,8 @@ export function useJobs() {
       setSelectedJob(jobs.find(job => job.jobId === jobId) ?? null)
       setFeedback('Active job selected')
       setError(null)
-    } catch (selectionError) {
-      setError(selectionError instanceof Error ? selectionError.message : 'Selection failed')
+    } catch {
+      setError('Selection failed')
     }
   }, [bridge, jobs])
 
@@ -100,8 +100,8 @@ export function useJobs() {
       setSelectedJob(current => current?.jobId === jobId ? result.job : current)
       setFeedback(`Status changed to ${status}`)
       setError(null)
-    } catch (statusError) {
-      setError(statusError instanceof Error ? statusError.message : 'Status change failed')
+    } catch {
+      setError('Status change failed')
     }
   }, [bridge])
 
@@ -112,8 +112,8 @@ export function useJobs() {
       setSortMode(sort)
       setFeedback(`Ordered by ${sort}`)
       setError(null)
-    } catch (sortError) {
-      setError(sortError instanceof Error ? sortError.message : 'Ordering failed')
+    } catch {
+      setError('Ordering failed')
     }
   }, [bridge])
 
@@ -131,8 +131,8 @@ export function useJobs() {
       setJobs(reordered)
       setFeedback('Manual order saved')
       setError(null)
-    } catch (orderError) {
-      setError(orderError instanceof Error ? orderError.message : 'Reordering failed')
+    } catch {
+      setError('Reordering failed')
     }
   }, [bridge, jobs, query, sortMode, statusGroup])
 
@@ -150,8 +150,8 @@ export function useJobs() {
       setJobs(reordered)
       setFeedback('Manual order saved')
       setError(null)
-    } catch (orderError) {
-      setError(orderError instanceof Error ? orderError.message : 'Reordering failed')
+    } catch {
+      setError('Reordering failed')
     }
   }, [bridge, jobs, query, sortMode, statusGroup])
 

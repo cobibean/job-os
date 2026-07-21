@@ -90,3 +90,20 @@ test('a malformed authenticated response is distinct from network unavailability
     message: 'Device authentication response invalid'
   })
 })
+
+test('network exceptions never expose credential material', async () => {
+  const token = 'credential-that-must-not-escape'
+  const result = await probeConnectivity({
+    baseUrl: 'http://jobos.test',
+    deviceToken: token,
+    fetch: async () => {
+      throw new Error(`request failed with ${token}`)
+    }
+  })
+
+  expect(result).toMatchObject({
+    state: 'disconnected',
+    message: 'JobOS API unavailable'
+  })
+  expect(JSON.stringify(result)).not.toContain(token)
+})

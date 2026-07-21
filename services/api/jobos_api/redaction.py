@@ -13,7 +13,8 @@ _SENSITIVE_VALUE = re.compile(
     r"(?:"
     r"(?:authorization|proxy-authorization|cookie|set-cookie)\s*:\s*[^\r\n]+"
     r"|bearer\s+\S+"
-    r"|(?:token|api[_-]?key|password|secret)\s*[:=]\s*\S+"
+    r"|(?:token|api[_-]?key|password|secret|credential|authorization[_-]?code)"
+    r"\s*[:=]\s*\S+"
     r")",
     re.IGNORECASE,
 )

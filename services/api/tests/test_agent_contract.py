@@ -23,13 +23,13 @@ class FakeJobFacade:
             {
                 "job_id": "job-1",
                 "company": "Northstar",
-                "role": "Product Engineer",
+                "title": "Product Engineer",
                 "status": "shortlisted",
             },
             {
                 "job_id": "job-2",
                 "company": "Daybreak",
-                "role": "Platform Engineer",
+                "title": "Platform Engineer",
                 "status": "reviewed",
             },
         ]
@@ -314,9 +314,19 @@ def test_turn_snapshots_selected_job_and_device_workspace_without_new_conversati
     assert sent.status_code == 201
     assert after["conversation_id"] == before["conversation_id"]
     assert gateway.submissions[0][1].selected_job_id == "job-1"
+    assert gateway.submissions[0][1].selected_job == {
+        "job_id": "job-1",
+        "company": "Northstar",
+        "title": "Product Engineer",
+    }
     assert gateway.submissions[0][1].workspace["selected_preset"] == "review"
     turn = next(entry for entry in after["entries"] if entry["type"] == "turn")
     assert turn["context"]["selected_job_id"] == "job-1"
+    assert turn["context"]["selected_job"] == {
+        "job_id": "job-1",
+        "company": "Northstar",
+        "title": "Product Engineer",
+    }
 
 
 def test_cancel_is_idempotent_and_retry_appends_linked_turn(tmp_path):

@@ -87,11 +87,11 @@ export async function probeConnectivity(config: ConnectivityConfig): Promise<Con
       checkedAt,
       message: 'Private API authenticated'
     }
-  } catch (error) {
+  } catch {
     return {
       state: 'disconnected',
       checkedAt,
-      message: error instanceof Error ? error.message : 'JobOS API unavailable'
+      message: 'JobOS API unavailable'
     }
   }
 }

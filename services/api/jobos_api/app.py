@@ -66,6 +66,7 @@ from jobos_api.jobs import (
     list_jobs,
     normalize_job_detail,
 )
+from jobos_api.redaction import sanitize_text
 from jobos_api.responses import DeviceSessionResponse, HealthResponse, VersionResponse
 from jobos_api.settings import Settings
 from jobos_api.state_store import (
@@ -93,7 +94,7 @@ def create_app(
         settings.job_hunter_db_path,
         settings.hermes_job_hunter_cwd,
     )
-    device_authenticator = DeviceAuthenticator(settings.device_token, settings.device_id)
+    device_authenticator = DeviceAuthenticator(settings.device_credential_registry())
     bearer = HTTPBearer(auto_error=False)
     configured_gateway = agent_gateway
     if configured_gateway is None and all(
@@ -481,8 +482,24 @@ def create_app(
     def conversation_context(identity: DeviceIdentity) -> dict[str, object]:
         selection = state_store.job_workspace_state().selected_job_id
         workspace = state_store.workspace_snapshot(identity.device_id).snapshot
+        selected_job = None
+        if selection is not None:
+            try:
+                job = jobs.inspect_job(selection)
+            except (KeyError, ValueError):
+                job = None
+            if job is not None:
+                company = sanitize_text(str(job.get("company", "")))[:200]
+                title = sanitize_text(str(job.get("title", "")))[:200]
+                if company and title:
+                    selected_job = {
+                        "job_id": selection,
+                        "company": company,
+                        "title": title,
+                    }
         return {
             "selected_job_id": selection,
+            "selected_job": selected_job,
             "workspace": {
                 key: workspace.get(key)
                 for key in (

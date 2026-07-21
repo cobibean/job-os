@@ -273,12 +273,18 @@ class ConversationService:
                     return
                 context = turn["context"]
                 assert isinstance(context, dict)
+                selected_job = context.get("selected_job")
                 await self.gateway.submit_turn(
                     str(turn["text"]),
                     AgentContext(
                         turn_id=turn_id,
                         selected_job_id=context.get("selected_job_id"),
                         workspace=dict(context.get("workspace", {})),
+                        selected_job=(
+                            {str(key): str(value) for key, value in selected_job.items()}
+                            if isinstance(selected_job, dict)
+                            else None
+                        ),
                     ),
                 )
         except Exception as error:

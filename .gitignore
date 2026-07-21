@@ -13,3 +13,5 @@ __pycache__/
 *.db-wal
 .env
 output/
+release/
+apps/desktop/build/jobos-keychain

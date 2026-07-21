@@ -1,14 +1,18 @@
 {
   "name": "@jobos/desktop",
   "version": "0.1.0",
+  "description": "Private job-search workbench",
+  "author": "Cobi",
   "private": true,
   "type": "module",
   "main": "dist/main/main.js",
   "scripts": {
     "build": "pnpm build:electron && vite build",
     "build:electron": "tsc -p tsconfig.electron.json && node scripts/verify-preload-artifact.mjs",
+    "build:keychain-helper": "node scripts/build-keychain-helper.mjs",
     "dev": "pnpm build:electron && concurrently --kill-others --success first \"vite --host 127.0.0.1\" \"wait-on http://127.0.0.1:5173 && VITE_DEV_SERVER_URL=http://127.0.0.1:5173 electron dist/main/main.js\"",
     "lint": "oxlint src vite.config.ts",
+    "package:mac": "pnpm build:keychain-helper && pnpm build && electron-builder --mac dir zip --arm64",
     "start": "electron dist/main/main.js",
     "test": "pnpm build:electron && vitest run",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.electron.json --noEmit"
@@ -28,11 +32,36 @@
     "@vitejs/plugin-react": "6.0.3",
     "concurrently": "10.0.3",
     "electron": "43.1.1",
+    "electron-builder": "26.15.3",
     "jsdom": "29.1.1",
     "oxlint": "1.74.0",
     "typescript": "7.0.2",
     "vite": "8.1.5",
     "vitest": "4.1.10",
     "wait-on": "9.0.10"
+  },
+  "build": {
+    "appId": "com.cobibean.jobos",
+    "productName": "JobOS",
+    "asar": true,
+    "directories": {
+      "output": "../../release/desktop"
+    },
+    "files": [
+      "dist/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "build/jobos-keychain",
+        "to": "jobos-keychain"
+      }
+    ],
+    "mac": {
+      "category": "public.app-category.productivity",
+      "icon": "build/icon.icns",
+      "identity": null
+    },
+    "artifactName": "${productName}-${version}-${arch}.${ext}"
   }
 }

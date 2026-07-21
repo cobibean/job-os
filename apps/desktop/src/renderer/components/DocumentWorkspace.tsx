@@ -42,24 +42,29 @@ export function DocumentWorkspace(props: DocumentWorkspaceProps) {
   const [payload, setPayload] = useState<PdfArtifactPayload | null>(null)
   const [loading, setLoading] = useState(false)
   const [message, setMessage] = useState('')
+  const incomingViewKey = `${props.restoredArtifactId ?? ''}:${props.restoredPage}:${props.restoredZoom}`
   const persistedView = useRef(
-    `${props.restoredArtifactId ?? ''}:${props.restoredPage}:${props.restoredZoom}`
+    incomingViewKey
   )
+  const restoredPropsView = useRef(incomingViewKey)
+  const restoringIncomingView = props.hydrated && incomingViewKey !== restoredPropsView.current
   const selectedId = useRef<string | null>(props.restoredArtifactId)
   const restoredArtifactId = useRef(props.restoredArtifactId)
   restoredArtifactId.current = props.restoredArtifactId
   const jobId = props.job?.jobId ?? null
   const activeJobId = useRef(jobId)
   activeJobId.current = jobId
+  const lastNonNullJobId = useRef<string | null>(null)
 
   useEffect(() => {
     if (!props.hydrated) return
+    restoredPropsView.current = incomingViewKey
     setActiveId(props.restoredArtifactId)
     selectedId.current = props.restoredArtifactId
     setPage(Math.max(1, props.restoredPage))
     setZoom(Math.max(0.5, Math.min(3, props.restoredZoom)))
-    persistedView.current = `${props.restoredArtifactId ?? ''}:${props.restoredPage}:${props.restoredZoom}`
-  }, [props.hydrated, props.restoredArtifactId, props.restoredPage, props.restoredZoom])
+    persistedView.current = incomingViewKey
+  }, [incomingViewKey, props.hydrated, props.restoredArtifactId, props.restoredPage, props.restoredZoom])
 
   const stateMatchesJob = state.jobId === props.job?.jobId
   const artifactById = useMemo(
@@ -107,16 +112,24 @@ export function DocumentWorkspace(props: DocumentWorkspaceProps) {
   }, [])
 
   useEffect(() => {
+    const jobChanged = Boolean(
+      jobId
+      && lastNonNullJobId.current
+      && lastNonNullJobId.current !== jobId
+    )
+    if (jobId) lastNonNullJobId.current = jobId
     if (!jobId || !bridge) {
       setState(emptyState(jobId ?? undefined))
-      setActiveId(null)
+      selectedId.current = restoredArtifactId.current
+      setActiveId(restoredArtifactId.current)
       setPayload(null)
       return
     }
     let active = true
+    const pendingId = jobChanged ? null : restoredArtifactId.current
     setState(emptyState(jobId))
-    selectedId.current = null
-    setActiveId(null)
+    selectedId.current = pendingId
+    setActiveId(pendingId)
     setPayload(null)
     setLoading(true)
     setMessage('Loading registered artifacts…')
@@ -164,10 +177,10 @@ export function DocumentWorkspace(props: DocumentWorkspaceProps) {
 
   useEffect(() => {
     const key = `${activeId ?? ''}:${page}:${zoom}`
-    if (!props.hydrated || key === persistedView.current) return
+    if (!props.hydrated || restoringIncomingView || key === persistedView.current) return
     persistedView.current = key
     props.onViewChange(activeId, page, zoom)
-  }, [activeId, page, props.hydrated, props.onViewChange, zoom])
+  }, [activeId, page, props.hydrated, props.onViewChange, restoringIncomingView, zoom])
 
   useEffect(() => {
     if (pageCount > 0 && page > pageCount) setPage(pageCount)

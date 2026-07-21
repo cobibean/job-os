@@ -2,7 +2,7 @@ import os
 from pathlib import Path
 
 from jobos_api.app import create_app
-from jobos_api.settings import Settings
+from jobos_api.settings import Settings, parse_device_credentials
 
 
 def settings_from_environment() -> Settings:
@@ -22,6 +22,9 @@ def settings_from_environment() -> Settings:
     return Settings(
         device_token=token,
         device_id=os.environ.get("JOBOS_DEVICE_ID", "primary-device"),
+        device_credentials=parse_device_credentials(
+            os.environ.get("JOBOS_DEVICE_CREDENTIALS_JSON")
+        ),
         state_db_path=state_db_path,
         job_hunter_db_path=Path(job_hunter_db) if job_hunter_db else None,
         artifact_roots=artifact_roots,

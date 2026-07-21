@@ -5,13 +5,15 @@ import { fileURLToPath } from 'node:url'
 import { app, BrowserWindow, clipboard, dialog, ipcMain, session, shell, WebContentsView } from 'electron'
 import type { IpcMainInvokeEvent } from 'electron'
 
-import type { BrowserBounds, ConnectivitySnapshot, JobSortMode, JobStatus, WorkspaceSnapshot } from '../shared/contracts.js'
+import type { BrowserBounds, JobSortMode, JobStatus, WorkspaceSnapshot } from '../shared/contracts.js'
 import { createMainAgentClient, startAgentEventStream } from './agent.js'
 import { registerAgentIpc } from './agentIpc.js'
+import { createApiLifecycle } from './apiLifecycle.js'
 import { BROWSER_PARTITION, BrowserManager, remoteBrowserPreferences } from './browser.js'
 import { registerBrowserRestoreHandler } from './browserIpc.js'
 import { startDesktopCapabilityClient } from './capabilityClient.js'
-import { probeConnectivity } from './connectivity.js'
+import { initializeDesktopRuntime } from './desktopRuntime.js'
+import type { DesktopRuntimeState } from './desktopRuntime.js'
 import { createMainJobsClient, startJobEventStream } from './jobs.js'
 import type { JobsConfig } from './jobs.js'
 import { createMainDocumentsClient } from './documents.js'
@@ -24,12 +26,14 @@ const developmentUrl = process.env.VITE_DEV_SERVER_URL
 const developmentOrigin = developmentUrl ? new URL(developmentUrl).origin : undefined
 let browserManager: BrowserManager | null = null
 let markBrowserRestored: () => void = () => undefined
-
-function disconnectedCredentialSnapshot(): ConnectivitySnapshot {
-  return {
+const apiLifecycle = createApiLifecycle()
+let desktopRuntimeState: DesktopRuntimeState = {
+  runtime: null,
+  deviceToken: null,
+  connectivity: {
     state: 'disconnected',
     checkedAt: new Date().toISOString(),
-    message: 'Device credential unavailable'
+    message: 'JobOS setup is required'
   }
 }
 
@@ -41,10 +45,10 @@ function assertTrustedRenderer(event: IpcMainInvokeEvent): void {
 }
 
 function jobsConfig(): JobsConfig | null {
-  const deviceToken = process.env.JOBOS_DEVICE_TOKEN
-  if (!deviceToken) return null
+  const { runtime, deviceToken } = desktopRuntimeState
+  if (!runtime || !deviceToken) return null
   return {
-    baseUrl: process.env.JOBOS_API_BASE_URL ?? 'http://100.123.109.19:8766',
+    baseUrl: runtime.apiBaseUrl,
     deviceToken
   }
 }
@@ -53,13 +57,11 @@ function registerConnectivityInterface(): void {
   ipcMain.handle('jobos:connectivity:get', async event => {
     assertTrustedRenderer(event)
 
-    const deviceToken = process.env.JOBOS_DEVICE_TOKEN
-    if (!deviceToken) return disconnectedCredentialSnapshot()
+    const { runtime, deviceToken } = desktopRuntimeState
+    if (!runtime || !deviceToken) return desktopRuntimeState.connectivity
 
-    const snapshot = await probeConnectivity({
-      baseUrl: process.env.JOBOS_API_BASE_URL ?? 'http://100.123.109.19:8766',
-      deviceToken
-    })
+    const snapshot = await apiLifecycle.ensureApiReady(runtime, deviceToken)
+    desktopRuntimeState = { runtime, deviceToken, connectivity: snapshot }
     if (process.env.JOBOS_CAPTURE_PATH) {
       console.info('[JobOS capture] connectivity', JSON.stringify(snapshot))
     }
@@ -250,7 +252,7 @@ async function createWindow(): Promise<BrowserWindow> {
   const stopCapabilities = capabilityConfig
     ? startDesktopCapabilityClient(browserManager, {
         ...capabilityConfig,
-        deviceId: process.env.JOBOS_DEVICE_ID ?? 'primary-device'
+        deviceId: desktopRuntimeState.runtime?.deviceId ?? 'primary-device'
       }, { browserReady })
     : () => undefined
 
@@ -312,6 +314,11 @@ async function createWindow(): Promise<BrowserWindow> {
 app.whenReady().then(async () => {
   session.defaultSession.setPermissionRequestHandler((_webContents, _permission, callback) => {
     callback(false)
+  })
+  desktopRuntimeState = await initializeDesktopRuntime({
+    configPath: path.join(app.getPath('userData'), 'runtime.json'),
+    environment: process.env,
+    ensureApiReady: apiLifecycle.ensureApiReady
   })
   registerConnectivityInterface()
   registerAgentInterface()
