@@ -1,4 +1,5 @@
 import { readFile } from 'node:fs/promises'
+import path from 'node:path'
 
 export type RuntimeMode = 'local-service' | 'remote-client'
 
@@ -25,6 +26,10 @@ const CONFIG_KEYS = new Set([
 ])
 const LOCAL_HOSTS = new Set(['127.0.0.1', 'localhost', '[::1]', '::1'])
 const DEFAULT_LAUNCHD_LABEL = 'com.cobibean.jobos.api'
+
+export function runtimeConfigPath(appDataPath: string): string {
+  return path.join(appDataPath, 'JobOS', 'runtime.json')
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
