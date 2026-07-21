@@ -53,3 +53,17 @@
 ## Operator next action
 
 Download the personalized bundle from the private link, unzip it, and run **Install JobOS.command**. After JobOS opens and shows **Mac Mini connected**, trash the downloaded ZIP and extracted installer folder.
+
+## 2026-07-21 packaging correction
+
+The first personalized bundle produced macOS's “JobOS is damaged” message. Direct verification found that Electron Builder had skipped top-level signing while nested Electron resources retained signatures, leaving an internally inconsistent app bundle. Removing quarantine could not repair that invalid signature state.
+
+The packaging flow now ad-hoc signs the complete app bundle, verifies the deep signature, and creates the ZIP only after verification. The personalized installer also repeats ad-hoc signing and verification after copying the app as a defensive check, then removes quarantine.
+
+Corrected private bundle proof:
+
+- size: `143,109,993` bytes;
+- SHA-256: `3c9431978d519433c34f49fa1ad97b986a961d81814c331ca0051db3909f71be`;
+- nested app deep-signature verification: passed;
+- installer shell validation: passed;
+- private-route download and ZIP integrity: passed.
