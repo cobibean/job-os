@@ -31,6 +31,16 @@ class DeviceAuthenticator:
             raise ValueError("device credentials must be unique")
         self._credentials = tuple(credentials.items())
 
+    def matches(self, token: object, device_id: object) -> bool:
+        if not isinstance(token, str) or not isinstance(device_id, str):
+            return False
+        matched = False
+        for candidate_device, expected_token in self._credentials:
+            token_matches = hmac.compare_digest(token.encode(), expected_token.encode())
+            device_matches = hmac.compare_digest(device_id.encode(), candidate_device.encode())
+            matched = matched or (token_matches and device_matches)
+        return matched
+
     def authenticate(
         self,
         credentials: HTTPAuthorizationCredentials | None,

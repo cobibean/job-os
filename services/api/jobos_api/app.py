@@ -1,6 +1,5 @@
 import asyncio
 import hashlib
-import hmac
 import json
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager, contextmanager
@@ -334,11 +333,7 @@ def create_app(
                 return
             token = first.get("token")
             device_id = first.get("device_id")
-            if (
-                not isinstance(token, str)
-                or not hmac.compare_digest(token, settings.device_token)
-                or device_id != settings.device_id
-            ):
+            if not device_authenticator.matches(token, device_id):
                 await socket.close(code=4401, reason="Device authentication required")
                 return
             registered = await browser_capabilities.register(socket, device_id)

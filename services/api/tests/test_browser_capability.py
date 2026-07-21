@@ -6,9 +6,10 @@ import pytest
 from fastapi.testclient import TestClient
 from jobos_api.app import create_app
 from jobos_api.capabilities import BrowserCommandResponse
-from jobos_api.settings import Settings
+from jobos_api.settings import DeviceCredential, Settings
 
 TOKEN = "phase-seven-device-token"
+REMOTE_TOKEN = "phase-seven-remote-device-token"
 
 
 def make_app(tmp_path, *, broker=None):
@@ -20,6 +21,61 @@ def make_app(tmp_path, *, broker=None):
 
 def auth():
     return {"Authorization": f"Bearer {TOKEN}"}
+
+
+def make_remote_app(tmp_path):
+    return create_app(
+        Settings(
+            device_token=TOKEN,
+            device_credentials=(
+                DeviceCredential(device_id="cobi-macbook", token=REMOTE_TOKEN),
+            ),
+            state_db_path=tmp_path / "jobos.db",
+        )
+    )
+
+
+def test_remote_desktop_credential_registers_for_primary_mcp_commands(tmp_path):
+    with (
+        TestClient(make_remote_app(tmp_path)) as client,
+        client.websocket_connect("/v1/desktop/capabilities") as socket,
+    ):
+        socket.send_json(
+            {
+                "type": "authenticate",
+                "token": REMOTE_TOKEN,
+                "device_id": "cobi-macbook",
+            }
+        )
+        assert socket.receive_json()["type"] == "ready"
+
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            task = executor.submit(
+                client.post,
+                "/v1/browser/commands",
+                headers=auth(),
+                json={
+                    "command": "tabs.inspect",
+                    "arguments": {},
+                    "origin": "mcp",
+                    "idempotency_key": "remote-inspect-1",
+                    "timeout_ms": 1000,
+                },
+            )
+            command = socket.receive_json()
+            socket.send_json(
+                {
+                    "type": "result",
+                    "command_id": command["command_id"],
+                    "state": "completed",
+                    "outcome": "tabs.inspect",
+                    "data": {"tabs": [], "active_tab_id": None},
+                }
+            )
+            response = task.result(timeout=2)
+
+    assert response.status_code == 200
+    assert response.json()["state"] == "completed"
 
 
 def test_browser_command_fails_immediately_without_a_desktop(tmp_path):

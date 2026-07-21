@@ -102,3 +102,23 @@ The demo required multiple avoidable manual steps and several repair bundles:
 - a final launcher that injected known-good runtime values directly.
 
 Do not treat this as an acceptable release workflow. Before wider use, replace it with one deterministic install-and-first-run path tracked in `docs/plans/macos-install-and-onboarding-hardening.md`.
+
+## 2026-07-21 remote browser agent activation
+
+The live JobHunter agent can now inspect and operate the exact embedded JobOS browser on the remote MacBook through the authenticated JobOS capability channel.
+
+Activation required three fixes:
+
+1. registered the JobOS stdio MCP adapter in the live `job-hunter` Hermes profile using a private launcher that reads the existing local runtime credential at process start; no credential was copied into Hermes YAML;
+2. registered the same MCP adapter in the unified dashboard host configuration because that long-lived dashboard currently performs MCP discovery in its launch-profile scope before building profile-scoped sessions;
+3. fixed the JobOS desktop capability WebSocket to authenticate every credential in the configured device registry, not only the Mini's primary credential. Before this change, the MacBook repeatedly connected but was closed with authentication code `4401`, so MCP commands reported `503 Desktop capability is unavailable`.
+
+Verification evidence:
+
+- JobOS MCP discovery: connected, with the full `mcp__jobos__*` browser toolset present in the live JobHunter session;
+- direct MCP execution: `browser_tabs_inspect` returned the MacBook's embedded tabs and `browser_snapshot` returned the active page;
+- live JobHunter turn through the real JobOS conversation API called `mcp__jobos__browser_tabs_inspect` and `mcp__jobos__browser_snapshot`, then reported `JOBOS_REMOTE_BROWSER_OK` for **Product Manager at Barti • United States • Remote (Work from Home) | Wellfound**;
+- complete Python suite: 313 tests passed with one expected skip;
+- Ruff: passed for all changed Python files.
+
+The distinction remains intentional: selected-job/workspace context is injected automatically, while full browser-page content is inspected on demand through JobOS MCP. Generic Hermes `computer_use` still targets the Mac Mini and is not the remote-browser path.
