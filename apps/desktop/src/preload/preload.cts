@@ -1,7 +1,7 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import type { IpcRendererEvent } from 'electron'
 
-import type { AgentStreamUpdate, BrowserBounds, BrowserRestoreState, BrowserState, JobEvent, JobOsRendererBridge, JobSortMode, JobStatus, WorkspaceSnapshot } from '../shared/contracts.js'
+import type { AgentStreamUpdate, BrowserBounds, BrowserJobListing, BrowserRestoreState, BrowserState, JobEvent, JobOsRendererBridge, JobSortMode, JobStatus, WorkspaceSnapshot } from '../shared/contracts.js'
 
 const bridge: JobOsRendererBridge = Object.freeze({
   connectivity: Object.freeze({
@@ -21,6 +21,7 @@ const bridge: JobOsRendererBridge = Object.freeze({
   }),
   jobs: Object.freeze({
     getState: () => ipcRenderer.invoke('jobos:jobs:get-state'),
+    addFromBrowser: (listing: BrowserJobListing) => ipcRenderer.invoke('jobos:jobs:add-from-browser', listing),
     list: (sort: JobSortMode, query?: string, statusGroup?: string) => ipcRenderer.invoke('jobos:jobs:list', sort, query, statusGroup),
     select: (jobId: string) => ipcRenderer.invoke('jobos:jobs:select', jobId),
     reorder: (jobIds: string[]) => ipcRenderer.invoke('jobos:jobs:reorder', jobIds),
@@ -48,6 +49,7 @@ const bridge: JobOsRendererBridge = Object.freeze({
     forward: (tabId: string) => ipcRenderer.invoke('jobos:browser:forward', tabId),
     reload: (tabId: string) => ipcRenderer.invoke('jobos:browser:reload', tabId),
     stop: (tabId: string) => ipcRenderer.invoke('jobos:browser:stop', tabId),
+    extractJob: (tabId: string) => ipcRenderer.invoke('jobos:browser:extract-job', tabId),
     associate: (tabId: string, jobId: string | null) => ipcRenderer.invoke('jobos:browser:associate', tabId, jobId),
     copyBlockedUrl: (tabId: string) => ipcRenderer.invoke('jobos:browser:copy-blocked-url', tabId),
     setBounds: (bounds: BrowserBounds) => ipcRenderer.invoke('jobos:browser:set-bounds', bounds),

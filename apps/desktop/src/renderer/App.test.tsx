@@ -154,6 +154,77 @@ test('real jobs render compactly and user selection and status use the shared br
   expect(await screen.findByText('Status changed to reviewed')).not.toBeNull()
 })
 
+test('saving the active browser listing adds, selects, and associates the canonical job', async () => {
+  const listing = {
+    companyName: 'Northstar Labs',
+    title: 'Applied AI Product Builder',
+    canonicalUrl: 'https://jobs.example.com/northstar',
+    locationText: 'United States · Remote',
+    descriptionText: 'Build useful agent workflows with operators.',
+    applicationUrl: 'https://jobs.example.com/northstar/apply'
+  }
+  const savedJob = {
+    jobId: 'browser-job-1', company: listing.companyName, title: listing.title,
+    status: 'discovered' as const, statusGroup: 'Inbox', canonicalUrl: listing.canonicalUrl,
+    discoveredAt: '2026-07-21T16:00:00Z', lastSeenAt: '2026-07-21T16:00:00Z'
+  }
+  const browserTab = {
+    tabId: 'job-tab', url: listing.canonicalUrl, title: listing.title, faviconUrl: null,
+    associatedJobId: null, loading: false, canGoBack: false, canGoForward: false,
+    error: null, crashed: false, blockedUrl: null
+  }
+  const addFromBrowser = vi.fn().mockResolvedValue({ eventId: 8, created: true, job: savedJob })
+  const extractJob = vi.fn().mockResolvedValue(listing)
+  const associate = vi.fn().mockResolvedValue({
+    tabs: [{ ...browserTab, associatedJobId: savedJob.jobId }],
+    activeTabId: browserTab.tabId,
+    download: null,
+    notice: null
+  })
+  const workspace = {
+    revision: 1,
+    selectedPreset: 'research' as const,
+    layouts: {
+      research: { order: ['jobs', 'center', 'agent'] as const, widths: { jobs: 260, center: 760, agent: 350 }, collapsed: [] },
+      review: { order: ['jobs', 'center', 'agent'] as const, widths: { jobs: 280, center: 700, agent: 380 }, collapsed: [] },
+      'agent-focus': { order: ['jobs', 'center', 'agent'] as const, widths: { jobs: 220, center: 420, agent: 650 }, collapsed: [] }
+    },
+    selectedJobId: null,
+    activeCenterSurface: 'browser' as const,
+    repairedPresets: [],
+    browserTabs: [{ tabId: browserTab.tabId, url: browserTab.url, title: browserTab.title, faviconUrl: null, associatedJobId: null }],
+    activeBrowserTabId: browserTab.tabId,
+    repairedBrowser: false
+  }
+  Object.defineProperty(window, 'jobos', { configurable: true, value: {
+    connectivity: { get: vi.fn().mockRejectedValue(new Error('offline')) },
+    jobs: {
+      getState: vi.fn().mockResolvedValue({ jobs: [], selectedJobId: null, sortMode: 'manual', manualOrder: [] }),
+      addFromBrowser,
+      list: vi.fn().mockResolvedValue([savedJob]), select: vi.fn(), reorder: vi.fn(), setSort: vi.fn(), updateStatus: vi.fn(),
+      subscribe: vi.fn(() => () => undefined)
+    },
+    workspace: { get: vi.fn().mockResolvedValue(workspace), save: vi.fn().mockImplementation(value => Promise.resolve({ ...value, revision: value.revision + 1 })) },
+    browser: {
+      getState: vi.fn(), restore: vi.fn().mockResolvedValue({ tabs: [browserTab], activeTabId: browserTab.tabId, download: null, notice: null }),
+      extractJob, associate, create: vi.fn(), select: vi.fn(), close: vi.fn(), reorder: vi.fn(), navigate: vi.fn(), back: vi.fn(), forward: vi.fn(),
+      reload: vi.fn(), stop: vi.fn(), copyBlockedUrl: vi.fn(), setBounds: vi.fn().mockResolvedValue(undefined), subscribe: vi.fn(() => () => undefined)
+    }
+  } })
+
+  render(<App />)
+  await screen.findByRole('tab', { name: `Select ${listing.title}` })
+  fireEvent.click(screen.getByRole('button', { name: 'Save this job to JobOS' }))
+
+  await waitFor(() => expect(extractJob).toHaveBeenCalledTimes(2))
+  await waitFor(() => expect(addFromBrowser).toHaveBeenCalledWith(listing))
+  expect(associate).toHaveBeenCalledWith(browserTab.tabId, savedJob.jobId)
+  expect(await screen.findByRole('button', { name: 'Select Northstar Labs Applied AI Product Builder' })).not.toBeNull()
+  expect(screen.getAllByText('Saved to JobOS').length).toBeGreaterThan(0)
+  expect(screen.getByText('Northstar Labs · Applied AI Product Builder')).not.toBeNull()
+})
+
+
 test('changing jobs never selects, closes, navigates, or reassociates an unrelated browser tab', async () => {
   const jobs = [
     { jobId: 'job-1', company: 'Example Co', title: 'Product Builder', status: 'reviewed' as const, statusGroup: 'Inbox', canonicalUrl: 'https://example.com/jobs/1', discoveredAt: '', lastSeenAt: '' },

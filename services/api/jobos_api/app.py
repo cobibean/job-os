@@ -49,6 +49,8 @@ from jobos_api.documents import (
 )
 from jobos_api.hermes_adapter import HermesWebSocketGateway
 from jobos_api.jobs import (
+    BrowserJobCreateRequest,
+    BrowserJobCreateResponse,
     JobDetail,
     JobEventsResponse,
     JobFacade,
@@ -618,6 +620,60 @@ def create_app(
             command_name="job.list",
             label="Inspected jobs",
             detail={"count": len(result.jobs)},
+        )
+        return result
+
+    @app.post("/v1/jobs", tags=["jobs"])
+    @serialized_mutation_route
+    def job_create_from_browser(
+        command: BrowserJobCreateRequest,
+        identity: Annotated[DeviceIdentity, Depends(authenticated_device)],
+    ) -> BrowserJobCreateResponse:
+        payload = command.model_dump(mode="json", exclude={"idempotency_key"})
+        request_hash = mutation_hash("job.create_from_browser", payload)
+        try:
+            replay = mutation_replay(
+                identity=identity,
+                target="jobs",
+                command_name="job.create_from_browser",
+                idempotency_key=command.idempotency_key,
+                request_hash=request_hash,
+            )
+        except IdempotencyConflict as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
+        if replay is not None:
+            return BrowserJobCreateResponse.model_validate(replay)
+
+        try:
+            saved = jobs.add_job(
+                company_name=command.company_name,
+                title=command.title,
+                canonical_url=str(command.canonical_url),
+                location_text=command.location_text,
+                description_text=command.description_text,
+                application_url=str(command.application_url),
+            )
+            normalized = normalize_job_detail(saved["job"])
+        except (KeyError, TypeError, ValueError) as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
+
+        event_id = state_store.save_job_selection(normalized.job_id, command.origin)
+        result = BrowserJobCreateResponse(
+            event_id=event_id,
+            created=bool(saved["created"]),
+            job=normalized,
+        )
+        record_mutation(
+            identity=identity,
+            target="jobs",
+            command_name="job.create_from_browser",
+            origin=command.origin,
+            idempotency_key=command.idempotency_key,
+            request_hash=request_hash,
+            result=result.model_dump(mode="json"),
+            label="Saved job from browser" if result.created else "Opened saved browser job",
+            job_id=normalized.job_id,
+            detail={"created": result.created},
         )
         return result
 

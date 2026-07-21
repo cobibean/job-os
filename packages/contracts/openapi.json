@@ -363,6 +363,94 @@
         "title": "BrowserCommandResponse",
         "type": "object"
       },
+      "BrowserJobCreateRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "application_url": {
+            "format": "uri",
+            "maxLength": 2083,
+            "minLength": 1,
+            "title": "Application Url",
+            "type": "string"
+          },
+          "canonical_url": {
+            "format": "uri",
+            "maxLength": 2083,
+            "minLength": 1,
+            "title": "Canonical Url",
+            "type": "string"
+          },
+          "company_name": {
+            "maxLength": 300,
+            "minLength": 1,
+            "title": "Company Name",
+            "type": "string"
+          },
+          "description_text": {
+            "maxLength": 100000,
+            "minLength": 1,
+            "title": "Description Text",
+            "type": "string"
+          },
+          "idempotency_key": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Idempotency Key",
+            "type": "string"
+          },
+          "location_text": {
+            "maxLength": 1000,
+            "minLength": 1,
+            "title": "Location Text",
+            "type": "string"
+          },
+          "origin": {
+            "const": "user",
+            "default": "user",
+            "title": "Origin",
+            "type": "string"
+          },
+          "title": {
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "company_name",
+          "title",
+          "canonical_url",
+          "location_text",
+          "description_text",
+          "application_url"
+        ],
+        "title": "BrowserJobCreateRequest",
+        "type": "object"
+      },
+      "BrowserJobCreateResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "created": {
+            "title": "Created",
+            "type": "boolean"
+          },
+          "event_id": {
+            "title": "Event Id",
+            "type": "integer"
+          },
+          "job": {
+            "$ref": "#/components/schemas/JobDetail"
+          }
+        },
+        "required": [
+          "event_id",
+          "created",
+          "job"
+        ],
+        "title": "BrowserJobCreateResponse",
+        "type": "object"
+      },
       "BrowserTabMetadata": {
         "additionalProperties": false,
         "properties": {
@@ -2465,6 +2553,50 @@
           }
         ],
         "summary": "Jobs List",
+        "tags": [
+          "jobs"
+        ]
+      },
+      "post": {
+        "operationId": "job_create_from_browser_v1_jobs_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BrowserJobCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BrowserJobCreateResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Job Create From Browser",
         "tags": [
           "jobs"
         ]

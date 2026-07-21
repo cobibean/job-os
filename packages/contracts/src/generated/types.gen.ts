@@ -218,6 +218,59 @@ export type BrowserCommandResponse = {
 };
 
 /**
+ * BrowserJobCreateRequest
+ */
+export type BrowserJobCreateRequest = {
+    /**
+     * Application Url
+     */
+    application_url: string;
+    /**
+     * Canonical Url
+     */
+    canonical_url: string;
+    /**
+     * Company Name
+     */
+    company_name: string;
+    /**
+     * Description Text
+     */
+    description_text: string;
+    /**
+     * Idempotency Key
+     */
+    idempotency_key?: string;
+    /**
+     * Location Text
+     */
+    location_text: string;
+    /**
+     * Origin
+     */
+    origin?: 'user';
+    /**
+     * Title
+     */
+    title: string;
+};
+
+/**
+ * BrowserJobCreateResponse
+ */
+export type BrowserJobCreateResponse = {
+    /**
+     * Created
+     */
+    created: boolean;
+    /**
+     * Event Id
+     */
+    event_id: number;
+    job: JobDetail;
+};
+
+/**
  * BrowserTabMetadata
  */
 export type BrowserTabMetadata = {
@@ -1339,6 +1392,31 @@ export type JobsListV1JobsGetResponses = {
 };
 
 export type JobsListV1JobsGetResponse = JobsListV1JobsGetResponses[keyof JobsListV1JobsGetResponses];
+
+export type JobCreateFromBrowserV1JobsPostData = {
+    body: BrowserJobCreateRequest;
+    path?: never;
+    query?: never;
+    url: '/v1/jobs';
+};
+
+export type JobCreateFromBrowserV1JobsPostErrors = {
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type JobCreateFromBrowserV1JobsPostError = JobCreateFromBrowserV1JobsPostErrors[keyof JobCreateFromBrowserV1JobsPostErrors];
+
+export type JobCreateFromBrowserV1JobsPostResponses = {
+    /**
+     * Successful Response
+     */
+    200: BrowserJobCreateResponse;
+};
+
+export type JobCreateFromBrowserV1JobsPostResponse = JobCreateFromBrowserV1JobsPostResponses[keyof JobCreateFromBrowserV1JobsPostResponses];
 
 export type JobsReorderV1JobsOrderPutData = {
     body: ManualOrderRequest;

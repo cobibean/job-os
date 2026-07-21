@@ -1,5 +1,8 @@
+import { randomUUID } from 'node:crypto'
+
 import {
   createJobOsApiClient,
+  jobCreateFromBrowserV1JobsPost,
   jobUpdateStatusV1JobsJobIdStatusPut,
   jobsListV1JobsGet,
   jobsReorderV1JobsOrderPut,
@@ -8,6 +11,7 @@ import {
   workspaceSortJobsV1WorkspaceJobsSortPut
 } from '@jobos/contracts'
 import type {
+  BrowserJobCreateResponse,
   JobEvent as ApiJobEvent,
   JobListItem as ApiJobListItem,
   JobListResponse,
@@ -17,6 +21,8 @@ import type {
 } from '@jobos/contracts'
 
 import type {
+  BrowserJobListing,
+  BrowserJobSaveResult,
   JobEvent,
   JobListItem,
   JobMutationResult,
@@ -68,6 +74,28 @@ export function createMainJobsClient(config: JobsConfig) {
   const client = createJobOsApiClient(config.baseUrl, config.deviceToken)
 
   return {
+    async addFromBrowser(listing: BrowserJobListing): Promise<BrowserJobSaveResult> {
+      const result = await jobCreateFromBrowserV1JobsPost({
+        client,
+        body: {
+          company_name: listing.companyName,
+          title: listing.title,
+          canonical_url: listing.canonicalUrl,
+          location_text: listing.locationText,
+          description_text: listing.descriptionText,
+          application_url: listing.applicationUrl,
+          origin: 'user',
+          idempotency_key: randomUUID()
+        }
+      })
+      const mutation = unwrap<BrowserJobCreateResponse>(result, 'Could not save this job')
+      return {
+        eventId: mutation.event_id,
+        created: mutation.created,
+        job: toJob(mutation.job)
+      }
+    },
+
     async getState(): Promise<JobWorkspaceSnapshot> {
       const [jobsResult, workspaceResult] = await Promise.all([
         jobsListV1JobsGet({ client }),

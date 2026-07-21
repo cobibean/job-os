@@ -124,7 +124,17 @@ export function useBrowser(
     forward: (tabId: string) => bridge && run(() => bridge.forward(tabId)),
     reload: (tabId: string) => bridge && run(() => bridge.reload(tabId)),
     stop: (tabId: string) => bridge && run(() => bridge.stop(tabId)),
-    associate: (tabId: string, jobId: string | null) => bridge && run(() => bridge.associate(tabId, jobId)),
+    extractJob: async (tabId: string) => {
+      if (!bridge) throw new Error('Browser surface unavailable')
+      return bridge.extractJob(tabId)
+    },
+    associate: async (tabId: string, jobId: string | null) => {
+      if (!bridge) throw new Error('Browser surface unavailable')
+      const next = await bridge.associate(tabId, jobId)
+      acceptState(next, true)
+      setMessage('Browser ready')
+      return next
+    },
     copyBlockedUrl: (tabId: string) => bridge && run(() => bridge.copyBlockedUrl(tabId))
   }
 }
