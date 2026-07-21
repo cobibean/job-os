@@ -598,6 +598,32 @@ test('job extraction refuses to mix fields and URL across a navigation race', as
   await expect(manager.extractJob('job')).rejects.toThrow('The page changed while JobOS was reading it. Try saving again.')
 })
 
+test('job extraction supports the current Greenhouse hosted-board markup', async () => {
+  const activeUrl = 'https://job-boards.greenhouse.io/figma/jobs/5364702004?gh_jid=5364702004'
+  const { manager } = extractionManager(`<!doctype html><html><head>
+    <title>Job Application for Account Executive, Emerging Enterprise (Berlin, Germany) at Figma</title>
+    <meta property="og:title" content="Account Executive, Emerging Enterprise (Berlin, Germany)">
+  </head><body><main><div class="job-post-container">
+    <div class="image-container"><img class="logo" alt="Figma Logo" src="logo.png"></div>
+    <h1 class="job__title">Account Executive, Emerging Enterprise (Berlin, Germany)</h1>
+    <div class="job__location">Berlin, Germany</div>
+    <div class="job__description body"><p>Build the future of collaborative design.</p><ul><li>Own enterprise relationships</li></ul></div>
+    <button class="btn btn--pill">Apply</button>
+  </div></main></body></html>`, activeUrl)
+  await manager.restore({ tabs: [
+    { tabId: 'job', url: activeUrl, title: 'Job', faviconUrl: null, associatedJobId: null }
+  ], activeTabId: 'job' })
+
+  await expect(manager.extractJob('job')).resolves.toEqual({
+    companyName: 'Figma',
+    title: 'Account Executive, Emerging Enterprise (Berlin, Germany)',
+    canonicalUrl: activeUrl,
+    locationText: 'Berlin, Germany',
+    descriptionText: 'Build the future of collaborative design. Own enterprise relationships',
+    applicationUrl: activeUrl
+  })
+})
+
 test('job extraction uses conservative rendered-page fallbacks and defaults application URL to canonical URL', async () => {
   const activeUrl = 'https://careers.example.com/openings/7'
   const { manager } = extractionManager(`<!doctype html><html><head>

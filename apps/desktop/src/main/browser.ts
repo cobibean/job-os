@@ -81,8 +81,13 @@ const JOB_EXTRACTION_SCRIPT = `(() => {
     } catch { /* Ignore malformed publisher metadata. */ }
   }
   const organization = posting?.hiringOrganization;
+  const greenhouseLogoCompany = normalize(document.querySelector('.job-post-container img.logo[alt]')?.getAttribute('alt') || '')
+    .replace(/\\s+logo$/iu, '');
+  const greenhouseTitleCompany = normalize(document.title).match(/\\sat\\s+(.+)$/iu)?.[1] || '';
   const companyName = decode(typeof organization === 'string' ? organization : organization?.name)
     || text('[data-testid*="company" i], [itemprop="hiringOrganization"], .company-name, .job-company')
+    || greenhouseLogoCompany
+    || greenhouseTitleCompany
     || meta('meta[property="og:site_name"], meta[name="application-name"]');
   const title = decode(posting?.title)
     || text('[data-testid*="job-title" i], [itemprop="title"], .job-title, h1')
@@ -100,10 +105,10 @@ const JOB_EXTRACTION_SCRIPT = `(() => {
   let locationText = locations.map(addressText).filter(Boolean).join('; ');
   if (!locationText && posting?.jobLocationType) locationText = decode(posting.jobLocationType);
   if (!locationText) locationText = text(
-    '[data-testid*="job-location" i], [itemprop="jobLocation"], .job-location, .location'
+    '[data-testid*="job-location" i], [itemprop="jobLocation"], .job-location, .job__location, .location'
   );
   const descriptionText = htmlText(posting?.description)
-    || elementHtml('[data-testid*="job-description" i], [itemprop="description"], #job-description, .job-description');
+    || elementHtml('[data-testid*="job-description" i], [itemprop="description"], #job-description, .job-description, .job__description');
   const ordinaryUrl = (value) => {
     if (typeof value !== 'string' || !value.trim()) return '';
     try {
