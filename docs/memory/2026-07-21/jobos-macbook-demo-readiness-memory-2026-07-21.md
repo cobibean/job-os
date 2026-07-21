@@ -73,3 +73,32 @@ Corrected private bundle proof:
 The first installed MacBook app displayed **JobOS API offline** even though the Mini API, Tailscale peer, and private Serve route were healthy. The installer wrote `runtime.json` to the intended stable path under `Application Support/JobOS`, but the packaged Electron app read `app.getPath('userData')`. Because the package name is `@jobos/desktop`, that resolved to a different directory on the MacBook, so the app never loaded its remote API URL.
 
 The desktop now derives its runtime configuration from `app.getPath('appData')/JobOS/runtime.json`, matching the installer and runtime architecture. A focused regression test covers this stable path. A tiny private repair bundle was also provided for the already-installed app; it copies the existing runtime config into the legacy package-derived directory and reopens JobOS, avoiding another full download.
+
+## Final MacBook activation outcome
+
+Cobi confirmed that JobOS successfully opened and connected to the Mac Mini API over Tailscale after running the personalized **Start JobOS Connected** launcher.
+
+The successful launcher performed the complete setup explicitly rather than relying on implicit installer behavior:
+
+1. located JobOS in either `/Applications` or `~/Applications`;
+2. called the Mini's private Tailscale endpoint and required an authenticated HTTP `200` before continuing;
+3. wrote `runtime.json` to both the canonical `Application Support/JobOS` path and the legacy package-derived path used by the already-installed build;
+4. stored the paired MacBook device credential through JobOS's Keychain helper;
+5. launched JobOS with explicit remote-client environment values;
+6. verified that the JobOS process stayed running.
+
+This proved the intended architecture—**MacBook desktop client → Tailscale → Mac Mini proxy → loopback JobOS API**—works end to end. The remaining problem is installation/onboarding quality, not the core product topology.
+
+## Accepted demo debt: MacBook installation is too complicated
+
+The demo required multiple avoidable manual steps and several repair bundles:
+
+- unsigned/unnotarized Gatekeeper overrides;
+- repair of an internally inconsistent Electron signature;
+- manual **Open Anyway** approval;
+- disagreement between `/Applications` and `~/Applications`;
+- disagreement between canonical and package-derived runtime-config directories;
+- repeated credential/config repair attempts;
+- a final launcher that injected known-good runtime values directly.
+
+Do not treat this as an acceptable release workflow. Before wider use, replace it with one deterministic install-and-first-run path tracked in `docs/plans/macos-install-and-onboarding-hardening.md`.
