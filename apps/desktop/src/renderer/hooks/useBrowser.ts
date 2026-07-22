@@ -23,7 +23,7 @@ export function useBrowser(
   workspaceHydrated: boolean,
   visible: boolean,
   layoutSignal: string,
-  onPersist: (state: BrowserRestoreState) => void
+  onPersist: (state: BrowserRestoreState) => void | Promise<void>
 ) {
   const bridge = useRef(window.jobos?.browser).current
   const [state, setState] = useState<BrowserState>(emptyState)
@@ -34,19 +34,22 @@ export function useBrowser(
   const persistedKey = useRef(JSON.stringify(restoredState))
   const requestedRestoreKey = useRef(JSON.stringify(restoredState))
 
-  const acceptState = useCallback((next: BrowserState, explicit = false) => {
+  const acceptState = useCallback((next: BrowserState, explicit = false): Promise<void> => {
     setState(next)
     if (explicit) explicitBrowserAction.current = true
-    if (!restored.current || !explicitBrowserAction.current) return
+    if (!restored.current || !explicitBrowserAction.current) return Promise.resolve()
     const durable = browserStateForPersistence(next)
     const key = JSON.stringify(durable)
-    if (key !== persistedKey.current) {
-      persistedKey.current = key
-      onPersist(durable)
-    }
+    if (key === persistedKey.current) return Promise.resolve()
+    const previousKey = persistedKey.current
+    persistedKey.current = key
+    return Promise.resolve(onPersist(durable)).catch(error => {
+      if (persistedKey.current === key) persistedKey.current = previousKey
+      throw error
+    })
   }, [onPersist])
 
-  useEffect(() => bridge?.subscribe(next => acceptState(next)), [acceptState, bridge])
+  useEffect(() => bridge?.subscribe(next => { void acceptState(next).catch(() => undefined) }), [acceptState, bridge])
 
   useEffect(() => {
     if (!bridge || !workspaceHydrated || restored.current) return
@@ -102,7 +105,7 @@ export function useBrowser(
 
   const run = useCallback(async (operation: () => Promise<BrowserState>) => {
     try {
-      acceptState(await operation(), true)
+      await acceptState(await operation(), true)
       setMessage('Browser ready')
     } catch (error) {
       setMessage(error instanceof Error ? error.message : 'Browser action failed')
@@ -115,6 +118,7 @@ export function useBrowser(
     activeTab,
     message,
     viewportRef,
+    reconcileExternalState: (next: BrowserState) => acceptState(next, true),
     create: (url?: string, jobId?: string | null) => bridge && run(() => bridge.create(url, jobId)),
     select: (tabId: string) => bridge && run(() => bridge.select(tabId)),
     close: (tabId: string) => bridge && run(() => bridge.close(tabId)),
@@ -124,14 +128,10 @@ export function useBrowser(
     forward: (tabId: string) => bridge && run(() => bridge.forward(tabId)),
     reload: (tabId: string) => bridge && run(() => bridge.reload(tabId)),
     stop: (tabId: string) => bridge && run(() => bridge.stop(tabId)),
-    extractJob: async (tabId: string) => {
-      if (!bridge) throw new Error('Browser surface unavailable')
-      return bridge.extractJob(tabId)
-    },
     associate: async (tabId: string, jobId: string | null) => {
       if (!bridge) throw new Error('Browser surface unavailable')
       const next = await bridge.associate(tabId, jobId)
-      acceptState(next, true)
+      await acceptState(next, true)
       setMessage('Browser ready')
       return next
     },

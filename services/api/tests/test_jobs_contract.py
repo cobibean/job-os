@@ -136,6 +136,7 @@ def make_client(tmp_path, facade=None):
     app = create_app(
         Settings(
             device_token="test-device-token",
+            mcp_token="test-mcp-trusted-token",
             state_db_path=tmp_path / "jobos.db",
             artifact_roots=(tmp_path,),
         ),
@@ -145,7 +146,10 @@ def make_client(tmp_path, facade=None):
 
 
 def auth_headers():
-    return {"Authorization": "Bearer test-device-token"}
+    return {
+        "Authorization": "Bearer test-device-token",
+        "X-JobOS-MCP-Token": "test-mcp-trusted-token",
+    }
 
 
 def browser_job_payload(**overrides):
@@ -182,6 +186,39 @@ def test_browser_save_creates_selects_and_immediately_lists_the_canonical_job(tm
     assert workspace.json()["selected_job_id"] == body["job"]["job_id"]
     assert events.json()["events"][-1]["event_type"] == "job_selected"
     assert events.json()["events"][-1]["job_id"] == body["job"]["job_id"]
+
+
+def test_mcp_job_create_requires_the_separate_trusted_credential(tmp_path):
+    with make_client(tmp_path) as client:
+        response = client.post(
+            "/v1/jobs",
+            headers={"Authorization": "Bearer test-device-token"},
+            json=browser_job_payload(origin="mcp", idempotency_key="forged-agent-save-1"),
+        )
+
+    assert response.status_code == 403
+    assert response.json()["detail"] == "MCP operations require the trusted local MCP credential"
+
+
+def test_agent_can_create_a_job_through_the_same_canonical_ingest_seam(tmp_path):
+    facade = FakeJobHunterFacade()
+
+    with make_client(tmp_path, facade) as client:
+        response = client.post(
+            "/v1/jobs",
+            headers=auth_headers(),
+            json=browser_job_payload(origin="mcp", idempotency_key="agent-save-1"),
+        )
+        conversation = client.get("/v1/conversations/current", headers=auth_headers())
+
+    assert response.status_code == 200
+    assert response.json()["job"]["title"] == "Applied AI Product Builder"
+    assert any(
+        entry["type"] == "activity"
+        and entry["summary"] == "Saved job from browser"
+        and entry["detail"]["origin"] == "mcp"
+        for entry in conversation.json()["entries"]
+    )
 
 
 def test_browser_save_replays_the_same_idempotent_result_without_a_second_ingest(tmp_path):
@@ -234,6 +271,20 @@ def test_browser_save_requires_every_listing_field(tmp_path, field, value):
             "/v1/jobs",
             headers=auth_headers(),
             json=browser_job_payload(**{field: value}),
+        )
+
+    assert response.status_code == 422
+
+
+@pytest.mark.parametrize("field", ["canonical_url", "application_url"])
+def test_browser_save_rejects_credential_bearing_urls(tmp_path, field):
+    with make_client(tmp_path) as client:
+        response = client.post(
+            "/v1/jobs",
+            headers=auth_headers(),
+            json=browser_job_payload(
+                **{field: "https://user:secret@jobs.example.com/northstar"}
+            ),
         )
 
     assert response.status_code == 422

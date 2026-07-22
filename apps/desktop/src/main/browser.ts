@@ -1,6 +1,5 @@
 import { randomUUID } from 'node:crypto'
 import path from 'node:path'
-import { setTimeout as wait } from 'node:timers/promises'
 
 import type {
   BrowserWindow,
@@ -16,7 +15,6 @@ import type {
 import type {
   BrowserBounds,
   BrowserDownload,
-  BrowserJobListing,
   BrowserRestoreState,
   BrowserSemanticSnapshot,
   BrowserState,
@@ -35,194 +33,6 @@ import {
 
 export const BROWSER_PARTITION = 'persist:jobos-browser-v1'
 export const DEFAULT_BROWSER_URL = 'https://www.google.com/'
-const JOB_EXTRACTION_ATTEMPTS = 21
-const JOB_EXTRACTION_RETRY_MS = 250
-
-const JOB_EXTRACTION_SCRIPT = `(() => {
-  const normalize = (value) => String(value ?? '').replace(/\\s+/gu, ' ').trim();
-  const decode = (value) => {
-    const textarea = document.createElement('textarea');
-    textarea.innerHTML = String(value ?? '');
-    return normalize(textarea.textContent || '');
-  };
-  const htmlText = (value) => {
-    const source = String(value ?? '')
-      .replace(/<br\\s*\\/?\\s*>/giu, ' ')
-      .replace(/<\\/(?:address|article|aside|blockquote|div|h[1-6]|li|main|p|pre|section|td|tr)>/giu, ' ');
-    const parsed = new DOMParser().parseFromString(source, 'text/html');
-    parsed.querySelectorAll('script,style,noscript,template,[hidden],[aria-hidden="true"]').forEach(element => element.remove());
-    parsed.querySelectorAll('[style]').forEach(element => {
-      if (element.style.display === 'none' || element.style.visibility === 'hidden') element.remove();
-    });
-    return normalize(parsed.body?.textContent || '');
-  };
-  const text = (selector) => normalize(document.querySelector(selector)?.textContent || '');
-  const elementHtml = (selector) => htmlText(document.querySelector(selector)?.innerHTML || '');
-  const textWithin = (root, selector) => {
-    for (const element of root?.querySelectorAll(selector) || []) {
-      const value = normalize(element.textContent || '');
-      if (value) return value;
-    }
-    return '';
-  };
-  const elementHtmlWithin = (root, selector) => htmlText(root?.querySelector(selector)?.innerHTML || '');
-  const meta = (selector) => normalize(document.querySelector(selector)?.getAttribute('content') || '');
-  const visible = (element) => {
-    if (!element) return false;
-    const style = getComputedStyle(element);
-    return !element.hidden && style.display !== 'none' && style.visibility !== 'hidden';
-  };
-  const commonAncestor = (first, second) => {
-    if (!first || !second) return null;
-    const firstAncestors = new Set();
-    for (let node = first; node; node = node.parentElement) firstAncestors.add(node);
-    for (let node = second; node; node = node.parentElement) {
-      if (firstAncestors.has(node)) return node === document.body ? null : node;
-    }
-    return null;
-  };
-  const typeIsJobPosting = (value) => {
-    const types = Array.isArray(value) ? value : [value];
-    return types.some(type => String(type).toLowerCase().replace(/^.*[/#]/u, '') === 'jobposting');
-  };
-  const findPosting = (value) => {
-    if (Array.isArray(value)) {
-      for (const item of value) { const found = findPosting(item); if (found) return found; }
-      return null;
-    }
-    if (!value || typeof value !== 'object') return null;
-    if (typeIsJobPosting(value['@type'])) return value;
-    if (Array.isArray(value['@graph'])) {
-      const found = findPosting(value['@graph']);
-      if (found) return found;
-    }
-    return null;
-  };
-  let posting = null;
-  for (const script of document.querySelectorAll('script[type="application/ld+json"]')) {
-    try {
-      posting = findPosting(JSON.parse(script.textContent || ''));
-      if (posting) break;
-    } catch { /* Ignore malformed publisher metadata. */ }
-  }
-  const headings = [...document.querySelectorAll('h1, h2, h3, h4, h5, h6, [role="heading"]')]
-    .filter(visible);
-  const aboutJobHeading = headings
-    .filter(element => /^about the job$/iu.test(normalize(element.textContent || '')))
-    .at(-1) || null;
-  const detailTitleHeading = aboutJobHeading
-    ? headings.filter(element => element.tagName === 'H1'
-      && Boolean(element.compareDocumentPosition(aboutJobHeading) & Node.DOCUMENT_POSITION_FOLLOWING)).at(-1) || null
-    : null;
-  const detailRoot = commonAncestor(detailTitleHeading, aboutJobHeading);
-  const organization = posting?.hiringOrganization;
-  const greenhouseLogoCompany = normalize(document.querySelector('.job-post-container img.logo[alt]')?.getAttribute('alt') || '')
-    .replace(/\\s+logo$/iu, '');
-  const greenhouseTitleCompany = normalize(document.title).match(/\\sat\\s+(.+)$/iu)?.[1] || '';
-  const companySelector = '[data-testid*="company" i], [itemprop="hiringOrganization"], .company-name, .job-company';
-  const scopedCompanySelector = 'a[href^="/company/"], a[href*="wellfound.com/company/"], [data-testid="startup-header"] h2, [data-testid="startup-header"] h3, ' + companySelector;
-  const companyName = decode(typeof organization === 'string' ? organization : organization?.name)
-    || (detailRoot
-      ? textWithin(detailRoot, scopedCompanySelector)
-      : text(companySelector))
-    || greenhouseLogoCompany
-    || greenhouseTitleCompany
-    || meta('meta[property="og:site_name"], meta[name="application-name"]');
-  const title = decode(posting?.title)
-    || normalize(detailTitleHeading?.textContent || '')
-    || text('[data-testid*="job-title" i], [itemprop="title"], .job-title, h1')
-    || meta('meta[property="og:title"], meta[name="twitter:title"]');
-  const nearbyRenderedLocation = () => {
-    if (!title) return '';
-    const anchor = detailTitleHeading || headings
-      .filter(element => normalize(element.textContent || '') === title)
-      .at(-1);
-    if (!anchor) return '';
-    let scope = anchor.parentElement;
-    for (let depth = 0; scope && depth < 5; depth += 1, scope = scope.parentElement) {
-      if (detailRoot && !detailRoot.contains(scope)) break;
-      const rendered = normalize(scope.innerText || scope.textContent || '');
-      const titleIndex = rendered.lastIndexOf(title);
-      if (titleIndex < 0) continue;
-      const nearby = rendered.slice(titleIndex + title.length, titleIndex + title.length + 300).trim();
-      const match = nearby.match(/^(?:\\$[\\d,.]+[km]?\\s*[–—-]\\s*\\$[\\d,.]+[km]?\\s*\\|\\s*)?(Remote\\s*\\(\\s*[^)]{2,80}\\s*\\))(?=\\s*(?:\\|\\s*)?(?:\\d+\\s+years?\\s+of\\s+exp\\b|Full\\s+Time\\b|$))/iu);
-      if (match) return normalize(match[1]).replace(/\\(\\s+/u, '(').replace(/\\s+\\)/u, ')');
-    }
-    return '';
-  };
-  const addressText = (location) => {
-    if (typeof location === 'string') return decode(location);
-    if (!location || typeof location !== 'object') return '';
-    const address = location.address && typeof location.address === 'object' ? location.address : location;
-    const country = typeof address.addressCountry === 'object' ? address.addressCountry?.name : address.addressCountry;
-    const parts = [address.streetAddress, address.addressLocality, address.addressRegion, address.postalCode, country]
-      .map(decode).filter(Boolean);
-    return parts.length ? parts.join(', ') : decode(location.name);
-  };
-  const locations = Array.isArray(posting?.jobLocation) ? posting.jobLocation : [posting?.jobLocation];
-  let locationText = locations.map(addressText).filter(Boolean).join('; ');
-  const structuredLocationLength = locationText.length;
-  if (!locationText && posting?.jobLocationType) locationText = decode(posting.jobLocationType);
-  const locationSelector = '[data-testid*="job-location" i], [itemprop="jobLocation"], .job-location, .job__location, .location';
-  const locationSelectorText = detailRoot
-    ? textWithin(detailRoot, locationSelector)
-    : text(locationSelector);
-  if (!locationText) locationText = locationSelectorText;
-  const nearbyLocationText = nearbyRenderedLocation();
-  if (!locationText) locationText = nearbyLocationText;
-  const semanticDescription = htmlText(
-    aboutJobHeading?.nextElementSibling?.innerHTML
-      || aboutJobHeading?.nextElementSibling?.textContent
-      || ''
-  );
-  const descriptionSelector = '[data-testid*="job-description" i], [itemprop="description"], #job-description, .job-description, .job__description';
-  const descriptionText = htmlText(posting?.description)
-    || semanticDescription
-    || (detailRoot
-      ? elementHtmlWithin(detailRoot, descriptionSelector)
-      : elementHtml(descriptionSelector));
-  const ordinaryUrl = (value) => {
-    if (typeof value !== 'string' || !value.trim()) return '';
-    try {
-      const url = new URL(value, document.baseURI);
-      return (url.protocol === 'http:' || url.protocol === 'https:') ? url.href : '';
-    } catch { return ''; }
-  };
-  let applicationUrl = ordinaryUrl(posting?.applicationUrl || posting?.applyUrl);
-  if (!applicationUrl) {
-    const links = [...(detailRoot || document).querySelectorAll('a[href]')];
-    const apply = links.find(link => /\\bapply(?: now| for| here)?\\b/iu.test(normalize(link.textContent || '')))
-      || links.find(link => /(?:^|[/_-])apply(?:[/?#_-]|$)/iu.test(link.getAttribute('href') || ''));
-    applicationUrl = ordinaryUrl(apply?.getAttribute('href'));
-  }
-  return {
-    pageUrl: location.href,
-    companyName,
-    title,
-    locationText,
-    descriptionText,
-    applicationUrl,
-    diagnostics: {
-      readyState: document.readyState,
-      documentTitle: normalize(document.title).slice(0, 300),
-      bodyTextLength: normalize(document.body?.innerText || '').length,
-      h1Text: text('h1').slice(0, 300),
-      jobPostingFound: Boolean(posting),
-      headingCount: document.querySelectorAll('h1, h2, h3, [role="heading"]').length,
-      exactTitleHeadingCount: [...document.querySelectorAll('h1, h2, h3, [role="heading"]')]
-        .filter(element => normalize(element.textContent || '') === title).length,
-      structuredLocationLength,
-      jobLocationTypeLength: decode(posting?.jobLocationType).length,
-      locationSelectorTextLength: locationSelectorText.length,
-      nearbyLocationTextLength: nearbyLocationText.length,
-      companyLength: companyName.length,
-      titleLength: title.length,
-      locationLength: locationText.length,
-      descriptionLength: descriptionText.length,
-      applicationUrlLength: applicationUrl.length
-    }
-  };
-})()`
 
 export function remoteBrowserPreferences(): WebPreferences {
   return {
@@ -271,7 +81,10 @@ interface ManagedTab {
   state: BrowserTab
   view: WebContentsView
   targetEpoch: number
+  documentEpoch: number
   targets: Map<string, SemanticTarget>
+  snapshotTextOffset: number
+  snapshotTextLength: number
 }
 
 interface SemanticTargetFingerprint {
@@ -340,6 +153,15 @@ export class BrowserManager {
       activeTabId: this.#activeTabId,
       download: this.#download ? { ...this.#download } : null,
       notice: this.#notice
+    }
+  }
+
+  contextToken(tabId: string): { url: string, documentEpoch: number, loading: boolean } {
+    const tab = this.#requireTab(tabId)
+    return {
+      url: sanitizeBrowserUrlForPersistence(tab.view.webContents.getURL()),
+      documentEpoch: tab.documentEpoch,
+      loading: tab.state.loading
     }
   }
 
@@ -445,9 +267,12 @@ export class BrowserManager {
     this.#hasExplicitAction = true
     const tab = this.#requireTab(tabId)
     this.#invalidateTargets(tab)
+    this.#resetSnapshotText(tab)
     const url = normalizeBrowserInput(input)
+    if (url !== tab.state.url) tab.state.associatedJobId = null
     tab.state.error = null
     tab.state.crashed = false
+    this.#emit()
     await tab.view.webContents.loadURL(url).catch(() => undefined)
     return this.getState()
   }
@@ -456,6 +281,7 @@ export class BrowserManager {
     this.#hasExplicitAction = true
     const tab = this.#requireTab(tabId)
     this.#invalidateTargets(tab)
+    this.#resetSnapshotText(tab)
     const contents = tab.view.webContents
     if (contents.navigationHistory.canGoBack()) contents.navigationHistory.goBack()
     return this.getState()
@@ -465,6 +291,7 @@ export class BrowserManager {
     this.#hasExplicitAction = true
     const tab = this.#requireTab(tabId)
     this.#invalidateTargets(tab)
+    this.#resetSnapshotText(tab)
     const contents = tab.view.webContents
     if (contents.navigationHistory.canGoForward()) contents.navigationHistory.goForward()
     return this.getState()
@@ -474,6 +301,7 @@ export class BrowserManager {
     this.#hasExplicitAction = true
     const tab = this.#requireTab(tabId)
     this.#invalidateTargets(tab)
+    this.#resetSnapshotText(tab)
     tab.state.error = null
     tab.state.crashed = false
     tab.view.webContents.reload()
@@ -491,107 +319,6 @@ export class BrowserManager {
     return this.getState()
   }
 
-  async extractJob(tabId: string): Promise<BrowserJobListing> {
-    const tab = this.#requireTab(tabId)
-    const targetEpoch = tab.targetEpoch
-    const startedAt = Date.now()
-    const before = {
-      tabId,
-      stateUrl: tab.state.url,
-      stateLoading: tab.state.loading,
-      webContentsUrl: tab.view.webContents.getURL(),
-      webContentsLoading: typeof tab.view.webContents.isLoading === 'function'
-        ? tab.view.webContents.isLoading()
-        : null
-    }
-    const expectedRawUrl = before.webContentsUrl
-    const expectedUrl = ordinaryHttpUrl(expectedRawUrl)
-    let missing: string[] = []
-    for (let attempt = 1; attempt <= JOB_EXTRACTION_ATTEMPTS; attempt += 1) {
-      const rawUrlBeforeAttempt = tab.view.webContents.getURL()
-      if (
-        tab.targetEpoch !== targetEpoch
-        || rawUrlBeforeAttempt !== expectedRawUrl
-        || ordinaryHttpUrl(rawUrlBeforeAttempt) !== expectedUrl
-      ) {
-        throw new Error('The page changed while JobOS was reading it. Try saving again.')
-      }
-      let raw: unknown
-      try {
-        raw = await tab.view.webContents.executeJavaScript(JOB_EXTRACTION_SCRIPT, true) as unknown
-      } catch (error) {
-        const rawUrlAfterError = tab.view.webContents.getURL()
-        if (
-          tab.targetEpoch !== targetEpoch
-          || rawUrlAfterError !== expectedRawUrl
-          || ordinaryHttpUrl(rawUrlAfterError) !== expectedUrl
-        ) {
-          throw new Error('The page changed while JobOS was reading it. Try saving again.')
-        }
-        throw error
-      }
-      const value = raw && typeof raw === 'object' ? raw as Record<string, unknown> : {}
-      const activeUrl = ordinaryHttpUrl(value.pageUrl)
-      const currentRawUrl = tab.view.webContents.getURL()
-      const currentUrl = ordinaryHttpUrl(currentRawUrl)
-      if (process.env.JOBOS_EXTRACTION_DIAGNOSTICS === '1') {
-        console.info('[JobOS extraction diagnostic]', JSON.stringify({
-          attempt,
-          elapsedMs: Date.now() - startedAt,
-          before,
-          after: {
-            stateUrl: tab.state.url,
-            stateLoading: tab.state.loading,
-            webContentsUrl: tab.view.webContents.getURL(),
-            webContentsLoading: typeof tab.view.webContents.isLoading === 'function'
-              ? tab.view.webContents.isLoading()
-              : null
-          },
-          pageUrl: activeUrl,
-          diagnostics: value.diagnostics ?? null
-        }))
-      }
-      if (
-        tab.targetEpoch !== targetEpoch
-        || currentRawUrl !== expectedRawUrl
-        || currentUrl !== expectedUrl
-        || (activeUrl && currentUrl && activeUrl !== currentUrl)
-        || (expectedUrl && currentUrl && expectedUrl !== currentUrl)
-        || (expectedUrl && activeUrl && expectedUrl !== activeUrl)
-      ) {
-        throw new Error('The page changed while JobOS was reading it. Try saving again.')
-      }
-      const companyName = boundedText(value.companyName, 300)
-      const title = boundedText(value.title, 500)
-      const locationText = boundedText(value.locationText, 1_000)
-      const descriptionText = boundedText(value.descriptionText, 100_000)
-      const explicitApplicationUrl = ordinaryHttpUrl(value.applicationUrl)
-      missing = [
-        companyName ? null : 'company',
-        title ? null : 'role',
-        locationText ? null : 'location',
-        descriptionText ? null : 'description',
-        activeUrl ? null : 'URL'
-      ].filter((field): field is string => field !== null)
-      if (!missing.length) {
-        return {
-          companyName,
-          title,
-          canonicalUrl: activeUrl,
-          locationText,
-          descriptionText,
-          applicationUrl: explicitApplicationUrl || activeUrl
-        }
-      }
-      if (!expectedUrl || attempt === JOB_EXTRACTION_ATTEMPTS) break
-      await wait(JOB_EXTRACTION_RETRY_MS)
-    }
-    const fields = missing.length === 1
-      ? missing[0]
-      : `${missing.slice(0, -1).join(', ')}${missing.length > 2 ? ',' : ''} and ${missing.at(-1)}`
-    throw new Error(`Could not extract a complete job listing; missing ${fields}.`)
-  }
-
   async snapshot(tabId: string): Promise<BrowserSemanticSnapshot> {
     const tab = this.#requireTab(tabId)
     this.#invalidateTargets(tab)
@@ -605,19 +332,27 @@ export class BrowserManager {
       };
       const candidates = [...document.querySelectorAll(
         'a,button,input,textarea,select,[role="button"],[role="link"],[contenteditable="true"],[tabindex]'
-      )].slice(0, 100);
+      )].filter(visible).slice(0, 100);
       const elements = candidates.map((element, index) => {
         if (!visible(element)) return null;
         const name = (element.getAttribute('aria-label') || element.getAttribute('title')
           || element.innerText || element.placeholder || '').trim().slice(0, 200);
         const type = (element.getAttribute('type') || ('type' in element ? element.type : ''))
           .toLowerCase().slice(0, 40);
+        const href = element.tagName === 'A' ? String(element.href || '').slice(0, 8192) : '';
         return { index, role: (element.getAttribute('role') || element.tagName).toLowerCase().slice(0, 40),
-          name, disabled: Boolean(element.disabled || element.getAttribute('aria-disabled') === 'true'), type };
+          name, disabled: Boolean(element.disabled || element.getAttribute('aria-disabled') === 'true'), type, href };
       }).filter(Boolean);
-      return { text: (document.body?.innerText || '').trim().slice(0, 5000), elements };
+      const pageText = (document.body?.innerText || '').trim();
+      const viewportHeight = Math.max(1, window.innerHeight);
+      const scrollHeight = Math.max(viewportHeight, document.documentElement.scrollHeight, document.body?.scrollHeight || 0);
+      const textStart = Math.min(${tab.snapshotTextOffset}, Math.max(0, pageText.length - 1));
+      return { text: pageText.slice(textStart, textStart + 5000), textStart,
+        textLength: pageText.length, scrollY: window.scrollY, scrollHeight, viewportHeight, elements };
     })()`, true) as unknown
     const value = raw && typeof raw === 'object' ? raw as Record<string, unknown> : {}
+    tab.snapshotTextOffset = boundedNonNegativeInteger(value.textStart)
+    tab.snapshotTextLength = boundedNonNegativeInteger(value.textLength)
     const targets = Array.isArray(value.elements)
       ? value.elements.slice(0, 100).flatMap(item => {
           if (!item || typeof item !== 'object') return []
@@ -632,7 +367,10 @@ export class BrowserManager {
           return [{
             targetId: `t_${targetPrefix}_${Number(candidate.index) + 1}`,
             index: Number(candidate.index),
-            fingerprint
+            fingerprint,
+            href: typeof candidate.href === 'string' && isOrdinaryWebUrl(candidate.href)
+              ? sanitizeBrowserUrlForPersistence(candidate.href)
+              : null
           }]
         })
       : []
@@ -646,7 +384,8 @@ export class BrowserManager {
       targetId: target.targetId,
       role: target.fingerprint.role,
       name: target.fingerprint.name,
-      disabled: target.fingerprint.disabled
+      disabled: target.fingerprint.disabled,
+      href: target.href
     }))
     const state = this.getState().tabs.find(candidate => candidate.tabId === tabId)
     return {
@@ -654,6 +393,11 @@ export class BrowserManager {
       url: state?.url ?? 'about:blank',
       title: state?.title ?? 'Untitled',
       text: typeof value.text === 'string' ? value.text.slice(0, 5000) : '',
+      textStart: boundedNonNegativeInteger(value.textStart),
+      textLength: boundedNonNegativeInteger(value.textLength),
+      scrollY: boundedNonNegativeInteger(value.scrollY),
+      scrollHeight: boundedNonNegativeInteger(value.scrollHeight),
+      viewportHeight: boundedNonNegativeInteger(value.viewportHeight),
       elements
     }
   }
@@ -672,7 +416,7 @@ export class BrowserManager {
       };
       const candidates = [...document.querySelectorAll(
         'a,button,input,textarea,select,[role="button"],[role="link"],[contenteditable="true"],[tabindex]'
-      )].slice(0, 100);
+      )].filter(visible).slice(0, 100);
       const element = candidates[${target.index}];
       if (!element || !visible(element)) return { ok: false, code: 'target_not_found' };
       const name = (element.getAttribute('aria-label') || element.getAttribute('title')
@@ -704,7 +448,7 @@ export class BrowserManager {
       };
       const candidates = [...document.querySelectorAll(
         'a,button,input,textarea,select,[role="button"],[role="link"],[contenteditable="true"],[tabindex]'
-      )].slice(0, 100);
+      )].filter(visible).slice(0, 100);
       const element = candidates[${target.index}];
       if (!element || !visible(element) || (!('value' in element) && !element.isContentEditable))
         return { ok: false, code: 'target_not_found' };
@@ -729,6 +473,9 @@ export class BrowserManager {
     const tab = this.#requireTab(tabId)
     if (!Number.isInteger(amount) || amount < 1 || amount > 2000) throw new Error('Invalid scroll amount')
     const delta = direction === 'up' ? -amount : amount
+    tab.snapshotTextOffset = direction === 'up'
+      ? Math.max(0, tab.snapshotTextOffset - 4_000)
+      : Math.min(Math.max(0, tab.snapshotTextLength - 1), tab.snapshotTextOffset + 4_000)
     await tab.view.webContents.executeJavaScript(
       `(() => { window.scrollBy({ top: ${delta}, behavior: 'auto' }); return { ok: true }; })()`,
       true
@@ -784,7 +531,10 @@ export class BrowserManager {
       crashed: false,
       blockedUrl: null
     }
-    const managed = { view, state, targetEpoch: 0, targets: new Map<string, SemanticTarget>() }
+    const managed = {
+      view, state, targetEpoch: 0, documentEpoch: 0, targets: new Map<string, SemanticTarget>(),
+      snapshotTextOffset: 0, snapshotTextLength: 0
+    }
     this.#tabs.set(state.tabId, managed)
     this.#order.push(state.tabId)
     this.#wireTab(managed)
@@ -796,15 +546,18 @@ export class BrowserManager {
     const refresh = () => {
       if (contents.isDestroyed()) return
       const currentUrl = contents.getURL()
-      if (isOrdinaryWebUrl(currentUrl)) tab.state.url = currentUrl
+      if (isOrdinaryWebUrl(currentUrl) && currentUrl !== tab.state.url) {
+        tab.state.url = currentUrl
+        tab.state.associatedJobId = null
+      }
       tab.state.canGoBack = contents.navigationHistory.canGoBack()
       tab.state.canGoForward = contents.navigationHistory.canGoForward()
       this.#emit()
     }
     contents.on('did-start-loading', () => { this.#invalidateTargets(tab); tab.state.loading = true; tab.state.error = null; tab.state.blockedUrl = null; this.#notice = null; refresh() })
     contents.on('did-stop-loading', () => { tab.state.loading = false; refresh() })
-    contents.on('did-navigate', () => { this.#invalidateTargets(tab); refresh() })
-    contents.on('did-navigate-in-page', () => { this.#invalidateTargets(tab); refresh() })
+    contents.on('did-navigate', () => { tab.documentEpoch += 1; this.#invalidateTargets(tab); this.#resetSnapshotText(tab); refresh() })
+    contents.on('did-navigate-in-page', () => { tab.documentEpoch += 1; this.#invalidateTargets(tab); this.#resetSnapshotText(tab); refresh() })
     contents.on('page-title-updated', (_event, title) => {
       const nextTitle = title || 'Untitled'
       const safeTitle = sanitizeBrowserTitleForPersistence(nextTitle)
@@ -938,6 +691,17 @@ export class BrowserManager {
     tab.targetEpoch += 1
     tab.targets.clear()
   }
+
+  #resetSnapshotText(tab: ManagedTab): void {
+    tab.snapshotTextOffset = 0
+    tab.snapshotTextLength = 0
+  }
+}
+
+function boundedNonNegativeInteger(value: unknown): number {
+  return typeof value === 'number' && Number.isFinite(value)
+    ? Math.min(1_000_000_000, Math.max(0, Math.floor(value)))
+    : 0
 }
 
 export function safeBlockedExternalUrl(value: string): string | null {
@@ -948,19 +712,5 @@ export function safeBlockedExternalUrl(value: string): string | null {
     return sanitized.length <= 2048 ? sanitized : null
   } catch {
     return null
-  }
-}
-
-function boundedText(value: unknown, limit: number): string {
-  return (typeof value === 'string' ? value : '').replace(/\s+/gu, ' ').trim().slice(0, limit)
-}
-
-function ordinaryHttpUrl(value: unknown): string {
-  if (typeof value !== 'string' || value.length > 2_083) return ''
-  try {
-    const parsed = new URL(value)
-    return parsed.protocol === 'http:' || parsed.protocol === 'https:' ? parsed.toString() : ''
-  } catch {
-    return ''
   }
 }

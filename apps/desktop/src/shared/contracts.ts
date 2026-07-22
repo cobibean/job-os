@@ -28,6 +28,21 @@ export interface JobStatusMutationResult extends JobMutationResult {
   job: JobListItem
 }
 
+export interface BrowserJobExtraction {
+  companyName: string
+  title: string
+  canonicalUrl: string
+  locationText: string
+  descriptionText: string
+  applicationUrl: string
+}
+
+export interface BrowserJobSaveResult extends JobMutationResult {
+  created: boolean
+  associated: boolean
+  job: JobListItem
+}
+
 export interface JobEvent {
   eventId: number
   eventType: string
@@ -78,6 +93,7 @@ export interface BrowserSemanticElement {
   role: string
   name: string
   disabled: boolean
+  href: string | null
 }
 
 export interface BrowserSemanticSnapshot {
@@ -85,23 +101,14 @@ export interface BrowserSemanticSnapshot {
   url: string
   title: string
   text: string
+  textStart: number
+  textLength: number
+  scrollY: number
+  scrollHeight: number
+  viewportHeight: number
   elements: BrowserSemanticElement[]
 }
 
-export interface BrowserJobListing {
-  companyName: string
-  title: string
-  canonicalUrl: string
-  locationText: string
-  descriptionText: string
-  applicationUrl: string
-}
-
-export interface BrowserJobSaveResult {
-  eventId: number
-  created: boolean
-  job: JobListItem
-}
 
 export interface BrowserRestoreState {
   tabs: BrowserTabMetadata[]
@@ -237,12 +244,18 @@ export interface JobOsRendererBridge {
   }
   jobs: {
     getState: () => Promise<JobWorkspaceSnapshot>
-    addFromBrowser: (listing: BrowserJobListing) => Promise<BrowserJobSaveResult>
+
     list: (sort: JobSortMode, query?: string, statusGroup?: string) => Promise<JobListItem[]>
     select: (jobId: string) => Promise<JobMutationResult>
     reorder: (jobIds: string[]) => Promise<JobMutationResult>
     setSort: (sort: JobSortMode) => Promise<JobMutationResult>
     updateStatus: (jobId: string, status: JobStatus) => Promise<JobStatusMutationResult>
+    saveFromBrowser: (
+      tabId: string,
+      expectedUrl: string,
+      extraction: BrowserJobExtraction,
+      idempotencyKey: string
+    ) => Promise<BrowserJobSaveResult>
     subscribe: (listener: (event: JobEvent) => void) => () => void
   }
   workspace: {
@@ -261,7 +274,7 @@ export interface JobOsRendererBridge {
     forward: (tabId: string) => Promise<BrowserState>
     reload: (tabId: string) => Promise<BrowserState>
     stop: (tabId: string) => Promise<BrowserState>
-    extractJob: (tabId: string) => Promise<BrowserJobListing>
+
     associate: (tabId: string, jobId: string | null) => Promise<BrowserState>
     copyBlockedUrl: (tabId: string) => Promise<BrowserState>
     setBounds: (bounds: BrowserBounds) => Promise<void>

@@ -5,11 +5,12 @@ import { fileURLToPath } from 'node:url'
 import { app, BrowserWindow, clipboard, dialog, ipcMain, session, shell, WebContentsView } from 'electron'
 import type { IpcMainInvokeEvent } from 'electron'
 
-import type { BrowserBounds, BrowserJobListing, JobSortMode, JobStatus, WorkspaceSnapshot } from '../shared/contracts.js'
+import type { BrowserBounds, JobSortMode, JobStatus, WorkspaceSnapshot } from '../shared/contracts.js'
 import { createMainAgentClient, startAgentEventStream } from './agent.js'
 import { registerAgentIpc } from './agentIpc.js'
 import { createApiLifecycle } from './apiLifecycle.js'
 import { BROWSER_PARTITION, BrowserManager, remoteBrowserPreferences } from './browser.js'
+import { canonicalListingUrl, safeApplicationUrl, validatedBrowserJobExtraction } from './browserJobExtraction.js'
 import { registerBrowserRestoreHandler } from './browserIpc.js'
 import { startDesktopCapabilityClient } from './capabilityClient.js'
 import { initializeDesktopRuntime } from './desktopRuntime.js'
@@ -95,23 +96,6 @@ function registerJobsInterface(): void {
   const statuses = new Set<JobStatus>(['discovered', 'scored', 'reviewed', 'shortlisted', 'apply_now', 'maybe', 'stretch', 'skipped', 'applied', 'interviewing', 'closed', 'archived'])
 
   ipcMain.handle('jobos:jobs:get-state', event => trusted(event).getState())
-  ipcMain.handle('jobos:jobs:add-from-browser', (event, listing: BrowserJobListing) => {
-    const limits: Record<keyof BrowserJobListing, number> = {
-      companyName: 300,
-      title: 500,
-      canonicalUrl: 2_083,
-      locationText: 1_000,
-      descriptionText: 100_000,
-      applicationUrl: 2_083
-    }
-    if (!listing || typeof listing !== 'object' || Object.entries(limits).some(([field, limit]) => {
-      const value = listing[field as keyof BrowserJobListing]
-      return typeof value !== 'string' || !value.trim() || value.length > limit
-    })) {
-      throw new Error('Invalid browser job listing')
-    }
-    return trusted(event).addFromBrowser(listing)
-  })
   ipcMain.handle('jobos:jobs:list', (event, sort: JobSortMode, query?: string, statusGroup?: string) => {
     if (!sortModes.has(sort)) throw new Error('Invalid job ordering')
     return trusted(event).list(sort, query, statusGroup)
@@ -133,6 +117,45 @@ function registerJobsInterface(): void {
   ipcMain.handle('jobos:jobs:update-status', (event, jobId: string, status: JobStatus) => {
     if (typeof jobId !== 'string' || !jobId || !statuses.has(status)) throw new Error('Invalid job status change')
     return trusted(event).updateStatus(jobId, status)
+  })
+  ipcMain.handle('jobos:jobs:save-from-browser', async (
+    event,
+    rawTabId: unknown,
+    expectedUrl: unknown,
+    rawExtraction: unknown,
+    idempotencyKey: unknown
+  ) => {
+    const client = trusted(event)
+    if (!browserManager) throw new Error('Browser surface unavailable')
+    if (typeof rawTabId !== 'string' || !rawTabId || rawTabId.length > 128) throw new Error('Invalid browser tab')
+    if (typeof expectedUrl !== 'string' || !expectedUrl || expectedUrl.length > 8192) throw new Error('Invalid browser address')
+    if (typeof idempotencyKey !== 'string' || !idempotencyKey || idempotencyKey.length > 128) throw new Error('Invalid idempotency key')
+    const extraction = validatedBrowserJobExtraction(rawExtraction)
+    const before = browserManager.getState()
+    const sourceTab = before.tabs.find(tab => tab.tabId === rawTabId)
+    const sourceContext = browserManager.contextToken(rawTabId)
+    if (before.activeTabId !== rawTabId || sourceTab?.url !== expectedUrl
+      || sourceContext.url !== expectedUrl || sourceContext.loading) {
+      throw new Error('The browser listing changed before saving finished. Retry on the intended listing.')
+    }
+    if (sourceTab.associatedJobId) throw new Error('This browser listing is already associated with a job')
+    const canonicalUrl = canonicalListingUrl(expectedUrl, extraction.canonicalUrl)
+    const result = await client.createFromBrowser({
+      ...extraction,
+      canonicalUrl,
+      applicationUrl: safeApplicationUrl(extraction.applicationUrl)
+    }, idempotencyKey)
+    const after = browserManager.getState()
+    const currentTab = after.tabs.find(tab => tab.tabId === rawTabId)
+    const currentContext = browserManager.contextToken(rawTabId)
+    if (after.activeTabId !== rawTabId || currentTab?.url !== expectedUrl
+      || currentContext.url !== expectedUrl || currentContext.loading
+      || currentContext.documentEpoch !== sourceContext.documentEpoch
+      || currentTab.associatedJobId !== sourceTab.associatedJobId) {
+      return result
+    }
+    browserManager.associate(rawTabId, result.job.jobId)
+    return { ...result, associated: true }
   })
 }
 
@@ -184,7 +207,7 @@ function registerBrowserInterface(): void {
   ipcMain.handle('jobos:browser:forward', (event, id: string) => trusted(event).forward(tabId(id)))
   ipcMain.handle('jobos:browser:reload', (event, id: string) => trusted(event).reload(tabId(id)))
   ipcMain.handle('jobos:browser:stop', (event, id: string) => trusted(event).stop(tabId(id)))
-  ipcMain.handle('jobos:browser:extract-job', (event, id: string) => trusted(event).extractJob(tabId(id)))
+
   ipcMain.handle('jobos:browser:associate', (event, id: string, jobId: string | null) => {
     if (jobId !== null && (typeof jobId !== 'string' || jobId.length > 512)) throw new Error('Invalid job association')
     return trusted(event).associate(tabId(id), jobId)

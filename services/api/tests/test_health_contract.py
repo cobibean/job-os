@@ -7,6 +7,7 @@ def test_health_reports_ready_phase_six_api_with_agent_connectivity_separate(tmp
     app = create_app(
         Settings(
             device_token="test-device-token",
+            mcp_token="test-mcp-trusted-token",
             state_db_path=tmp_path / "jobos.db",
         )
     )
@@ -19,7 +20,7 @@ def test_health_reports_ready_phase_six_api_with_agent_connectivity_separate(tmp
         "status": "ready",
         "service": "jobos-api",
         "version": "0.1.0",
-        "state_schema": 8,
+        "state_schema": 10,
         "agent_connection": "offline",
     }
 
@@ -28,6 +29,7 @@ def test_device_session_requires_the_runtime_credential(tmp_path):
     app = create_app(
         Settings(
             device_token="test-device-token",
+            mcp_token="test-mcp-trusted-token",
             state_db_path=tmp_path / "jobos.db",
         )
     )
@@ -53,6 +55,7 @@ def test_version_and_openapi_describe_the_shared_workspace_contract(tmp_path):
     app = create_app(
         Settings(
             device_token="test-device-token",
+            mcp_token="test-mcp-trusted-token",
             state_db_path=tmp_path / "jobos.db",
         )
     )

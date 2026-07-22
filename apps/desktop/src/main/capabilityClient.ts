@@ -1,7 +1,7 @@
 import type { BrowserSemanticSnapshot, BrowserState } from '../shared/contracts.js'
 
 const COMMANDS = new Set([
-  'tabs.inspect', 'tab.create', 'tab.select', 'tab.close', 'tabs.reorder',
+  'tabs.inspect', 'tab.create', 'tab.select', 'tab.associate', 'tab.close', 'tabs.reorder',
   'tab.navigate', 'tab.back', 'tab.forward', 'tab.reload', 'tab.stop',
   'page.snapshot', 'element.click', 'element.type', 'page.scroll'
 ])
@@ -21,6 +21,7 @@ interface BrowserCapabilities {
   inspect: () => BrowserState
   create?: (url?: string, associatedJobId?: string | null) => Promise<BrowserState>
   select?: (tabId: string) => BrowserState
+  associate?: (tabId: string, jobId: string | null) => BrowserState
   close?: (tabId: string) => Promise<BrowserState>
   reorder?: (tabIds: string[]) => BrowserState
   navigate?: (tabId: string, url: string) => Promise<BrowserState>
@@ -126,6 +127,10 @@ export async function dispatchCapabilityCommand(
         break
       }
       case 'tab.select': data = safeState(requiredMethod(manager, 'select')(tabId as string)); break
+      case 'tab.associate': {
+        if (typeof args.job_id !== 'string' || !args.job_id || args.job_id.length > 512) throw new TypeError()
+        data = safeState(requiredMethod(manager, 'associate')(tabId as string, args.job_id)); break
+      }
       case 'tab.close': data = safeState(await requiredMethod(manager, 'close')(tabId as string)); break
       case 'tabs.reorder': {
         if (!Array.isArray(args.tab_ids) || args.tab_ids.length < 1
@@ -144,9 +149,12 @@ export async function dispatchCapabilityCommand(
       case 'page.snapshot': {
         const snapshot = await requiredMethod(manager, 'snapshot')(tabId as string)
         data = { tab_id: snapshot.tabId, url: snapshot.url, title: snapshot.title,
-          text: snapshot.text.slice(0, 5000), elements: snapshot.elements.slice(0, 100).map(element => ({
+          text: snapshot.text.slice(0, 5000), text_start: snapshot.textStart,
+          text_length: snapshot.textLength, scroll_y: snapshot.scrollY,
+          scroll_height: snapshot.scrollHeight, viewport_height: snapshot.viewportHeight,
+          elements: snapshot.elements.slice(0, 100).map(element => ({
             target_id: element.targetId, role: element.role, name: element.name,
-            disabled: element.disabled
+            disabled: element.disabled, href: element.href
           })) }
         break
       }

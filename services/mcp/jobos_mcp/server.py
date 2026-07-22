@@ -2,11 +2,36 @@ from __future__ import annotations
 
 import asyncio
 import os
+import subprocess
+import sys
 from typing import Any
 
 from mcp.server.fastmcp import FastMCP
 
 from jobos_mcp.jobs import JobOsMcpClient
+
+
+def local_mcp_token() -> str:
+    configured = os.environ.get("JOBOS_MCP_TOKEN", "")
+    if configured:
+        return configured
+    if sys.platform == "darwin":
+        account = os.environ.get("JOBOS_DEVICE_ID", "primary-device")
+        for arguments in (
+            ["-s", "com.cobibean.jobos.mcp-token", "-a", account],
+            ["-s", "com.cobibean.jobos.mcp-token"],
+        ):
+            result = subprocess.run(
+                ["security", "find-generic-password", "-w", *arguments],
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+            token = result.stdout.strip()
+            if result.returncode == 0 and token:
+                return token
+    raise RuntimeError("JOBOS_MCP_TOKEN is required")
 
 
 def create_server(client: JobOsMcpClient) -> FastMCP:
@@ -34,6 +59,27 @@ def create_server(client: JobOsMcpClient) -> FastMCP:
     async def job_inspect(job_id: str, idempotency_key: str | None = None) -> dict[str, Any]:
         """Inspect one normalized JobOS job record."""
         return await client.inspect_job(job_id, idempotency_key=idempotency_key)
+
+    @server.tool(name="job_create_from_browser", structured_output=True)
+    async def job_create_from_browser(
+        company_name: str,
+        title: str,
+        canonical_url: str,
+        location_text: str,
+        description_text: str,
+        application_url: str,
+        idempotency_key: str | None = None,
+    ) -> dict[str, Any]:
+        """Save one listing inspected from the live JobOS browser through canonical ingest."""
+        return await client.create_job(
+            company_name=company_name,
+            title=title,
+            canonical_url=canonical_url,
+            location_text=location_text,
+            description_text=description_text,
+            application_url=application_url,
+            idempotency_key=idempotency_key,
+        )
 
     @server.tool(name="job_select", structured_output=True)
     async def job_select(job_id: str, idempotency_key: str | None = None) -> dict[str, Any]:
@@ -132,6 +178,15 @@ def create_server(client: JobOsMcpClient) -> FastMCP:
     async def browser_tab_select(tab_id: str, idempotency_key: str | None = None) -> dict[str, Any]:
         """Select a live browser tab."""
         return await browser("tab.select", {"tab_id": tab_id}, idempotency_key)
+
+    @server.tool(name="browser_tab_associate", structured_output=True)
+    async def browser_tab_associate(
+        tab_id: str, job_id: str, idempotency_key: str | None = None
+    ) -> dict[str, Any]:
+        """Link a live browser tab to the canonical JobOS job created from it."""
+        return await browser(
+            "tab.associate", {"tab_id": tab_id, "job_id": job_id}, idempotency_key
+        )
 
     @server.tool(name="browser_tab_close", structured_output=True)
     async def browser_tab_close(tab_id: str, idempotency_key: str | None = None) -> dict[str, Any]:
@@ -235,7 +290,8 @@ def main() -> None:
     device_token = os.environ.get("JOBOS_DEVICE_TOKEN", "")
     if not device_token:
         raise RuntimeError("JOBOS_DEVICE_TOKEN is required")
-    client = JobOsMcpClient(base_url=base_url, device_token=device_token)
+    mcp_token = local_mcp_token()
+    client = JobOsMcpClient(base_url=base_url, device_token=device_token, mcp_token=mcp_token)
     try:
         create_server(client).run(transport="stdio")
     finally:

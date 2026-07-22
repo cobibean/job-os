@@ -12,6 +12,7 @@ def main() -> None:
     app = create_app(
         Settings(
             device_token="contract-generation-only",
+            mcp_token="contract-mcp-generation-only",
             state_db_path=ROOT / ".contract-generation.db",
         )
     )

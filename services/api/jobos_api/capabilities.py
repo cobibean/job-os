@@ -17,6 +17,7 @@ BrowserCommandName = Literal[
     "tabs.inspect",
     "tab.create",
     "tab.select",
+    "tab.associate",
     "tab.close",
     "tabs.reorder",
     "tab.navigate",
@@ -34,6 +35,7 @@ COMMANDS = {
     "tabs.inspect",
     "tab.create",
     "tab.select",
+    "tab.associate",
     "tab.close",
     "tabs.reorder",
     "tab.navigate",
@@ -82,6 +84,7 @@ class BrowserCommandRequest(BaseModel):
             "tabs.inspect": set(),
             "tab.create": {"url", "associated_job_id"},
             "tab.select": {"tab_id"},
+            "tab.associate": {"tab_id", "job_id"},
             "tab.close": {"tab_id"},
             "tabs.reorder": {"tab_ids"},
             "tab.navigate": {"tab_id", "url"},
@@ -143,6 +146,10 @@ class BrowserCommandRequest(BaseModel):
             if job_id is not None and (
                 not isinstance(job_id, str) or not job_id or len(job_id) > 512
             ):
+                raise ValueError("Invalid browser command arguments")
+        if command == "tab.associate":
+            job_id = args.get("job_id")
+            if not isinstance(job_id, str) or not job_id or len(job_id) > 512:
                 raise ValueError("Invalid browser command arguments")
         return dict(args)
 
@@ -226,23 +233,26 @@ def sanitize_browser_result_data(
 class CapabilityBroker:
     def __init__(self, *, lease_seconds: float = 15.0) -> None:
         self._lease_seconds = lease_seconds
-        self._desktop: _Desktop | None = None
-        self._pending: dict[str, asyncio.Future[BrowserCommandResponse]] = {}
+        self._desktops: dict[str, _Desktop] = {}
+        self._pending: dict[
+            str, tuple[asyncio.Future[BrowserCommandResponse], CapabilitySocket]
+        ] = {}
         self._lock = asyncio.Lock()
 
     async def register(self, socket: CapabilitySocket, device_id: str) -> bool:
         async with self._lock:
-            if self._desktop and monotonic() - self._desktop.lease_at <= self._lease_seconds:
+            existing = self._desktops.get(device_id)
+            if existing and monotonic() - existing.lease_at <= self._lease_seconds:
                 return False
-            self._desktop = _Desktop(socket, device_id, monotonic())
+            self._desktops[device_id] = _Desktop(socket, device_id, monotonic())
             return True
 
     async def presence(self, device_id: str) -> DesktopCapabilityPresence:
         async with self._lock:
-            desktop = self._desktop
+            desktop = self._desktops.get(device_id)
             remaining = (
                 max(0.0, self._lease_seconds - (monotonic() - desktop.lease_at))
-                if desktop and desktop.device_id == device_id
+                if desktop
                 else 0.0
             )
             return DesktopCapabilityPresence(
@@ -253,31 +263,59 @@ class CapabilityBroker:
 
     async def heartbeat(self, socket: CapabilitySocket) -> None:
         async with self._lock:
-            if self._desktop and self._desktop.socket is socket:
-                self._desktop.lease_at = monotonic()
+            for desktop in self._desktops.values():
+                if desktop.socket is socket:
+                    desktop.lease_at = monotonic()
+                    return
 
     async def unregister(self, socket: CapabilitySocket) -> None:
         async with self._lock:
-            if not self._desktop or self._desktop.socket is not socket:
+            device_id = next(
+                (
+                    device_id
+                    for device_id, desktop in self._desktops.items()
+                    if desktop.socket is socket
+                ),
+                None,
+            )
+            if device_id is None:
                 return
-            self._desktop = None
-            pending = list(self._pending.values())
-            self._pending.clear()
+            self._desktops.pop(device_id, None)
+            pending_ids = [
+                command_id
+                for command_id, (_, pending_socket) in self._pending.items()
+                if pending_socket is socket
+            ]
+            pending = [self._pending.pop(command_id)[0] for command_id in pending_ids]
         for future in pending:
             if not future.done():
                 future.set_exception(DesktopUnavailable())
 
-    async def execute(self, request: BrowserCommandRequest) -> BrowserCommandResponse:
+    async def execute(
+        self, request: BrowserCommandRequest, *, device_id: str | None = None
+    ) -> BrowserCommandResponse:
         arguments = request.validated_arguments()
         command_id = f"cmd_{secrets.token_urlsafe(18)}"
         loop = asyncio.get_running_loop()
         future: asyncio.Future[BrowserCommandResponse] = loop.create_future()
         async with self._lock:
-            desktop = self._desktop
-            if not desktop or monotonic() - desktop.lease_at > self._lease_seconds:
-                self._desktop = None
+            now = monotonic()
+            expired = [
+                candidate_id
+                for candidate_id, candidate in self._desktops.items()
+                if now - candidate.lease_at > self._lease_seconds
+            ]
+            for candidate_id in expired:
+                self._desktops.pop(candidate_id, None)
+            if device_id is not None:
+                desktop = self._desktops.get(device_id)
+            elif len(self._desktops) == 1:
+                desktop = next(iter(self._desktops.values()))
+            else:
+                desktop = None
+            if desktop is None:
                 raise DesktopUnavailable()
-            self._pending[command_id] = future
+            self._pending[command_id] = (future, desktop.socket)
             deadline = datetime.now(UTC) + timedelta(milliseconds=request.timeout_ms)
             payload = {
                 "type": "command",
@@ -312,11 +350,12 @@ class CapabilityBroker:
 
     async def resolve(self, socket: CapabilitySocket, payload: dict[str, Any]) -> None:
         async with self._lock:
-            if not self._desktop or self._desktop.socket is not socket:
-                return
             command_id = payload.get("command_id")
-            future = self._pending.get(command_id) if isinstance(command_id, str) else None
-        if not future or future.done():
+            pending = self._pending.get(command_id) if isinstance(command_id, str) else None
+            if not pending or pending[1] is not socket:
+                return
+            future = pending[0]
+        if future.done():
             return
         try:
             state = payload.get("state")

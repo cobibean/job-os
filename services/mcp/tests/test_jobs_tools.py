@@ -21,11 +21,21 @@ async def test_job_tools_use_only_the_authenticated_jobos_http_contract():
     client = JobOsMcpClient(
         base_url="http://jobos.test",
         device_token="test-device-token",
+        mcp_token="test-mcp-trusted-token",
         transport=httpx.MockTransport(handler),
     )
 
     await client.list_jobs(sort="status", query="builder")
     await client.inspect_job("job-1")
+    await client.create_job(
+        company_name="Northstar Labs",
+        title="Applied AI Product Builder",
+        canonical_url="https://jobs.example.com/northstar/applied-ai-builder",
+        location_text="United States · Remote",
+        description_text="Build useful agent workflows.",
+        application_url="https://jobs.example.com/northstar/applied-ai-builder/apply",
+        idempotency_key="create-1",
+    )
     await client.select_job("job-1", idempotency_key="select-1")
     await client.reorder_jobs(["job-1", "job-2"], idempotency_key="order-1")
     await client.update_status(
@@ -36,6 +46,7 @@ async def test_job_tools_use_only_the_authenticated_jobos_http_contract():
     assert [(request.method, request.url.path) for request in requests] == [
         ("GET", "/v1/jobs"),
         ("GET", "/v1/jobs/job-1"),
+        ("POST", "/v1/jobs"),
         ("PUT", "/v1/workspace/jobs/selection"),
         ("PUT", "/v1/jobs/order"),
         ("PUT", "/v1/jobs/job-1/status"),
@@ -44,11 +55,21 @@ async def test_job_tools_use_only_the_authenticated_jobos_http_contract():
         request.headers["authorization"] == "Bearer test-device-token" for request in requests
     )
     assert json.loads(requests[2].content) == {
+        "company_name": "Northstar Labs",
+        "title": "Applied AI Product Builder",
+        "canonical_url": "https://jobs.example.com/northstar/applied-ai-builder",
+        "location_text": "United States · Remote",
+        "description_text": "Build useful agent workflows.",
+        "application_url": "https://jobs.example.com/northstar/applied-ai-builder/apply",
+        "origin": "mcp",
+        "idempotency_key": "create-1",
+    }
+    assert json.loads(requests[3].content) == {
         "job_id": "job-1",
         "origin": "mcp",
         "idempotency_key": "select-1",
     }
-    assert json.loads(requests[4].content) == {
+    assert json.loads(requests[5].content) == {
         "target_status": "reviewed",
         "origin": "mcp",
         "reason": "Agent review",
@@ -61,6 +82,7 @@ async def test_mcp_server_exposes_phase_seven_parity_tools_while_retaining_job_t
     client = JobOsMcpClient(
         base_url="http://jobos.test",
         device_token="test-device-token",
+        mcp_token="test-mcp-trusted-token",
         transport=httpx.MockTransport(lambda _: httpx.Response(200, json={})),
     )
 
@@ -71,6 +93,7 @@ async def test_mcp_server_exposes_phase_seven_parity_tools_while_retaining_job_t
     assert [tool.name for tool in tools] == [
         "job_list",
         "job_inspect",
+        "job_create_from_browser",
         "job_select",
         "job_reorder",
         "job_update_status",
@@ -85,6 +108,7 @@ async def test_mcp_server_exposes_phase_seven_parity_tools_while_retaining_job_t
         "browser_tabs_inspect",
         "browser_tab_create",
         "browser_tab_select",
+        "browser_tab_associate",
         "browser_tab_close",
         "browser_tabs_reorder",
         "browser_navigate",
@@ -113,6 +137,7 @@ async def test_parity_mutations_are_thin_authenticated_api_calls_with_idempotenc
     client = JobOsMcpClient(
         base_url="http://jobos.test",
         device_token="test-device-token",
+        mcp_token="test-mcp-trusted-token",
         transport=httpx.MockTransport(handler),
     )
     await client.browser_command(
@@ -174,6 +199,7 @@ async def test_document_select_reads_workspace_silently_then_emits_one_shared_mu
     client = JobOsMcpClient(
         base_url="http://jobos.test",
         device_token="test-device-token",
+        mcp_token="test-mcp-trusted-token",
         transport=httpx.MockTransport(handler),
     )
     await client.select_document("art_1234567890abcdef", idempotency_key="select-document-1")

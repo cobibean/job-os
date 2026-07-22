@@ -1,5 +1,3 @@
-import { randomUUID } from 'node:crypto'
-
 import {
   createJobOsApiClient,
   jobCreateFromBrowserV1JobsPost,
@@ -21,7 +19,7 @@ import type {
 } from '@jobos/contracts'
 
 import type {
-  BrowserJobListing,
+  BrowserJobExtraction,
   BrowserJobSaveResult,
   JobEvent,
   JobListItem,
@@ -74,28 +72,6 @@ export function createMainJobsClient(config: JobsConfig) {
   const client = createJobOsApiClient(config.baseUrl, config.deviceToken)
 
   return {
-    async addFromBrowser(listing: BrowserJobListing): Promise<BrowserJobSaveResult> {
-      const result = await jobCreateFromBrowserV1JobsPost({
-        client,
-        body: {
-          company_name: listing.companyName,
-          title: listing.title,
-          canonical_url: listing.canonicalUrl,
-          location_text: listing.locationText,
-          description_text: listing.descriptionText,
-          application_url: listing.applicationUrl,
-          origin: 'user',
-          idempotency_key: randomUUID()
-        }
-      })
-      const mutation = unwrap<BrowserJobCreateResponse>(result, 'Could not save this job')
-      return {
-        eventId: mutation.event_id,
-        created: mutation.created,
-        job: toJob(mutation.job)
-      }
-    },
-
     async getState(): Promise<JobWorkspaceSnapshot> {
       const [jobsResult, workspaceResult] = await Promise.all([
         jobsListV1JobsGet({ client }),
@@ -154,6 +130,32 @@ export function createMainJobsClient(config: JobsConfig) {
       })
       const mutation = unwrap<StatusChangeResponse>(result, 'Status change failed')
       return { eventId: mutation.event_id, job: toJob(mutation.job) }
+    },
+
+    async createFromBrowser(
+      extraction: BrowserJobExtraction,
+      idempotencyKey: string
+    ): Promise<BrowserJobSaveResult> {
+      const result = await jobCreateFromBrowserV1JobsPost({
+        client,
+        body: {
+          company_name: extraction.companyName,
+          title: extraction.title,
+          canonical_url: extraction.canonicalUrl,
+          location_text: extraction.locationText,
+          description_text: extraction.descriptionText,
+          application_url: extraction.applicationUrl,
+          origin: 'user',
+          idempotency_key: idempotencyKey
+        }
+      })
+      const mutation = unwrap<BrowserJobCreateResponse>(result, 'Could not save this job')
+      return {
+        eventId: mutation.event_id,
+        created: mutation.created,
+        associated: false,
+        job: toJob(mutation.job)
+      }
     }
   }
 }

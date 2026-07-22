@@ -274,6 +274,7 @@
               "tabs.inspect",
               "tab.create",
               "tab.select",
+              "tab.associate",
               "tab.close",
               "tabs.reorder",
               "tab.navigate",
@@ -405,8 +406,11 @@
             "type": "string"
           },
           "origin": {
-            "const": "user",
             "default": "user",
+            "enum": [
+              "user",
+              "mcp"
+            ],
             "title": "Origin",
             "type": "string"
           },
@@ -1949,6 +1953,24 @@
     "/v1/browser/commands": {
       "post": {
         "operationId": "browser_command_v1_browser_commands_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-JobOS-MCP-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Jobos-Mcp-Token"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -1969,6 +1991,9 @@
               }
             },
             "description": "Successful Response"
+          },
+          "403": {
+            "description": "Trusted MCP credential required"
           },
           "422": {
             "content": {
@@ -2559,6 +2584,24 @@
       },
       "post": {
         "operationId": "job_create_from_browser_v1_jobs_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-JobOS-MCP-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Jobos-Mcp-Token"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -2579,6 +2622,9 @@
               }
             },
             "description": "Successful Response"
+          },
+          "403": {
+            "description": "Trusted MCP credential required"
           },
           "422": {
             "content": {
@@ -2605,6 +2651,24 @@
     "/v1/jobs/order": {
       "put": {
         "operationId": "jobs_reorder_v1_jobs_order_put",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-JobOS-MCP-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Jobos-Mcp-Token"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -2625,6 +2689,9 @@
               }
             },
             "description": "Successful Response"
+          },
+          "403": {
+            "description": "Trusted MCP credential required"
           },
           "422": {
             "content": {
@@ -3118,6 +3185,22 @@
               "title": "Job Id",
               "type": "string"
             }
+          },
+          {
+            "in": "header",
+            "name": "X-JobOS-MCP-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Jobos-Mcp-Token"
+            }
           }
         ],
         "requestBody": {
@@ -3140,6 +3223,9 @@
               }
             },
             "description": "Successful Response"
+          },
+          "403": {
+            "description": "Trusted MCP credential required"
           },
           "422": {
             "content": {
@@ -3256,6 +3342,24 @@
       },
       "put": {
         "operationId": "workspace_put_v1_workspace_put",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-JobOS-MCP-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Jobos-Mcp-Token"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -3276,6 +3380,9 @@
               }
             },
             "description": "Successful Response"
+          },
+          "403": {
+            "description": "Trusted MCP credential required"
           },
           "422": {
             "content": {
@@ -3328,6 +3435,24 @@
     "/v1/workspace/jobs/selection": {
       "put": {
         "operationId": "workspace_select_job_v1_workspace_jobs_selection_put",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-JobOS-MCP-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Jobos-Mcp-Token"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -3348,6 +3473,9 @@
               }
             },
             "description": "Successful Response"
+          },
+          "403": {
+            "description": "Trusted MCP credential required"
           },
           "422": {
             "content": {
@@ -3374,6 +3502,24 @@
     "/v1/workspace/jobs/sort": {
       "put": {
         "operationId": "workspace_sort_jobs_v1_workspace_jobs_sort_put",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-JobOS-MCP-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Jobos-Mcp-Token"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -3394,6 +3540,9 @@
               }
             },
             "description": "Successful Response"
+          },
+          "403": {
+            "description": "Trusted MCP credential required"
           },
           "422": {
             "content": {
