@@ -529,10 +529,16 @@ test('restore validates and deduplicates before retaining fifty recoverable tabs
   manager.dispose()
 })
 
-function extractionManager(html: string, activeUrl: string) {
-  const dom = new JSDOM(html, { url: activeUrl, runScripts: 'outside-only' })
+function extractionManager(html: string | string[], activeUrl: string) {
+  const pages = (Array.isArray(html) ? html : [html])
+    .map(markup => new JSDOM(markup, { url: activeUrl, runScripts: 'outside-only' }))
+  let extractionAttempt = 0
   let currentUrl = activeUrl
-  const executeJavaScript = vi.fn(async (script: string, _userGesture?: boolean) => dom.window.eval(script) as unknown)
+  const executeJavaScript = vi.fn(async (script: string, _userGesture?: boolean) => {
+    const page = pages[Math.min(extractionAttempt, pages.length - 1)]!
+    extractionAttempt += 1
+    return page.window.eval(script) as unknown
+  })
   const contents = Object.assign(new EventEmitter(), {
     navigationHistory: { canGoBack: () => false, canGoForward: () => false, goBack: vi.fn(), goForward: vi.fn() },
     loadURL: vi.fn(async () => undefined), getURL: () => currentUrl,
@@ -550,7 +556,12 @@ function extractionManager(html: string, activeUrl: string) {
     dialog: { showSaveDialog: vi.fn() } as unknown as Pick<Dialog, 'showSaveDialog'>,
     downloadsPath: '/tmp'
   })
-  return { manager, executeJavaScript, setCurrentUrl: (url: string) => { currentUrl = url } }
+  return {
+    manager,
+    executeJavaScript,
+    emitDidStartLoading: () => contents.emit('did-start-loading'),
+    setCurrentUrl: (url: string) => { currentUrl = url }
+  }
 }
 
 test('job extraction prefers JobPosting JSON-LD graphs and uses the live ordinary tab URL', async () => {
@@ -667,6 +678,118 @@ test('job extraction scopes every field to the active Wellfound detail pane desp
     descriptionText: 'Build production sales agents and own their customer outcomes.',
     applicationUrl: 'https://example.com/apply'
   })
+})
+
+test('job extraction waits for a client-rendered Wellfound detail pane after document loading completes', async () => {
+  const activeUrl = 'https://wellfound.com/jobs/starred?job_listing_slug=4467759-sales-ai-agent-builder'
+  const loadingShell = `<!doctype html><html><head>
+    <title>Saved Startups | Wellfound | Wellfound</title>
+    <meta property="og:site_name" content="Wellfound">
+    <meta property="og:title" content="Saved Startups | Wellfound">
+  </head><body><div id="__next">Open to offers Home Profile Jobs Applied Messages</div></body></html>`
+  const hydratedListing = `<!doctype html><html><head>
+    <title>Saved Startups | Wellfound | Wellfound</title>
+  </head><body><main>
+    <h1>Search for jobs</h1>
+    <aside class="job-detail-pane">
+      <a href="/company/recurring-decimal-1"><span>Recurring Decimal</span></a>
+      <header><h1>Sales AI Agent Builder</h1><p>Remote ( <a>United States</a> )</p></header>
+      <section><h2>About the job</h2><div>Build production sales agents.</div></section>
+    </aside>
+  </main></body></html>`
+  const { manager, executeJavaScript } = extractionManager([loadingShell, hydratedListing], activeUrl)
+  await manager.restore({ tabs: [
+    { tabId: 'job', url: activeUrl, title: 'Saved Startups | Wellfound', faviconUrl: null, associatedJobId: null }
+  ], activeTabId: 'job' })
+
+  await expect(manager.extractJob('job')).resolves.toEqual({
+    companyName: 'Recurring Decimal',
+    title: 'Sales AI Agent Builder',
+    canonicalUrl: activeUrl,
+    locationText: 'Remote (United States)',
+    descriptionText: 'Build production sales agents.',
+    applicationUrl: activeUrl
+  })
+  expect(executeJavaScript).toHaveBeenCalledTimes(2)
+})
+
+test('job extraction stops before retrying when the page navigates to about:blank during hydration', async () => {
+  vi.useFakeTimers()
+  try {
+    const activeUrl = 'https://jobs.example.com/roles/platform-engineer'
+    const loadingShell = '<html><body><h1>Loading</h1></body></html>'
+    const hydratedListing = `<!doctype html><html><head>
+      <script type="application/ld+json">{"@type":"JobPosting","title":"Platform Engineer","hiringOrganization":{"name":"Acme"},"jobLocation":"Remote","description":"Build systems."}</script>
+    </head><body></body></html>`
+    const { manager, executeJavaScript, setCurrentUrl } = extractionManager(
+      [loadingShell, hydratedListing], activeUrl
+    )
+    await manager.restore({ tabs: [
+      { tabId: 'job', url: activeUrl, title: 'Job', faviconUrl: null, associatedJobId: null }
+    ], activeTabId: 'job' })
+
+    const extraction = manager.extractJob('job')
+    await vi.waitFor(() => expect(executeJavaScript).toHaveBeenCalledTimes(1))
+    setCurrentUrl('about:blank')
+    await vi.advanceTimersByTimeAsync(250)
+
+    await expect(extraction).rejects.toThrow('The page changed while JobOS was reading it. Try saving again.')
+    expect(executeJavaScript).toHaveBeenCalledTimes(1)
+  } finally {
+    vi.useRealTimers()
+  }
+})
+
+test('job extraction translates an execution-context rejection caused by navigation', async () => {
+  vi.useFakeTimers()
+  try {
+    const activeUrl = 'https://jobs.example.com/roles/platform-engineer'
+    const { manager, executeJavaScript, setCurrentUrl } = extractionManager(
+      '<html><body><h1>Loading</h1></body></html>', activeUrl
+    )
+    executeJavaScript.mockImplementationOnce(async () => ({ pageUrl: activeUrl }))
+    executeJavaScript.mockImplementationOnce(async () => {
+      setCurrentUrl('about:blank')
+      throw new Error('Execution context was destroyed, most likely because of a navigation.')
+    })
+    await manager.restore({ tabs: [
+      { tabId: 'job', url: activeUrl, title: 'Job', faviconUrl: null, associatedJobId: null }
+    ], activeTabId: 'job' })
+
+    const extraction = manager.extractJob('job')
+    await vi.waitFor(() => expect(executeJavaScript).toHaveBeenCalledTimes(1))
+    await vi.advanceTimersByTimeAsync(250)
+
+    await expect(extraction).rejects.toThrow('The page changed while JobOS was reading it. Try saving again.')
+  } finally {
+    vi.useRealTimers()
+  }
+})
+
+test('job extraction translates an execution-context rejection caused by a same-URL reload', async () => {
+  vi.useFakeTimers()
+  try {
+    const activeUrl = 'https://jobs.example.com/roles/platform-engineer'
+    const { manager, executeJavaScript, emitDidStartLoading } = extractionManager(
+      '<html><body><h1>Loading</h1></body></html>', activeUrl
+    )
+    executeJavaScript.mockImplementationOnce(async () => ({ pageUrl: activeUrl }))
+    executeJavaScript.mockImplementationOnce(async () => {
+      emitDidStartLoading()
+      throw new Error('Execution context was destroyed, most likely because of a navigation.')
+    })
+    await manager.restore({ tabs: [
+      { tabId: 'job', url: activeUrl, title: 'Job', faviconUrl: null, associatedJobId: null }
+    ], activeTabId: 'job' })
+
+    const extraction = manager.extractJob('job')
+    await vi.waitFor(() => expect(executeJavaScript).toHaveBeenCalledTimes(1))
+    await vi.advanceTimersByTimeAsync(250)
+
+    await expect(extraction).rejects.toThrow('The page changed while JobOS was reading it. Try saving again.')
+  } finally {
+    vi.useRealTimers()
+  }
 })
 
 test('job extraction uses conservative rendered-page fallbacks and defaults application URL to canonical URL', async () => {

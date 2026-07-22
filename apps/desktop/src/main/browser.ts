@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import path from 'node:path'
+import { setTimeout as wait } from 'node:timers/promises'
 
 import type {
   BrowserWindow,
@@ -34,6 +35,8 @@ import {
 
 export const BROWSER_PARTITION = 'persist:jobos-browser-v1'
 export const DEFAULT_BROWSER_URL = 'https://www.google.com/'
+const JOB_EXTRACTION_ATTEMPTS = 21
+const JOB_EXTRACTION_RETRY_MS = 250
 
 const JOB_EXTRACTION_SCRIPT = `(() => {
   const normalize = (value) => String(value ?? '').replace(/\\s+/gu, ' ').trim();
@@ -490,6 +493,7 @@ export class BrowserManager {
 
   async extractJob(tabId: string): Promise<BrowserJobListing> {
     const tab = this.#requireTab(tabId)
+    const targetEpoch = tab.targetEpoch
     const startedAt = Date.now()
     const before = {
       tabId,
@@ -500,55 +504,92 @@ export class BrowserManager {
         ? tab.view.webContents.isLoading()
         : null
     }
-    const raw = await tab.view.webContents.executeJavaScript(JOB_EXTRACTION_SCRIPT, true) as unknown
-    const value = raw && typeof raw === 'object' ? raw as Record<string, unknown> : {}
-    const activeUrl = ordinaryHttpUrl(value.pageUrl)
-    const currentUrl = ordinaryHttpUrl(tab.view.webContents.getURL())
-    if (process.env.JOBOS_EXTRACTION_DIAGNOSTICS === '1') {
-      console.info('[JobOS extraction diagnostic]', JSON.stringify({
-        elapsedMs: Date.now() - startedAt,
-        before,
-        after: {
-          stateUrl: tab.state.url,
-          stateLoading: tab.state.loading,
-          webContentsUrl: tab.view.webContents.getURL(),
-          webContentsLoading: typeof tab.view.webContents.isLoading === 'function'
-            ? tab.view.webContents.isLoading()
-            : null
-        },
-        pageUrl: activeUrl,
-        diagnostics: value.diagnostics ?? null
-      }))
+    const expectedRawUrl = before.webContentsUrl
+    const expectedUrl = ordinaryHttpUrl(expectedRawUrl)
+    let missing: string[] = []
+    for (let attempt = 1; attempt <= JOB_EXTRACTION_ATTEMPTS; attempt += 1) {
+      const rawUrlBeforeAttempt = tab.view.webContents.getURL()
+      if (
+        tab.targetEpoch !== targetEpoch
+        || rawUrlBeforeAttempt !== expectedRawUrl
+        || ordinaryHttpUrl(rawUrlBeforeAttempt) !== expectedUrl
+      ) {
+        throw new Error('The page changed while JobOS was reading it. Try saving again.')
+      }
+      let raw: unknown
+      try {
+        raw = await tab.view.webContents.executeJavaScript(JOB_EXTRACTION_SCRIPT, true) as unknown
+      } catch (error) {
+        const rawUrlAfterError = tab.view.webContents.getURL()
+        if (
+          tab.targetEpoch !== targetEpoch
+          || rawUrlAfterError !== expectedRawUrl
+          || ordinaryHttpUrl(rawUrlAfterError) !== expectedUrl
+        ) {
+          throw new Error('The page changed while JobOS was reading it. Try saving again.')
+        }
+        throw error
+      }
+      const value = raw && typeof raw === 'object' ? raw as Record<string, unknown> : {}
+      const activeUrl = ordinaryHttpUrl(value.pageUrl)
+      const currentRawUrl = tab.view.webContents.getURL()
+      const currentUrl = ordinaryHttpUrl(currentRawUrl)
+      if (process.env.JOBOS_EXTRACTION_DIAGNOSTICS === '1') {
+        console.info('[JobOS extraction diagnostic]', JSON.stringify({
+          attempt,
+          elapsedMs: Date.now() - startedAt,
+          before,
+          after: {
+            stateUrl: tab.state.url,
+            stateLoading: tab.state.loading,
+            webContentsUrl: tab.view.webContents.getURL(),
+            webContentsLoading: typeof tab.view.webContents.isLoading === 'function'
+              ? tab.view.webContents.isLoading()
+              : null
+          },
+          pageUrl: activeUrl,
+          diagnostics: value.diagnostics ?? null
+        }))
+      }
+      if (
+        tab.targetEpoch !== targetEpoch
+        || currentRawUrl !== expectedRawUrl
+        || currentUrl !== expectedUrl
+        || (activeUrl && currentUrl && activeUrl !== currentUrl)
+        || (expectedUrl && currentUrl && expectedUrl !== currentUrl)
+        || (expectedUrl && activeUrl && expectedUrl !== activeUrl)
+      ) {
+        throw new Error('The page changed while JobOS was reading it. Try saving again.')
+      }
+      const companyName = boundedText(value.companyName, 300)
+      const title = boundedText(value.title, 500)
+      const locationText = boundedText(value.locationText, 1_000)
+      const descriptionText = boundedText(value.descriptionText, 100_000)
+      const explicitApplicationUrl = ordinaryHttpUrl(value.applicationUrl)
+      missing = [
+        companyName ? null : 'company',
+        title ? null : 'role',
+        locationText ? null : 'location',
+        descriptionText ? null : 'description',
+        activeUrl ? null : 'URL'
+      ].filter((field): field is string => field !== null)
+      if (!missing.length) {
+        return {
+          companyName,
+          title,
+          canonicalUrl: activeUrl,
+          locationText,
+          descriptionText,
+          applicationUrl: explicitApplicationUrl || activeUrl
+        }
+      }
+      if (!expectedUrl || attempt === JOB_EXTRACTION_ATTEMPTS) break
+      await wait(JOB_EXTRACTION_RETRY_MS)
     }
-    if (activeUrl && currentUrl && activeUrl !== currentUrl) {
-      throw new Error('The page changed while JobOS was reading it. Try saving again.')
-    }
-    const companyName = boundedText(value.companyName, 300)
-    const title = boundedText(value.title, 500)
-    const locationText = boundedText(value.locationText, 1_000)
-    const descriptionText = boundedText(value.descriptionText, 100_000)
-    const explicitApplicationUrl = ordinaryHttpUrl(value.applicationUrl)
-    const missing = [
-      companyName ? null : 'company',
-      title ? null : 'role',
-      locationText ? null : 'location',
-      descriptionText ? null : 'description',
-      activeUrl ? null : 'URL'
-    ].filter((field): field is string => field !== null)
-    if (missing.length) {
-      const fields = missing.length === 1
-        ? missing[0]
-        : `${missing.slice(0, -1).join(', ')}${missing.length > 2 ? ',' : ''} and ${missing.at(-1)}`
-      throw new Error(`Could not extract a complete job listing; missing ${fields}.`)
-    }
-    return {
-      companyName,
-      title,
-      canonicalUrl: activeUrl,
-      locationText,
-      descriptionText,
-      applicationUrl: explicitApplicationUrl || activeUrl
-    }
+    const fields = missing.length === 1
+      ? missing[0]
+      : `${missing.slice(0, -1).join(', ')}${missing.length > 2 ? ',' : ''} and ${missing.at(-1)}`
+    throw new Error(`Could not extract a complete job listing; missing ${fields}.`)
   }
 
   async snapshot(tabId: string): Promise<BrowserSemanticSnapshot> {
