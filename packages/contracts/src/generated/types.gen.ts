@@ -177,7 +177,7 @@ export type BrowserCommandRequest = {
     /**
      * Command
      */
-    command: 'tabs.inspect' | 'tab.create' | 'tab.select' | 'tab.close' | 'tabs.reorder' | 'tab.navigate' | 'tab.back' | 'tab.forward' | 'tab.reload' | 'tab.stop' | 'page.snapshot' | 'element.click' | 'element.type' | 'page.scroll';
+    command: 'tabs.inspect' | 'tab.create' | 'tab.select' | 'tab.associate' | 'tab.close' | 'tabs.reorder' | 'tab.navigate' | 'tab.back' | 'tab.forward' | 'tab.reload' | 'tab.stop' | 'page.snapshot' | 'element.click' | 'element.type' | 'page.scroll';
     /**
      * Idempotency Key
      */
@@ -248,7 +248,7 @@ export type BrowserJobCreateRequest = {
     /**
      * Origin
      */
-    origin?: 'user';
+    origin?: 'user' | 'mcp';
     /**
      * Title
      */
@@ -1065,12 +1065,22 @@ export type ArtifactDownloadV1ArtifactsArtifactIdDownloadGetResponses = {
 
 export type BrowserCommandV1BrowserCommandsPostData = {
     body: BrowserCommandRequest;
+    headers?: {
+        /**
+         * X-Jobos-Mcp-Token
+         */
+        'X-JobOS-MCP-Token'?: string | null;
+    };
     path?: never;
     query?: never;
     url: '/v1/browser/commands';
 };
 
 export type BrowserCommandV1BrowserCommandsPostErrors = {
+    /**
+     * Trusted MCP credential required
+     */
+    403: unknown;
     /**
      * Validation Error
      */
@@ -1395,12 +1405,22 @@ export type JobsListV1JobsGetResponse = JobsListV1JobsGetResponses[keyof JobsLis
 
 export type JobCreateFromBrowserV1JobsPostData = {
     body: BrowserJobCreateRequest;
+    headers?: {
+        /**
+         * X-Jobos-Mcp-Token
+         */
+        'X-JobOS-MCP-Token'?: string | null;
+    };
     path?: never;
     query?: never;
     url: '/v1/jobs';
 };
 
 export type JobCreateFromBrowserV1JobsPostErrors = {
+    /**
+     * Trusted MCP credential required
+     */
+    403: unknown;
     /**
      * Validation Error
      */
@@ -1420,12 +1440,22 @@ export type JobCreateFromBrowserV1JobsPostResponse = JobCreateFromBrowserV1JobsP
 
 export type JobsReorderV1JobsOrderPutData = {
     body: ManualOrderRequest;
+    headers?: {
+        /**
+         * X-Jobos-Mcp-Token
+         */
+        'X-JobOS-MCP-Token'?: string | null;
+    };
     path?: never;
     query?: never;
     url: '/v1/jobs/order';
 };
 
 export type JobsReorderV1JobsOrderPutErrors = {
+    /**
+     * Trusted MCP credential required
+     */
+    403: unknown;
     /**
      * Validation Error
      */
@@ -1683,6 +1713,12 @@ export type JobHistoryV1JobsJobIdHistoryGetResponse = JobHistoryV1JobsJobIdHisto
 
 export type JobUpdateStatusV1JobsJobIdStatusPutData = {
     body: StatusChangeRequest;
+    headers?: {
+        /**
+         * X-Jobos-Mcp-Token
+         */
+        'X-JobOS-MCP-Token'?: string | null;
+    };
     path: {
         /**
          * Job Id
@@ -1694,6 +1730,10 @@ export type JobUpdateStatusV1JobsJobIdStatusPutData = {
 };
 
 export type JobUpdateStatusV1JobsJobIdStatusPutErrors = {
+    /**
+     * Trusted MCP credential required
+     */
+    403: unknown;
     /**
      * Validation Error
      */
@@ -1763,12 +1803,22 @@ export type WorkspaceGetV1WorkspaceGetResponse = WorkspaceGetV1WorkspaceGetRespo
 
 export type WorkspacePutV1WorkspacePutData = {
     body: WorkspaceSnapshotCommand;
+    headers?: {
+        /**
+         * X-Jobos-Mcp-Token
+         */
+        'X-JobOS-MCP-Token'?: string | null;
+    };
     path?: never;
     query?: never;
     url: '/v1/workspace';
 };
 
 export type WorkspacePutV1WorkspacePutErrors = {
+    /**
+     * Trusted MCP credential required
+     */
+    403: unknown;
     /**
      * Validation Error
      */
@@ -1804,12 +1854,22 @@ export type WorkspaceJobsV1WorkspaceJobsGetResponse = WorkspaceJobsV1WorkspaceJo
 
 export type WorkspaceSelectJobV1WorkspaceJobsSelectionPutData = {
     body: JobSelectionRequest;
+    headers?: {
+        /**
+         * X-Jobos-Mcp-Token
+         */
+        'X-JobOS-MCP-Token'?: string | null;
+    };
     path?: never;
     query?: never;
     url: '/v1/workspace/jobs/selection';
 };
 
 export type WorkspaceSelectJobV1WorkspaceJobsSelectionPutErrors = {
+    /**
+     * Trusted MCP credential required
+     */
+    403: unknown;
     /**
      * Validation Error
      */
@@ -1829,12 +1889,22 @@ export type WorkspaceSelectJobV1WorkspaceJobsSelectionPutResponse = WorkspaceSel
 
 export type WorkspaceSortJobsV1WorkspaceJobsSortPutData = {
     body: JobSortRequest;
+    headers?: {
+        /**
+         * X-Jobos-Mcp-Token
+         */
+        'X-JobOS-MCP-Token'?: string | null;
+    };
     path?: never;
     query?: never;
     url: '/v1/workspace/jobs/sort';
 };
 
 export type WorkspaceSortJobsV1WorkspaceJobsSortPutErrors = {
+    /**
+     * Trusted MCP credential required
+     */
+    403: unknown;
     /**
      * Validation Error
      */

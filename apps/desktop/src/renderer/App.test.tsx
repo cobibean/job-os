@@ -1,9 +1,23 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, expect, test, vi } from 'vitest'
 
+import type { AgentStreamUpdate, JobListItem } from '../shared/contracts'
 import { App } from './App'
+import { isExpectedSaveNavigation } from './components/CenterWorkspace'
 
 afterEach(cleanup)
+
+
+test('browser save navigation only accepts the original listing or its slug-matched detail page', () => {
+  expect(isExpectedSaveNavigation(
+    'https://wellfound.com/jobs/starred?job_listing_slug=applied-ai-builder',
+    'https://wellfound.com/jobs/123-applied-ai-builder'
+  )).toBe(true)
+  expect(isExpectedSaveNavigation(
+    'https://wellfound.com/jobs/starred?job_listing_slug=applied-ai-builder',
+    'https://wellfound.com/jobs/starred?job_listing_slug=unrelated-role'
+  )).toBe(false)
+})
 
 
 test('the shell reports authenticated Mini connectivity without exposing credentials', async () => {
@@ -145,16 +159,17 @@ test('real jobs render compactly and user selection and status use the shared br
   render(<App />)
   const job = await screen.findByRole('button', { name: 'Select Example Co Product Builder' })
   fireEvent.click(job)
+  await waitFor(() => expect(select).toHaveBeenCalledWith('job-1'))
+  await screen.findByText('Example Co · Product Builder')
   fireEvent.change(screen.getByRole('combobox', { name: 'Change Example Co status' }), {
     target: { value: 'reviewed' }
   })
 
-  expect(select).toHaveBeenCalledWith('job-1')
   expect(updateStatus).toHaveBeenCalledWith('job-1', 'reviewed')
   expect(await screen.findByText('Status changed to reviewed')).not.toBeNull()
 })
 
-test('saving the active browser listing adds, selects, and associates the canonical job', async () => {
+test('saving dispatches job-hunter and reconciles a failure emitted before send resolves', async () => {
   const listing = {
     companyName: 'Northstar Labs',
     title: 'Applied AI Product Builder',
@@ -163,23 +178,36 @@ test('saving the active browser listing adds, selects, and associates the canoni
     descriptionText: 'Build useful agent workflows with operators.',
     applicationUrl: 'https://jobs.example.com/northstar/apply'
   }
-  const savedJob = {
-    jobId: 'browser-job-1', company: listing.companyName, title: listing.title,
-    status: 'discovered' as const, statusGroup: 'Inbox', canonicalUrl: listing.canonicalUrl,
-    discoveredAt: '2026-07-21T16:00:00Z', lastSeenAt: '2026-07-21T16:00:00Z'
-  }
+
   const browserTab = {
     tabId: 'job-tab', url: listing.canonicalUrl, title: listing.title, faviconUrl: null,
-    associatedJobId: null, loading: false, canGoBack: false, canGoForward: false,
+    associatedJobId: null as string | null, loading: false, canGoBack: false, canGoForward: false,
     error: null, crashed: false, blockedUrl: null
   }
-  const addFromBrowser = vi.fn().mockResolvedValue({ eventId: 8, created: true, job: savedJob })
-  const extractJob = vi.fn().mockResolvedValue(listing)
-  const associate = vi.fn().mockResolvedValue({
-    tabs: [{ ...browserTab, associatedJobId: savedJob.jobId }],
-    activeTabId: browserTab.tabId,
-    download: null,
-    notice: null
+  const browserState = { tabs: [browserTab], activeTabId: browserTab.tabId, download: null, notice: null }
+  const associate = vi.fn()
+  let saveOutcome: 'idle' | 'failed' | 'completed' | 'running' | 'interrupted' = 'idle'
+  let currentTurnId = ''
+  let sendCount = 0
+  let browserListener: (state: typeof browserState) => void = () => undefined
+  const agentListeners: Array<(update: AgentStreamUpdate) => void> = []
+  const cancel = vi.fn().mockResolvedValue(undefined)
+  let successfulJob: JobListItem | null = null
+  const saveFromBrowser = vi.fn().mockImplementation(async () => ({
+    eventId: 9,
+    created: true,
+    associated: true,
+    job: successfulJob
+  }))
+  const send = vi.fn().mockImplementation(async () => {
+    sendCount += 1
+    currentTurnId = `turn-save-job-${sendCount}`
+    if (saveOutcome === 'idle') saveOutcome = 'failed'
+    if (successfulJob) browserListener({
+      ...browserState,
+      tabs: [{ ...browserTab, associatedJobId: successfulJob.jobId }]
+    })
+    return { turnId: currentTurnId, status: saveOutcome }
   })
   const workspace = {
     revision: 1,
@@ -198,17 +226,44 @@ test('saving the active browser listing adds, selects, and associates the canoni
   }
   Object.defineProperty(window, 'jobos', { configurable: true, value: {
     connectivity: { get: vi.fn().mockRejectedValue(new Error('offline')) },
+    agent: {
+      get: vi.fn().mockImplementation(async () => ({
+        conversationId: 'conv-1',
+        entries: ['failed', 'completed', 'interrupted'].includes(saveOutcome) ? [{
+          eventId: 1,
+          turnId: currentTurnId,
+          type: saveOutcome === 'failed' ? 'error' : saveOutcome === 'interrupted' ? 'status' : 'assistant_message',
+          state: saveOutcome === 'failed' ? 'failed' : saveOutcome === 'interrupted' ? 'interrupted' : 'completed',
+          summary: saveOutcome === 'failed' ? 'Agent connection unavailable'
+            : successfulJob ? `JOBOS_SAVE_RESULT:${JSON.stringify({
+                jobId: successfulJob.jobId,
+                created: true
+              })}` : 'Could not identify a job listing',
+          detail: {}, occurredAt: ''
+        }] : [],
+        activeTurn: null, connection: 'online', latestEventId: ['failed', 'completed', 'interrupted'].includes(saveOutcome) ? 1 : 0
+      })),
+      send, cancel, retry: vi.fn(), reset: vi.fn(),
+      subscribe: vi.fn(listener => { agentListeners.push(listener); return () => undefined })
+    },
     jobs: {
-      getState: vi.fn().mockResolvedValue({ jobs: [], selectedJobId: null, sortMode: 'manual', manualOrder: [] }),
-      addFromBrowser,
-      list: vi.fn().mockResolvedValue([savedJob]), select: vi.fn(), reorder: vi.fn(), setSort: vi.fn(), updateStatus: vi.fn(),
+      getState: vi.fn().mockImplementation(async () => ({
+        jobs: successfulJob ? [successfulJob] : [], selectedJobId: null,
+        sortMode: 'manual', manualOrder: []
+      })),
+      list: vi.fn().mockImplementation(async () => successfulJob ? [successfulJob] : []), select: vi.fn(), reorder: vi.fn(), setSort: vi.fn(), updateStatus: vi.fn(), saveFromBrowser,
       subscribe: vi.fn(() => () => undefined)
     },
     workspace: { get: vi.fn().mockResolvedValue(workspace), save: vi.fn().mockImplementation(value => Promise.resolve({ ...value, revision: value.revision + 1 })) },
     browser: {
-      getState: vi.fn(), restore: vi.fn().mockResolvedValue({ tabs: [browserTab], activeTabId: browserTab.tabId, download: null, notice: null }),
-      extractJob, associate, create: vi.fn(), select: vi.fn(), close: vi.fn(), reorder: vi.fn(), navigate: vi.fn(), back: vi.fn(), forward: vi.fn(),
-      reload: vi.fn(), stop: vi.fn(), copyBlockedUrl: vi.fn(), setBounds: vi.fn().mockResolvedValue(undefined), subscribe: vi.fn(() => () => undefined)
+      getState: vi.fn().mockImplementation(async () => successfulJob ? {
+        ...browserState,
+        tabs: [{ ...browserTab, associatedJobId: successfulJob.jobId }]
+      } : browserState),
+      restore: vi.fn().mockResolvedValue(browserState),
+      associate, create: vi.fn(), select: vi.fn(), close: vi.fn(), reorder: vi.fn(), navigate: vi.fn(), back: vi.fn(), forward: vi.fn(),
+      reload: vi.fn(), stop: vi.fn(), copyBlockedUrl: vi.fn(), setBounds: vi.fn().mockResolvedValue(undefined),
+      subscribe: vi.fn(listener => { browserListener = listener; return () => undefined })
     }
   } })
 
@@ -216,12 +271,74 @@ test('saving the active browser listing adds, selects, and associates the canoni
   await screen.findByRole('tab', { name: `Select ${listing.title}` })
   fireEvent.click(screen.getByRole('button', { name: 'Save this job to JobOS' }))
 
-  await waitFor(() => expect(extractJob).toHaveBeenCalledTimes(2))
-  await waitFor(() => expect(addFromBrowser).toHaveBeenCalledWith(listing))
-  expect(associate).toHaveBeenCalledWith(browserTab.tabId, savedJob.jobId)
-  expect(await screen.findByRole('button', { name: 'Select Northstar Labs Applied AI Product Builder' })).not.toBeNull()
-  expect(screen.getAllByText('Saved to JobOS').length).toBeGreaterThan(0)
-  expect(screen.getByText('Northstar Labs · Applied AI Product Builder')).not.toBeNull()
+  await waitFor(() => expect(send).toHaveBeenCalledOnce())
+  expect(send.mock.calls[0]?.[0]).toContain('job-tab')
+  expect(send.mock.calls[0]?.[0]).toContain('mcp__jobos__browser_click')
+  expect(send.mock.calls[0]?.[0]).toContain('link whose href or name matches the job slug')
+  expect(send.mock.calls[0]?.[0]).toContain('JOBOS_SAVE_RESULT:')
+  expect(send.mock.calls[0]?.[0]).toContain('mcp__jobos__job_create_from_browser')
+  expect(send.mock.calls[0]?.[0]).toContain('mcp__jobos__browser_tab_associate')
+  expect(send.mock.calls[0]?.[1]).toMatch(/^browser-save-/)
+  expect(associate).not.toHaveBeenCalled()
+  await screen.findByRole('alert')
+  expect(screen.getByText('Agent connection unavailable')).not.toBeNull()
+  expect((screen.getByRole('button', { name: 'Save this job to JobOS' }) as HTMLButtonElement).disabled).toBe(false)
+
+  saveOutcome = 'completed'
+  fireEvent.click(screen.getByRole('button', { name: 'Save this job to JobOS' }))
+  await waitFor(() => expect(send).toHaveBeenCalledTimes(2))
+  expect(await screen.findByText('Job hunter finished without returning usable job details. You can retry.')).not.toBeNull()
+  expect((screen.getByRole('button', { name: 'Save this job to JobOS' }) as HTMLButtonElement).disabled).toBe(false)
+
+  saveOutcome = 'running'
+  fireEvent.click(screen.getByRole('button', { name: 'Save this job to JobOS' }))
+  await waitFor(() => expect(send).toHaveBeenCalledTimes(3))
+  act(() => browserListener({
+    ...browserState,
+    tabs: [{ ...browserTab, url: 'https://jobs.example.com/jobs/northstar' }]
+  }))
+  expect(cancel).not.toHaveBeenCalledWith('turn-save-job-3')
+  browserListener({
+    ...browserState,
+    tabs: [{ ...browserTab, url: 'https://wellfound.com/jobs/another-listing' }]
+  })
+  await waitFor(() => expect(cancel).toHaveBeenCalledWith('turn-save-job-3'))
+  expect(screen.getByText('The browser listing changed before saving finished. Retry on the intended listing.')).not.toBeNull()
+
+  browserListener(browserState)
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Save this job to JobOS' }).textContent).toContain('Save job'))
+  saveOutcome = 'running'
+  fireEvent.click(screen.getByRole('button', { name: 'Save this job to JobOS' }))
+  await waitFor(() => expect(send).toHaveBeenCalledTimes(4))
+  saveOutcome = 'interrupted'
+  act(() => {
+    agentListeners.forEach(listener => listener({ kind: 'event', event: {
+      eventId: 2, turnId: currentTurnId, type: 'status', state: 'interrupted',
+      summary: 'Turn stopped', detail: {}, occurredAt: ''
+    } }))
+  })
+  expect(await screen.findByText('Job hunter finished without returning usable job details. You can retry.')).not.toBeNull()
+  expect((screen.getByRole('button', { name: 'Save this job to JobOS' }) as HTMLButtonElement).disabled).toBe(false)
+
+  successfulJob = {
+    jobId: 'job-saved-by-turn',
+    company: 'Northstar Labs',
+    title: listing.title,
+    status: 'discovered',
+    statusGroup: 'Inbox',
+    canonicalUrl: listing.canonicalUrl,
+    discoveredAt: '2026-07-22T00:00:00Z',
+    lastSeenAt: '2026-07-22T00:00:00Z'
+  }
+  saveOutcome = 'completed'
+  fireEvent.click(screen.getByRole('button', { name: 'Save this job to JobOS' }))
+  await waitFor(() => expect(send).toHaveBeenCalledTimes(5))
+  expect(saveFromBrowser).not.toHaveBeenCalled()
+  expect(await screen.findByText(`Saved to JobOS: Northstar Labs · ${listing.title}`)).not.toBeNull()
+  expect(await screen.findByRole('button', {
+    name: `Select Northstar Labs ${listing.title}`
+  })).not.toBeNull()
+  expect((screen.getByRole('button', { name: 'Save this job to JobOS' }) as HTMLButtonElement).disabled).toBe(true)
 })
 
 

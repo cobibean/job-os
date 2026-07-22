@@ -8,6 +8,7 @@ from pydantic import ValidationError
 def base_settings(**overrides):
     values = {
         "device_token": "mini-device-token-value",
+        "mcp_token": "trusted-mcp-token-value",
         "device_id": "mini-device",
         "state_db_path": Path("/tmp/jobos-test.db"),
     }

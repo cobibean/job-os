@@ -1,12 +1,10 @@
 // @vitest-environment node
 
-import { beforeEach, expect, test, vi } from 'vitest'
-
-const { jobCreate } = vi.hoisted(() => ({ jobCreate: vi.fn() }))
+import { expect, test, vi } from 'vitest'
 
 vi.mock('@jobos/contracts', () => ({
   createJobOsApiClient: vi.fn(() => ({})),
-  jobCreateFromBrowserV1JobsPost: jobCreate,
+  jobCreateFromBrowserV1JobsPost: vi.fn(),
   jobUpdateStatusV1JobsJobIdStatusPut: vi.fn(),
   jobsListV1JobsGet: vi.fn(),
   jobsReorderV1JobsOrderPut: vi.fn(),
@@ -15,55 +13,53 @@ vi.mock('@jobos/contracts', () => ({
   workspaceSortJobsV1WorkspaceJobsSortPut: vi.fn()
 }))
 
+import { jobCreateFromBrowserV1JobsPost } from '@jobos/contracts'
+
 import { createMainJobsClient, JobEventDecoder } from './jobs.js'
 
-beforeEach(() => jobCreate.mockReset())
-
-test('the desktop saves a complete extracted listing through the canonical job endpoint', async () => {
-  jobCreate.mockResolvedValue({
-    response: { status: 200 },
+test('browser extraction is persisted through the authenticated JobOS API', async () => {
+  vi.mocked(jobCreateFromBrowserV1JobsPost).mockResolvedValue({
+    response: new Response(null, { status: 200 }),
     data: {
-      event_id: 42,
-      created: true,
+      event_id: 17,
+      created: false,
       job: {
-        job_id: 'browser-job-1',
+        job_id: 'job-existing',
         company: 'Northstar Labs',
-        title: 'Applied AI Product Builder',
+        title: 'Senior Engineer',
         status: 'discovered',
         status_group: 'Inbox',
-        canonical_url: 'https://jobs.example.com/northstar',
-        discovered_at: '2026-07-21T16:00:00Z',
-        last_seen_at: '2026-07-21T16:00:00Z',
-        description: 'Build useful agent workflows.',
+        canonical_url: 'https://example.com/jobs/17',
+        discovered_at: '2026-07-22T00:00:00Z',
+        last_seen_at: '2026-07-22T00:00:00Z',
+        description: 'Build useful things.',
         location: 'Remote'
       }
     }
-  })
+  } as never)
+  const client = createMainJobsClient({ baseUrl: 'http://127.0.0.1:8766', deviceToken: 'test-token' })
 
-  const result = await createMainJobsClient({
-    baseUrl: 'http://jobos.test',
-    deviceToken: 'fake-device-token'
-  }).addFromBrowser({
+  const result = await client.createFromBrowser({
     companyName: 'Northstar Labs',
-    title: 'Applied AI Product Builder',
-    canonicalUrl: 'https://jobs.example.com/northstar',
+    title: 'Senior Engineer',
+    canonicalUrl: 'https://example.com/jobs/17',
     locationText: 'Remote',
-    descriptionText: 'Build useful agent workflows.',
-    applicationUrl: 'https://jobs.example.com/northstar/apply'
-  })
+    descriptionText: 'Build useful things.',
+    applicationUrl: 'https://example.com/jobs/17/apply'
+  }, 'browser-save-17')
 
-  expect(result).toMatchObject({ eventId: 42, created: true, job: { jobId: 'browser-job-1' } })
-  expect(jobCreate).toHaveBeenCalledOnce()
-  expect(jobCreate.mock.calls[0]?.[0].body).toMatchObject({
-    company_name: 'Northstar Labs',
-    title: 'Applied AI Product Builder',
-    canonical_url: 'https://jobs.example.com/northstar',
-    location_text: 'Remote',
-    description_text: 'Build useful agent workflows.',
-    application_url: 'https://jobs.example.com/northstar/apply',
-    origin: 'user'
-  })
-  expect(jobCreate.mock.calls[0]?.[0].body.idempotency_key).toMatch(/^[0-9a-f-]{36}$/)
+  expect(jobCreateFromBrowserV1JobsPost).toHaveBeenCalledWith(expect.objectContaining({
+    body: expect.objectContaining({
+      company_name: 'Northstar Labs',
+      idempotency_key: 'browser-save-17',
+      origin: 'user'
+    })
+  }))
+  expect(result).toEqual(expect.objectContaining({
+    eventId: 17,
+    created: false,
+    job: expect.objectContaining({ jobId: 'job-existing' })
+  }))
 })
 
 test('the desktop event decoder preserves SSE events split across network chunks', () => {

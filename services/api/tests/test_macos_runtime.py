@@ -77,6 +77,7 @@ def test_service_environment_and_uvicorn_command_are_fixed_and_loopback_only(tmp
     environment = build_service_environment(
         config,
         device_token="device-secret-value",
+        mcp_token="mcp-secret-value",
         hermes_dashboard_token="hermes-secret-value",
         base_environment={"PATH": "/usr/bin:/bin", "UNRELATED": "omitted"},
     )
@@ -88,6 +89,7 @@ def test_service_environment_and_uvicorn_command_are_fixed_and_loopback_only(tmp
             f"{tmp_path / 'job-os/services/api'}:{tmp_path / 'facade/src'}"
         ),
         "JOBOS_DEVICE_TOKEN": "device-secret-value",
+        "JOBOS_MCP_TOKEN": "mcp-secret-value",
         "JOBOS_DEVICE_ID": "mini-device",
         "JOBOS_STATE_DB_PATH": str(tmp_path / "state/jobos.db"),
         "JOBOS_JOB_HUNTER_DB_PATH": str(tmp_path / "job-hunter/data/jobs/jobs.db"),
@@ -110,6 +112,7 @@ def test_service_environment_and_uvicorn_command_are_fixed_and_loopback_only(tmp
     remote_environment = build_service_environment(
         config,
         device_token="device-secret-value",
+        mcp_token="mcp-secret-value",
         remote_device_tokens={"macbook-device": "macbook-secret-value"},
         hermes_dashboard_token=None,
         base_environment={},
@@ -200,6 +203,7 @@ def test_install_writes_private_configs_provisions_keychain_and_bootstraps_launc
         launcher_path=tmp_path / "job-os/scripts/macos/jobos_runtime.py",
         uid=501,
         device_token="device-secret-value",
+        mcp_token="mcp-secret-value",
         hermes_dashboard_token="hermes-secret-value",
         store_secret=lambda service, account, secret: keychain_writes.append(
             (service, account, secret)
@@ -223,9 +227,11 @@ def test_install_writes_private_configs_provisions_keychain_and_bootstraps_launc
         + result.plist_path.read_bytes()
     )
     assert b"device-secret-value" not in persisted
+    assert b"mcp-secret-value" not in persisted
     assert b"hermes-secret-value" not in persisted
     assert keychain_writes == [
         ("com.cobibean.jobos.device-token", "mini-device", "device-secret-value"),
+        ("com.cobibean.jobos.mcp-token", "mini-device", "mcp-secret-value"),
         (
             "com.cobibean.jobos.hermes-dashboard-token",
             "mini-device",
@@ -435,6 +441,7 @@ def test_install_restores_previous_files_credentials_and_service_on_failure(tmp_
             launcher_path=tmp_path / "job-os/scripts/macos/jobos_runtime.py",
             uid=501,
             device_token="new-device-token-value",
+            mcp_token="new-mcp-token-value",
             hermes_dashboard_token="new-hermes-token-value",
             store_secret=lambda service, account, secret: secrets.__setitem__(
                 (service, account), secret
@@ -488,4 +495,5 @@ def test_uninstall_removes_exact_service_files_and_registered_credentials(tmp_pa
         ("com.cobibean.jobos.device-token", "mini-device"),
         ("com.cobibean.jobos.device-token", "macbook-device"),
         ("com.cobibean.jobos.hermes-dashboard-token", "mini-device"),
+        ("com.cobibean.jobos.mcp-token", "mini-device"),
     ]

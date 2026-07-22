@@ -39,6 +39,7 @@ class Settings(BaseModel):
     model_config = ConfigDict(frozen=True, hide_input_in_errors=True)
 
     device_token: str = Field(min_length=16, max_length=4096, repr=False)
+    mcp_token: str = Field(min_length=16, max_length=4096, repr=False)
     device_id: str = Field(default="primary-device", min_length=1, max_length=100)
     device_credentials: tuple[DeviceCredential, ...] = Field(default=(), repr=False)
     state_db_path: Path
@@ -52,7 +53,11 @@ class Settings(BaseModel):
     @model_validator(mode="after")
     def validate_unique_device_credentials(self) -> "Settings":
         device_ids = [self.device_id, *(item.device_id for item in self.device_credentials)]
-        tokens = [self.device_token, *(item.token for item in self.device_credentials)]
+        tokens = [
+            self.device_token,
+            self.mcp_token,
+            *(item.token for item in self.device_credentials),
+        ]
         if len(set(device_ids)) != len(device_ids):
             raise ValueError("device identifiers must be unique")
         if len(set(tokens)) != len(tokens):

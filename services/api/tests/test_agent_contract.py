@@ -195,7 +195,11 @@ def headers():
 
 def make_client(tmp_path, gateway=None):
     app = create_app(
-        Settings(device_token=TOKEN, state_db_path=tmp_path / "jobos.db"),
+        Settings(
+            device_token=TOKEN,
+            mcp_token="test-mcp-trusted-token",
+            state_db_path=tmp_path / "jobos.db",
+        ),
         job_facade=FakeJobFacade(),
         agent_gateway=gateway or FakeGateway(),
     )
@@ -208,6 +212,101 @@ def send_message(client, text="Help me plan the next step", key="message-key-000
         headers=headers(),
         json={"text": text, "idempotency_key": key},
     )
+
+
+def test_browser_save_turn_starts_with_fresh_model_context(tmp_path):
+    """Large browser snapshots must not bury required save tools in old agent history."""
+
+    async def scenario():
+        gateway = FakeGateway()
+        store = JobOsStateStore(tmp_path / "jobos.db")
+        store.initialize()
+        store.save_stored_session_id("stored-long-running-session")
+        service = ConversationService(store, gateway)
+        await service.start()
+        try:
+            created = await service.send(
+                SendMessageRequest(
+                    text="Save the job in this browser tab",
+                    idempotency_key="browser-save-regression-0001",
+                ),
+                actor_id="device-mini",
+                context={"workspace": {"active_browser_tab_id": "tab-1"}},
+            )
+            assert store.stored_session_id() == "stored-session"
+            gateway._events.append(
+                GatewayEvent(
+                    event_type="assistant_message",
+                    state="completed",
+                    summary="JOBOS_EXTRACT_RESULT:{}",
+                    turn_id=created.turn_id,
+                    source_event_id="browser-save-complete",
+                )
+            )
+            await service._consume_gateway_events()
+        finally:
+            await service.close()
+        assert gateway.session_requests == [None]
+        assert gateway.submissions[0][0] == "Save the job in this browser tab"
+        assert store.stored_session_id() == "stored-long-running-session"
+        snapshot = store.conversation_snapshot()
+        entries = snapshot["entries"]
+        assert isinstance(entries, list)
+        turn_entry = next(entry for entry in entries if entry["type"] == "turn")
+        assert "_fresh_agent_session" not in turn_entry["context"]
+
+    asyncio.run(scenario())
+
+
+def test_browser_save_session_restores_after_api_restart_and_ignores_late_terminal(tmp_path):
+    async def scenario():
+        store = JobOsStateStore(tmp_path / "jobos.db")
+        store.initialize()
+        store.save_stored_session_id("ordinary-session")
+        first = ConversationService(store, FakeGateway())
+        await first.start()
+        created = await first.send(
+            SendMessageRequest(
+                text="Save the current browser job",
+                idempotency_key="browser-save-restart-regression",
+            ),
+            actor_id="device-mini",
+            context={"workspace": {"active_browser_tab_id": "tab-1"}},
+        )
+        await first.close()
+        assert store.stored_session_id() == "stored-session"
+
+        recovered_gateway = FakeGateway()
+        recovered = ConversationService(store, recovered_gateway)
+        await recovered.start()
+        assert recovered_gateway.interruptions == [created.turn_id]
+        assert store.stored_session_id() == "ordinary-session"
+
+        recovered_gateway._events.append(GatewayEvent(
+            event_type="reconciliation",
+            state="completed",
+            summary="late isolated-session reconciliation",
+            turn_id=None,
+            source_event_id="late-isolated-reconciliation",
+            detail={"stored_session_id": "stored-session"},
+        ))
+        await recovered._consume_gateway_events()
+        assert store.stored_session_id() == "ordinary-session"
+        recovered_gateway._events.clear()
+
+        store.save_stored_session_id("newer-conversation-session")
+        recovered_gateway._events.append(GatewayEvent(
+            event_type="assistant_message",
+            state="completed",
+            summary="late duplicate",
+            turn_id=created.turn_id,
+            source_event_id="late-browser-save-terminal",
+        ))
+        await recovered._consume_gateway_events()
+        assert store.stored_session_id() == "newer-conversation-session"
+        await recovered.close()
+
+    asyncio.run(scenario())
 
 
 def test_empty_current_conversation_is_authenticated_and_stable(tmp_path):
@@ -777,6 +876,45 @@ def test_attachment_failure_before_submit_terminalizes_without_recovery_quaranti
 
     assert gateway.submissions == []
     assert record["status"] == "failed"
+    assert recovery_turn_id is None
+
+
+def test_isolated_submission_failure_recovers_with_the_isolated_session_id(tmp_path):
+    async def scenario():
+        store = JobOsStateStore(tmp_path / "jobos.db")
+        store.initialize()
+        store.save_stored_session_id("ordinary-session")
+
+        class SubmissionFailureGateway(FakeGateway):
+            def __init__(self):
+                super().__init__()
+                self.recoveries = []
+
+            async def submit_turn(self, text, context):
+                raise ConnectionError("transport lost during submission")
+
+            async def recover_active_turn(self, stored_session_id, turn_id):
+                self.recoveries.append((stored_session_id, turn_id))
+
+        gateway = SubmissionFailureGateway()
+        service = ConversationService(store, gateway)
+        result = await service.send(
+            SendMessageRequest(
+                text="Save the active browser listing",
+                idempotency_key="browser-save-submission-failure",
+            ),
+            actor_id="device-a",
+            context={"selected_job_id": None, "workspace": {}},
+        )
+        assert store.stored_session_id() == "ordinary-session"
+        assert store.recovery_turn_id() == result.turn_id
+
+        await service._ensure_recovery_clear()
+        return result.turn_id, gateway.recoveries, store.recovery_turn_id()
+
+    turn_id, recoveries, recovery_turn_id = asyncio.run(scenario())
+
+    assert recoveries == [("stored-session", turn_id)]
     assert recovery_turn_id is None
 
 

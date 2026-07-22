@@ -1,5 +1,6 @@
 import asyncio
 import hashlib
+import hmac
 import json
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager, contextmanager
@@ -8,7 +9,7 @@ from threading import Lock
 from typing import Annotated, Literal, ParamSpec, TypeVar, cast
 from urllib.parse import quote
 
-from fastapi import Depends, FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
+from fastapi import Depends, FastAPI, Header, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import Response, StreamingResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
@@ -212,6 +213,21 @@ def create_app(
     ) -> DeviceIdentity:
         return device_authenticator.authenticate(credentials)
 
+    def require_trusted_mcp(
+        identity: DeviceIdentity,
+        origin: str | None,
+        mcp_token: str | None,
+    ) -> None:
+        if origin == "mcp" and (
+            identity.device_id != settings.device_id
+            or mcp_token is None
+            or not hmac.compare_digest(mcp_token, settings.mcp_token)
+        ):
+            raise HTTPException(
+                status_code=403,
+                detail="MCP operations require the trusted local MCP credential",
+            )
+
     def mutation_hash(command_name: str, payload: dict[str, object]) -> str:
         return hashlib.sha256(
             json.dumps(
@@ -358,15 +374,29 @@ def create_app(
             if registered:
                 await browser_capabilities.unregister(socket)
 
-    @app.post("/v1/browser/commands", tags=["browser"])
+    @app.post(
+        "/v1/browser/commands",
+        tags=["browser"],
+        responses={403: {"description": "Trusted MCP credential required"}},
+    )
     async def browser_command(
         command: BrowserCommandRequest,
         identity: Annotated[DeviceIdentity, Depends(authenticated_device)],
+        mcp_token: Annotated[str | None, Header(alias="X-JobOS-MCP-Token")] = None,
     ) -> BrowserCommandResponse:
+        require_trusted_mcp(identity, command.origin, mcp_token)
         try:
             arguments = command.validated_arguments()
         except ValueError as error:
             raise HTTPException(status_code=422, detail=str(error)) from error
+        if command.command == "tab.associate":
+            try:
+                jobs.inspect_job(arguments["job_id"])
+            except (KeyError, ValueError) as error:
+                raise HTTPException(
+                    status_code=422,
+                    detail="Cannot associate a browser tab with an unknown job",
+                ) from error
         request_hash = hashlib.sha256(
             json.dumps(
                 {"command": command.command, "arguments": arguments, "origin": command.origin},
@@ -374,8 +404,13 @@ def create_app(
                 sort_keys=True,
             ).encode()
         ).hexdigest()
-        target = f"browser/{arguments.get('tab_id', 'desktop')}"
         durable_command = command.command not in {"tabs.inspect", "page.snapshot"}
+        target_device_id = (
+            state_store.active_turn_origin_device_id() or identity.device_id
+            if command.origin == "mcp"
+            else identity.device_id
+        )
+        target = f"browser/{target_device_id}/{arguments.get('tab_id', 'desktop')}"
 
         def ensure_activity(result: BrowserCommandResponse) -> None:
             if command.origin != "mcp":
@@ -412,7 +447,9 @@ def create_app(
                     response = BrowserCommandResponse.model_validate(replay)
                     ensure_activity(response)
                     return response
-            result = await browser_capabilities.execute(command)
+            result = await browser_capabilities.execute(
+                command, device_id=target_device_id
+            )
             result_dict = result.model_dump(mode="json")
             if durable_command:
                 state_store.record_mutation_result(
@@ -439,7 +476,7 @@ def create_app(
         try:
             if durable_command:
                 async with serialize_browser_command(
-                    (identity.device_id, command.idempotency_key)
+                    (target_device_id, command.idempotency_key)
                 ):
                     return await execute_or_replay()
             return await execute_or_replay()
@@ -504,6 +541,7 @@ def create_app(
                         "title": title,
                     }
         return {
+            "origin_device_id": identity.device_id,
             "selected_job_id": selection,
             "selected_job": selected_job,
             "workspace": {
@@ -623,12 +661,18 @@ def create_app(
         )
         return result
 
-    @app.post("/v1/jobs", tags=["jobs"])
+    @app.post(
+        "/v1/jobs",
+        tags=["jobs"],
+        responses={403: {"description": "Trusted MCP credential required"}},
+    )
     @serialized_mutation_route
     def job_create_from_browser(
         command: BrowserJobCreateRequest,
         identity: Annotated[DeviceIdentity, Depends(authenticated_device)],
+        mcp_token: Annotated[str | None, Header(alias="X-JobOS-MCP-Token")] = None,
     ) -> BrowserJobCreateResponse:
+        require_trusted_mcp(identity, command.origin, mcp_token)
         payload = command.model_dump(mode="json", exclude={"idempotency_key"})
         request_hash = mutation_hash("job.create_from_browser", payload)
         try:
@@ -677,12 +721,18 @@ def create_app(
         )
         return result
 
-    @app.put("/v1/jobs/order", tags=["jobs"])
+    @app.put(
+        "/v1/jobs/order",
+        tags=["jobs"],
+        responses={403: {"description": "Trusted MCP credential required"}},
+    )
     @serialized_mutation_route
     def jobs_reorder(
         command: ManualOrderRequest,
         identity: Annotated[DeviceIdentity, Depends(authenticated_device)],
+        mcp_token: Annotated[str | None, Header(alias="X-JobOS-MCP-Token")] = None,
     ) -> JobMutationResponse:
+        require_trusted_mcp(identity, command.origin, mcp_token)
         request_hash = mutation_hash(
             "jobs.reorder", {"job_ids": command.job_ids, "origin": command.origin}
         )
@@ -753,11 +803,17 @@ def create_app(
         )
         return result
 
-    @app.put("/v1/workspace", tags=["workspace"])
+    @app.put(
+        "/v1/workspace",
+        tags=["workspace"],
+        responses={403: {"description": "Trusted MCP credential required"}},
+    )
     def workspace_put(
         command: WorkspaceSnapshotCommand,
         identity: Annotated[DeviceIdentity, Depends(authenticated_device)],
+        mcp_token: Annotated[str | None, Header(alias="X-JobOS-MCP-Token")] = None,
     ) -> WorkspaceSnapshotResponse:
+        require_trusted_mcp(identity, command.origin, mcp_token)
         if command.active_artifact_id is not None:
             artifact = state_store.get_document_artifact(command.active_artifact_id)
             selected_job_id = state_store.job_workspace_state().selected_job_id
@@ -811,12 +867,18 @@ def create_app(
             **record.snapshot,
         )
 
-    @app.put("/v1/workspace/jobs/selection", tags=["workspace"])
+    @app.put(
+        "/v1/workspace/jobs/selection",
+        tags=["workspace"],
+        responses={403: {"description": "Trusted MCP credential required"}},
+    )
     @serialized_mutation_route
     def workspace_select_job(
         command: JobSelectionRequest,
         identity: Annotated[DeviceIdentity, Depends(authenticated_device)],
+        mcp_token: Annotated[str | None, Header(alias="X-JobOS-MCP-Token")] = None,
     ) -> JobMutationResponse:
+        require_trusted_mcp(identity, command.origin, mcp_token)
         request_hash = mutation_hash(
             "job.select", {"job_id": command.job_id, "origin": command.origin}
         )
@@ -850,12 +912,18 @@ def create_app(
         )
         return result
 
-    @app.put("/v1/workspace/jobs/sort", tags=["workspace"])
+    @app.put(
+        "/v1/workspace/jobs/sort",
+        tags=["workspace"],
+        responses={403: {"description": "Trusted MCP credential required"}},
+    )
     @serialized_mutation_route
     def workspace_sort_jobs(
         command: JobSortRequest,
         identity: Annotated[DeviceIdentity, Depends(authenticated_device)],
+        mcp_token: Annotated[str | None, Header(alias="X-JobOS-MCP-Token")] = None,
     ) -> JobMutationResponse:
+        require_trusted_mcp(identity, command.origin, mcp_token)
         request_hash = mutation_hash(
             "jobs.sort", {"sort_mode": command.sort_mode, "origin": command.origin}
         )
@@ -906,13 +974,19 @@ def create_app(
         except KeyError as error:
             raise HTTPException(status_code=404, detail="Job not found") from error
 
-    @app.put("/v1/jobs/{job_id}/status", tags=["jobs"])
+    @app.put(
+        "/v1/jobs/{job_id}/status",
+        tags=["jobs"],
+        responses={403: {"description": "Trusted MCP credential required"}},
+    )
     @serialized_mutation_route
     def job_update_status(
         job_id: str,
         command: StatusChangeRequest,
         identity: Annotated[DeviceIdentity, Depends(authenticated_device)],
+        mcp_token: Annotated[str | None, Header(alias="X-JobOS-MCP-Token")] = None,
     ) -> StatusChangeResponse:
+        require_trusted_mcp(identity, command.origin, mcp_token)
         request_hash = mutation_hash(
             "job.update_status",
             {

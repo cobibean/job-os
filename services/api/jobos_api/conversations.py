@@ -1,5 +1,6 @@
 import asyncio
 import json
+import logging
 import time
 from collections.abc import AsyncIterator
 from contextlib import suppress
@@ -10,6 +11,11 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from .agent_gateway import AgentContext, AgentGateway
 from .redaction import safe_error_summary, sanitize_user_text
 from .state_store import ConversationBusy, JobOsStateStore
+
+logger = logging.getLogger(__name__)
+
+BROWSER_SAVE_IDEMPOTENCY_PREFIX = "browser-save-"
+FRESH_AGENT_SESSION_CONTEXT_KEY = "_fresh_agent_session"
 
 
 class ConversationModel(BaseModel):
@@ -57,7 +63,11 @@ class ConversationService:
         self.gateway = gateway
         self._event_task: asyncio.Task[None] | None = None
         self._recovery_turn_id: str | None = None
+        self._isolated_session_ids: set[str] = set()
         self._submission_lock = asyncio.Lock()
+
+    def _restore_session_after_isolated_turn(self, turn_id: str) -> None:
+        self.store.restore_isolated_agent_session(turn_id)
 
     async def start(self) -> None:
         with suppress(Exception):
@@ -70,7 +80,13 @@ class ConversationService:
         if recovery_turn_id:
             try:
                 await self._confirm_recovery(recovery_turn_id)
-            except Exception:
+            except Exception as error:
+                logger.warning(
+                    "Agent startup recovery failed (%s, code=%s, reason=%s)",
+                    type(error).__name__,
+                    getattr(error, "code", None),
+                    str(error) if isinstance(error, RuntimeError) else None,
+                )
                 self._recovery_turn_id = recovery_turn_id
                 self.store.append_conversation_event(
                     turn_id=recovery_turn_id,
@@ -88,6 +104,7 @@ class ConversationService:
         turn_id = str(active["turn_id"])
         stored_session_id = self.store.stored_session_id()
         if not stored_session_id:
+            self._restore_session_after_isolated_turn(turn_id)
             self.store.recover_active_conversation_turns()
             return
         try:
@@ -106,7 +123,7 @@ class ConversationService:
                 turn_id, "waiting", expected=("queued", "running", "waiting")
             )
             return
-        self.store.settle_active_turn(
+        won = self.store.settle_active_turn(
             turn_id,
             "interrupted",
             event_type="status",
@@ -114,9 +131,14 @@ class ConversationService:
             detail={"actionable": True, "reason": "api_restart", "retry": True},
             source_event_id=f"startup-recovery-complete:{turn_id}",
         )
+        if won:
+            self._restore_session_after_isolated_turn(turn_id)
 
     async def _confirm_recovery(self, turn_id: str) -> None:
-        stored_session_id = self.store.stored_session_id()
+        stored_session_id = (
+            self.store.recovery_agent_session_id(turn_id)
+            or self.store.stored_session_id()
+        )
         if not stored_session_id:
             raise ConnectionError("Stored agent session is unavailable")
         await self.gateway.recover_active_turn(stored_session_id, turn_id)
@@ -131,6 +153,11 @@ class ConversationService:
         try:
             await self._confirm_recovery(turn_id)
         except Exception as error:
+            logger.warning(
+                "Agent recovery confirmation failed (%s, code=%s)",
+                type(error).__name__,
+                getattr(error, "code", None),
+            )
             self._recovery_turn_id = turn_id
             raise ConversationBusy(
                 "Remote agent cleanup must be confirmed before new work"
@@ -175,15 +202,24 @@ class ConversationService:
         await self._ensure_recovery_clear()
         safe_text = sanitize_user_text(command.text)
         latest_before = int(self.store.conversation_snapshot()["latest_event_id"])
+        stored_context = dict(context)
+        if command.idempotency_key.startswith(BROWSER_SAVE_IDEMPOTENCY_PREFIX):
+            stored_context[FRESH_AGENT_SESSION_CONTEXT_KEY] = True
         created = self.store.create_conversation_turn(
             text=safe_text,
-            context=context,
+            context=stored_context,
             idempotency_key=command.idempotency_key,
             actor_id=actor_id,
         )
         turn = self.store.turn_record(str(created["turn_id"]))
         latest_after = int(self.store.conversation_snapshot()["latest_event_id"])
         if turn and turn["status"] == "running" and latest_after > latest_before:
+            turn_context = turn.get("context")
+            if (
+                isinstance(turn_context, dict)
+                and turn_context.get(FRESH_AGENT_SESSION_CONTEXT_KEY) is True
+            ):
+                self.store.begin_isolated_agent_session(str(turn["turn_id"]))
             await self._dispatch(turn)
         return TurnMutationResponse(**created)
 
@@ -207,6 +243,12 @@ class ConversationService:
         turn = self.store.turn_record(str(created["turn_id"]))
         latest_after = int(self.store.conversation_snapshot()["latest_event_id"])
         if turn and latest_after > latest_before:
+            turn_context = turn.get("context")
+            if (
+                isinstance(turn_context, dict)
+                and turn_context.get(FRESH_AGENT_SESSION_CONTEXT_KEY) is True
+            ):
+                self.store.begin_isolated_agent_session(str(turn["turn_id"]))
             await self._dispatch(turn)
         return TurnMutationResponse(**created)
 
@@ -256,6 +298,8 @@ class ConversationService:
                     },
                     cancel_requested=True,
                 )
+                if won:
+                    self._restore_session_after_isolated_turn(turn_id)
                 if won and self._recovery_turn_id == turn_id:
                     self._recovery_turn_id = None
         current = self.store.turn_record(turn_id)
@@ -270,8 +314,25 @@ class ConversationService:
         turn_id = str(turn["turn_id"])
         try:
             prior_stored_id = self.store.stored_session_id()
-            stored_id, _ = await self.gateway.create_or_resume_conversation(prior_stored_id)
+            context = turn["context"]
+            assert isinstance(context, dict)
+            requested_session_id = (
+                None
+                if context.get(FRESH_AGENT_SESSION_CONTEXT_KEY) is True
+                else prior_stored_id
+            )
+            stored_id, _ = await self.gateway.create_or_resume_conversation(
+                requested_session_id
+            )
+            if context.get(FRESH_AGENT_SESSION_CONTEXT_KEY) is True:
+                self._isolated_session_ids.add(stored_id)
+                self.store.record_isolated_agent_session(turn_id, stored_id)
         except Exception as error:
+            logger.warning(
+                "Agent conversation attachment failed (%s, code=%s)",
+                type(error).__name__,
+                getattr(error, "code", None),
+            )
             current = self.store.turn_record(turn_id)
             if current and current["cancel_requested"]:
                 return
@@ -282,13 +343,12 @@ class ConversationService:
                 summary=safe_error_summary(error),
                 detail={"actionable": True, "retry": True},
             )
+            self._restore_session_after_isolated_turn(turn_id)
             return
         try:
             async with self._submission_lock:
                 if not self.store.prepare_turn_submission(turn_id, prior_stored_id, stored_id):
                     return
-                context = turn["context"]
-                assert isinstance(context, dict)
                 selected_job = context.get("selected_job")
                 await self.gateway.submit_turn(
                     str(turn["text"]),
@@ -304,6 +364,11 @@ class ConversationService:
                     ),
                 )
         except Exception as error:
+            logger.warning(
+                "Agent turn submission failed (%s, code=%s)",
+                type(error).__name__,
+                getattr(error, "code", None),
+            )
             current = self.store.turn_record(turn_id)
             if current and current["cancel_requested"]:
                 return
@@ -315,6 +380,7 @@ class ConversationService:
                 detail={"actionable": True, "retry": True},
                 quarantine=True,
             )
+            self._restore_session_after_isolated_turn(turn_id)
 
     async def _consume_gateway_events(self) -> None:
         try:
@@ -332,6 +398,12 @@ class ConversationService:
                     continue
                 if event.event_type == "reconciliation":
                     stored_session_id = event.detail.get("stored_session_id")
+                    if isinstance(stored_session_id, str) and (
+                        stored_session_id in self._isolated_session_ids
+                        or self.store.consume_ignored_agent_session(stored_session_id)
+                    ):
+                        self._isolated_session_ids.discard(stored_session_id)
+                        continue
                     if isinstance(stored_session_id, str) and 0 < len(stored_session_id) <= 256:
                         self.store.save_stored_session_id(stored_session_id)
                     continue
@@ -344,7 +416,7 @@ class ConversationService:
                     and event.event_type in {"assistant_message", "error"}
                 )
                 if is_terminal:
-                    self.store.settle_active_turn(
+                    won = self.store.settle_active_turn(
                         str(turn_id),
                         event.state,
                         event_type=event.event_type,
@@ -353,6 +425,8 @@ class ConversationService:
                         source_event_id=event.source_event_id,
                         quarantine=event.detail.get("reason") == "transport_lost",
                     )
+                    if won:
+                        self._restore_session_after_isolated_turn(str(turn_id))
                     continue
                 event_id = self.store.append_conversation_event(
                     turn_id=turn_id,

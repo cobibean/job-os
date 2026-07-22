@@ -16,7 +16,10 @@ test('capability dispatch validates commands and calls only fixed BrowserManager
     inspect: vi.fn(() => state),
     navigate: vi.fn(async () => state),
     snapshot: vi.fn(async () => ({ tabId: 'tab-1', url: 'https://example.com/',
-      title: 'Example', text: 'Apply', elements: [{ targetId: 't_1', role: 'button', name: 'Apply', disabled: false }] }))
+      title: 'Example', text: 'Apply', textStart: 0, textLength: 5, scrollY: 0,
+      scrollHeight: 800, viewportHeight: 800,
+      elements: [{ targetId: 't_1', role: 'link', name: 'Apply', disabled: false,
+        href: 'https://example.com/apply' }] }))
   }
   const inspected = await dispatchCapabilityCommand(manager, {
     type: 'command', command_id: 'cmd_12345678', idempotency_key: 'inspect-1', origin: 'mcp',
@@ -34,7 +37,11 @@ test('capability dispatch validates commands and calls only fixed BrowserManager
   })
 
   expect(inspected.state).toBe('completed')
-  expect(snapshot.data).toMatchObject({ tab_id: 'tab-1', elements: [{ target_id: 't_1' }] })
+  expect(snapshot.data).toMatchObject({
+    tab_id: 'tab-1', text_start: 0, text_length: 5, scroll_y: 0,
+    scroll_height: 800, viewport_height: 800,
+    elements: [{ target_id: 't_1', href: 'https://example.com/apply' }]
+  })
   expect(invalid).toMatchObject({ state: 'failed', error: { code: 'validation' } })
   expect(JSON.stringify(invalid)).not.toContain('document.cookie')
 })
@@ -65,6 +72,22 @@ test('capability dispatch preserves BrowserManager method binding', async () => 
 
   expect(result.state).toBe('completed')
   expect(result.data).toMatchObject({ active_tab_id: 'tab-1' })
+})
+
+test('capability dispatch lets the agent associate a live tab with its saved job', async () => {
+  const associate = vi.fn(() => ({
+    ...state,
+    tabs: [{ ...state.tabs[0]!, associatedJobId: 'job-7' }]
+  }))
+  const result = await dispatchCapabilityCommand({ inspect: () => state, associate }, {
+    type: 'command', command_id: 'cmd_62345678', idempotency_key: 'associate-1', origin: 'mcp',
+    deadline_at: new Date(Date.now() + 1000).toISOString(), command: 'tab.associate',
+    arguments: { tab_id: 'tab-1', job_id: 'job-7' }
+  })
+
+  expect(result.state).toBe('completed')
+  expect(associate).toHaveBeenCalledWith('tab-1', 'job-7')
+  expect(result.data).toMatchObject({ tabs: [{ tab_id: 'tab-1', associated_job_id: 'job-7' }] })
 })
 
 test('capability client authenticates in the first frame and keeps the token out of its URL', () => {

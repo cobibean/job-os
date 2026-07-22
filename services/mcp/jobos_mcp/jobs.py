@@ -14,11 +14,15 @@ class JobOsMcpClient:
         *,
         base_url: str,
         device_token: str,
+        mcp_token: str,
         transport: httpx.AsyncBaseTransport | None = None,
     ) -> None:
         self._client = httpx.AsyncClient(
             base_url=base_url,
-            headers={"Authorization": f"Bearer {device_token}"},
+            headers={
+                "Authorization": f"Bearer {device_token}",
+                "X-JobOS-MCP-Token": mcp_token,
+            },
             transport=transport,
         )
 
@@ -47,6 +51,32 @@ class JobOsMcpClient:
             "GET",
             f"/v1/jobs/{job_id}",
             params={"origin": "mcp", "idempotency_key": self._key(idempotency_key)},
+        )
+
+    async def create_job(
+        self,
+        *,
+        company_name: str,
+        title: str,
+        canonical_url: str,
+        location_text: str,
+        description_text: str,
+        application_url: str,
+        idempotency_key: str | None = None,
+    ) -> dict[str, Any]:
+        return await self._request(
+            "POST",
+            "/v1/jobs",
+            json={
+                "company_name": company_name,
+                "title": title,
+                "canonical_url": canonical_url,
+                "location_text": location_text,
+                "description_text": description_text,
+                "application_url": application_url,
+                "origin": "mcp",
+                "idempotency_key": self._key(idempotency_key),
+            },
         )
 
     @staticmethod

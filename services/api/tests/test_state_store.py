@@ -82,9 +82,9 @@ def test_initialization_applies_every_migration_once(tmp_path):
     first = store.initialize()
     second = store.initialize()
 
-    assert first.schema_version == SCHEMA_VERSION == 8
+    assert first.schema_version == SCHEMA_VERSION == 10
     assert second.schema_version == SCHEMA_VERSION
-    assert applied_versions(database) == [1, 2, 3, 4, 5, 6, 7, 8]
+    assert applied_versions(database) == [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
     assert metadata_columns(database) == {"key", "value", "updated_at"}
 
 
@@ -99,11 +99,11 @@ def test_initialization_upgrades_a_behind_database(tmp_path):
     result = JobOsStateStore(database).initialize()
 
     assert result.schema_version == SCHEMA_VERSION
-    assert applied_versions(database) == [1, 2, 3, 4, 5, 6, 7, 8]
+    assert applied_versions(database) == [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
     assert metadata_columns(database) == {"key", "value", "updated_at"}
 
 
-@pytest.mark.parametrize("versions", ([1, 2, 3, 4, 5, 6, 7, 8, 9], [2]))
+@pytest.mark.parametrize("versions", ([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11], [2]))
 def test_initialization_rejects_ahead_or_incompatible_history(tmp_path, versions):
     database = tmp_path / "jobos.db"
     with sqlite3.connect(database) as connection:

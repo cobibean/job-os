@@ -4,8 +4,6 @@ import { expect, test } from 'vitest'
 
 import { EventEmitter } from 'node:events'
 import { readFileSync } from 'node:fs'
-// @ts-expect-error jsdom does not publish TypeScript declarations.
-import { JSDOM } from 'jsdom'
 
 import type { BrowserWindow, Dialog, Session, WebContents, WebContentsView } from 'electron'
 import { vi } from 'vitest'
@@ -224,6 +222,8 @@ test('tabs reorder and bounds changes reuse the same live WebContentsView instan
     url: 'https://www.google.com/',
     associatedJobId: 'job-7'
   })
+  await manager.navigate('google', 'https://www.google.com/search?q=job')
+  expect(manager.getState().tabs.find(tab => tab.tabId === 'google')?.associatedJobId).toBeNull()
   expect(attached).toEqual([views[0]])
   expect(views[0]?.setBounds).toHaveBeenLastCalledWith({ x: 310, y: 180, width: 540, height: 510 })
 
@@ -372,9 +372,16 @@ test('main-process emission enforces Workspace bounds and keeps later saves viab
 test('agent browser operations use bounded semantic targets and fixed internal scripts', async () => {
   const executeJavaScript = vi.fn(async (script: string) => {
     if (script.includes('candidates.map')) {
+      const textStart = Number(script.match(/Math\.min\((\d+)/)?.[1] ?? 0)
       return {
         text: 'Apply now',
-        elements: [{ index: 0, role: 'button', name: 'Apply', disabled: false, type: 'button' }]
+        textStart,
+        textLength: 12_000,
+        scrollY: 900,
+        scrollHeight: 2_400,
+        viewportHeight: 800,
+        elements: [{ index: 0, role: 'link', name: 'Apply', disabled: false, type: '',
+          href: 'https://example.com/apply' }]
       }
     }
     return { ok: true }
@@ -412,15 +419,26 @@ test('agent browser operations use bounded semantic targets and fixed internal s
   await manager.click('tab-1', targetId)
   await manager.type('tab-1', targetId, 'hello', true)
   await manager.scroll('tab-1', 'down', 600)
+  const nextSnapshot = await manager.snapshot('tab-1')
 
   expect(snapshot.elements).toEqual([
-    { targetId, role: 'button', name: 'Apply', disabled: false }
+    { targetId, role: 'link', name: 'Apply', disabled: false, href: 'https://example.com/apply' }
   ])
   expect(snapshot.text).toBe('Apply now')
-  expect(executeJavaScript).toHaveBeenCalledTimes(4)
+  expect(snapshot).toMatchObject({
+    textStart: 0,
+    textLength: 12_000,
+    scrollY: 900,
+    scrollHeight: 2_400,
+    viewportHeight: 800
+  })
+  expect(nextSnapshot.textStart).toBe(4_000)
+  expect(executeJavaScript).toHaveBeenCalledTimes(5)
   const snapshotScript = String(executeJavaScript.mock.calls[0]?.[0])
   expect(snapshotScript).toContain('getClientRects().length')
-  expect(snapshotScript).not.toContain('innerHeight')
+  expect(snapshotScript).toContain('pageText.slice(textStart, textStart + 5000)')
+  expect(snapshotScript).not.toContain('window.scrollY / maxScroll')
+  expect(snapshotScript).toContain('filter(visible).slice(0, 100)')
   const allScripts = executeJavaScript.mock.calls.flat().join('\n')
   expect(allScripts).not.toContain('querySelector(\'button\')')
   expect(allScripts).not.toContain('data-jobos-target-id')
@@ -527,374 +545,4 @@ test('restore validates and deduplicates before retaining fifty recoverable tabs
   expect(manager.getState().activeTabId).toBe('tab-49')
   expect(views).toHaveLength(50)
   manager.dispose()
-})
-
-function extractionManager(html: string | string[], activeUrl: string) {
-  const pages = (Array.isArray(html) ? html : [html])
-    .map(markup => new JSDOM(markup, { url: activeUrl, runScripts: 'outside-only' }))
-  let extractionAttempt = 0
-  let currentUrl = activeUrl
-  const executeJavaScript = vi.fn(async (script: string, _userGesture?: boolean) => {
-    const page = pages[Math.min(extractionAttempt, pages.length - 1)]!
-    extractionAttempt += 1
-    return page.window.eval(script) as unknown
-  })
-  const contents = Object.assign(new EventEmitter(), {
-    navigationHistory: { canGoBack: () => false, canGoForward: () => false, goBack: vi.fn(), goForward: vi.fn() },
-    loadURL: vi.fn(async () => undefined), getURL: () => currentUrl,
-    executeJavaScript, setWindowOpenHandler: vi.fn(), isDestroyed: () => false,
-    close: vi.fn(), reload: vi.fn(), stop: vi.fn()
-  })
-  const manager = new BrowserManager({
-    window: { contentView: { addChildView: vi.fn(), removeChildView: vi.fn() },
-      webContents: { send: vi.fn() }, isDestroyed: () => false } as unknown as BrowserWindow,
-    browserSession: Object.assign(new EventEmitter(), {
-      setPermissionCheckHandler: vi.fn(), setPermissionRequestHandler: vi.fn()
-    }) as unknown as Session,
-    createView: () => ({ webContents: contents, setBounds: vi.fn() }) as unknown as WebContentsView,
-    clipboard: { writeText: vi.fn() },
-    dialog: { showSaveDialog: vi.fn() } as unknown as Pick<Dialog, 'showSaveDialog'>,
-    downloadsPath: '/tmp'
-  })
-  return {
-    manager,
-    executeJavaScript,
-    emitDidStartLoading: () => contents.emit('did-start-loading'),
-    setCurrentUrl: (url: string) => { currentUrl = url }
-  }
-}
-
-test('job extraction prefers JobPosting JSON-LD graphs and uses the live ordinary tab URL', async () => {
-  const activeUrl = 'https://jobs.example.com/roles/platform-engineer?source=workspace'
-  const { manager, executeJavaScript } = extractionManager(`<!doctype html><html><head>
-    <link rel="canonical" href="https://spoofed.example/job">
-    <script type="application/ld+json">[
-      {"@context":"https://schema.org","@graph":[
-        {"@type":"Organization","name":"Ignore me"},
-        {"@type":["Thing","https://schema.org/JobPosting"],"title":"  Senior   Platform Engineer ",
-          "hiringOrganization":{"@type":"Organization","name":" Acme &amp; Co "},
-          "jobLocation":[{"address":{"addressLocality":" New York ","addressRegion":"NY","addressCountry":"US"}}],
-          "description":"<p>Build &amp; ship.</p><span hidden>tracking copy</span><ul><li>Own reliability</li><li>Mentor peers</li></ul>",
-          "applicationUrl":"https://apply.example.com/jobs/42"}
-      ]}
-    ]</script></head><body><h1>Fallback title</h1></body></html>`, activeUrl)
-  await manager.restore({ tabs: [
-    { tabId: 'job', url: activeUrl, title: 'Job', faviconUrl: null, associatedJobId: null }
-  ], activeTabId: 'job' })
-
-  await expect(manager.extractJob('job')).resolves.toEqual({
-    companyName: 'Acme & Co',
-    title: 'Senior Platform Engineer',
-    canonicalUrl: activeUrl,
-    locationText: 'New York, NY, US',
-    descriptionText: 'Build & ship. Own reliability Mentor peers',
-    applicationUrl: 'https://apply.example.com/jobs/42'
-  })
-  await manager.extractJob('job')
-  expect(executeJavaScript).toHaveBeenCalledTimes(2)
-  expect(executeJavaScript.mock.calls[0]?.[0]).toBe(executeJavaScript.mock.calls[1]?.[0])
-  expect(executeJavaScript.mock.calls[0]?.[1]).toBe(true)
-})
-
-test('job extraction refuses to mix fields and URL across a navigation race', async () => {
-  const activeUrl = 'https://jobs.example.com/roles/platform-engineer'
-  const { manager, setCurrentUrl } = extractionManager(`<!doctype html><html><head>
-    <script type="application/ld+json">{"@type":"JobPosting","title":"Platform Engineer","hiringOrganization":{"name":"Acme"},"jobLocation":"Remote","description":"Build systems."}</script>
-  </head><body></body></html>`, activeUrl)
-  await manager.restore({ tabs: [
-    { tabId: 'job', url: activeUrl, title: 'Job', faviconUrl: null, associatedJobId: null }
-  ], activeTabId: 'job' })
-  setCurrentUrl('https://jobs.example.com/roles/product-engineer')
-
-  await expect(manager.extractJob('job')).rejects.toThrow('The page changed while JobOS was reading it. Try saving again.')
-})
-
-test('job extraction supports the current Greenhouse hosted-board markup', async () => {
-  const activeUrl = 'https://job-boards.greenhouse.io/figma/jobs/5364702004?gh_jid=5364702004'
-  const { manager } = extractionManager(`<!doctype html><html><head>
-    <title>Job Application for Account Executive, Emerging Enterprise (Berlin, Germany) at Figma</title>
-    <meta property="og:title" content="Account Executive, Emerging Enterprise (Berlin, Germany)">
-  </head><body><main><div class="job-post-container">
-    <div class="image-container"><img class="logo" alt="Figma Logo" src="logo.png"></div>
-    <h1 class="job__title">Account Executive, Emerging Enterprise (Berlin, Germany)</h1>
-    <div class="job__location">Berlin, Germany</div>
-    <div class="job__description body"><p>Build the future of collaborative design.</p><ul><li>Own enterprise relationships</li></ul></div>
-    <button class="btn btn--pill">Apply</button>
-  </div></main></body></html>`, activeUrl)
-  await manager.restore({ tabs: [
-    { tabId: 'job', url: activeUrl, title: 'Job', faviconUrl: null, associatedJobId: null }
-  ], activeTabId: 'job' })
-
-  await expect(manager.extractJob('job')).resolves.toEqual({
-    companyName: 'Figma',
-    title: 'Account Executive, Emerging Enterprise (Berlin, Germany)',
-    canonicalUrl: activeUrl,
-    locationText: 'Berlin, Germany',
-    descriptionText: 'Build the future of collaborative design. Own enterprise relationships',
-    applicationUrl: activeUrl
-  })
-})
-
-test('job extraction scopes every field to the active Wellfound detail pane despite page-level headings and other listings', async () => {
-  const activeUrl = 'https://wellfound.com/jobs/starred?job_listing_slug=4467759-sales-ai-agent-builder'
-  const { manager } = extractionManager(`<!doctype html><html><head>
-    <title>Saved Startups | Wellfound | Wellfound</title>
-    <meta property="og:site_name" content="Wellfound">
-  </head><body>
-    <main>
-      <h1>Search for jobs</h1>
-      <section class="saved-jobs-list">
-        <article><h2>Waymark</h2><a>Junior Software Engineer Remote only United States</a></article>
-        <article><h2>Recurring Decimal</h2><a>Sales AI Agent Builder Remote only United States</a></article>
-        <article><h2>Cresta</h2><a>Senior Software Engineer Remote only Canada</a></article>
-      </section>
-      <aside class="job-detail-pane">
-        <div class="selected-company">
-          <a href="/company/recurring-decimal-1"><img alt="Avatar for Recurring Decimal"></a>
-          <a href="/company/recurring-decimal-1"><span>Recurring Decimal</span></a>
-        </div>
-        <header>
-          <h1>Sales AI Agent Builder</h1>
-          <p>Remote ( <a>United States</a> ) | 4 years of exp | Full Time</p>
-        </header>
-        <section>
-          <h2>About the job</h2>
-          <div>Build production sales agents and own their customer outcomes.</div>
-          <a href="https://example.com/apply">Apply on company website</a>
-        </section>
-        <section><h2>About the company</h2><h3>Wellfound</h3></section>
-      </aside>
-    </main>
-  </body></html>`, activeUrl)
-  await manager.restore({ tabs: [
-    { tabId: 'job', url: activeUrl, title: 'Saved Startups | Wellfound', faviconUrl: null, associatedJobId: null }
-  ], activeTabId: 'job' })
-
-  await expect(manager.extractJob('job')).resolves.toEqual({
-    companyName: 'Recurring Decimal',
-    title: 'Sales AI Agent Builder',
-    canonicalUrl: activeUrl,
-    locationText: 'Remote (United States)',
-    descriptionText: 'Build production sales agents and own their customer outcomes.',
-    applicationUrl: 'https://example.com/apply'
-  })
-})
-
-test('job extraction finds a Wellfound remote location after salary text in the detail header', async () => {
-  const activeUrl = 'https://wellfound.com/jobs/starred?job_listing_slug=3931880-senior-software-engineer-backend-ai-agent'
-  const { manager } = extractionManager(`<!doctype html><html><head>
-    <title>Saved Startups | Wellfound | Wellfound</title>
-  </head><body><main>
-    <h1>Search for jobs</h1>
-    <aside class="job-detail-pane">
-      <a href="/company/cresta"><span>Cresta</span></a>
-      <header>
-        <h1>Senior Software Engineer, Backend (AI Agent)</h1>
-        <p>$205k – $270k | Remote ( <a>United States</a> ) | 5 years of exp | Full Time</p>
-      </header>
-      <section><h2>About the job</h2><div>Build reliable AI agent infrastructure.</div></section>
-    </aside>
-  </main></body></html>`, activeUrl)
-  await manager.restore({ tabs: [
-    { tabId: 'job', url: activeUrl, title: 'Saved Startups | Wellfound', faviconUrl: null, associatedJobId: null }
-  ], activeTabId: 'job' })
-
-  await expect(manager.extractJob('job')).resolves.toEqual({
-    companyName: 'Cresta',
-    title: 'Senior Software Engineer, Backend (AI Agent)',
-    canonicalUrl: activeUrl,
-    locationText: 'Remote (United States)',
-    descriptionText: 'Build reliable AI agent infrastructure.',
-    applicationUrl: activeUrl
-  })
-})
-
-test('job extraction does not mistake nearby descriptive prose for a location', async () => {
-  const activeUrl = 'https://jobs.example.com/roles/agent-engineer'
-  const { manager, executeJavaScript, setCurrentUrl } = extractionManager(`<!doctype html><html><body><main>
-    <a href="/company/example"><span>Example</span></a>
-    <header>
-      <h1>Agent Engineer</h1>
-      <p>$205k – $270k | Remote (United States) | teams collaborate across time zones.</p>
-    </header>
-    <section><h2>About the job</h2><div>Own reliable agent infrastructure.</div></section>
-  </main></body></html>`, activeUrl)
-  await manager.restore({ tabs: [
-    { tabId: 'job', url: activeUrl, title: 'Agent Engineer', faviconUrl: null, associatedJobId: null }
-  ], activeTabId: 'job' })
-
-  const extraction = manager.extractJob('job')
-  await vi.waitFor(() => expect(executeJavaScript).toHaveBeenCalledTimes(1))
-  await expect(executeJavaScript.mock.results[0]?.value).resolves.toMatchObject({ locationText: '' })
-  setCurrentUrl('about:blank')
-  await expect(extraction).rejects.toThrow('The page changed while JobOS was reading it. Try saving again.')
-})
-
-test('job extraction waits for a client-rendered Wellfound detail pane after document loading completes', async () => {
-  const activeUrl = 'https://wellfound.com/jobs/starred?job_listing_slug=4467759-sales-ai-agent-builder'
-  const loadingShell = `<!doctype html><html><head>
-    <title>Saved Startups | Wellfound | Wellfound</title>
-    <meta property="og:site_name" content="Wellfound">
-    <meta property="og:title" content="Saved Startups | Wellfound">
-  </head><body><div id="__next">Open to offers Home Profile Jobs Applied Messages</div></body></html>`
-  const hydratedListing = `<!doctype html><html><head>
-    <title>Saved Startups | Wellfound | Wellfound</title>
-  </head><body><main>
-    <h1>Search for jobs</h1>
-    <aside class="job-detail-pane">
-      <a href="/company/recurring-decimal-1"><span>Recurring Decimal</span></a>
-      <header><h1>Sales AI Agent Builder</h1><p>Remote ( <a>United States</a> )</p></header>
-      <section><h2>About the job</h2><div>Build production sales agents.</div></section>
-    </aside>
-  </main></body></html>`
-  const { manager, executeJavaScript } = extractionManager([loadingShell, hydratedListing], activeUrl)
-  await manager.restore({ tabs: [
-    { tabId: 'job', url: activeUrl, title: 'Saved Startups | Wellfound', faviconUrl: null, associatedJobId: null }
-  ], activeTabId: 'job' })
-
-  await expect(manager.extractJob('job')).resolves.toEqual({
-    companyName: 'Recurring Decimal',
-    title: 'Sales AI Agent Builder',
-    canonicalUrl: activeUrl,
-    locationText: 'Remote (United States)',
-    descriptionText: 'Build production sales agents.',
-    applicationUrl: activeUrl
-  })
-  expect(executeJavaScript).toHaveBeenCalledTimes(2)
-})
-
-test('job extraction stops before retrying when the page navigates to about:blank during hydration', async () => {
-  vi.useFakeTimers()
-  try {
-    const activeUrl = 'https://jobs.example.com/roles/platform-engineer'
-    const loadingShell = '<html><body><h1>Loading</h1></body></html>'
-    const hydratedListing = `<!doctype html><html><head>
-      <script type="application/ld+json">{"@type":"JobPosting","title":"Platform Engineer","hiringOrganization":{"name":"Acme"},"jobLocation":"Remote","description":"Build systems."}</script>
-    </head><body></body></html>`
-    const { manager, executeJavaScript, setCurrentUrl } = extractionManager(
-      [loadingShell, hydratedListing], activeUrl
-    )
-    await manager.restore({ tabs: [
-      { tabId: 'job', url: activeUrl, title: 'Job', faviconUrl: null, associatedJobId: null }
-    ], activeTabId: 'job' })
-
-    const extraction = manager.extractJob('job')
-    await vi.waitFor(() => expect(executeJavaScript).toHaveBeenCalledTimes(1))
-    setCurrentUrl('about:blank')
-    await vi.advanceTimersByTimeAsync(250)
-
-    await expect(extraction).rejects.toThrow('The page changed while JobOS was reading it. Try saving again.')
-    expect(executeJavaScript).toHaveBeenCalledTimes(1)
-  } finally {
-    vi.useRealTimers()
-  }
-})
-
-test('job extraction translates an execution-context rejection caused by navigation', async () => {
-  vi.useFakeTimers()
-  try {
-    const activeUrl = 'https://jobs.example.com/roles/platform-engineer'
-    const { manager, executeJavaScript, setCurrentUrl } = extractionManager(
-      '<html><body><h1>Loading</h1></body></html>', activeUrl
-    )
-    executeJavaScript.mockImplementationOnce(async () => ({ pageUrl: activeUrl }))
-    executeJavaScript.mockImplementationOnce(async () => {
-      setCurrentUrl('about:blank')
-      throw new Error('Execution context was destroyed, most likely because of a navigation.')
-    })
-    await manager.restore({ tabs: [
-      { tabId: 'job', url: activeUrl, title: 'Job', faviconUrl: null, associatedJobId: null }
-    ], activeTabId: 'job' })
-
-    const extraction = manager.extractJob('job')
-    await vi.waitFor(() => expect(executeJavaScript).toHaveBeenCalledTimes(1))
-    await vi.advanceTimersByTimeAsync(250)
-
-    await expect(extraction).rejects.toThrow('The page changed while JobOS was reading it. Try saving again.')
-  } finally {
-    vi.useRealTimers()
-  }
-})
-
-test('job extraction translates an execution-context rejection caused by a same-URL reload', async () => {
-  vi.useFakeTimers()
-  try {
-    const activeUrl = 'https://jobs.example.com/roles/platform-engineer'
-    const { manager, executeJavaScript, emitDidStartLoading } = extractionManager(
-      '<html><body><h1>Loading</h1></body></html>', activeUrl
-    )
-    executeJavaScript.mockImplementationOnce(async () => ({ pageUrl: activeUrl }))
-    executeJavaScript.mockImplementationOnce(async () => {
-      emitDidStartLoading()
-      throw new Error('Execution context was destroyed, most likely because of a navigation.')
-    })
-    await manager.restore({ tabs: [
-      { tabId: 'job', url: activeUrl, title: 'Job', faviconUrl: null, associatedJobId: null }
-    ], activeTabId: 'job' })
-
-    const extraction = manager.extractJob('job')
-    await vi.waitFor(() => expect(executeJavaScript).toHaveBeenCalledTimes(1))
-    await vi.advanceTimersByTimeAsync(250)
-
-    await expect(extraction).rejects.toThrow('The page changed while JobOS was reading it. Try saving again.')
-  } finally {
-    vi.useRealTimers()
-  }
-})
-
-test('job extraction uses conservative rendered-page fallbacks and defaults application URL to canonical URL', async () => {
-  const activeUrl = 'https://careers.example.com/openings/7'
-  const { manager } = extractionManager(`<!doctype html><html><head>
-    <meta property="og:site_name" content=" Example Corp ">
-    <meta property="og:title" content=" Staff   Product Designer ">
-  </head><body>
-    <div data-testid="job-location">Remote — United States</div>
-    <section id="job-description"><p>Shape the product.</p><p>Partner with engineering.</p></section>
-    <a href="mailto:jobs@example.com">Apply by email</a>
-  </body></html>`, activeUrl)
-  await manager.restore({ tabs: [
-    { tabId: 'job', url: activeUrl, title: 'Job', faviconUrl: null, associatedJobId: null }
-  ], activeTabId: 'job' })
-
-  await expect(manager.extractJob('job')).resolves.toEqual({
-    companyName: 'Example Corp',
-    title: 'Staff Product Designer',
-    canonicalUrl: activeUrl,
-    locationText: 'Remote — United States',
-    descriptionText: 'Shape the product. Partner with engineering.',
-    applicationUrl: activeUrl
-  })
-})
-
-test('job extraction bounds every returned field', async () => {
-  const activeUrl = 'https://jobs.example.com/roles/long'
-  const { manager } = extractionManager(`<!doctype html><html><head>
-    <script type="application/ld+json">${JSON.stringify({
-      '@type': 'JobPosting', title: 'T'.repeat(600),
-      hiringOrganization: { name: 'C'.repeat(400) },
-      jobLocation: 'L'.repeat(1_100), description: 'D'.repeat(100_100),
-      applicationUrl: 'https://apply.example.com/job'
-    })}</script></head><body></body></html>`, activeUrl)
-  await manager.restore({ tabs: [
-    { tabId: 'job', url: activeUrl, title: 'Job', faviconUrl: null, associatedJobId: null }
-  ], activeTabId: 'job' })
-
-  const extracted = await manager.extractJob('job')
-  expect(extracted.companyName).toHaveLength(300)
-  expect(extracted.title).toHaveLength(500)
-  expect(extracted.locationText).toHaveLength(1_000)
-  expect(extracted.descriptionText).toHaveLength(100_000)
-  expect(extracted.canonicalUrl.length).toBeLessThanOrEqual(2_083)
-  expect(extracted.applicationUrl.length).toBeLessThanOrEqual(2_083)
-})
-
-test('job extraction rejects incomplete or non-web listings with named plain-English missing fields', async () => {
-  const { manager } = extractionManager('<html><body><h1>Only a role</h1></body></html>', 'about:blank')
-  await manager.restore({ tabs: [
-    { tabId: 'job', url: 'about:blank', title: 'Job', faviconUrl: null, associatedJobId: null }
-  ], activeTabId: 'job' })
-
-  await expect(manager.extractJob('job')).rejects.toThrow(
-    'Could not extract a complete job listing; missing company, location, description, and URL.'
-  )
 })

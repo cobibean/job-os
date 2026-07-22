@@ -28,10 +28,10 @@ export function useWorkspace(selectedJobId: string | null) {
   const selectedJobIdRef = useRef(selectedJobId)
   selectedJobIdRef.current = selectedJobId
 
-  const persist = useCallback((next: WorkspaceSnapshot) => {
-    if (!bridge) return
+  const persist = useCallback((next: WorkspaceSnapshot): Promise<void> => {
+    if (!bridge) return Promise.resolve()
     latest.current = next
-    queue.current = queue.current.then(async () => {
+    const operation = queue.current.then(async () => {
       try {
         const saved = await bridge.save({
           ...latest.current,
@@ -63,7 +63,11 @@ export function useWorkspace(selectedJobId: string | null) {
           startupRecoveryUpdates.current = []
         }
       }
-    }).catch(() => setAnnouncement('Layout save failed; changes remain visible'))
+    })
+    queue.current = operation.catch(() => {
+      setAnnouncement('Layout save failed; changes remain visible')
+    })
+    return operation
   }, [bridge])
 
   useEffect(() => {
@@ -106,16 +110,18 @@ export function useWorkspace(selectedJobId: string | null) {
     return () => { active = false }
   }, [bridge, persist])
 
-  const commit = useCallback((update: WorkspaceUpdate, message: string) => {
+  const commit = useCallback((update: WorkspaceUpdate, message: string): Promise<void> => {
     const next = update(latest.current)
     latest.current = next
     setWorkspace(next)
+    let persistence = Promise.resolve()
     if (bridge && hydrating.current) pendingHydrationUpdates.current.push(update)
     else {
       if (recoveringStartup.current) startupRecoveryUpdates.current.push(update)
-      persist(next)
+      persistence = persist(next)
     }
     if (message) setAnnouncement(message)
+    return persistence
   }, [bridge, persist])
 
   const selectPreset = (preset: LayoutPreset) => commit(current => ({

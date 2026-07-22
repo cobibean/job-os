@@ -127,7 +127,7 @@ class BrowserJobCreateRequest(BaseModel):
     location_text: str = Field(min_length=1, max_length=1000)
     description_text: str = Field(min_length=1, max_length=100_000)
     application_url: HttpUrl
-    origin: Literal["user"] = "user"
+    origin: Literal["user", "mcp"] = "user"
     idempotency_key: str = Field(
         default_factory=lambda: str(uuid4()), min_length=1, max_length=128
     )
@@ -139,6 +139,13 @@ class BrowserJobCreateRequest(BaseModel):
         if not stripped:
             raise ValueError("field must not be blank")
         return stripped
+
+    @field_validator("canonical_url", "application_url")
+    @classmethod
+    def reject_url_credentials(cls, value: HttpUrl) -> HttpUrl:
+        if value.username or value.password:
+            raise ValueError("URL credentials are not allowed")
+        return value
 
 
 class BrowserJobCreateResponse(BaseModel):

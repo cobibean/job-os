@@ -210,6 +210,20 @@ MIGRATIONS = (
             "ALTER TABLE job_document_state ADD COLUMN approved_at TEXT",
         ),
     ),
+    Migration(
+        version=9,
+        statements=(
+            "ALTER TABLE conversations ADD COLUMN isolated_turn_id TEXT",
+            "ALTER TABLE conversations ADD COLUMN isolated_previous_session_id TEXT",
+        ),
+    ),
+    Migration(
+        version=10,
+        statements=(
+            "ALTER TABLE conversations ADD COLUMN isolated_agent_session_id TEXT",
+            "ALTER TABLE conversations ADD COLUMN ignored_agent_session_id TEXT",
+        ),
+    ),
 )
 SCHEMA_VERSION = MIGRATIONS[-1].version
 
@@ -670,23 +684,66 @@ class JobOsStateStore:
             ).fetchone()
         return row[0] if row else None
 
-    def save_stored_session_id(self, stored_session_id: str) -> None:
+    def save_stored_session_id(self, stored_session_id: str | None) -> None:
         with sqlite3.connect(self._path) as connection:
             connection.execute(
                 "UPDATE conversations SET stored_session_id = ?, updated_at = CURRENT_TIMESTAMP "
                 "WHERE singleton_id = 1",
-                (stored_session_id[:256],),
+                (stored_session_id[:256] if stored_session_id else None,),
             )
 
     def save_stored_session_id_if_current(
-        self, expected_session_id: str | None, stored_session_id: str
+        self, expected_session_id: str | None, stored_session_id: str | None
     ) -> bool:
         with sqlite3.connect(self._path) as connection:
             cursor = connection.execute(
                 "UPDATE conversations SET stored_session_id = ?, "
                 "updated_at = CURRENT_TIMESTAMP "
                 "WHERE singleton_id = 1 AND stored_session_id IS ?",
-                (stored_session_id[:256], expected_session_id),
+                (stored_session_id[:256] if stored_session_id else None, expected_session_id),
+            )
+        return cursor.rowcount == 1
+
+    def begin_isolated_agent_session(self, turn_id: str) -> None:
+        with sqlite3.connect(self._path) as connection:
+            cursor = connection.execute(
+                "UPDATE conversations SET isolated_turn_id = ?, "
+                "isolated_previous_session_id = stored_session_id, stored_session_id = NULL, "
+                "updated_at = CURRENT_TIMESTAMP "
+                "WHERE singleton_id = 1 AND isolated_turn_id IS NULL",
+                (turn_id[:256],),
+            )
+        if cursor.rowcount != 1:
+            raise ConversationBusy("An isolated agent session is already active")
+
+    def restore_isolated_agent_session(self, turn_id: str) -> bool:
+        with sqlite3.connect(self._path) as connection:
+            cursor = connection.execute(
+                "UPDATE conversations SET stored_session_id = isolated_previous_session_id, "
+                "ignored_agent_session_id = isolated_agent_session_id, "
+                "isolated_agent_session_id = NULL, isolated_turn_id = NULL, "
+                "isolated_previous_session_id = NULL, updated_at = CURRENT_TIMESTAMP "
+                "WHERE singleton_id = 1 AND isolated_turn_id = ?",
+                (turn_id,),
+            )
+        return cursor.rowcount == 1
+
+    def record_isolated_agent_session(self, turn_id: str, session_id: str) -> None:
+        with sqlite3.connect(self._path) as connection:
+            connection.execute(
+                "UPDATE conversations SET isolated_agent_session_id = ?, "
+                "updated_at = CURRENT_TIMESTAMP "
+                "WHERE singleton_id = 1 AND isolated_turn_id = ?",
+                (session_id[:256], turn_id),
+            )
+
+    def consume_ignored_agent_session(self, session_id: str) -> bool:
+        with sqlite3.connect(self._path) as connection:
+            cursor = connection.execute(
+                "UPDATE conversations SET ignored_agent_session_id = NULL, "
+                "updated_at = CURRENT_TIMESTAMP "
+                "WHERE singleton_id = 1 AND ignored_agent_session_id = ?",
+                (session_id,),
             )
         return cursor.rowcount == 1
 
@@ -716,6 +773,8 @@ class JobOsStateStore:
             connection.execute("DELETE FROM conversation_turns")
             connection.execute(
                 "UPDATE conversations SET conversation_id = ?, stored_session_id = NULL, "
+                "isolated_turn_id = NULL, isolated_previous_session_id = NULL, "
+                "isolated_agent_session_id = NULL, ignored_agent_session_id = NULL, "
                 "updated_at = CURRENT_TIMESTAMP WHERE singleton_id = 1",
                 (conversation_id,),
             )
@@ -782,6 +841,21 @@ class JobOsStateStore:
                 "SELECT value FROM jobos_metadata WHERE key = 'agent_recovery_turn_id'"
             ).fetchone()
         return row[0] if row else None
+
+    def recovery_agent_session_id(self, turn_id: str) -> str | None:
+        with sqlite3.connect(f"file:{self._path}?mode=ro", uri=True) as connection:
+            row = connection.execute(
+                """
+                SELECT ignored_agent_session_id FROM conversations
+                WHERE singleton_id = 1
+                  AND EXISTS (
+                      SELECT 1 FROM jobos_metadata
+                      WHERE key = 'agent_recovery_turn_id' AND value = ?
+                  )
+                """,
+                (turn_id,),
+            ).fetchone()
+        return row[0] if row and row[0] else None
 
     def clear_recovery_turn_if_current(self, turn_id: str) -> bool:
         with sqlite3.connect(self._path) as connection:
@@ -853,6 +927,8 @@ class JobOsStateStore:
             turn_id = f"turn_{secrets.token_urlsafe(16)}"
             safe_context = redact_detail(context)
             safe_context.pop("redacted", None)
+            public_context = dict(safe_context)
+            public_context.pop("_fresh_agent_session", None)
             connection.execute(
                 """
                 INSERT INTO conversation_turns(
@@ -888,7 +964,7 @@ class JobOsStateStore:
                 (
                     turn_id,
                     json.dumps(
-                        {"context": safe_context, "source_turn_id": source_turn_id},
+                        {"context": public_context, "source_turn_id": source_turn_id},
                         separators=(",", ":"),
                         sort_keys=True,
                     ),
@@ -1132,6 +1208,24 @@ class JobOsStateStore:
         result = dict(row)
         result["context"] = json.loads(str(result.pop("context_json")))
         return result
+
+    def active_turn_origin_device_id(self) -> str | None:
+        with sqlite3.connect(f"file:{self._path}?mode=ro", uri=True) as connection:
+            row = connection.execute(
+                """
+                SELECT context_json FROM conversation_turns
+                WHERE status IN ('queued', 'running', 'waiting')
+                ORDER BY created_at LIMIT 1
+                """
+            ).fetchone()
+        if row is None:
+            return None
+        try:
+            context = json.loads(str(row[0]))
+        except (TypeError, ValueError):
+            return None
+        device_id = context.get("origin_device_id") if isinstance(context, dict) else None
+        return device_id if isinstance(device_id, str) and device_id else None
 
     def conversation_events_after(self, after: int) -> list[dict[str, object]]:
         with sqlite3.connect(f"file:{self._path}?mode=ro", uri=True) as connection:

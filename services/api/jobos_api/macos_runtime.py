@@ -6,6 +6,7 @@ import json
 import os
 import plistlib
 import re
+import secrets
 import subprocess
 import sys
 import time
@@ -25,6 +26,7 @@ from jobos_api.macos_keychain import (
 
 SERVICE_LABEL = "com.cobibean.jobos.api"
 DEVICE_TOKEN_SERVICE = "com.cobibean.jobos.device-token"
+MCP_TOKEN_SERVICE = "com.cobibean.jobos.mcp-token"
 HERMES_TOKEN_SERVICE = "com.cobibean.jobos.hermes-dashboard-token"
 _CONFIG_FIELDS = {
     "schema_version",
@@ -182,12 +184,15 @@ def build_service_environment(
     config: RuntimeServiceConfig,
     *,
     device_token: str,
+    mcp_token: str,
     remote_device_tokens: dict[str, str] | None = None,
     hermes_dashboard_token: str | None,
     base_environment: dict[str, str] | None = None,
 ) -> dict[str, str]:
     if not 16 <= len(device_token) <= 4096 or any(char in device_token for char in "\r\n\0"):
         raise ValueError("device credential is invalid")
+    if not 16 <= len(mcp_token) <= 4096 or any(char in mcp_token for char in "\r\n\0"):
+        raise ValueError("MCP credential is invalid")
     if hermes_dashboard_token is not None and (
         not 16 <= len(hermes_dashboard_token) <= 4096
         or any(char in hermes_dashboard_token for char in "\r\n\0")
@@ -208,6 +213,7 @@ def build_service_environment(
             (str(config.jobos_root / "services/api"), str(config.facade_source_path))
         ),
         "JOBOS_DEVICE_TOKEN": device_token,
+        "JOBOS_MCP_TOKEN": mcp_token,
         "JOBOS_DEVICE_ID": config.device_id,
         "JOBOS_STATE_DB_PATH": str(config.state_db_path),
         "JOBOS_JOB_HUNTER_DB_PATH": str(config.job_hunter_db_path),
@@ -440,6 +446,7 @@ def install_runtime(
     launcher_path: Path,
     uid: int,
     device_token: str,
+    mcp_token: str,
     hermes_dashboard_token: str | None,
     store_secret: Callable[[str, str, str], None] = store_keychain_secret,
     read_secret: Callable[[str, str], str | None] = read_keychain_secret,
@@ -457,6 +464,7 @@ def install_runtime(
     build_service_environment(
         config,
         device_token=device_token,
+        mcp_token=mcp_token,
         hermes_dashboard_token=hermes_dashboard_token,
         base_environment={},
     )
@@ -488,6 +496,7 @@ def install_runtime(
         )
     }
     previous_device_token = read_secret(DEVICE_TOKEN_SERVICE, config.device_id)
+    previous_mcp_token = read_secret(MCP_TOKEN_SERVICE, config.device_id)
     previous_hermes_token = read_secret(HERMES_TOKEN_SERVICE, config.device_id)
     previously_loaded = is_loaded(uid, config.label)
 
@@ -497,6 +506,7 @@ def install_runtime(
         _write_private_file(paths.plist_path, plist, 0o644)
         paths.stdout_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
         store_secret(DEVICE_TOKEN_SERVICE, config.device_id, device_token)
+        store_secret(MCP_TOKEN_SERVICE, config.device_id, mcp_token)
         if hermes_dashboard_token:
             store_secret(HERMES_TOKEN_SERVICE, config.device_id, hermes_dashboard_token)
         else:
@@ -537,6 +547,13 @@ def install_runtime(
             DEVICE_TOKEN_SERVICE,
             config.device_id,
             previous_device_token,
+            store_secret=store_secret,
+            delete_secret=delete_secret,
+        )
+        _restore_secret(
+            MCP_TOKEN_SERVICE,
+            config.device_id,
+            previous_mcp_token,
             store_secret=store_secret,
             delete_secret=delete_secret,
         )
@@ -669,6 +686,7 @@ def uninstall_runtime(
     for device_id in (config.device_id, *config.remote_device_ids):
         delete_secret(DEVICE_TOKEN_SERVICE, device_id)
     delete_secret(HERMES_TOKEN_SERVICE, config.device_id)
+    delete_secret(MCP_TOKEN_SERVICE, config.device_id)
     for path in (
         paths.plist_path,
         paths.desktop_config_path,
@@ -704,6 +722,10 @@ def run_service(config_path: Path) -> None:
     config = RuntimeServiceConfig.load(config_path)
     validate_runtime_paths(config)
     device_token = _read_keychain(DEVICE_TOKEN_SERVICE, config.device_id)
+    mcp_token = read_keychain_secret(MCP_TOKEN_SERVICE, config.device_id)
+    if mcp_token is None:
+        mcp_token = secrets.token_urlsafe(48)
+        store_keychain_secret(MCP_TOKEN_SERVICE, config.device_id, mcp_token)
     remote_device_tokens = {
         device_id: _read_keychain(DEVICE_TOKEN_SERVICE, device_id)
         for device_id in config.remote_device_ids
@@ -716,6 +738,7 @@ def run_service(config_path: Path) -> None:
     environment = build_service_environment(
         config,
         device_token=device_token,
+        mcp_token=mcp_token,
         remote_device_tokens=remote_device_tokens,
         hermes_dashboard_token=hermes_token,
     )
@@ -753,6 +776,7 @@ def main(arguments: list[str] | None = None) -> int:
             device_token = os.environ.get("JOBOS_DEVICE_TOKEN", "")
             if not device_token:
                 raise RuntimeError("JOBOS_DEVICE_TOKEN is required for installation")
+            mcp_token = os.environ.get("JOBOS_MCP_TOKEN") or secrets.token_urlsafe(48)
             config = RuntimeServiceConfig.load(options.config)
             install_runtime(
                 config,
@@ -760,6 +784,7 @@ def main(arguments: list[str] | None = None) -> int:
                 launcher_path=options.launcher,
                 uid=os.getuid(),
                 device_token=device_token,
+                mcp_token=mcp_token,
                 hermes_dashboard_token=os.environ.get("JOBOS_HERMES_DASHBOARD_TOKEN"),
             )
             print(f"JobOS runtime installed: {config.label}")
