@@ -37,6 +37,7 @@ test('starts a fresh agent session only after an explicit inline confirmation', 
   fireEvent.click(screen.getByRole('button', { name: 'Start new agent session' }))
   expect(agent.reset).not.toHaveBeenCalled()
   expect(screen.getByText('Start with fresh context?')).not.toBeNull()
+  expect(screen.getByRole('alertdialog').closest('.agent-body')).toBeNull()
   expect((screen.getByRole('button', { name: 'Send message' }) as HTMLButtonElement).disabled).toBe(true)
   fireEvent.click(screen.getByRole('button', { name: 'Confirm new session' }))
 

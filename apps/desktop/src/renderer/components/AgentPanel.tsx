@@ -110,28 +110,29 @@ export function AgentPanel({ contextLabel, apiState = 'connected', onArtifactRen
         </button>
       </div>
 
+      {confirmingReset && (
+        <section aria-labelledby="new-session-title" className="new-session-confirm" role="alertdialog">
+          <div>
+            <strong id="new-session-title">Start with fresh context?</strong>
+            <p>This clears the visible conversation and starts a new agent session. Your selected job stays attached.</p>
+          </div>
+          <div className="new-session-actions">
+            <button onClick={() => setConfirmingReset(false)} type="button">Cancel</button>
+            <button
+              aria-label="Confirm new session"
+              className="confirm"
+              disabled={!canReset}
+              onClick={() => void conversation.reset().then(reset => { if (reset) setConfirmingReset(false) })}
+              type="button"
+            >
+              {conversation.resetting && <LoaderCircle aria-hidden="true" className="spin" size={13} />}
+              {conversation.resetting ? 'Starting…' : 'New session'}
+            </button>
+          </div>
+        </section>
+      )}
+
       <div className="agent-body" onScroll={handleScroll} ref={scrollRef}>
-        {confirmingReset && (
-          <section aria-labelledby="new-session-title" className="new-session-confirm" role="alertdialog">
-            <div>
-              <strong id="new-session-title">Start with fresh context?</strong>
-              <p>This clears the visible conversation and starts a new agent session. Your selected job stays attached.</p>
-            </div>
-            <div className="new-session-actions">
-              <button onClick={() => setConfirmingReset(false)} type="button">Cancel</button>
-              <button
-                aria-label="Confirm new session"
-                className="confirm"
-                disabled={!canReset}
-                onClick={() => void conversation.reset().then(reset => { if (reset) setConfirmingReset(false) })}
-                type="button"
-              >
-                {conversation.resetting && <LoaderCircle aria-hidden="true" className="spin" size={13} />}
-                {conversation.resetting ? 'Starting…' : 'New session'}
-              </button>
-            </div>
-          </section>
-        )}
         <ConnectionNotice apiState={apiState} connection={conversation.connection} />
         {conversation.restoring && <div className="agent-restore"><LoaderCircle aria-hidden="true" className="spin" size={17} /> Restoring conversation…</div>}
         {!conversation.restoring && conversation.items.length === 0 && !conversation.error && (
