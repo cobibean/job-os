@@ -120,11 +120,14 @@ const JOB_EXTRACTION_SCRIPT = `(() => {
   };
   const locations = Array.isArray(posting?.jobLocation) ? posting.jobLocation : [posting?.jobLocation];
   let locationText = locations.map(addressText).filter(Boolean).join('; ');
+  const structuredLocationLength = locationText.length;
   if (!locationText && posting?.jobLocationType) locationText = decode(posting.jobLocationType);
-  if (!locationText) locationText = text(
+  const locationSelectorText = text(
     '[data-testid*="job-location" i], [itemprop="jobLocation"], .job-location, .job__location, .location'
   );
-  if (!locationText) locationText = nearbyRenderedLocation();
+  if (!locationText) locationText = locationSelectorText;
+  const nearbyLocationText = nearbyRenderedLocation();
+  if (!locationText) locationText = nearbyLocationText;
   const descriptionText = htmlText(posting?.description)
     || elementHtml('[data-testid*="job-description" i], [itemprop="description"], #job-description, .job-description, .job__description');
   const ordinaryUrl = (value) => {
@@ -141,7 +144,33 @@ const JOB_EXTRACTION_SCRIPT = `(() => {
       || links.find(link => /(?:^|[/_-])apply(?:[/?#_-]|$)/iu.test(link.getAttribute('href') || ''));
     applicationUrl = ordinaryUrl(apply?.getAttribute('href'));
   }
-  return { pageUrl: location.href, companyName, title, locationText, descriptionText, applicationUrl };
+  return {
+    pageUrl: location.href,
+    companyName,
+    title,
+    locationText,
+    descriptionText,
+    applicationUrl,
+    diagnostics: {
+      readyState: document.readyState,
+      documentTitle: normalize(document.title).slice(0, 300),
+      bodyTextLength: normalize(document.body?.innerText || '').length,
+      h1Text: text('h1').slice(0, 300),
+      jobPostingFound: Boolean(posting),
+      headingCount: document.querySelectorAll('h1, h2, h3, [role="heading"]').length,
+      exactTitleHeadingCount: [...document.querySelectorAll('h1, h2, h3, [role="heading"]')]
+        .filter(element => normalize(element.textContent || '') === title).length,
+      structuredLocationLength,
+      jobLocationTypeLength: decode(posting?.jobLocationType).length,
+      locationSelectorTextLength: locationSelectorText.length,
+      nearbyLocationTextLength: nearbyLocationText.length,
+      companyLength: companyName.length,
+      titleLength: title.length,
+      locationLength: locationText.length,
+      descriptionLength: descriptionText.length,
+      applicationUrlLength: applicationUrl.length
+    }
+  };
 })()`
 
 export function remoteBrowserPreferences(): WebPreferences {
@@ -413,10 +442,36 @@ export class BrowserManager {
 
   async extractJob(tabId: string): Promise<BrowserJobListing> {
     const tab = this.#requireTab(tabId)
+    const startedAt = Date.now()
+    const before = {
+      tabId,
+      stateUrl: tab.state.url,
+      stateLoading: tab.state.loading,
+      webContentsUrl: tab.view.webContents.getURL(),
+      webContentsLoading: typeof tab.view.webContents.isLoading === 'function'
+        ? tab.view.webContents.isLoading()
+        : null
+    }
     const raw = await tab.view.webContents.executeJavaScript(JOB_EXTRACTION_SCRIPT, true) as unknown
     const value = raw && typeof raw === 'object' ? raw as Record<string, unknown> : {}
     const activeUrl = ordinaryHttpUrl(value.pageUrl)
     const currentUrl = ordinaryHttpUrl(tab.view.webContents.getURL())
+    if (process.env.JOBOS_EXTRACTION_DIAGNOSTICS === '1') {
+      console.info('[JobOS extraction diagnostic]', JSON.stringify({
+        elapsedMs: Date.now() - startedAt,
+        before,
+        after: {
+          stateUrl: tab.state.url,
+          stateLoading: tab.state.loading,
+          webContentsUrl: tab.view.webContents.getURL(),
+          webContentsLoading: typeof tab.view.webContents.isLoading === 'function'
+            ? tab.view.webContents.isLoading()
+            : null
+        },
+        pageUrl: activeUrl,
+        diagnostics: value.diagnostics ?? null
+      }))
+    }
     if (activeUrl && currentUrl && activeUrl !== currentUrl) {
       throw new Error('The page changed while JobOS was reading it. Try saving again.')
     }
