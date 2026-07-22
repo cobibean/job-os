@@ -1,4 +1,4 @@
-import { Moon, PanelLeft, RotateCcw, Sun } from 'lucide-react'
+import { Moon, RotateCcw, Sun } from 'lucide-react'
 import type { LayoutPreset } from '../workspaceLayout'
 import type { ThemeMode } from '../theme/themes'
 
@@ -22,7 +22,6 @@ export function WorkspaceBar({ activePreset, onPresetChange, onReset, onToggleMo
     <header className="workspace-bar">
       <div className="brand-lockup">
         <span className="brand">JobOS</span>
-        <PanelLeft aria-hidden="true" className="brand-panel-icon" size={17} strokeWidth={1.5} />
       </div>
 
       <nav aria-label="Workspace layouts" className="layout-switcher">
