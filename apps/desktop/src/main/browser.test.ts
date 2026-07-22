@@ -624,6 +624,35 @@ test('job extraction supports the current Greenhouse hosted-board markup', async
   })
 })
 
+test('job extraction derives a nearby rendered location for Wellfound detail panes', async () => {
+  const activeUrl = 'https://wellfound.com/jobs/starred?job_listing_slug=4467759-sales-ai-agent-builder'
+  const { manager } = extractionManager(`<!doctype html><html><body>
+    <main>
+      <section class="saved-jobs-list"><a>Other Company</a><a>Other Role Remote onlyCanada</a></section>
+      <aside class="job-detail-pane">
+        <div data-testid="company-name">Recurring Decimal</div>
+        <h1>Sales AI Agent Builder</h1>
+        <div>Remote ( <a>United States</a> )</div>
+        <div>|4 years of exp |Full Time</div>
+        <div class="job-description">Build production sales agents and own their customer outcomes.</div>
+        <a href="https://example.com/apply">Apply on company website</a>
+      </aside>
+    </main>
+  </body></html>`, activeUrl)
+  await manager.restore({ tabs: [
+    { tabId: 'job', url: activeUrl, title: 'Saved Startups | Wellfound', faviconUrl: null, associatedJobId: null }
+  ], activeTabId: 'job' })
+
+  await expect(manager.extractJob('job')).resolves.toMatchObject({
+    companyName: 'Recurring Decimal',
+    title: 'Sales AI Agent Builder',
+    canonicalUrl: activeUrl,
+    locationText: 'Remote (United States)',
+    descriptionText: 'Build production sales agents and own their customer outcomes.',
+    applicationUrl: 'https://example.com/apply'
+  })
+})
+
 test('job extraction uses conservative rendered-page fallbacks and defaults application URL to canonical URL', async () => {
   const activeUrl = 'https://careers.example.com/openings/7'
   const { manager } = extractionManager(`<!doctype html><html><head>
