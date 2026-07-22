@@ -92,6 +92,23 @@ const JOB_EXTRACTION_SCRIPT = `(() => {
   const title = decode(posting?.title)
     || text('[data-testid*="job-title" i], [itemprop="title"], .job-title, h1')
     || meta('meta[property="og:title"], meta[name="twitter:title"]');
+  const nearbyRenderedLocation = () => {
+    if (!title) return '';
+    const headings = [...document.querySelectorAll('h1, h2, h3, [role="heading"]')]
+      .filter(element => normalize(element.textContent || '') === title);
+    const anchor = headings.at(-1);
+    if (!anchor) return '';
+    let scope = anchor.parentElement;
+    for (let depth = 0; scope && depth < 5; depth += 1, scope = scope.parentElement) {
+      const rendered = normalize(scope.innerText || scope.textContent || '');
+      const titleIndex = rendered.lastIndexOf(title);
+      if (titleIndex < 0) continue;
+      const nearby = rendered.slice(titleIndex + title.length, titleIndex + title.length + 300).trim();
+      const match = nearby.match(/^(Remote\\s*\\(\\s*[^)]{2,80}\\s*\\))/iu);
+      if (match) return normalize(match[1]).replace(/\\(\\s+/u, '(').replace(/\\s+\\)/u, ')');
+    }
+    return '';
+  };
   const addressText = (location) => {
     if (typeof location === 'string') return decode(location);
     if (!location || typeof location !== 'object') return '';
@@ -107,6 +124,7 @@ const JOB_EXTRACTION_SCRIPT = `(() => {
   if (!locationText) locationText = text(
     '[data-testid*="job-location" i], [itemprop="jobLocation"], .job-location, .job__location, .location'
   );
+  if (!locationText) locationText = nearbyRenderedLocation();
   const descriptionText = htmlText(posting?.description)
     || elementHtml('[data-testid*="job-description" i], [itemprop="description"], #job-description, .job-description, .job__description');
   const ordinaryUrl = (value) => {
