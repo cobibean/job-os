@@ -145,7 +145,7 @@ const JOB_EXTRACTION_SCRIPT = `(() => {
       const titleIndex = rendered.lastIndexOf(title);
       if (titleIndex < 0) continue;
       const nearby = rendered.slice(titleIndex + title.length, titleIndex + title.length + 300).trim();
-      const match = nearby.match(/^(Remote\\s*\\(\\s*[^)]{2,80}\\s*\\))/iu);
+      const match = nearby.match(/^(?:\\$[\\d,.]+[km]?\\s*[–—-]\\s*\\$[\\d,.]+[km]?\\s*\\|\\s*)?(Remote\\s*\\(\\s*[^)]{2,80}\\s*\\))(?=\\s*(?:\\|\\s*)?(?:\\d+\\s+years?\\s+of\\s+exp\\b|Full\\s+Time\\b|$))/iu);
       if (match) return normalize(match[1]).replace(/\\(\\s+/u, '(').replace(/\\s+\\)/u, ')');
     }
     return '';

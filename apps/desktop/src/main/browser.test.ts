@@ -655,7 +655,7 @@ test('job extraction scopes every field to the active Wellfound detail pane desp
         </div>
         <header>
           <h1>Sales AI Agent Builder</h1>
-          <ul><li>Remote ( <a>United States</a> )</li><li>4 years of exp</li><li>Full Time</li></ul>
+          <p>Remote ( <a>United States</a> ) | 4 years of exp | Full Time</p>
         </header>
         <section>
           <h2>About the job</h2>
@@ -678,6 +678,56 @@ test('job extraction scopes every field to the active Wellfound detail pane desp
     descriptionText: 'Build production sales agents and own their customer outcomes.',
     applicationUrl: 'https://example.com/apply'
   })
+})
+
+test('job extraction finds a Wellfound remote location after salary text in the detail header', async () => {
+  const activeUrl = 'https://wellfound.com/jobs/starred?job_listing_slug=3931880-senior-software-engineer-backend-ai-agent'
+  const { manager } = extractionManager(`<!doctype html><html><head>
+    <title>Saved Startups | Wellfound | Wellfound</title>
+  </head><body><main>
+    <h1>Search for jobs</h1>
+    <aside class="job-detail-pane">
+      <a href="/company/cresta"><span>Cresta</span></a>
+      <header>
+        <h1>Senior Software Engineer, Backend (AI Agent)</h1>
+        <p>$205k – $270k | Remote ( <a>United States</a> ) | 5 years of exp | Full Time</p>
+      </header>
+      <section><h2>About the job</h2><div>Build reliable AI agent infrastructure.</div></section>
+    </aside>
+  </main></body></html>`, activeUrl)
+  await manager.restore({ tabs: [
+    { tabId: 'job', url: activeUrl, title: 'Saved Startups | Wellfound', faviconUrl: null, associatedJobId: null }
+  ], activeTabId: 'job' })
+
+  await expect(manager.extractJob('job')).resolves.toEqual({
+    companyName: 'Cresta',
+    title: 'Senior Software Engineer, Backend (AI Agent)',
+    canonicalUrl: activeUrl,
+    locationText: 'Remote (United States)',
+    descriptionText: 'Build reliable AI agent infrastructure.',
+    applicationUrl: activeUrl
+  })
+})
+
+test('job extraction does not mistake nearby descriptive prose for a location', async () => {
+  const activeUrl = 'https://jobs.example.com/roles/agent-engineer'
+  const { manager, executeJavaScript, setCurrentUrl } = extractionManager(`<!doctype html><html><body><main>
+    <a href="/company/example"><span>Example</span></a>
+    <header>
+      <h1>Agent Engineer</h1>
+      <p>$205k – $270k | Remote (United States) | teams collaborate across time zones.</p>
+    </header>
+    <section><h2>About the job</h2><div>Own reliable agent infrastructure.</div></section>
+  </main></body></html>`, activeUrl)
+  await manager.restore({ tabs: [
+    { tabId: 'job', url: activeUrl, title: 'Agent Engineer', faviconUrl: null, associatedJobId: null }
+  ], activeTabId: 'job' })
+
+  const extraction = manager.extractJob('job')
+  await vi.waitFor(() => expect(executeJavaScript).toHaveBeenCalledTimes(1))
+  await expect(executeJavaScript.mock.results[0]?.value).resolves.toMatchObject({ locationText: '' })
+  setCurrentUrl('about:blank')
+  await expect(extraction).rejects.toThrow('The page changed while JobOS was reading it. Try saving again.')
 })
 
 test('job extraction waits for a client-rendered Wellfound detail pane after document loading completes', async () => {

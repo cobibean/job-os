@@ -50,6 +50,20 @@ URL changes, `about:blank`, in-page navigation, and same-URL reload/context-dest
 - Screenshot: `/Users/jacobilangemm/.hermes/profiles/devonte/cache/screenshots/jobos-wellfound-save-passed-2026-07-21.png`.
 - Machine-readable proof: `/Users/jacobilangemm/.hermes/profiles/devonte/cache/jobos-installed-trusted-save-proof.json`.
 
+## Follow-up: salary before location
+
+A second real listing exposed a separate header format:
+
+- URL: `https://wellfound.com/jobs/starred?job_listing_slug=3931880-senior-software-engineer-backend-ai-agent`
+- Title: `Senior Software Engineer, Backend (AI Agent)`
+- Company: `Cresta`
+- Header: `$205k – $270k | Remote ( United States ) | 5 years of exp | Full Time`
+- Exact installed-app failure: `Could not extract a complete job listing; missing location.`
+
+The nearby rendered-location fallback previously required `Remote (...)` to appear immediately after the title. It now accepts Wellfound's bounded salary-range prefix, while requiring known metadata after the location (`years of exp`, `Full Time`, or end of header). A negative regression prevents salary-prefixed descriptive prose from being mistaken for location metadata.
+
+Verification after this follow-up: 26 focused browser tests passed, full `pnpm check` passed, the arm64 bundle was rebuilt, its deep signature verified, and it was installed. Final human-click acceptance remained pending because repeated automated Wellfound navigation stopped rendering any detail pane and only returned the saved-list shell; do not treat that external incomplete DOM as proof of either success or failure.
+
 ## Gotchas
 
 - Do not accept direct extraction IPC, renderer `.click()`, a forced BrowserView size, or an unverified CDP port owner as installed-app acceptance.
