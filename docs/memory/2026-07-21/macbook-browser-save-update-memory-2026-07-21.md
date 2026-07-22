@@ -29,6 +29,8 @@ The updater keeps the existing MacBook runtime configuration, Keychain credentia
 - Copied the artifact into the active private HTTP server root.
 - Downloaded the artifact back through Tailscale HTTPS port `10449`.
 - Downloaded size, SHA-256, and ZIP integrity matched the local source exactly.
+- Restarted `com.cobibean.jobos.api` so the Mini loaded the new `POST /v1/jobs` route and updated Job Hunter facade.
+- Live Mini verification passed: health `ready`, agent `online`, browser-create route loaded, and the existing MacBook credential returned HTTP `200` for `/v1/jobs`.
 
 ## Installation
 
