@@ -38,7 +38,3 @@ Place two opportunities side by side to compare fit, compensation, risks, and pr
 ## Command palette and keyboard shortcuts
 
 Quickly jump to jobs, tabs, layouts, documents, and common actions without reaching for the mouse.
-
-## Themes
-
-Choose between polished visual themes while preserving JobOS’s layout, readability, and design system.
