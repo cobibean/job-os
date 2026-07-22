@@ -98,13 +98,11 @@ button:focus-visible {
   height: 100%;
   display: flex;
   align-items: center;
-  justify-content: space-between;
   padding: 0 20px 0 var(--macos-titlebar-safe-left);
   border-right: 1px solid var(--border);
 }
 
 .brand { font-size: 21px; font-weight: 650; letter-spacing: -0.04em; }
-.brand-panel-icon { color: var(--muted); }
 
 .layout-switcher {
   justify-self: center;
