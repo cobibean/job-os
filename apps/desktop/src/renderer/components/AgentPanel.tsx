@@ -10,6 +10,7 @@ interface AgentPanelProps {
   contextLabel: string
   apiState?: ConnectivityState
   onArtifactRendered?: () => void
+  onModalOpenChange?: (open: boolean) => void
 }
 
 type TerminalState = Extract<ConversationEntryState, 'completed' | 'failed' | 'interrupted'>
@@ -37,10 +38,11 @@ function ConnectionNotice({ apiState, connection }: { apiState: ConnectivityStat
   return null
 }
 
-export function AgentPanel({ contextLabel, apiState = 'connected', onArtifactRendered }: AgentPanelProps) {
+export function AgentPanel({ contextLabel, apiState = 'connected', onArtifactRendered, onModalOpenChange }: AgentPanelProps) {
   const conversation = useAgentConversation()
   const terminalByTurn = useMemo(() => terminalStateByTurn(conversation.entries), [conversation.entries])
   const [confirmingReset, setConfirmingReset] = useState(false)
+  const [preparingReset, setPreparingReset] = useState(false)
   const scrollRef = useRef<HTMLDivElement>(null)
   const newSessionButtonRef = useRef<HTMLButtonElement>(null)
   const cancelResetButtonRef = useRef<HTMLButtonElement>(null)
@@ -56,10 +58,35 @@ export function AgentPanel({ contextLabel, apiState = 'connected', onArtifactRen
     && !confirmingReset
     && apiState === 'connected'
   )
-  const canReset = !conversation.activeTurn && !conversation.restoring && !conversation.operationPending && apiState === 'connected'
+  const canReset = !conversation.activeTurn && !conversation.restoring && !conversation.operationPending && !preparingReset && apiState === 'connected'
+
+  useEffect(() => {
+    return () => onModalOpenChange?.(false)
+  }, [onModalOpenChange])
+
+  const openResetDialog = async () => {
+    if (!canReset) return
+    onModalOpenChange?.(true)
+    const browser = window.jobos?.browser
+    if (!browser) {
+      setConfirmingReset(true)
+      return
+    }
+    setPreparingReset(true)
+    try {
+      await browser.setBounds({ x: 0, y: 0, width: 0, height: 0, visible: false })
+      setConfirmingReset(true)
+    } catch {
+      onModalOpenChange?.(false)
+    } finally {
+      setPreparingReset(false)
+    }
+  }
 
   const closeResetDialog = () => {
-    if (!conversation.resetting) setConfirmingReset(false)
+    if (conversation.resetting) return
+    setConfirmingReset(false)
+    onModalOpenChange?.(false)
   }
 
   const trapResetDialogFocus = (event: globalThis.KeyboardEvent) => {
@@ -95,6 +122,7 @@ export function AgentPanel({ contextLabel, apiState = 'connected', onArtifactRen
         if (event.key === 'Escape' && !conversation.resetting) {
           event.preventDefault()
           setConfirmingReset(false)
+          onModalOpenChange?.(false)
           return
         }
         trapResetDialogFocus(event)
@@ -160,7 +188,7 @@ export function AgentPanel({ contextLabel, apiState = 'connected', onArtifactRen
           aria-label="Start new agent session"
           className="new-session-button"
           disabled={!canReset}
-          onClick={() => setConfirmingReset(true)}
+          onClick={() => void openResetDialog()}
           ref={newSessionButtonRef}
           title={conversation.activeTurn ? 'Finish or stop the active turn first' : 'Clear this conversation and start with fresh context'}
           type="button"
@@ -190,7 +218,11 @@ export function AgentPanel({ contextLabel, apiState = 'connected', onArtifactRen
                 autoFocus
                 className="confirm"
                 disabled={!canReset}
-                onClick={() => void conversation.reset().then(reset => { if (reset) setConfirmingReset(false) })}
+                onClick={() => void conversation.reset().then(reset => {
+                  if (!reset) return
+                  setConfirmingReset(false)
+                  onModalOpenChange?.(false)
+                })}
                 type="button"
               >
                 {conversation.resetting && <LoaderCircle aria-hidden="true" className="spin" size={13} />}

@@ -17,6 +17,7 @@ export function App() {
   const layoutState = useWorkspace(jobState.selectedJobId)
   const theme = useTheme()
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [agentModalOpen, setAgentModalOpen] = useState(false)
   const activePreset = layoutState.workspace.selectedPreset
   const activeLayout = layoutState.workspace.layouts[activePreset]
 
@@ -34,6 +35,7 @@ export function App() {
           apiState={connectivity.state}
           contextLabel={jobState.selectedJob ? `${jobState.selectedJob.company} · ${jobState.selectedJob.title}` : 'No active job'}
           onArtifactRendered={layoutState.showDocument}
+          onModalOpenChange={setAgentModalOpen}
         />}
         center={<CenterWorkspace
           activeSurface={layoutState.workspace.activeCenterSurface}
@@ -47,7 +49,7 @@ export function App() {
           }}
           browserRepaired={Boolean(layoutState.workspace.repairedBrowser)}
           browserRepairReasons={layoutState.workspace.browserRepairReasons ?? []}
-          browserVisible={!activeLayout.collapsed.includes('center')}
+          browserVisible={!activeLayout.collapsed.includes('center') && !agentModalOpen}
           jobs={jobState.jobs}
           layoutSignal={`${activePreset}:${activeLayout.order.join(',')}:${activeLayout.collapsed.join(',')}`}
           onBrowserPersist={layoutState.updateBrowserState}

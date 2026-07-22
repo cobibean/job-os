@@ -226,6 +226,10 @@ test('tabs reorder and bounds changes reuse the same live WebContentsView instan
   expect(manager.getState().tabs.find(tab => tab.tabId === 'google')?.associatedJobId).toBeNull()
   expect(attached).toEqual([views[0]])
   expect(views[0]?.setBounds).toHaveBeenLastCalledWith({ x: 310, y: 180, width: 540, height: 510 })
+  manager.setBounds({ x: 0, y: 0, width: 0, height: 0, visible: false })
+  expect(attached).toEqual([])
+  manager.setBounds({ x: 310, y: 180, width: 540, height: 510, visible: true })
+  expect(attached).toEqual([views[0]])
 
   await manager.close('gmail')
   await manager.create('https://jobs.example.com/roles/8', 'job-8')
