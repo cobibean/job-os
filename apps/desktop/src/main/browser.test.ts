@@ -624,18 +624,34 @@ test('job extraction supports the current Greenhouse hosted-board markup', async
   })
 })
 
-test('job extraction derives a nearby rendered location for Wellfound detail panes', async () => {
+test('job extraction scopes every field to the active Wellfound detail pane despite page-level headings and other listings', async () => {
   const activeUrl = 'https://wellfound.com/jobs/starred?job_listing_slug=4467759-sales-ai-agent-builder'
-  const { manager } = extractionManager(`<!doctype html><html><body>
+  const { manager } = extractionManager(`<!doctype html><html><head>
+    <title>Saved Startups | Wellfound | Wellfound</title>
+    <meta property="og:site_name" content="Wellfound">
+  </head><body>
     <main>
-      <section class="saved-jobs-list"><a>Other Company</a><a>Other Role Remote onlyCanada</a></section>
+      <h1>Search for jobs</h1>
+      <section class="saved-jobs-list">
+        <article><h2>Waymark</h2><a>Junior Software Engineer Remote only United States</a></article>
+        <article><h2>Recurring Decimal</h2><a>Sales AI Agent Builder Remote only United States</a></article>
+        <article><h2>Cresta</h2><a>Senior Software Engineer Remote only Canada</a></article>
+      </section>
       <aside class="job-detail-pane">
-        <div data-testid="company-name">Recurring Decimal</div>
-        <h1>Sales AI Agent Builder</h1>
-        <div>Remote ( <a>United States</a> )</div>
-        <div>|4 years of exp |Full Time</div>
-        <div class="job-description">Build production sales agents and own their customer outcomes.</div>
-        <a href="https://example.com/apply">Apply on company website</a>
+        <div class="selected-company">
+          <a href="/company/recurring-decimal-1"><img alt="Avatar for Recurring Decimal"></a>
+          <a href="/company/recurring-decimal-1"><span>Recurring Decimal</span></a>
+        </div>
+        <header>
+          <h1>Sales AI Agent Builder</h1>
+          <ul><li>Remote ( <a>United States</a> )</li><li>4 years of exp</li><li>Full Time</li></ul>
+        </header>
+        <section>
+          <h2>About the job</h2>
+          <div>Build production sales agents and own their customer outcomes.</div>
+          <a href="https://example.com/apply">Apply on company website</a>
+        </section>
+        <section><h2>About the company</h2><h3>Wellfound</h3></section>
       </aside>
     </main>
   </body></html>`, activeUrl)
@@ -643,7 +659,7 @@ test('job extraction derives a nearby rendered location for Wellfound detail pan
     { tabId: 'job', url: activeUrl, title: 'Saved Startups | Wellfound', faviconUrl: null, associatedJobId: null }
   ], activeTabId: 'job' })
 
-  await expect(manager.extractJob('job')).resolves.toMatchObject({
+  await expect(manager.extractJob('job')).resolves.toEqual({
     companyName: 'Recurring Decimal',
     title: 'Sales AI Agent Builder',
     canonicalUrl: activeUrl,
