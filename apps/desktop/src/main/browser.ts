@@ -55,7 +55,29 @@ const JOB_EXTRACTION_SCRIPT = `(() => {
   };
   const text = (selector) => normalize(document.querySelector(selector)?.textContent || '');
   const elementHtml = (selector) => htmlText(document.querySelector(selector)?.innerHTML || '');
+  const textWithin = (root, selector) => {
+    for (const element of root?.querySelectorAll(selector) || []) {
+      const value = normalize(element.textContent || '');
+      if (value) return value;
+    }
+    return '';
+  };
+  const elementHtmlWithin = (root, selector) => htmlText(root?.querySelector(selector)?.innerHTML || '');
   const meta = (selector) => normalize(document.querySelector(selector)?.getAttribute('content') || '');
+  const visible = (element) => {
+    if (!element) return false;
+    const style = getComputedStyle(element);
+    return !element.hidden && style.display !== 'none' && style.visibility !== 'hidden';
+  };
+  const commonAncestor = (first, second) => {
+    if (!first || !second) return null;
+    const firstAncestors = new Set();
+    for (let node = first; node; node = node.parentElement) firstAncestors.add(node);
+    for (let node = second; node; node = node.parentElement) {
+      if (firstAncestors.has(node)) return node === document.body ? null : node;
+    }
+    return null;
+  };
   const typeIsJobPosting = (value) => {
     const types = Array.isArray(value) ? value : [value];
     return types.some(type => String(type).toLowerCase().replace(/^.*[/#]/u, '') === 'jobposting');
@@ -80,26 +102,42 @@ const JOB_EXTRACTION_SCRIPT = `(() => {
       if (posting) break;
     } catch { /* Ignore malformed publisher metadata. */ }
   }
+  const headings = [...document.querySelectorAll('h1, h2, h3, h4, h5, h6, [role="heading"]')]
+    .filter(visible);
+  const aboutJobHeading = headings
+    .filter(element => /^about the job$/iu.test(normalize(element.textContent || '')))
+    .at(-1) || null;
+  const detailTitleHeading = aboutJobHeading
+    ? headings.filter(element => element.tagName === 'H1'
+      && Boolean(element.compareDocumentPosition(aboutJobHeading) & Node.DOCUMENT_POSITION_FOLLOWING)).at(-1) || null
+    : null;
+  const detailRoot = commonAncestor(detailTitleHeading, aboutJobHeading);
   const organization = posting?.hiringOrganization;
   const greenhouseLogoCompany = normalize(document.querySelector('.job-post-container img.logo[alt]')?.getAttribute('alt') || '')
     .replace(/\\s+logo$/iu, '');
   const greenhouseTitleCompany = normalize(document.title).match(/\\sat\\s+(.+)$/iu)?.[1] || '';
+  const companySelector = '[data-testid*="company" i], [itemprop="hiringOrganization"], .company-name, .job-company';
+  const scopedCompanySelector = 'a[href^="/company/"], a[href*="wellfound.com/company/"], [data-testid="startup-header"] h2, [data-testid="startup-header"] h3, ' + companySelector;
   const companyName = decode(typeof organization === 'string' ? organization : organization?.name)
-    || text('[data-testid*="company" i], [itemprop="hiringOrganization"], .company-name, .job-company')
+    || (detailRoot
+      ? textWithin(detailRoot, scopedCompanySelector)
+      : text(companySelector))
     || greenhouseLogoCompany
     || greenhouseTitleCompany
     || meta('meta[property="og:site_name"], meta[name="application-name"]');
   const title = decode(posting?.title)
+    || normalize(detailTitleHeading?.textContent || '')
     || text('[data-testid*="job-title" i], [itemprop="title"], .job-title, h1')
     || meta('meta[property="og:title"], meta[name="twitter:title"]');
   const nearbyRenderedLocation = () => {
     if (!title) return '';
-    const headings = [...document.querySelectorAll('h1, h2, h3, [role="heading"]')]
-      .filter(element => normalize(element.textContent || '') === title);
-    const anchor = headings.at(-1);
+    const anchor = detailTitleHeading || headings
+      .filter(element => normalize(element.textContent || '') === title)
+      .at(-1);
     if (!anchor) return '';
     let scope = anchor.parentElement;
     for (let depth = 0; scope && depth < 5; depth += 1, scope = scope.parentElement) {
+      if (detailRoot && !detailRoot.contains(scope)) break;
       const rendered = normalize(scope.innerText || scope.textContent || '');
       const titleIndex = rendered.lastIndexOf(title);
       if (titleIndex < 0) continue;
@@ -122,14 +160,24 @@ const JOB_EXTRACTION_SCRIPT = `(() => {
   let locationText = locations.map(addressText).filter(Boolean).join('; ');
   const structuredLocationLength = locationText.length;
   if (!locationText && posting?.jobLocationType) locationText = decode(posting.jobLocationType);
-  const locationSelectorText = text(
-    '[data-testid*="job-location" i], [itemprop="jobLocation"], .job-location, .job__location, .location'
-  );
+  const locationSelector = '[data-testid*="job-location" i], [itemprop="jobLocation"], .job-location, .job__location, .location';
+  const locationSelectorText = detailRoot
+    ? textWithin(detailRoot, locationSelector)
+    : text(locationSelector);
   if (!locationText) locationText = locationSelectorText;
   const nearbyLocationText = nearbyRenderedLocation();
   if (!locationText) locationText = nearbyLocationText;
+  const semanticDescription = htmlText(
+    aboutJobHeading?.nextElementSibling?.innerHTML
+      || aboutJobHeading?.nextElementSibling?.textContent
+      || ''
+  );
+  const descriptionSelector = '[data-testid*="job-description" i], [itemprop="description"], #job-description, .job-description, .job__description';
   const descriptionText = htmlText(posting?.description)
-    || elementHtml('[data-testid*="job-description" i], [itemprop="description"], #job-description, .job-description, .job__description');
+    || semanticDescription
+    || (detailRoot
+      ? elementHtmlWithin(detailRoot, descriptionSelector)
+      : elementHtml(descriptionSelector));
   const ordinaryUrl = (value) => {
     if (typeof value !== 'string' || !value.trim()) return '';
     try {
@@ -139,7 +187,7 @@ const JOB_EXTRACTION_SCRIPT = `(() => {
   };
   let applicationUrl = ordinaryUrl(posting?.applicationUrl || posting?.applyUrl);
   if (!applicationUrl) {
-    const links = [...document.querySelectorAll('a[href]')];
+    const links = [...(detailRoot || document).querySelectorAll('a[href]')];
     const apply = links.find(link => /\\bapply(?: now| for| here)?\\b/iu.test(normalize(link.textContent || '')))
       || links.find(link => /(?:^|[/_-])apply(?:[/?#_-]|$)/iu.test(link.getAttribute('href') || ''));
     applicationUrl = ordinaryUrl(apply?.getAttribute('href'));
