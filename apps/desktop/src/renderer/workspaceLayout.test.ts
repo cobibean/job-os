@@ -23,6 +23,7 @@ test('presets encode the locked dominant surfaces', () => {
   expect(workspace.layouts.research.widths.center).toBeGreaterThan(700)
   expect(workspace.layouts.review.widths.center).toBeGreaterThan(650)
   expect(workspace.layouts['agent-focus'].widths.agent).toBeGreaterThan(600)
+  expect(workspace.layouts['agent-focus'].order).toEqual(['jobs', 'agent', 'center'])
 })
 
 test('resizing is continuous data with usable panel minimums', () => {

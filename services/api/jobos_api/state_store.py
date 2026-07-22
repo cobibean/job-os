@@ -250,6 +250,11 @@ class WorkspaceSnapshotRecord:
 
 
 PANEL_IDS = ("jobs", "center", "agent")
+LEGACY_AGENT_FOCUS_DEFAULT: dict[str, object] = {
+    "order": ["jobs", "center", "agent"],
+    "widths": {"jobs": 220, "center": 420, "agent": 650},
+    "collapsed": [],
+}
 PRESET_DEFAULTS: dict[str, dict[str, object]] = {
     "research": {
         "order": ["jobs", "center", "agent"],
@@ -262,7 +267,7 @@ PRESET_DEFAULTS: dict[str, dict[str, object]] = {
         "collapsed": [],
     },
     "agent-focus": {
-        "order": ["jobs", "center", "agent"],
+        "order": ["jobs", "agent", "center"],
         "widths": {"jobs": 220, "center": 420, "agent": 650},
         "collapsed": [],
     },
@@ -354,7 +359,11 @@ def normalize_workspace_snapshot(
         for preset in PRESET_DEFAULTS:
             layout = layouts.get(preset)
             if _valid_layout(layout):
-                canonical["layouts"][preset] = deepcopy(layout)  # type: ignore[index]
+                canonical["layouts"][preset] = deepcopy(  # type: ignore[index]
+                    PRESET_DEFAULTS[preset]
+                    if preset == "agent-focus" and layout == LEGACY_AGENT_FOCUS_DEFAULT
+                    else layout
+                )
             else:
                 repaired.append(preset)
     else:

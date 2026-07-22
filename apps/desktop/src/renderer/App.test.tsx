@@ -820,6 +820,7 @@ test('layout changes preserve mounted content surface identities', async () => {
 
   fireEvent.click(screen.getByRole('button', { name: 'Agent Focus' }))
 
+  expect(panelDomOrder()).toEqual(['jobs', 'agent', 'center'])
   expect(screen.getByRole('main')).toBe(center)
   expect(screen.getByRole('complementary', { name: 'Agent chat' })).toBe(agent)
 })
