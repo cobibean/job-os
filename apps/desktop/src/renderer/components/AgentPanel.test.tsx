@@ -12,7 +12,11 @@ const event = (eventId: number, overrides: Partial<ConversationEvent> = {}): Con
   occurredAt: '2026-07-20T10:43:00Z', ...overrides
 })
 
-function installAgent(snapshot: AgentConversationSnapshot, overrides: Record<string, unknown> = {}) {
+function installAgent(
+  snapshot: AgentConversationSnapshot,
+  overrides: Record<string, unknown> = {},
+  bridgeOverrides: Record<string, unknown> = {}
+) {
   const agent = {
     get: vi.fn().mockResolvedValue(snapshot), send: vi.fn().mockResolvedValue({ turnId: 'turn-new', status: 'running' }),
     reset: vi.fn().mockResolvedValue({ ...snapshot, conversationId: 'conv-fresh', entries: [] }),
@@ -20,7 +24,7 @@ function installAgent(snapshot: AgentConversationSnapshot, overrides: Record<str
     retry: vi.fn().mockResolvedValue({ turnId: 'turn-retry', status: 'running' }),
     subscribe: vi.fn(() => () => undefined), ...overrides
   }
-  Object.defineProperty(window, 'jobos', { configurable: true, value: { agent } })
+  Object.defineProperty(window, 'jobos', { configurable: true, value: { agent, ...bridgeOverrides } })
   return agent
 }
 
@@ -111,6 +115,57 @@ test('renders transcript and exactly fifteen chronological compact activity rows
   expect(disclosure.getAttribute('aria-expanded')).toBe('true')
   expect(screen.getByText('Safe operation 2')).not.toBeNull()
   expect(screen.getByText('Sensitive detail was redacted.')).not.toBeNull()
+})
+
+test('renders assistant Markdown safely while keeping user messages literal', async () => {
+  const markdown = [
+    '**Important**',
+    '',
+    '- First item',
+    '- Second item',
+    '',
+    '[JobOS docs](https://example.com/docs)',
+    '',
+    '[Unsafe link](javascript:alert(1))',
+    '',
+    '![Tracking image](https://tracker.example/pixel.png)',
+    '',
+    '```ts',
+    'const ready = true',
+    '```',
+    '',
+    '<button data-testid="unsafe-html">Do not mount</button>'
+  ].join('\n')
+  const openExternal = vi.fn().mockResolvedValue(undefined)
+  installAgent({
+    conversationId: 'conv-current', activeTurn: null, connection: 'online', latestEventId: 2,
+    entries: [
+      event(1, { type: 'user_message', summary: markdown, text: markdown, detail: {} }),
+      event(2, { type: 'assistant_message', summary: markdown, text: markdown, detail: { type: 'message.complete' } })
+    ]
+  }, {}, { shell: { openExternal } })
+  render(<AgentPanel apiState="connected" contextLabel="Northstar" />)
+
+  const assistant = (await screen.findByText('Important')).closest('.assistant-markdown')
+  expect(assistant).not.toBeNull()
+  expect(assistant?.querySelector('strong')?.textContent).toBe('Important')
+  expect(assistant?.querySelectorAll('li')).toHaveLength(2)
+  expect(assistant?.querySelector('pre code')?.textContent).toContain('const ready = true')
+  const link = assistant?.querySelector<HTMLAnchorElement>('a[href="https://example.com/docs"]')
+  expect(link?.getAttribute('target')).toBe('_blank')
+  expect(link?.getAttribute('rel')).toBe('noreferrer noopener')
+  fireEvent.click(link as HTMLAnchorElement)
+  expect(openExternal).toHaveBeenCalledWith('https://example.com/docs')
+  expect(assistant?.querySelector('a[href^="javascript:"]')).toBeNull()
+  expect(assistant?.querySelector('img')).toBeNull()
+  expect(assistant?.textContent).toContain('[Image: Tracking image]')
+  expect(assistant?.querySelector('[data-testid="unsafe-html"]')).toBeNull()
+  expect(assistant?.textContent).toContain('<button data-testid="unsafe-html">Do not mount</button>')
+
+  const userMessage = document.querySelector('.user-message p')
+  expect(userMessage?.textContent).toBe(markdown)
+  expect(document.querySelector('.user-message strong')).toBeNull()
+  expect(document.querySelector('.user-message a')).toBeNull()
 })
 
 test('composer supports Enter submission, Shift+Enter drafting, and preserves a draft across job changes', async () => {

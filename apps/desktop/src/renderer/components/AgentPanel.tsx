@@ -5,6 +5,7 @@ import { createPortal } from 'react-dom'
 import type { ConnectivityState, ConversationEntryState, ConversationEvent } from '../../shared/contracts'
 import { useAgentConversation } from '../hooks/useAgentConversation'
 import { ActivityRow } from './ActivityRow'
+import { AssistantMarkdown } from './AssistantMarkdown'
 
 interface AgentPanelProps {
   contextLabel: string
@@ -262,7 +263,7 @@ export function AgentPanel({ contextLabel, apiState = 'connected', onArtifactRen
                 return (
                   <article className={`message assistant-message ${visualState}`} key={item.id}>
                     <header><Bot aria-hidden="true" size={16} /> Agent {streaming && <span>Streaming</span>}</header>
-                    <p>{item.text}</p>
+                    <AssistantMarkdown>{item.text}</AssistantMarkdown>
                   </article>
                 )
               }
