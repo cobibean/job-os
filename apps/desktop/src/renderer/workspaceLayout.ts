@@ -34,7 +34,7 @@ export const panelNames: Record<PanelId, string> = {
 const defaults: Record<LayoutPreset, PanelLayout> = {
   research: { order: ['jobs', 'center', 'agent'], widths: { jobs: 260, center: 760, agent: 350 }, collapsed: [] },
   review: { order: ['jobs', 'center', 'agent'], widths: { jobs: 280, center: 700, agent: 380 }, collapsed: [] },
-  'agent-focus': { order: ['jobs', 'center', 'agent'], widths: { jobs: 220, center: 420, agent: 650 }, collapsed: [] }
+  'agent-focus': { order: ['jobs', 'agent', 'center'], widths: { jobs: 220, center: 420, agent: 650 }, collapsed: [] }
 }
 
 function cloneLayout(layout: PanelLayout): PanelLayout {

@@ -427,6 +427,65 @@ def test_corrupt_layout_repairs_only_the_affected_preset(tmp_path):
     assert restored.snapshot["selected_job_id"] == "job-9"
 
 
+def test_agent_focus_defaults_to_centered_chat_and_upgrades_only_the_legacy_stock_layout(
+    tmp_path,
+):
+    database = tmp_path / "jobos.db"
+    store = JobOsStateStore(database)
+    store.initialize()
+    initial = store.workspace_snapshot("new-device")
+
+    assert initial.snapshot["layouts"]["agent-focus"]["order"] == [
+        "jobs",
+        "agent",
+        "center",
+    ]
+
+    legacy = {
+        **initial.snapshot,
+        "layouts": {
+            **initial.snapshot["layouts"],
+            "agent-focus": {
+                "order": ["jobs", "center", "agent"],
+                "widths": {"jobs": 220, "center": 420, "agent": 650},
+                "collapsed": [],
+            },
+        },
+    }
+    customized = {
+        **legacy,
+        "layouts": {
+            **legacy["layouts"],
+            "agent-focus": {
+                **legacy["layouts"]["agent-focus"],
+                "order": ["center", "agent", "jobs"],
+                "widths": {"jobs": 220, "center": 420, "agent": 651},
+                "collapsed": ["jobs"],
+            },
+        },
+    }
+    with sqlite3.connect(database) as connection:
+        connection.executemany(
+            "INSERT INTO workspace_snapshots(device_id, revision, snapshot_json) VALUES (?, ?, ?)",
+            (
+                ("legacy-device", 3, json.dumps(legacy)),
+                ("custom-device", 4, json.dumps(customized)),
+            ),
+        )
+
+    restored_legacy = store.workspace_snapshot("legacy-device")
+    restored_custom = store.workspace_snapshot("custom-device")
+
+    assert restored_legacy.snapshot["layouts"]["agent-focus"]["order"] == [
+        "jobs",
+        "agent",
+        "center",
+    ]
+    assert restored_custom.snapshot["layouts"]["agent-focus"] == customized["layouts"][
+        "agent-focus"
+    ]
+
+
 def test_browser_metadata_round_trips_without_credentials_or_session_material(tmp_path):
     database = tmp_path / "jobos.db"
     store = JobOsStateStore(database)
