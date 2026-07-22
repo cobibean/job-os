@@ -58,11 +58,11 @@ test('later-phase controls stay disabled while the browser surface is recoverabl
 
   for (const name of [
     'Start new agent session',
-    'Send message',
-    'Open settings'
+    'Send message'
   ]) {
     expect((screen.getByRole('button', { name }) as HTMLButtonElement).disabled).toBe(true)
   }
+  expect((screen.getByRole('button', { name: 'Open settings' }) as HTMLButtonElement).disabled).toBe(false)
   fireEvent.click(screen.getByRole('button', { name: 'Research' }))
   expect((screen.getByRole('button', { name: 'Open a new tab' }) as HTMLButtonElement).disabled).toBe(true)
   expect(screen.getByText('Browser available in the desktop app')).not.toBeNull()

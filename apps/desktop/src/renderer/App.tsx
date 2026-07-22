@@ -1,17 +1,22 @@
 import { AgentPanel } from './components/AgentPanel'
 import { CenterWorkspace } from './components/CenterWorkspace'
 import { JobNavigator } from './components/JobNavigator'
+import { SettingsPanel } from './components/SettingsPanel'
 import { StatusBar } from './components/StatusBar'
 import { WorkbenchLayout } from './components/WorkbenchLayout'
 import { WorkspaceBar } from './components/WorkspaceBar'
 import { useConnectivity } from './hooks/useConnectivity'
 import { useJobs } from './hooks/useJobs'
 import { useWorkspace } from './hooks/useWorkspace'
+import { useTheme } from './theme/useTheme'
+import { useState } from 'react'
 
 export function App() {
   const connectivity = useConnectivity()
   const jobState = useJobs()
   const layoutState = useWorkspace(jobState.selectedJobId)
+  const theme = useTheme()
+  const [settingsOpen, setSettingsOpen] = useState(false)
   const activePreset = layoutState.workspace.selectedPreset
   const activeLayout = layoutState.workspace.layouts[activePreset]
 
@@ -21,6 +26,8 @@ export function App() {
         activePreset={activePreset}
         onPresetChange={layoutState.selectPreset}
         onReset={layoutState.reset}
+        onToggleMode={theme.toggleMode}
+        themeMode={theme.mode}
       />
       <WorkbenchLayout
         agent={<AgentPanel
@@ -71,7 +78,15 @@ export function App() {
         workspace={layoutState.workspace}
       />
       <p aria-live="polite" className="layout-announcement">{layoutState.announcement}</p>
-      <StatusBar apiVersion={connectivity.apiVersion} message={connectivity.message} state={connectivity.state} />
+      <StatusBar apiVersion={connectivity.apiVersion} message={connectivity.message} onOpenSettings={() => setSettingsOpen(true)} state={connectivity.state} />
+      {settingsOpen ? (
+        <SettingsPanel
+          activeThemeId={theme.themeId}
+          mode={theme.mode}
+          onClose={() => setSettingsOpen(false)}
+          onSelectTheme={theme.selectTheme}
+        />
+      ) : null}
     </div>
   )
 }

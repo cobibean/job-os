@@ -1,10 +1,13 @@
-import { PanelLeft, RotateCcw } from 'lucide-react'
+import { Moon, PanelLeft, RotateCcw, Sun } from 'lucide-react'
 import type { LayoutPreset } from '../workspaceLayout'
+import type { ThemeMode } from '../theme/themes'
 
 interface WorkspaceBarProps {
   activePreset: LayoutPreset
   onPresetChange: (preset: LayoutPreset) => void
   onReset: () => void
+  onToggleMode: () => void
+  themeMode: ThemeMode
 }
 
 const presets: Array<{ id: LayoutPreset; label: string }> = [
@@ -13,7 +16,8 @@ const presets: Array<{ id: LayoutPreset; label: string }> = [
   { id: 'agent-focus', label: 'Agent Focus' }
 ]
 
-export function WorkspaceBar({ activePreset, onPresetChange, onReset }: WorkspaceBarProps) {
+export function WorkspaceBar({ activePreset, onPresetChange, onReset, onToggleMode, themeMode }: WorkspaceBarProps) {
+  const dark = themeMode === 'dark'
   return (
     <header className="workspace-bar">
       <div className="brand-lockup">
@@ -35,10 +39,24 @@ export function WorkspaceBar({ activePreset, onPresetChange, onReset }: Workspac
         ))}
       </nav>
 
-      <button className="reset-layout" onClick={onReset} type="button">
-        <RotateCcw aria-hidden="true" size={16} strokeWidth={1.5} />
-        Reset layout
-      </button>
+      <div className="workspace-bar-actions">
+        <button
+          aria-label={dark ? 'Switch to light mode' : 'Switch to dark mode'}
+          aria-pressed={!dark}
+          className="icon-button mode-toggle"
+          onClick={onToggleMode}
+          title={dark ? 'Switch to light mode' : 'Switch to dark mode'}
+          type="button"
+        >
+          {dark
+            ? <Sun aria-hidden="true" size={16} strokeWidth={1.5} />
+            : <Moon aria-hidden="true" size={16} strokeWidth={1.5} />}
+        </button>
+        <button className="reset-layout" onClick={onReset} type="button">
+          <RotateCcw aria-hidden="true" size={16} strokeWidth={1.5} />
+          Reset layout
+        </button>
+      </div>
     </header>
   )
 }

@@ -5,10 +5,11 @@ import type { ConnectivityState } from '../../shared/contracts'
 interface StatusBarProps {
   apiVersion?: string
   message?: string
+  onOpenSettings?: () => void
   state: ConnectivityState
 }
 
-function ConnectionLabel({ apiVersion, state }: StatusBarProps) {
+function ConnectionLabel({ apiVersion, state }: Pick<StatusBarProps, 'apiVersion' | 'state'>) {
   if (state === 'connecting') {
     return <><LoaderCircle aria-hidden="true" className="spin" size={14} /> Connecting to Mac Mini…</>
   }
@@ -21,14 +22,14 @@ function ConnectionLabel({ apiVersion, state }: StatusBarProps) {
   return <><CircleAlert aria-hidden="true" size={14} /> Mac Mini unavailable</>
 }
 
-export function StatusBar(props: StatusBarProps) {
+export function StatusBar({ apiVersion, message, onOpenSettings, state }: StatusBarProps) {
   return (
     <footer className="status-bar">
-      <button aria-label="Open settings" className="icon-button settings-button placeholder-control" disabled title="Available in a later phase" type="button">
+      <button aria-label="Open settings" className="icon-button settings-button" onClick={onOpenSettings} type="button">
         <Settings aria-hidden="true" size={16} strokeWidth={1.5} />
       </button>
-      <span className={`connection-state ${props.state}`} role="status" title={props.message}>
-        <ConnectionLabel {...props} />
+      <span className={`connection-state ${state}`} role="status" title={message}>
+        <ConnectionLabel apiVersion={apiVersion} state={state} />
       </span>
     </footer>
   )
