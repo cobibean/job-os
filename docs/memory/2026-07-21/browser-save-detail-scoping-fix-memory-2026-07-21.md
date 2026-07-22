@@ -1,5 +1,7 @@
 # Browser Save Detail-Scoping Fix — 2026-07-21
 
+> **Superseded acceptance claim:** Cobi's real installed Save-button test still failed with the same error. Treat the direct IPC proof below as incomplete diagnostic evidence, not user acceptance. Continue from `browser-save-user-acceptance-failed-handoff-2026-07-21.md`.
+
 ## Session summary
 
 Fixed the live Wellfound browser-save failure after diagnostics proved the extractor was reading page-level/list content instead of the selected job detail pane.
