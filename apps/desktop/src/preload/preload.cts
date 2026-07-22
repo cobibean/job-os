@@ -4,6 +4,9 @@ import type { IpcRendererEvent } from 'electron'
 import type { AgentStreamUpdate, BrowserBounds, BrowserJobExtraction, BrowserRestoreState, BrowserState, JobEvent, JobOsRendererBridge, JobSortMode, JobStatus, WorkspaceSnapshot } from '../shared/contracts.js'
 
 const bridge: JobOsRendererBridge = Object.freeze({
+  shell: Object.freeze({
+    openExternal: (url: string) => ipcRenderer.invoke('jobos:shell:open-external', url)
+  }),
   connectivity: Object.freeze({
     get: () => ipcRenderer.invoke('jobos:connectivity:get')
   }),

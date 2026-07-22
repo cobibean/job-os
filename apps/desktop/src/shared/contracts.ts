@@ -231,6 +231,9 @@ export type AgentStreamUpdate =
   | { kind: 'connection'; state: AgentConnectionState }
 
 export interface JobOsRendererBridge {
+  shell: {
+    openExternal: (url: string) => Promise<void>
+  }
   connectivity: {
     get: () => Promise<ConnectivitySnapshot>
   }

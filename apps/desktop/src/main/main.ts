@@ -18,6 +18,7 @@ import type { DesktopRuntimeState } from './desktopRuntime.js'
 import { runtimeConfigPath } from './runtimeConfig.js'
 import { createMainJobsClient, startJobEventStream } from './jobs.js'
 import type { JobsConfig } from './jobs.js'
+import { safeExternalUrl } from '../shared/externalLinks.js'
 import { createMainDocumentsClient } from './documents.js'
 import { isTrustedRendererUrl } from './security.js'
 import { createMainWorkspaceClient } from './workspace.js'
@@ -53,6 +54,15 @@ function jobsConfig(): JobsConfig | null {
     baseUrl: runtime.apiBaseUrl,
     deviceToken
   }
+}
+
+function registerShellInterface(): void {
+  ipcMain.handle('jobos:shell:open-external', async (event, rawUrl: unknown) => {
+    assertTrustedRenderer(event)
+    const url = safeExternalUrl(rawUrl)
+    if (!url) throw new Error('Invalid external link')
+    await shell.openExternal(url)
+  })
 }
 
 function registerConnectivityInterface(): void {
@@ -362,6 +372,7 @@ app.whenReady().then(async () => {
     environment: process.env,
     ensureApiReady: apiLifecycle.ensureApiReady
   })
+  registerShellInterface()
   registerConnectivityInterface()
   registerAgentInterface()
   registerJobsInterface()
