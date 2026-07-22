@@ -29,21 +29,64 @@ test('starts a fresh agent session only after an explicit inline confirmation', 
     conversationId: 'conv-current', activeTurn: null, connection: 'online', latestEventId: 1,
     entries: [event(1, { type: 'assistant_message', summary: 'Old context', detail: { type: 'message.complete' } })]
   })
-  render(<AgentPanel apiState="connected" contextLabel="Northstar" />)
+  render(<div className="app-shell"><AgentPanel apiState="connected" contextLabel="Northstar" /></div>)
 
   expect(await screen.findByText('Old context')).not.toBeNull()
   fireEvent.change(screen.getByRole('textbox', { name: 'Message the agent' }), { target: { value: 'Draft for next session' } })
   expect((screen.getByRole('button', { name: 'Send message' }) as HTMLButtonElement).disabled).toBe(false)
-  fireEvent.click(screen.getByRole('button', { name: 'Start new agent session' }))
+  const startButton = screen.getByRole('button', { name: 'Start new agent session' })
+  fireEvent.click(startButton)
   expect(agent.reset).not.toHaveBeenCalled()
   expect(screen.getByText('Start with fresh context?')).not.toBeNull()
-  expect(screen.getByRole('alertdialog').closest('.agent-body')).toBeNull()
+  const dialog = screen.getByRole('alertdialog')
+  const confirmButton = screen.getByRole('button', { name: 'Confirm new session' })
+  const cancelButton = screen.getByRole('button', { name: 'Cancel' })
+  expect(dialog.closest('.agent-body')).toBeNull()
+  expect(dialog.getAttribute('aria-modal')).toBe('true')
+  expect(dialog.closest('.new-session-overlay')).not.toBeNull()
+  expect(document.querySelector('.app-shell')?.hasAttribute('inert')).toBe(true)
+  expect(document.activeElement).toBe(confirmButton)
+  fireEvent.keyDown(confirmButton, { key: 'Tab' })
+  expect(document.activeElement).toBe(cancelButton)
+  fireEvent.keyDown(cancelButton, { key: 'Tab', shiftKey: true })
+  expect(document.activeElement).toBe(confirmButton)
+  fireEvent.keyDown(dialog, { key: 'Escape' })
+  expect(screen.queryByRole('alertdialog')).toBeNull()
+  expect(document.activeElement).toBe(startButton)
+  fireEvent.click(startButton)
   expect((screen.getByRole('button', { name: 'Send message' }) as HTMLButtonElement).disabled).toBe(true)
   fireEvent.click(screen.getByRole('button', { name: 'Confirm new session' }))
 
   await waitFor(() => expect(agent.reset).toHaveBeenCalledOnce())
   expect(screen.queryByText('Old context')).toBeNull()
   expect(screen.getByText('Fresh conversation')).not.toBeNull()
+})
+
+test('keeps keyboard focus inside the modal while a new session is starting', async () => {
+  let resolveReset!: (snapshot: AgentConversationSnapshot) => void
+  const reset = vi.fn(() => new Promise<AgentConversationSnapshot>(resolve => { resolveReset = resolve }))
+  installAgent(
+    { conversationId: 'conv-current', activeTurn: null, connection: 'online', latestEventId: 0, entries: [] },
+    { reset }
+  )
+  render(<div className="app-shell"><AgentPanel apiState="connected" contextLabel="Northstar" /></div>)
+
+  await screen.findByRole('textbox', { name: 'Message the agent' })
+  fireEvent.click(screen.getByRole('button', { name: 'Start new agent session' }))
+  fireEvent.click(screen.getByRole('button', { name: 'Confirm new session' }))
+  await waitFor(() => expect(reset).toHaveBeenCalledOnce())
+
+  const cancelButton = screen.getByRole('button', { name: 'Cancel' })
+  const confirmButton = screen.getByRole('button', { name: 'Confirm new session' }) as HTMLButtonElement
+  expect(confirmButton.disabled).toBe(true)
+  await waitFor(() => expect(document.activeElement).toBe(cancelButton))
+  fireEvent.keyDown(cancelButton, { key: 'Tab' })
+  expect(document.activeElement).toBe(cancelButton)
+  fireEvent.keyDown(cancelButton, { key: 'Tab', shiftKey: true })
+  expect(document.activeElement).toBe(cancelButton)
+
+  resolveReset({ conversationId: 'conv-fresh', activeTurn: null, connection: 'online', latestEventId: 0, entries: [] })
+  await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull())
 })
 
 test('renders transcript and exactly fifteen chronological compact activity rows with accessible disclosure', async () => {
