@@ -49,6 +49,7 @@
   --shadow-color-soft: #00000055;
   --highlight-inset: #ffffff16;
   --page-backdrop: #f6f6f6;
+  --macos-titlebar-safe-left: 84px;
 }
 
 * { box-sizing: border-box; }
@@ -98,7 +99,7 @@ button:focus-visible {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 20px 0 22px;
+  padding: 0 20px 0 var(--macos-titlebar-safe-left);
   border-right: 1px solid var(--border);
 }
 
