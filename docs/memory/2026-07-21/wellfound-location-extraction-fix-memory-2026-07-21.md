@@ -37,4 +37,11 @@ Added a narrow final location fallback that:
   - lint, typecheck, generated contracts, and production build passed.
 - `git diff --check` passed.
 
-A new MacBook package is required because extraction runs inside Electron main on the MacBook.
+## Corrected MacBook update
+
+- Source commit: `74f2f1ce06d412ba3ae4c35a46d1d3dd94714c8b`
+- Artifact: `JobOS-Wellfound-Fix-2026-07-21.zip`
+- Private URL: `https://jacobis-mac-mini.tailf1a3a1.ts.net:10449/JobOS-Wellfound-Fix-2026-07-21.zip`
+- Size: `143121021` bytes
+- SHA-256: `7e31daec805d17c19cac56522fe351508e33bcd5fdf207e9850e3acfc3879fd7`
+- Fresh arm64 package build, deep signature verification, nested ZIP integrity, updater syntax, served-root copy, and private Tailscale re-download verification all passed.
