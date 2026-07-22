@@ -1,5 +1,6 @@
 import { Bot, BriefcaseBusiness, CircleAlert, LoaderCircle, MessageSquarePlus, RotateCcw, Send, Square, UserRound, WifiOff } from 'lucide-react'
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 
 import type { ConnectivityState, ConversationEntryState, ConversationEvent } from '../../shared/contracts'
 import { useAgentConversation } from '../hooks/useAgentConversation'
@@ -41,6 +42,10 @@ export function AgentPanel({ contextLabel, apiState = 'connected', onArtifactRen
   const terminalByTurn = useMemo(() => terminalStateByTurn(conversation.entries), [conversation.entries])
   const [confirmingReset, setConfirmingReset] = useState(false)
   const scrollRef = useRef<HTMLDivElement>(null)
+  const newSessionButtonRef = useRef<HTMLButtonElement>(null)
+  const cancelResetButtonRef = useRef<HTMLButtonElement>(null)
+  const resetDialogRef = useRef<HTMLElement>(null)
+  const resetDialogWasOpen = useRef(false)
   const pinnedToBottom = useRef(true)
   const observedEventId = useRef<number | null>(null)
   const canSend = Boolean(
@@ -52,6 +57,59 @@ export function AgentPanel({ contextLabel, apiState = 'connected', onArtifactRen
     && apiState === 'connected'
   )
   const canReset = !conversation.activeTurn && !conversation.restoring && !conversation.operationPending && apiState === 'connected'
+
+  const closeResetDialog = () => {
+    if (!conversation.resetting) setConfirmingReset(false)
+  }
+
+  const trapResetDialogFocus = (event: globalThis.KeyboardEvent) => {
+    if (event.key !== 'Tab') return
+    const focusable = [...(resetDialogRef.current?.querySelectorAll<HTMLButtonElement>('button:not(:disabled)') ?? [])]
+    const first = focusable.at(0)
+    const last = focusable.at(-1)
+    if (!first || !last) {
+      event.preventDefault()
+      return
+    }
+    if (focusable.length === 1) {
+      event.preventDefault()
+      first.focus()
+      return
+    }
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault()
+      last.focus()
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault()
+      first.focus()
+    }
+  }
+
+  useEffect(() => {
+    const appShell = document.querySelector<HTMLElement>('.app-shell')
+    if (confirmingReset) {
+      resetDialogWasOpen.current = true
+      appShell?.setAttribute('inert', '')
+      if (conversation.resetting) cancelResetButtonRef.current?.focus()
+      const handleKeyDown = (event: globalThis.KeyboardEvent) => {
+        if (event.key === 'Escape' && !conversation.resetting) {
+          event.preventDefault()
+          setConfirmingReset(false)
+          return
+        }
+        trapResetDialogFocus(event)
+      }
+      document.addEventListener('keydown', handleKeyDown)
+      return () => {
+        document.removeEventListener('keydown', handleKeyDown)
+        appShell?.removeAttribute('inert')
+      }
+    }
+    if (!resetDialogWasOpen.current) return
+    resetDialogWasOpen.current = false
+    newSessionButtonRef.current?.focus()
+  }, [confirmingReset, conversation.resetting])
+
 
   useEffect(() => {
     if (conversation.restoring || conversation.restoredEventId === null) return
@@ -103,6 +161,7 @@ export function AgentPanel({ contextLabel, apiState = 'connected', onArtifactRen
           className="new-session-button"
           disabled={!canReset}
           onClick={() => setConfirmingReset(true)}
+          ref={newSessionButtonRef}
           title={conversation.activeTurn ? 'Finish or stop the active turn first' : 'Clear this conversation and start with fresh context'}
           type="button"
         >
@@ -110,26 +169,37 @@ export function AgentPanel({ contextLabel, apiState = 'connected', onArtifactRen
         </button>
       </div>
 
-      {confirmingReset && (
-        <section aria-labelledby="new-session-title" className="new-session-confirm" role="alertdialog">
-          <div>
-            <strong id="new-session-title">Start with fresh context?</strong>
-            <p>This clears the visible conversation and starts a new agent session. Your selected job stays attached.</p>
-          </div>
-          <div className="new-session-actions">
-            <button onClick={() => setConfirmingReset(false)} type="button">Cancel</button>
-            <button
-              aria-label="Confirm new session"
-              className="confirm"
-              disabled={!canReset}
-              onClick={() => void conversation.reset().then(reset => { if (reset) setConfirmingReset(false) })}
-              type="button"
-            >
-              {conversation.resetting && <LoaderCircle aria-hidden="true" className="spin" size={13} />}
-              {conversation.resetting ? 'Starting…' : 'New session'}
-            </button>
-          </div>
-        </section>
+      {confirmingReset && createPortal(
+        <div className="new-session-overlay" onClick={closeResetDialog} role="presentation">
+          <section
+            aria-labelledby="new-session-title"
+            aria-modal="true"
+            className="new-session-confirm"
+            onClick={event => event.stopPropagation()}
+            ref={resetDialogRef}
+            role="alertdialog"
+          >
+            <div>
+              <strong id="new-session-title">Start with fresh context?</strong>
+              <p>This clears the visible conversation and starts a new agent session. Your selected job stays attached.</p>
+            </div>
+            <div className="new-session-actions">
+              <button onClick={closeResetDialog} ref={cancelResetButtonRef} type="button">Cancel</button>
+              <button
+                aria-label="Confirm new session"
+                autoFocus
+                className="confirm"
+                disabled={!canReset}
+                onClick={() => void conversation.reset().then(reset => { if (reset) setConfirmingReset(false) })}
+                type="button"
+              >
+                {conversation.resetting && <LoaderCircle aria-hidden="true" className="spin" size={13} />}
+                {conversation.resetting ? 'Starting…' : 'New session'}
+              </button>
+            </div>
+          </section>
+        </div>,
+        document.body
       )}
 
       <div className="agent-body" onScroll={handleScroll} ref={scrollRef}>
