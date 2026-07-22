@@ -448,7 +448,7 @@ def test_agent_focus_defaults_to_centered_chat_and_upgrades_only_the_legacy_stoc
             "agent-focus": {
                 "order": ["jobs", "center", "agent"],
                 "widths": {"jobs": 220, "center": 420, "agent": 650},
-                "collapsed": [],
+                "collapsed": ["center"],
             },
         },
     }
@@ -481,6 +481,7 @@ def test_agent_focus_defaults_to_centered_chat_and_upgrades_only_the_legacy_stoc
         "agent",
         "center",
     ]
+    assert restored_legacy.snapshot["layouts"]["agent-focus"]["collapsed"] == ["center"]
     assert restored_custom.snapshot["layouts"]["agent-focus"] == customized["layouts"][
         "agent-focus"
     ]
