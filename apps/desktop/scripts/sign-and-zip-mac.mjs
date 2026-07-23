@@ -1,12 +1,13 @@
-import { rmSync } from 'node:fs'
+import { readFileSync, rmSync } from 'node:fs'
 import { spawnSync } from 'node:child_process'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const desktopRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const releaseRoot = path.resolve(desktopRoot, '../../release/desktop')
+const packageJson = JSON.parse(readFileSync(path.join(desktopRoot, 'package.json'), 'utf8'))
 const appPath = path.join(releaseRoot, 'mac-arm64', 'JobOS.app')
-const archivePath = path.join(releaseRoot, 'JobOS-0.1.0-arm64.zip')
+const archivePath = path.join(releaseRoot, `JobOS-${packageJson.version}-arm64.zip`)
 
 function run(command, arguments_) {
   const result = spawnSync(command, arguments_, { stdio: 'inherit' })
