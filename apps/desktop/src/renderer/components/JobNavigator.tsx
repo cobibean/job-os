@@ -2,7 +2,20 @@ import { ArrowDown, ArrowUp, BriefcaseBusiness, Search, UserRound } from 'lucide
 
 import type { JobListItem, JobSortMode, JobStatus } from '../../shared/contracts'
 
-const STATUSES: JobStatus[] = ['discovered', 'scored', 'reviewed', 'shortlisted', 'apply_now', 'maybe', 'stretch', 'skipped', 'applied', 'interviewing', 'closed', 'archived']
+const STATUS_TRANSITIONS: Record<JobStatus, JobStatus[]> = {
+  discovered: ['scored', 'reviewed', 'skipped', 'archived'],
+  scored: ['reviewed', 'shortlisted', 'apply_now', 'maybe', 'stretch', 'skipped', 'archived'],
+  reviewed: ['shortlisted', 'apply_now', 'maybe', 'stretch', 'skipped', 'archived'],
+  shortlisted: ['apply_now', 'maybe', 'stretch', 'applied'],
+  apply_now: ['applied', 'interviewing', 'closed'],
+  maybe: ['reviewed', 'apply_now', 'skipped', 'archived'],
+  stretch: ['reviewed', 'apply_now', 'skipped', 'archived'],
+  skipped: ['reviewed', 'archived'],
+  applied: ['interviewing', 'closed', 'archived'],
+  interviewing: ['closed', 'archived'],
+  closed: ['archived'],
+  archived: []
+}
 const STATUS_GROUPS = ['Inbox', 'Considering', 'Applied', 'Interviewing', 'Closed', 'Inactive']
 
 interface JobNavigatorProps {
@@ -96,7 +109,7 @@ export function JobNavigator(props: JobNavigatorProps) {
               ) : null}
             </div>
             <select aria-label={`Change ${job.company} status`} className="status-select" onChange={event => props.onStatusChange(job.jobId, event.target.value as JobStatus)} value={job.status}>
-              {STATUSES.map(status => <option key={status} value={status}>{statusLabel(status)}</option>)}
+              {[job.status, ...STATUS_TRANSITIONS[job.status]].map(status => <option key={status} value={status}>{statusLabel(status)}</option>)}
             </select>
           </div>
         ))}
