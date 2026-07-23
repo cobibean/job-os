@@ -187,7 +187,8 @@ export function projectConversation(entries: ConversationEvent[]): ProjectedConv
       continue
     }
     if (entry.type === 'assistant_message') {
-      const key = entry.turnId ?? `event-${entry.eventId}`
+      if (!entry.turnId) continue
+      const key = entry.turnId
       const existing = assistants.get(key)
       const phase = detailString(entry, 'type')
       const nextText = phase === 'message.start' ? '' : entry.summary

@@ -100,6 +100,15 @@ test('assistant deltas form one streaming response and completion replaces it wi
   expect(projected).toEqual([expect.objectContaining({ kind: 'assistant', text: 'Hello there', state: 'completed' })])
 })
 
+test('ownerless assistant events from a broken restart are not rendered as messages', () => {
+  const projected = projectConversation([
+    event(1, { turnId: null, type: 'assistant_message', summary: 'f', detail: { type: 'message.delta', text: 'f' } }),
+    event(2, { turnId: null, type: 'assistant_message', summary: 'ca', detail: { type: 'message.delta', text: 'ca' } })
+  ])
+
+  expect(projected).toEqual([])
+})
+
 test('the hook restores, subscribes, preserves drafts while running, and serializes submission', async () => {
   let stream: ((update: any) => void) | undefined
   const send = vi.fn().mockResolvedValue({ turnId: 'turn-2', messageId: 'message-2', status: 'running' })
