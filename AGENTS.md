@@ -23,3 +23,11 @@ For browser-save fixes, only the exact installed JobOS UI path counts as accepta
 - remember that client-rendered sites can finish Electron navigation before their job-detail DOM hydrates.
 
 Synthetic fixtures and direct IPC are useful diagnostics, not shipment proof.
+
+## MacBook update packaging
+
+- A MacBook handoff is always the **outer updater ZIP**, never `release/desktop/JobOS-<version>-arm64.zip` by itself.
+- Build the complete handoff with `pnpm --filter @jobos/desktop package:macbook-update`.
+- The outer ZIP must contain `Update JobOS.command`, `VERIFIED.txt`, and the inner app ZIP. Extract and verify all three before delivery.
+- Use the unique timestamp-and-commit filename printed by the command; never overwrite or relabel an older MacBook artifact.
+- Deliver only after confirming the source commit includes every user-visible change represented to Cobi.
