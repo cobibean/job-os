@@ -583,6 +583,12 @@ class HermesWebSocketGateway:
         }
         if frame_type not in supported_types:
             return None
+        if frame_type != "session.info" and self._active_turn_id is None:
+            # A resumed Hermes session can keep emitting after JobOS restarts, but
+            # without an active JobOS turn those events have no safe transcript
+            # owner. Dropping them prevents token deltas from becoming orphaned
+            # one-token messages and keeps stale tool/status activity quarantined.
+            return None
         event_id = None
         if frame_type == "session.info":
             return None

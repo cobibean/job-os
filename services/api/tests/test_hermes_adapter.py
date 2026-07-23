@@ -827,6 +827,25 @@ def test_real_events_without_synthetic_ids_or_sequences_are_not_dropped(tmp_path
     assert second is not None and second.summary == "two"
 
 
+def test_turn_events_without_an_active_jobos_turn_are_dropped(tmp_path):
+    gateway = HermesWebSocketGateway(url="ws://127.0.0.1:9119/api/ws", token=TOKEN, cwd=tmp_path)
+    gateway._live_session_id = "live-1"
+
+    orphan_delta = gateway.normalize_frame(
+        event("message.delta", "live-1", {"text": "orphaned token"})
+    )
+    orphan_tool = gateway.normalize_frame(
+        event("tool.start", "live-1", {"tool_id": "tool-1", "name": "terminal"})
+    )
+    orphan_status = gateway.normalize_frame(
+        event("status.update", "live-1", {"text": "Still working"})
+    )
+
+    assert orphan_delta is None
+    assert orphan_tool is None
+    assert orphan_status is None
+
+
 def test_real_status_and_error_fields_are_read_from_payload(tmp_path):
     gateway = HermesWebSocketGateway(url="ws://127.0.0.1:9119/api/ws", token=TOKEN, cwd=tmp_path)
     gateway._live_session_id = "live-1"
