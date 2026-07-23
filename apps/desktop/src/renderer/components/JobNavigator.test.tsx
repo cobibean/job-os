@@ -34,3 +34,27 @@ test('manual rows support deliberate drag ordering with an accessible button alt
   expect(onReorder).toHaveBeenCalledWith('a', 'b')
   expect(screen.getByRole('button', { name: 'Move Alpha down' })).not.toBeNull()
 })
+
+test('status controls offer only transitions allowed from the current job state', () => {
+  const jobs = [
+    { jobId: 'a', company: 'Alpha', title: 'Builder', status: 'discovered' as const, statusGroup: 'Inbox', canonicalUrl: 'https://example.com/a', discoveredAt: '', lastSeenAt: '' },
+    { jobId: 'b', company: 'Beta', title: 'Operator', status: 'shortlisted' as const, statusGroup: 'Considering', canonicalUrl: 'https://example.com/b', discoveredAt: '', lastSeenAt: '' }
+  ]
+  render(
+    <JobNavigator
+      error={null} feedback={null} jobs={jobs} loading={false}
+      onMove={vi.fn()} onQueryChange={vi.fn()} onReorder={vi.fn()}
+      onSelect={vi.fn()} onSortChange={vi.fn()} onStatusChange={vi.fn()}
+      onStatusGroupChange={vi.fn()} query="" selectedJobId={null}
+      sortMode="manual" statusGroup=""
+    />
+  )
+
+  const alphaOptions = [...screen.getByRole('combobox', { name: 'Change Alpha status' }).querySelectorAll('option')]
+    .map(option => option.value)
+  const betaOptions = [...screen.getByRole('combobox', { name: 'Change Beta status' }).querySelectorAll('option')]
+    .map(option => option.value)
+
+  expect(alphaOptions).toEqual(['discovered', 'scored', 'reviewed', 'skipped', 'archived'])
+  expect(betaOptions).toEqual(['shortlisted', 'apply_now', 'maybe', 'stretch', 'applied'])
+})

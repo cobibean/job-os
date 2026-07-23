@@ -653,6 +653,58 @@ test('a synthesized default tab is not replayed over authoritative browser state
   })
 })
 
+test('opening Settings detaches an active native browser surface before showing the panel', async () => {
+  const tab = {
+    tabId: 'listing', url: 'https://jobs.example.com/7', title: 'Listing', faviconUrl: null, associatedJobId: null,
+    loading: false, canGoBack: false, canGoForward: false, error: null, crashed: false, blockedUrl: null
+  }
+  const browserState = { tabs: [tab], activeTabId: tab.tabId, download: null, notice: null }
+  let resolveDetach!: () => void
+  const detached = new Promise<void>(resolve => { resolveDetach = resolve })
+  const setBounds = vi.fn().mockImplementation(bounds => bounds.visible ? Promise.resolve() : detached)
+  const rect = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue(
+    DOMRect.fromRect({ x: 100, y: 120, width: 800, height: 500 })
+  )
+  Object.defineProperty(window, 'jobos', {
+    configurable: true,
+    value: {
+      connectivity: { get: vi.fn().mockResolvedValue({ state: 'connected', checkedAt: '', message: 'Private API authenticated' }) },
+      workspace: {
+        get: vi.fn().mockResolvedValue({
+          ...restoredWorkspace(3), selectedPreset: 'research', activeCenterSurface: 'browser',
+          browserTabs: [{ tabId: tab.tabId, url: tab.url, title: tab.title, faviconUrl: null, associatedJobId: null }],
+          activeBrowserTabId: tab.tabId, repairedBrowser: false
+        }),
+        save: vi.fn().mockImplementation(snapshot => Promise.resolve({ ...snapshot, revision: snapshot.revision + 1 }))
+      },
+      browser: {
+        restore: vi.fn().mockResolvedValue(browserState), getState: vi.fn(), subscribe: vi.fn().mockReturnValue(() => undefined), setBounds,
+        create: vi.fn(), select: vi.fn(), close: vi.fn(), reorder: vi.fn(), navigate: vi.fn(), back: vi.fn(), forward: vi.fn(),
+        reload: vi.fn(), stop: vi.fn(), associate: vi.fn(), copyBlockedUrl: vi.fn()
+      }
+    }
+  })
+
+  render(<App />)
+  await screen.findByRole('tab', { name: 'Select Listing' })
+  await waitFor(() => expect(setBounds).toHaveBeenCalledWith(expect.objectContaining({ visible: true })))
+  setBounds.mockClear()
+
+  fireEvent.click(screen.getByRole('button', { name: 'Open settings' }))
+  await waitFor(() => expect(setBounds).toHaveBeenCalledWith(expect.objectContaining({ visible: false })))
+  expect(screen.queryByRole('dialog', { name: 'Settings' })).toBeNull()
+  setBounds.mockClear()
+  window.dispatchEvent(new Event('resize'))
+  expect(setBounds).not.toHaveBeenCalledWith(expect.objectContaining({ visible: true }))
+  resolveDetach()
+  expect(await screen.findByRole('dialog', { name: 'Settings' })).not.toBeNull()
+  setBounds.mockClear()
+
+  fireEvent.click(screen.getByRole('button', { name: 'Close settings' }))
+  await waitFor(() => expect(setBounds).toHaveBeenCalledWith(expect.objectContaining({ visible: true })))
+  rect.mockRestore()
+})
+
 test('opening New Session detaches an active native browser surface before showing the modal', async () => {
   const tab = {
     tabId: 'listing', url: 'https://jobs.example.com/7', title: 'Listing', faviconUrl: null, associatedJobId: null,

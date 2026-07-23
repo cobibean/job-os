@@ -17,9 +17,28 @@ export function App() {
   const layoutState = useWorkspace(jobState.selectedJobId)
   const theme = useTheme()
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [settingsPreparing, setSettingsPreparing] = useState(false)
   const [agentModalOpen, setAgentModalOpen] = useState(false)
   const activePreset = layoutState.workspace.selectedPreset
   const activeLayout = layoutState.workspace.layouts[activePreset]
+
+  const openSettings = async () => {
+    if (settingsOpen || settingsPreparing) return
+    const browser = window.jobos?.browser
+    if (!browser) {
+      setSettingsOpen(true)
+      return
+    }
+    setSettingsPreparing(true)
+    try {
+      await browser.setBounds({ x: 0, y: 0, width: 0, height: 0, visible: false })
+      setSettingsOpen(true)
+    } catch {
+      // Keep the panel closed rather than rendering it beneath an attached native browser view.
+    } finally {
+      setSettingsPreparing(false)
+    }
+  }
 
   return (
     <div className="app-shell" data-layout={activePreset}>
@@ -49,7 +68,7 @@ export function App() {
           }}
           browserRepaired={Boolean(layoutState.workspace.repairedBrowser)}
           browserRepairReasons={layoutState.workspace.browserRepairReasons ?? []}
-          browserVisible={!activeLayout.collapsed.includes('center') && !agentModalOpen}
+          browserVisible={!activeLayout.collapsed.includes('center') && !agentModalOpen && !settingsOpen && !settingsPreparing}
           jobs={jobState.jobs}
           layoutSignal={`${activePreset}:${activeLayout.order.join(',')}:${activeLayout.collapsed.join(',')}`}
           onBrowserPersist={layoutState.updateBrowserState}
@@ -80,7 +99,7 @@ export function App() {
         workspace={layoutState.workspace}
       />
       <p aria-live="polite" className="layout-announcement">{layoutState.announcement}</p>
-      <StatusBar apiVersion={connectivity.apiVersion} message={connectivity.message} onOpenSettings={() => setSettingsOpen(true)} state={connectivity.state} />
+      <StatusBar apiVersion={connectivity.apiVersion} message={connectivity.message} onOpenSettings={() => { void openSettings() }} state={connectivity.state} />
       {settingsOpen ? (
         <SettingsPanel
           activeThemeId={theme.themeId}

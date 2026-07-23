@@ -2,6 +2,20 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 
 import type { JobListItem, JobSortMode, JobStatus } from '../../shared/contracts'
 
+const JOB_STATUSES = new Set<string>([
+  'discovered', 'scored', 'reviewed', 'shortlisted', 'apply_now', 'maybe',
+  'stretch', 'skipped', 'applied', 'interviewing', 'closed', 'archived'
+])
+
+function statusChangeError(error: unknown): string {
+  if (!(error instanceof Error)) return 'Status change failed'
+  const transition = error.message.match(/Invalid lead state transition: ([a-z_]+) -> ([a-z_]+)/)
+  const source = transition?.[1]
+  const target = transition?.[2]
+  if (source && target && JOB_STATUSES.has(source) && JOB_STATUSES.has(target)) return transition[0]
+  return 'Status change failed'
+}
+
 export function useJobs() {
   const [jobs, setJobs] = useState<JobListItem[]>([])
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null)
@@ -108,8 +122,8 @@ export function useJobs() {
       setSelectedJob(current => current?.jobId === jobId ? result.job : current)
       setFeedback(`Status changed to ${status}`)
       setError(null)
-    } catch {
-      setError('Status change failed')
+    } catch (statusError) {
+      setError(statusChangeError(statusError))
     }
   }, [bridge])
 
