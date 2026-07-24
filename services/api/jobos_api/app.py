@@ -52,6 +52,8 @@ from jobos_api.hermes_adapter import HermesWebSocketGateway
 from jobos_api.jobs import (
     BrowserJobCreateRequest,
     BrowserJobCreateResponse,
+    JobDescriptionUpdateRequest,
+    JobDescriptionUpdateResponse,
     JobDetail,
     JobEventsResponse,
     JobFacade,
@@ -274,9 +276,12 @@ def create_app(
         outcome: str = "completed",
         job_id: str | None = None,
         detail: dict[str, object] | None = None,
+        event_type: str | None = None,
+        inject_event_id: bool = False,
+        reserved_event_id: int | None = None,
     ) -> int:
         event_id = state_store.record_mutation_result(
-            event_type="agent_action" if origin == "mcp" else "user_action",
+            event_type=event_type or ("agent_action" if origin == "mcp" else "user_action"),
             origin=origin,
             actor_id=identity.device_id,
             target_resource=target,
@@ -293,6 +298,8 @@ def create_app(
                 **(detail or {}),
             },
             job_id=job_id,
+            inject_event_id=inject_event_id,
+            reserved_event_id=reserved_event_id,
         )
         if origin == "mcp":
             state_store.ensure_conversation_event(
@@ -975,6 +982,76 @@ def create_app(
             raise HTTPException(status_code=404, detail="Job not found") from error
 
     @app.put(
+        "/v1/jobs/{job_id}/description",
+        tags=["jobs"],
+        responses={403: {"description": "Trusted MCP credential required"}},
+    )
+    @serialized_mutation_route
+    def job_update_description(
+        job_id: str,
+        command: JobDescriptionUpdateRequest,
+        identity: Annotated[DeviceIdentity, Depends(authenticated_device)],
+        mcp_token: Annotated[str | None, Header(alias="X-JobOS-MCP-Token")] = None,
+    ) -> JobDescriptionUpdateResponse:
+        require_trusted_mcp(identity, command.origin, mcp_token)
+        request_hash = mutation_hash(
+            "job.update_description",
+            {"job_id": job_id, **command.model_dump(exclude={"idempotency_key"})},
+        )
+        try:
+            replay = mutation_replay(
+                identity=identity,
+                target=f"jobs/{job_id}",
+                command_name="job.update_description",
+                idempotency_key=command.idempotency_key,
+                request_hash=request_hash,
+            )
+        except IdempotencyConflict as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
+        if replay is not None:
+            return JobDescriptionUpdateResponse.model_validate(replay)
+        reservation_event_id = state_store.reserve_mutation(
+            origin=command.origin,
+            actor_id=identity.device_id,
+            target_resource=f"jobs/{job_id}",
+            command_name="job.update_description",
+            idempotency_key=command.idempotency_key,
+            request_hash=request_hash,
+            job_id=job_id,
+        )
+        try:
+            updated = jobs.update_job_description(
+                job_id,
+                command.description_text,
+                source=command.source,
+                provenance=command.provenance,
+            )
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail="Job not found") from error
+        except ValueError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
+        normalized = normalize_job_detail(updated)
+        result_payload = JobDescriptionUpdateResponse(event_id=0, job=normalized).model_dump(
+            mode="json"
+        )
+        event_id = record_mutation(
+            identity=identity,
+            target=f"jobs/{job_id}",
+            command_name="job.update_description",
+            origin=command.origin,
+            idempotency_key=command.idempotency_key,
+            request_hash=request_hash,
+            result=result_payload,
+            label="Updated full job listing",
+            job_id=job_id,
+            detail={"source": command.source, "description_length": len(command.description_text)},
+            event_type="job_description_updated",
+            inject_event_id=True,
+            reserved_event_id=reservation_event_id,
+        )
+        return JobDescriptionUpdateResponse(event_id=event_id, job=normalized)
+
+    @app.put(
         "/v1/jobs/{job_id}/status",
         tags=["jobs"],
         responses={403: {"description": "Trusted MCP credential required"}},
@@ -1040,7 +1117,11 @@ def create_app(
         )
         return result
 
-    @app.get("/v1/jobs/{job_id}/history", tags=["jobs"])
+    @app.get(
+        "/v1/jobs/{job_id}/history",
+        tags=["jobs"],
+        response_model_exclude_none=True,
+    )
     def job_history(
         job_id: str,
         _: Annotated[DeviceIdentity, Depends(authenticated_device)],

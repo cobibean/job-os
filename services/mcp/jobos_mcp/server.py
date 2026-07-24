@@ -103,6 +103,21 @@ def create_server(client: JobOsMcpClient) -> FastMCP:
             job_id, target_status, reason=reason, idempotency_key=idempotency_key
         )
 
+    @server.tool(name="job_update_description", structured_output=True)
+    async def job_update_description(
+        job_id: str,
+        description_text: str,
+        source_note: str | None = None,
+        idempotency_key: str | None = None,
+    ) -> dict[str, Any]:
+        """Replace a saved job's canonical full listing and refresh its durable packet."""
+        return await client.update_description(
+            job_id,
+            description_text,
+            source_note=source_note,
+            idempotency_key=idempotency_key,
+        )
+
     @server.tool(name="workspace_inspect", structured_output=True)
     async def workspace_inspect(idempotency_key: str | None = None) -> dict[str, Any]:
         """Inspect the current shared JobOS workspace snapshot."""

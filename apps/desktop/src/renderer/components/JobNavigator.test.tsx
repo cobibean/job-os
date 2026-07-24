@@ -99,3 +99,49 @@ test('status sections are independently collapsible and start collapsed', () => 
   expect(screen.queryByRole('button', { name: 'Select Alpha Builder' })).toBeNull()
   expect(screen.getByRole('button', { name: 'Select Gamma Designer' })).not.toBeNull()
 })
+
+test('the selected card previews and expands the separately fetched full listing', () => {
+  const description = `Build trustworthy AI systems. ${'Detailed responsibility. '.repeat(20)}`
+  const job = {
+    jobId: 'a', company: 'Alpha', title: 'AI Product Manager', status: 'discovered' as const,
+    statusGroup: 'Inbox', canonicalUrl: 'https://example.com/a', discoveredAt: '', lastSeenAt: ''
+  }
+  render(
+    <JobNavigator
+      error={null} feedback={null} jobs={[job]} loading={false}
+      onMove={vi.fn()} onQueryChange={vi.fn()} onReorder={vi.fn()}
+      onSelect={vi.fn()} onSortChange={vi.fn()} onStatusChange={vi.fn()}
+      onStatusGroupChange={vi.fn()} query="" selectedJobId="a"
+      selectedJobDetail={{ ...job, description, location: 'Remote' }}
+      sortMode="manual" statusGroup=""
+    />
+  )
+
+  expect(screen.getByText('Remote')).not.toBeNull()
+  expect(screen.getByText(/Build trustworthy AI systems.*…/)).not.toBeNull()
+  const disclosure = screen.getByText('Full listing')
+  expect(disclosure.closest('details')?.open).toBe(false)
+  fireEvent.click(disclosure)
+  expect(disclosure.closest('details')?.open).toBe(true)
+  expect(document.querySelector('.full-listing-text')?.textContent).toBe(description)
+})
+
+test('a stale detail response is never rendered on a newly selected card', () => {
+  const job = {
+    jobId: 'new', company: 'New Co', title: 'Current role', status: 'discovered' as const,
+    statusGroup: 'Inbox', canonicalUrl: 'https://example.com/new', discoveredAt: '', lastSeenAt: ''
+  }
+  render(
+    <JobNavigator
+      error={null} feedback={null} jobs={[job]} loading={false}
+      onMove={vi.fn()} onQueryChange={vi.fn()} onReorder={vi.fn()}
+      onSelect={vi.fn()} onSortChange={vi.fn()} onStatusChange={vi.fn()}
+      onStatusGroupChange={vi.fn()} query="" selectedJobId="new"
+      selectedJobDetail={{ ...job, jobId: 'old', description: 'Stale listing', location: 'Old place' }}
+      sortMode="manual" statusGroup=""
+    />
+  )
+
+  expect(screen.queryByText('Stale listing')).toBeNull()
+  expect(screen.queryByText('Old place')).toBeNull()
+})

@@ -432,6 +432,43 @@ export type JobArtifactsResponse = {
 };
 
 /**
+ * JobDescriptionUpdateRequest
+ */
+export type JobDescriptionUpdateRequest = {
+    /**
+     * Description Text
+     */
+    description_text: string;
+    /**
+     * Idempotency Key
+     */
+    idempotency_key?: string;
+    /**
+     * Origin
+     */
+    origin: 'user' | 'mcp';
+    /**
+     * Provenance
+     */
+    provenance?: string | null;
+    /**
+     * Source
+     */
+    source: string;
+};
+
+/**
+ * JobDescriptionUpdateResponse
+ */
+export type JobDescriptionUpdateResponse = {
+    /**
+     * Event Id
+     */
+    event_id: number;
+    job: JobDetail;
+};
+
+/**
  * JobDetail
  */
 export type JobDetail = {
@@ -482,6 +519,10 @@ export type JobDetail = {
  */
 export type JobEvent = {
     /**
+     * Description Length
+     */
+    description_length?: number | null;
+    /**
      * Event Id
      */
     event_id: number;
@@ -517,6 +558,10 @@ export type JobEvent = {
      * Sort Mode
      */
     sort_mode?: 'manual' | 'recent' | 'alphabetical' | 'status' | null;
+    /**
+     * Source
+     */
+    source?: string | null;
     /**
      * To Status
      */
@@ -640,6 +685,10 @@ export type LeadHistoryEvent = {
      */
     event_type: string;
     /**
+     * From Sha256
+     */
+    from_sha256?: string | null;
+    /**
      * From Status
      */
     from_status: string | null;
@@ -648,9 +697,21 @@ export type LeadHistoryEvent = {
      */
     occurred_at: string;
     /**
+     * Provenance
+     */
+    provenance?: string | null;
+    /**
      * Reason
      */
     reason: string | null;
+    /**
+     * Source
+     */
+    source?: string | null;
+    /**
+     * To Sha256
+     */
+    to_sha256?: string | null;
     /**
      * To Status
      */
@@ -1680,6 +1741,46 @@ export type ApproveJobArtifactV1JobsJobIdArtifactsArtifactIdApprovePostResponses
 };
 
 export type ApproveJobArtifactV1JobsJobIdArtifactsArtifactIdApprovePostResponse = ApproveJobArtifactV1JobsJobIdArtifactsArtifactIdApprovePostResponses[keyof ApproveJobArtifactV1JobsJobIdArtifactsArtifactIdApprovePostResponses];
+
+export type JobUpdateDescriptionV1JobsJobIdDescriptionPutData = {
+    body: JobDescriptionUpdateRequest;
+    headers?: {
+        /**
+         * X-Jobos-Mcp-Token
+         */
+        'X-JobOS-MCP-Token'?: string | null;
+    };
+    path: {
+        /**
+         * Job Id
+         */
+        job_id: string;
+    };
+    query?: never;
+    url: '/v1/jobs/{job_id}/description';
+};
+
+export type JobUpdateDescriptionV1JobsJobIdDescriptionPutErrors = {
+    /**
+     * Trusted MCP credential required
+     */
+    403: unknown;
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type JobUpdateDescriptionV1JobsJobIdDescriptionPutError = JobUpdateDescriptionV1JobsJobIdDescriptionPutErrors[keyof JobUpdateDescriptionV1JobsJobIdDescriptionPutErrors];
+
+export type JobUpdateDescriptionV1JobsJobIdDescriptionPutResponses = {
+    /**
+     * Successful Response
+     */
+    200: JobDescriptionUpdateResponse;
+};
+
+export type JobUpdateDescriptionV1JobsJobIdDescriptionPutResponse = JobUpdateDescriptionV1JobsJobIdDescriptionPutResponses[keyof JobUpdateDescriptionV1JobsJobIdDescriptionPutResponses];
 
 export type JobHistoryV1JobsJobIdHistoryGetData = {
     body?: never;

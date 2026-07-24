@@ -63,6 +63,8 @@ class FakeJobHunterFacade:
         self.history = []
         self.artifacts = {}
         self.add_job_calls = 0
+        self.description_update_calls = 0
+        self.descriptions = {}
 
     def list_jobs(self):
         return list(self.jobs)
@@ -106,7 +108,19 @@ class FakeJobHunterFacade:
         job = next((job for job in self.jobs if job["job_id"] == job_id), None)
         if job is None:
             raise KeyError(job_id)
-        return {**job, "description": "A job description", "location": "Remote"}
+        return {
+            **job,
+            "description": self.descriptions.get(job_id, "A job description"),
+            "location": "Remote",
+        }
+
+    def update_job_description(
+        self, job_id, description_text, *, source, provenance=None
+    ):
+        self.inspect_job(job_id)
+        self.description_update_calls += 1
+        self.descriptions[job_id] = description_text
+        return self.inspect_job(job_id)
 
     def get_lead_history(self, job_id):
         self.inspect_job(job_id)
@@ -219,6 +233,88 @@ def test_agent_can_create_a_job_through_the_same_canonical_ingest_seam(tmp_path)
         and entry["detail"]["origin"] == "mcp"
         for entry in conversation.json()["entries"]
     )
+
+
+def test_agent_updates_full_description_with_idempotent_recorded_mutation(tmp_path):
+    facade = FakeJobHunterFacade()
+    payload = {
+        "description_text": (
+            "Complete listing with responsibilities, qualifications, and compensation."
+        ),
+        "source": "jobhunter_agent",
+        "provenance": "User supplied the complete posting",
+        "origin": "mcp",
+        "idempotency_key": "description-update-1",
+    }
+
+    with make_client(tmp_path, facade) as client:
+        first = client.put(
+            "/v1/jobs/job-0/description", headers=auth_headers(), json=payload
+        )
+        replay = client.put(
+            "/v1/jobs/job-0/description", headers=auth_headers(), json=payload
+        )
+        inspected = client.get("/v1/jobs/job-0", headers=auth_headers())
+        events = client.get("/v1/events?after=0", headers=auth_headers())
+        conversation = client.get("/v1/conversations/current", headers=auth_headers())
+
+    assert first.status_code == 200
+    assert replay.json() == first.json()
+    assert facade.description_update_calls == 1
+    assert inspected.json()["description"] == payload["description_text"]
+    description_events = [
+        event
+        for event in events.json()["events"]
+        if event["event_type"] == "job_description_updated"
+    ]
+    assert description_events == [
+        {
+            "event_id": first.json()["event_id"],
+            "event_type": "job_description_updated",
+            "job_id": "job-0",
+            "origin": "mcp",
+            "occurred_at": description_events[0]["occurred_at"],
+            "from_status": None,
+            "to_status": None,
+            "selected_job_id": None,
+            "job_ids": None,
+            "sort_mode": None,
+            "source": "jobhunter_agent",
+            "description_length": len(payload["description_text"]),
+        }
+    ]
+    assert any(
+        entry["summary"] == "Updated full job listing"
+        and entry["detail"]["description_length"] == len(payload["description_text"])
+        for entry in conversation.json()["entries"]
+    )
+
+
+def test_description_update_requires_trusted_mcp_credential_and_valid_job(tmp_path):
+    payload = {
+        "description_text": "Complete listing",
+        "source": "jobhunter_agent",
+        "origin": "mcp",
+        "idempotency_key": "description-update-2",
+    }
+    with make_client(tmp_path) as client:
+        forbidden = client.put(
+            "/v1/jobs/job-0/description",
+            headers={"Authorization": "Bearer test-device-token"},
+            json=payload,
+        )
+        missing = client.put(
+            "/v1/jobs/missing/description", headers=auth_headers(), json=payload
+        )
+        invalid = client.put(
+            "/v1/jobs/job-0/description",
+            headers=auth_headers(),
+            json={**payload, "description_text": "   "},
+        )
+
+    assert forbidden.status_code == 403
+    assert missing.status_code == 404
+    assert invalid.status_code == 422
 
 
 def test_browser_save_replays_the_same_idempotent_result_without_a_second_ingest(tmp_path):

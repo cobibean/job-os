@@ -1481,7 +1481,56 @@ class JobOsStateStore:
             return None
         if row[0] != request_hash:
             raise IdempotencyConflict("Idempotency key was already used for a different command")
-        return json.loads(row[1])
+        return json.loads(row[1]) if row[1] is not None else None
+
+    def reserve_mutation(
+        self,
+        *,
+        origin: str,
+        actor_id: str,
+        target_resource: str,
+        command_name: str,
+        idempotency_key: str,
+        request_hash: str,
+        job_id: str | None = None,
+    ) -> int:
+        with sqlite3.connect(self._path) as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            prior = connection.execute(
+                """
+                SELECT event_id, request_hash
+                FROM job_events
+                WHERE actor_id = ? AND target_resource = ? AND command_name = ?
+                    AND idempotency_key = ?
+                """,
+                (actor_id, target_resource, command_name, idempotency_key),
+            ).fetchone()
+            if prior is not None:
+                if prior[1] != request_hash:
+                    raise IdempotencyConflict(
+                        "Idempotency key was already used for a different command"
+                    )
+                return int(prior[0])
+            cursor = connection.execute(
+                """
+                INSERT INTO job_events(
+                    event_type, job_id, origin, payload_json, actor_id, target_resource,
+                    command_name, outcome, idempotency_key, request_hash, result_json
+                ) VALUES ('mutation_pending', ?, ?, '{}', ?, ?, ?, 'pending', ?, ?, NULL)
+                """,
+                (
+                    job_id,
+                    origin,
+                    actor_id,
+                    target_resource,
+                    command_name,
+                    idempotency_key,
+                    request_hash,
+                ),
+            )
+            if cursor.lastrowid is None:  # pragma: no cover - SQLite INSERT guarantees this
+                raise RuntimeError("Mutation reservation did not return an event ID")
+            return int(cursor.lastrowid)
 
     def ensure_mutation_activity(
         self,
@@ -1541,9 +1590,43 @@ class JobOsStateStore:
         result: dict[str, object],
         detail: dict[str, object],
         job_id: str | None = None,
+        inject_event_id: bool = False,
+        reserved_event_id: int | None = None,
     ) -> int:
         safe_detail = redact_detail(detail)
         with sqlite3.connect(self._path) as connection:
+            if reserved_event_id is not None:
+                event_id = reserved_event_id
+                stored_result = (
+                    {**result, "event_id": event_id} if inject_event_id else result
+                )
+                cursor = connection.execute(
+                    """
+                    UPDATE job_events
+                    SET event_type = ?, job_id = ?, origin = ?, payload_json = ?,
+                        actor_id = ?, target_resource = ?, command_name = ?, outcome = ?,
+                        idempotency_key = ?, request_hash = ?, result_json = ?
+                    WHERE event_id = ? AND request_hash = ? AND result_json IS NULL
+                    """,
+                    (
+                        event_type,
+                        job_id,
+                        origin,
+                        json.dumps(safe_detail, separators=(",", ":"), sort_keys=True),
+                        actor_id,
+                        target_resource,
+                        command_name,
+                        outcome,
+                        idempotency_key,
+                        request_hash,
+                        json.dumps(stored_result, separators=(",", ":"), sort_keys=True),
+                        event_id,
+                        request_hash,
+                    ),
+                )
+                if cursor.rowcount != 1:
+                    raise IdempotencyConflict("Mutation reservation is no longer pending")
+                return event_id
             try:
                 cursor = connection.execute(
                     """
@@ -1568,7 +1651,19 @@ class JobOsStateStore:
                 )
             except sqlite3.IntegrityError as error:
                 raise IdempotencyConflict("Idempotency key was already used") from error
-        return int(cursor.lastrowid)
+            if cursor.lastrowid is None:  # pragma: no cover - SQLite INSERT guarantees this
+                raise RuntimeError("Mutation event insert did not return an event ID")
+            event_id = int(cursor.lastrowid)
+            if inject_event_id:
+                stored_result = {**result, "event_id": event_id}
+                connection.execute(
+                    "UPDATE job_events SET result_json = ? WHERE event_id = ?",
+                    (
+                        json.dumps(stored_result, separators=(",", ":"), sort_keys=True),
+                        event_id,
+                    ),
+                )
+        return event_id
 
     def save_job_selection(self, job_id: str, origin: str) -> int:
         payload = json.dumps({"selected_job_id": job_id}, separators=(",", ":"))
@@ -1666,7 +1761,8 @@ class JobOsStateStore:
                 """
                 SELECT event_id, event_type, job_id, origin, occurred_at, payload_json
                 FROM job_events
-                WHERE event_id > ? AND command_name IS NULL
+                WHERE event_id > ?
+                    AND (command_name IS NULL OR event_type = 'job_description_updated')
                 ORDER BY event_id
                 """,
                 (after,),
@@ -1674,6 +1770,12 @@ class JobOsStateStore:
         events = []
         for row in rows:
             payload = json.loads(row["payload_json"])
+            if row["event_type"] == "job_description_updated":
+                payload = {
+                    key: payload[key]
+                    for key in ("source", "description_length")
+                    if key in payload
+                }
             events.append(
                 {
                     "event_id": row["event_id"],

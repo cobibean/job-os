@@ -26,6 +26,7 @@ const bridge: JobOsRendererBridge = Object.freeze({
     getState: () => ipcRenderer.invoke('jobos:jobs:get-state'),
 
     list: (sort: JobSortMode, query?: string, statusGroup?: string) => ipcRenderer.invoke('jobos:jobs:list', sort, query, statusGroup),
+    inspect: (jobId: string) => ipcRenderer.invoke('jobos:jobs:inspect', jobId),
     select: (jobId: string) => ipcRenderer.invoke('jobos:jobs:select', jobId),
     reorder: (jobIds: string[]) => ipcRenderer.invoke('jobos:jobs:reorder', jobIds),
     setSort: (sort: JobSortMode) => ipcRenderer.invoke('jobos:jobs:set-sort', sort),
