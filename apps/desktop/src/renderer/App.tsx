@@ -122,6 +122,7 @@ export function App() {
           onStatusGroupChange={jobState.setStatusGroup}
           query={jobState.query}
           selectedJobId={jobState.selectedJobId}
+          selectedJobDetail={jobState.selectedJobDetail}
           sortMode={jobState.sortMode}
           statusGroup={jobState.statusGroup}
         />}

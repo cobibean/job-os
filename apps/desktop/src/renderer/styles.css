@@ -308,6 +308,12 @@ button:focus-visible {
 .job-select strong { font-size: 12px; font-weight: 570; }
 .job-select small { color: var(--muted); font-size: 11px; }
 .status-select { max-width: 150px; margin: 7px 0 0 29px; padding: 0; border: 0; color: var(--accent); background: transparent; font-size: 11px; text-transform: capitalize; }
+.job-description-card { margin: 10px 0 0 29px; padding: 10px; border: 1px solid var(--border-soft); border-radius: 6px; background: var(--surface-inset); }
+.job-description-card p { margin: 6px 0 8px; color: var(--text-soft); font-size: 10px; line-height: 1.5; }
+.job-location { display: block; overflow: hidden; color: var(--quiet); font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+.job-description-card details { color: var(--muted); font-size: 10px; }
+.job-description-card summary { color: var(--accent-text); cursor: pointer; font-weight: 600; }
+.full-listing-text { max-height: 280px; margin-top: 8px; padding-top: 8px; overflow-y: auto; border-top: 1px solid var(--border-soft); color: var(--text-soft); line-height: 1.55; white-space: pre-wrap; }
 .order-buttons { display: flex; }
 .order-buttons .icon-button { width: 22px; height: 22px; }
 .order-buttons .icon-button:disabled { opacity: 0.25; }

@@ -1,6 +1,7 @@
 import {
   createJobOsApiClient,
   jobCreateFromBrowserV1JobsPost,
+  jobInspectV1JobsJobIdGet,
   jobUpdateStatusV1JobsJobIdStatusPut,
   jobsListV1JobsGet,
   jobsReorderV1JobsOrderPut,
@@ -11,6 +12,7 @@ import {
 import type {
   BrowserJobCreateResponse,
   JobEvent as ApiJobEvent,
+  JobDetail as ApiJobDetail,
   JobListItem as ApiJobListItem,
   JobListResponse,
   JobMutationResponse,
@@ -21,6 +23,7 @@ import type {
 import type {
   BrowserJobExtraction,
   BrowserJobSaveResult,
+  JobDetail,
   JobEvent,
   JobListItem,
   JobMutationResult,
@@ -68,6 +71,14 @@ function toJob(job: ApiJobListItem): JobListItem {
   }
 }
 
+function toJobDetail(job: ApiJobDetail): JobDetail {
+  return {
+    ...toJob(job),
+    description: job.description,
+    location: job.location ?? null
+  }
+}
+
 export function createMainJobsClient(config: JobsConfig) {
   const client = createJobOsApiClient(config.baseUrl, config.deviceToken)
 
@@ -93,6 +104,11 @@ export function createMainJobsClient(config: JobsConfig) {
         query: { sort, query, status_group: statusGroup }
       })
       return unwrap<JobListResponse>(result, 'Jobs unavailable').jobs.map(toJob)
+    },
+
+    async inspect(jobId: string): Promise<JobDetail> {
+      const result = await jobInspectV1JobsJobIdGet({ client, path: { job_id: jobId } })
+      return toJobDetail(unwrap<ApiJobDetail>(result, 'Job details unavailable'))
     },
 
     async select(jobId: string): Promise<JobMutationResult> {

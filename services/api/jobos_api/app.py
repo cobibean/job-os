@@ -52,6 +52,8 @@ from jobos_api.hermes_adapter import HermesWebSocketGateway
 from jobos_api.jobs import (
     BrowserJobCreateRequest,
     BrowserJobCreateResponse,
+    JobDescriptionUpdateRequest,
+    JobDescriptionUpdateResponse,
     JobDetail,
     JobEventsResponse,
     JobFacade,
@@ -973,6 +975,68 @@ def create_app(
             return result
         except KeyError as error:
             raise HTTPException(status_code=404, detail="Job not found") from error
+
+    @app.put(
+        "/v1/jobs/{job_id}/description",
+        tags=["jobs"],
+        responses={403: {"description": "Trusted MCP credential required"}},
+    )
+    @serialized_mutation_route
+    def job_update_description(
+        job_id: str,
+        command: JobDescriptionUpdateRequest,
+        identity: Annotated[DeviceIdentity, Depends(authenticated_device)],
+        mcp_token: Annotated[str | None, Header(alias="X-JobOS-MCP-Token")] = None,
+    ) -> JobDescriptionUpdateResponse:
+        require_trusted_mcp(identity, command.origin, mcp_token)
+        request_hash = mutation_hash(
+            "job.update_description",
+            {"job_id": job_id, **command.model_dump(exclude={"idempotency_key"})},
+        )
+        try:
+            replay = mutation_replay(
+                identity=identity,
+                target=f"jobs/{job_id}",
+                command_name="job.update_description",
+                idempotency_key=command.idempotency_key,
+                request_hash=request_hash,
+            )
+        except IdempotencyConflict as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
+        if replay is not None:
+            return JobDescriptionUpdateResponse.model_validate(replay)
+        try:
+            updated = jobs.update_job_description(
+                job_id,
+                command.description_text,
+                source=command.source,
+                provenance=command.provenance,
+            )
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail="Job not found") from error
+        except ValueError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
+        normalized = normalize_job_detail(updated)
+        event_id = state_store.record_description_event(
+            job_id=job_id,
+            origin=command.origin,
+            source=command.source,
+            description_length=len(command.description_text),
+        )
+        result = JobDescriptionUpdateResponse(event_id=event_id, job=normalized)
+        record_mutation(
+            identity=identity,
+            target=f"jobs/{job_id}",
+            command_name="job.update_description",
+            origin=command.origin,
+            idempotency_key=command.idempotency_key,
+            request_hash=request_hash,
+            result=result.model_dump(mode="json"),
+            label="Updated full job listing",
+            job_id=job_id,
+            detail={"source": command.source, "description_length": len(command.description_text)},
+        )
+        return result
 
     @app.put(
         "/v1/jobs/{job_id}/status",
