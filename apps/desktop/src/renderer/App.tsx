@@ -1,5 +1,5 @@
 import { AgentPanel } from './components/AgentPanel'
-import { CenterWorkspace } from './components/CenterWorkspace'
+import { CenterWorkspace, type JobListingRequest } from './components/CenterWorkspace'
 import { JobNavigator } from './components/JobNavigator'
 import { SettingsPanel } from './components/SettingsPanel'
 import { StatusBar } from './components/StatusBar'
@@ -9,7 +9,7 @@ import { useConnectivity } from './hooks/useConnectivity'
 import { useJobs } from './hooks/useJobs'
 import { useWorkspace } from './hooks/useWorkspace'
 import { useTheme } from './theme/useTheme'
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 
 export function App() {
   const connectivity = useConnectivity()
@@ -19,6 +19,10 @@ export function App() {
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [settingsPreparing, setSettingsPreparing] = useState(false)
   const [agentModalOpen, setAgentModalOpen] = useState(false)
+  const [jobListingRequest, setJobListingRequest] = useState<JobListingRequest | null>(null)
+  const nextJobListingRequestId = useRef(0)
+  const latestNavigatorSelection = useRef(0)
+  const navigatorSelectionQueue = useRef(Promise.resolve())
   const activePreset = layoutState.workspace.selectedPreset
   const activeLayout = layoutState.workspace.layouts[activePreset]
 
@@ -38,6 +42,31 @@ export function App() {
     } finally {
       setSettingsPreparing(false)
     }
+  }
+
+  const selectJobFromNavigator = (jobId: string): Promise<void> => {
+    const selectionRequest = latestNavigatorSelection.current + 1
+    latestNavigatorSelection.current = selectionRequest
+    const job = jobState.jobs.find(candidate => candidate.jobId === jobId)
+    if (!job) return Promise.resolve()
+    const operation = navigatorSelectionQueue.current.then(async () => {
+      if (selectionRequest !== latestNavigatorSelection.current) return
+      if (!await jobState.selectJob(jobId)) return
+      try {
+        await layoutState.showBrowser()
+      } catch {
+        // The visible workspace update already succeeded; navigation should not depend on persistence.
+      }
+      if (selectionRequest !== latestNavigatorSelection.current) return
+      nextJobListingRequestId.current += 1
+      setJobListingRequest({
+        requestId: nextJobListingRequestId.current,
+        jobId: job.jobId,
+        canonicalUrl: job.canonicalUrl
+      })
+    })
+    navigatorSelectionQueue.current = operation.catch(() => undefined)
+    return operation
   }
 
   return (
@@ -69,11 +98,14 @@ export function App() {
           browserRepaired={Boolean(layoutState.workspace.repairedBrowser)}
           browserRepairReasons={layoutState.workspace.browserRepairReasons ?? []}
           browserVisible={!activeLayout.collapsed.includes('center') && !agentModalOpen && !settingsOpen && !settingsPreparing}
+          jobListingRequest={jobListingRequest}
           jobs={jobState.jobs}
           layoutSignal={`${activePreset}:${activeLayout.order.join(',')}:${activeLayout.collapsed.join(',')}`}
           onBrowserPersist={layoutState.updateBrowserState}
           onDocumentPersist={layoutState.updateDocumentState}
-          onJobSaved={jobState.selectJob}
+          onJobSaved={async jobId => {
+            await jobState.selectJob(jobId)
+          }}
           workspaceHydrated={layoutState.hydrated}
         />}
         jobs={<JobNavigator
@@ -84,7 +116,7 @@ export function App() {
           onMove={jobState.reorder}
           onReorder={jobState.reorderTo}
           onQueryChange={jobState.setQuery}
-          onSelect={jobState.selectJob}
+          onSelect={selectJobFromNavigator}
           onSortChange={jobState.changeSort}
           onStatusChange={jobState.changeStatus}
           onStatusGroupChange={jobState.setStatusGroup}

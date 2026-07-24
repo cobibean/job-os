@@ -1,9 +1,23 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
-import type { BrowserRestoreState, BrowserState } from '../../shared/contracts'
-import { sanitizeBrowserMetadata } from '../../shared/browserPersistence'
+import type { BrowserRestoreState, BrowserState, BrowserTab } from '../../shared/contracts'
+import { normalizeBrowserUrlForPersistence, sanitizeBrowserMetadata } from '../../shared/browserPersistence'
 
 const emptyState: BrowserState = { tabs: [], activeTabId: null, download: null, notice: null }
+
+export function findOpenJobListingTab(
+  tabs: BrowserTab[],
+  jobId: string,
+  canonicalUrl: string
+): BrowserTab | null {
+  const associated = tabs.find(tab => tab.associatedJobId === jobId)
+  if (associated) return associated
+  const canonicalKey = normalizeBrowserUrlForPersistence(canonicalUrl, false)
+  if (!canonicalKey) return null
+  return tabs.find(tab => (
+    normalizeBrowserUrlForPersistence(tab.url, false) === canonicalKey
+  )) ?? null
+}
 
 export function browserStateForPersistence(state: BrowserState): BrowserRestoreState {
   return {
@@ -28,6 +42,7 @@ export function useBrowser(
   const bridge = useRef(window.jobos?.browser).current
   const [state, setState] = useState<BrowserState>(emptyState)
   const [message, setMessage] = useState('Browser ready')
+  const [restorationReady, setRestorationReady] = useState(!bridge)
   const viewportRef = useRef<HTMLDivElement | null>(null)
   const restored = useRef(false)
   const explicitBrowserAction = useRef(false)
@@ -59,6 +74,7 @@ export function useBrowser(
     void bridge.restore(restoredState).then(next => {
       setState(next)
       persistedKey.current = JSON.stringify(browserStateForPersistence(next))
+      setRestorationReady(true)
     }).catch(error => {
       setMessage(error instanceof Error ? error.message : 'Browser restore failed')
     })
@@ -112,13 +128,23 @@ export function useBrowser(
     }
   }, [acceptState])
 
+  const openJobListing = useCallback(async (jobId: string, canonicalUrl: string) => {
+    if (!bridge) return
+    const existing = findOpenJobListingTab(state.tabs, jobId, canonicalUrl)
+    await run(() => existing
+      ? bridge.select(existing.tabId)
+      : bridge.create(canonicalUrl, jobId))
+  }, [bridge, run, state.tabs])
+
   return {
     bridgeAvailable: Boolean(bridge),
+    restorationReady,
     state,
     activeTab,
     message,
     viewportRef,
     reconcileExternalState: (next: BrowserState) => acceptState(next, true),
+    openJobListing,
     create: (url?: string, jobId?: string | null) => bridge && run(() => bridge.create(url, jobId)),
     select: (tabId: string) => bridge && run(() => bridge.select(tabId)),
     close: (tabId: string) => bridge && run(() => bridge.close(tabId)),

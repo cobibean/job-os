@@ -171,7 +171,12 @@ export function useWorkspace(selectedJobId: string | null) {
     activeCenterSurface: 'document'
   }), 'Newest resume opened for review'), [commit])
 
-  return { workspace, announcement, hydrated, selectPreset, resize, collapse, move, reset, updateBrowserState, updateDocumentState, showDocument }
+  const showBrowser = useCallback(() => commit(current => ({
+    ...current,
+    activeCenterSurface: 'browser'
+  }), 'Job listing opened in browser'), [commit])
+
+  return { workspace, announcement, hydrated, selectPreset, resize, collapse, move, reset, updateBrowserState, updateDocumentState, showDocument, showBrowser }
 }
 
 function panelLabel(panel: PanelId) {

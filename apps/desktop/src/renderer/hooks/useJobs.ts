@@ -96,7 +96,7 @@ export function useJobs() {
   }, [bridge, jobs, refresh])
 
   const selectJob = useCallback(async (jobId: string) => {
-    if (!bridge) return
+    if (!bridge) return false
     try {
       await bridge.select(jobId)
       const [snapshot, refreshed] = await Promise.all([
@@ -109,8 +109,10 @@ export function useJobs() {
       setSortMode(snapshot.sortMode)
       setFeedback('Active job selected')
       setError(null)
+      return true
     } catch {
       setError('Selection failed')
+      return false
     }
   }, [bridge, query, sortMode, statusGroup])
 
