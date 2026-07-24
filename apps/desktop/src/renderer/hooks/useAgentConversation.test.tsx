@@ -76,28 +76,186 @@ test('hydration preserves a newer durable gateway connectivity transition', () =
   expect(hydrated.connection).toBe('offline')
 })
 
-test('fifteen distinct tool calls project to fifteen concise chronological rows', () => {
+test('a completed tool-heavy turn projects activity before one final assistant response', () => {
+  const entries = [
+    event(1, { type: 'assistant_message', summary: 'Agent response', detail: { type: 'message.start', text: '' } }),
+    ...Array.from({ length: 3 }, (_, index) => [
+      event(index * 2 + 2, { summary: `Action ${index + 1}`, detail: { activity_id: `tool-${index}`, phase: 'start' } }),
+      event(index * 2 + 3, { summary: `Action ${index + 1}`, state: 'completed', detail: { activity_id: `tool-${index}`, phase: 'complete' } })
+    ]).flat(),
+    event(8, { type: 'assistant_message', state: 'completed', summary: 'Finished once.', detail: { type: 'message.complete', text: 'Finished once.' } })
+  ]
+
+  const [turn] = projectConversation(entries)
+  expect(turn).toEqual(expect.objectContaining({
+    kind: 'agent-turn',
+    state: 'completed',
+    activities: [
+      expect.objectContaining({ label: 'Action 1' }),
+      expect.objectContaining({ label: 'Action 2' }),
+      expect.objectContaining({ label: 'Action 3' })
+    ],
+    assistant: expect.objectContaining({ text: 'Finished once.', state: 'completed' })
+  }))
+})
+
+test('fifteen distinct tool calls project to fifteen concise chronological activities', () => {
   const entries = Array.from({ length: 15 }, (_, index) => [
     event(index * 3 + 1, { summary: `Action ${index + 1}`, detail: { activity_id: `tool-${index}`, phase: 'start' } }),
     event(index * 3 + 2, { summary: `Action ${index + 1}`, detail: { activity_id: `tool-${index}`, phase: 'progress' } }),
     event(index * 3 + 3, { summary: `Action ${index + 1}`, state: 'completed', detail: { activity_id: `tool-${index}`, phase: 'complete' } })
   ]).flat()
 
-  const activities = projectConversation(entries).filter(item => item.kind === 'activity')
-  expect(activities).toHaveLength(15)
-  expect(activities.map(item => item.label)).toEqual(Array.from({ length: 15 }, (_, index) => `Action ${index + 1}`))
-  expect(activities.every(item => item.state === 'completed')).toBe(true)
+  const [turn] = projectConversation(entries)
+  if (!turn || turn.kind !== 'agent-turn') throw new Error('Expected an agent turn')
+  expect(turn.activities).toHaveLength(15)
+  expect(turn.activities.map(item => item.label)).toEqual(Array.from({ length: 15 }, (_, index) => `Action ${index + 1}`))
+  expect(turn.activities.every(item => item.state === 'completed')).toBe(true)
 })
 
 test('assistant deltas form one streaming response and completion replaces it without duplicate final text', () => {
-  const projected = projectConversation([
+  const [turn] = projectConversation([
     event(1, { type: 'assistant_message', summary: 'Agent response', detail: { type: 'message.start', text: '' } }),
     event(2, { type: 'assistant_message', summary: 'Hello ', detail: { type: 'message.delta', text: 'Hello ' } }),
     event(3, { type: 'assistant_message', summary: 'there', detail: { type: 'message.delta', text: 'there' } }),
     event(4, { type: 'assistant_message', state: 'completed', summary: 'Hello there', detail: { type: 'message.complete', text: 'Hello there' } })
   ])
 
-  expect(projected).toEqual([expect.objectContaining({ kind: 'assistant', text: 'Hello there', state: 'completed' })])
+  expect(turn).toEqual(expect.objectContaining({
+    kind: 'agent-turn',
+    assistant: expect.objectContaining({ text: 'Hello there', state: 'completed' })
+  }))
+})
+
+test.each([
+  ['running', event(2, { type: 'assistant_message', state: 'working', summary: 'Drafting', detail: { type: 'message.delta' } })],
+  ['waiting', event(2, { type: 'status', state: 'waiting', summary: 'Choose one', detail: { actionable: true } })],
+  ['interrupted', event(2, { type: 'status', state: 'interrupted', summary: 'Stopped', detail: { retry: true } })],
+  ['failed', event(2, { type: 'error', state: 'failed', summary: 'Failed', detail: { retry: true } })]
+] as const)('projects a %s turn without mislabeling its state', (_label, terminalEvent) => {
+  const [turn] = projectConversation([event(1), terminalEvent])
+  expect(turn).toEqual(expect.objectContaining({ kind: 'agent-turn', state: terminalEvent.state }))
+  if (terminalEvent.type === 'status' || terminalEvent.type === 'error') {
+    expect(turn).toEqual(expect.objectContaining({ terminal: expect.objectContaining({ state: terminalEvent.state }) }))
+  }
+})
+
+test.each(['failed', 'interrupted'] as const)('projects a terminal assistant completion as explicit %s state with retry', state => {
+  const [turn] = projectConversation([
+    event(1, { type: 'assistant_message', state: 'working', summary: 'Partial response', detail: { type: 'message.delta' } }),
+    event(2, { type: 'assistant_message', state, summary: `Response ${state}`, detail: { type: 'message.complete', status: state } })
+  ])
+
+  expect(turn).toEqual(expect.objectContaining({
+    kind: 'agent-turn',
+    state,
+    terminal: expect.objectContaining({ state, retryable: true }),
+    assistant: expect.objectContaining({ state, text: `Response ${state}` })
+  }))
+})
+
+test('clears a resolved waiting notice when the turn later completes', () => {
+  const [turn] = projectConversation([
+    event(1, { type: 'status', state: 'waiting', summary: 'Choose one', detail: { actionable: true } }),
+    event(2, { type: 'assistant_message', state: 'completed', summary: 'Finished after the choice', detail: { type: 'message.complete' } })
+  ])
+
+  expect(turn).toEqual(expect.objectContaining({
+    kind: 'agent-turn',
+    state: 'completed',
+    terminal: null,
+    assistant: expect.objectContaining({ text: 'Finished after the choice' })
+  }))
+})
+
+test('keeps waiting authoritative across a late completed activity', () => {
+  const [turn] = projectConversation([
+    event(1, { type: 'status', state: 'waiting', summary: 'Choose one', detail: { actionable: true } }),
+    event(2, { state: 'completed', summary: 'Late activity', detail: { activity_id: 'late', phase: 'complete' } })
+  ])
+
+  expect(turn).toEqual(expect.objectContaining({
+    kind: 'agent-turn',
+    state: 'waiting',
+    terminal: expect.objectContaining({ state: 'waiting' }),
+    activities: [expect.objectContaining({ state: 'completed' })]
+  }))
+})
+
+test('clears a waiting notice when activity resumes the turn', () => {
+  const [turn] = projectConversation([
+    event(1, { type: 'status', state: 'waiting', summary: 'Choose one', detail: { actionable: true } }),
+    event(2, { state: 'working', summary: 'Resumed work', detail: { activity_id: 'resumed', phase: 'start' } })
+  ])
+
+  expect(turn).toEqual(expect.objectContaining({
+    kind: 'agent-turn',
+    state: 'working',
+    terminal: null
+  }))
+})
+
+test.each(['failed', 'interrupted'] as const)('lets a later completed terminal event supersede %s', state => {
+  const terminal = state === 'failed'
+    ? event(1, { type: 'error', state, summary: 'Failed', detail: { retry: true } })
+    : event(1, { type: 'status', state, summary: 'Interrupted', detail: { retry: true } })
+  const [turn] = projectConversation([
+    terminal,
+    event(2, { type: 'assistant_message', state: 'completed', summary: 'Recovered and finished', detail: { type: 'message.complete' } })
+  ])
+
+  expect(turn).toEqual(expect.objectContaining({
+    kind: 'agent-turn',
+    state: 'completed',
+    terminal: null
+  }))
+})
+
+test.each(['failed', 'interrupted'] as const)('preserves %s terminal state across a late activity update', state => {
+  const terminal = state === 'failed'
+    ? event(2, { type: 'error', state, summary: 'Failed', detail: { retry: true } })
+    : event(2, { type: 'status', state, summary: 'Interrupted', detail: { retry: true } })
+  const [turn] = projectConversation([
+    event(1),
+    terminal,
+    event(3, { state: 'completed', summary: 'Late activity update', detail: { activity_id: 'late', phase: 'complete' } })
+  ])
+
+  expect(turn).toEqual(expect.objectContaining({
+    kind: 'agent-turn',
+    state,
+    terminal: expect.objectContaining({ state })
+  }))
+})
+
+test('keeps activities with matching IDs isolated between turns', () => {
+  const projected = projectConversation([
+    event(1, { turnId: 'turn-1', summary: 'First turn action', detail: { activity_id: 'shared', phase: 'start' } }),
+    event(2, { turnId: 'turn-2', summary: 'Second turn action', detail: { activity_id: 'shared', phase: 'start' } })
+  ])
+
+  expect(projected).toHaveLength(2)
+  expect(projected.map(item => item.kind === 'agent-turn' ? item.activities[0]?.label : null)).toEqual([
+    'First turn action',
+    'Second turn action'
+  ])
+})
+
+test('preserves and deduplicates valid ownerless activity records', () => {
+  const projected = projectConversation([
+    event(1, { turnId: null, summary: 'Saved browser job', state: 'working', detail: { activity_id: 'mcp-save', phase: 'start' } }),
+    event(2, { turnId: null, summary: 'Saved browser job', state: 'completed', detail: { activity_id: 'mcp-save', phase: 'complete' } })
+  ])
+
+  expect(projected).toEqual([
+    expect.objectContaining({
+      kind: 'activity',
+      turnId: null,
+      activityId: 'mcp-save',
+      eventId: 1,
+      state: 'completed'
+    })
+  ])
 })
 
 test('ownerless assistant events from a broken restart are not rendered as messages', () => {
@@ -246,7 +404,10 @@ test('stop and retry invoke only the active or actionable turn and keep failures
   expect(cancel).toHaveBeenCalledWith('turn-1')
   expect(retry).toHaveBeenCalledWith('turn-1', expect.stringMatching(/^desktop-retry-/))
   expect(projectConversation(result.current.entries)).toEqual(expect.arrayContaining([
-    expect.objectContaining({ kind: 'error', label: 'Agent unavailable', retryable: true })
+    expect.objectContaining({
+      kind: 'agent-turn',
+      terminal: expect.objectContaining({ kind: 'error', label: 'Agent unavailable', retryable: true })
+    })
   ]))
 })
 

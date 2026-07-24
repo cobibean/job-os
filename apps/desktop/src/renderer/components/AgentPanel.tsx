@@ -1,9 +1,10 @@
-import { Bot, BriefcaseBusiness, CircleAlert, LoaderCircle, MessageSquarePlus, RotateCcw, Send, Square, UserRound, WifiOff } from 'lucide-react'
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { ArrowDown, Bot, BriefcaseBusiness, CircleAlert, LoaderCircle, MessageSquarePlus, RotateCcw, Send, Square, UserRound, WifiOff } from 'lucide-react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 
-import type { ConnectivityState, ConversationEntryState, ConversationEvent } from '../../shared/contracts'
+import type { ConnectivityState } from '../../shared/contracts'
 import { useAgentConversation } from '../hooks/useAgentConversation'
+import { AgentActivityGroup } from './AgentActivityGroup'
 import { ActivityRow } from './ActivityRow'
 import { AssistantMarkdown } from './AssistantMarkdown'
 
@@ -12,18 +13,6 @@ interface AgentPanelProps {
   apiState?: ConnectivityState
   onArtifactRendered?: () => void
   onModalOpenChange?: (open: boolean) => void
-}
-
-type TerminalState = Extract<ConversationEntryState, 'completed' | 'failed' | 'interrupted'>
-
-function terminalStateByTurn(entries: ConversationEvent[]): Map<string, { eventId: number; state: TerminalState }> {
-  const terminalByTurn = new Map<string, { eventId: number; state: TerminalState }>()
-  for (const entry of [...entries].sort((left, right) => left.eventId - right.eventId)) {
-    if (!entry.turnId || !['completed', 'failed', 'interrupted'].includes(entry.state)) continue
-    const isTerminalEntry = entry.type === 'assistant_message' || entry.type === 'error' || entry.type === 'status'
-    if (isTerminalEntry) terminalByTurn.set(entry.turnId, { eventId: entry.eventId, state: entry.state as TerminalState })
-  }
-  return terminalByTurn
 }
 
 function ConnectionNotice({ apiState, connection }: { apiState: ConnectivityState; connection: ReturnType<typeof useAgentConversation>['connection'] }) {
@@ -41,7 +30,6 @@ function ConnectionNotice({ apiState, connection }: { apiState: ConnectivityStat
 
 export function AgentPanel({ contextLabel, apiState = 'connected', onArtifactRendered, onModalOpenChange }: AgentPanelProps) {
   const conversation = useAgentConversation()
-  const terminalByTurn = useMemo(() => terminalStateByTurn(conversation.entries), [conversation.entries])
   const [confirmingReset, setConfirmingReset] = useState(false)
   const [preparingReset, setPreparingReset] = useState(false)
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -50,6 +38,7 @@ export function AgentPanel({ contextLabel, apiState = 'connected', onArtifactRen
   const resetDialogRef = useRef<HTMLElement>(null)
   const resetDialogWasOpen = useRef(false)
   const pinnedToBottom = useRef(true)
+  const [isPinnedToBottom, setIsPinnedToBottom] = useState(true)
   const observedEventId = useRef<number | null>(null)
   const canSend = Boolean(
     conversation.draft.trim()
@@ -159,27 +148,56 @@ export function AgentPanel({ contextLabel, apiState = 'connected', onArtifactRen
     if (rendered) onArtifactRendered?.()
   }, [conversation.entries, conversation.restoredEventId, conversation.restoring, onArtifactRendered])
 
-  useLayoutEffect(() => {
+  const scrollToLatest = useCallback((focusTranscript = false) => {
     const transcript = scrollRef.current
-    if (transcript && pinnedToBottom.current) transcript.scrollTop = transcript.scrollHeight
-  }, [conversation.items.length, conversation.items.at(-1)])
+    if (!transcript) return
+    transcript.scrollTop = transcript.scrollHeight
+    pinnedToBottom.current = true
+    setIsPinnedToBottom(true)
+    if (focusTranscript) transcript.focus({ preventScroll: true })
+  }, [])
+
+  useLayoutEffect(() => {
+    if (pinnedToBottom.current) scrollToLatest()
+  }, [conversation.items, scrollToLatest])
 
   const handleScroll = () => {
     const transcript = scrollRef.current
     if (!transcript) return
-    pinnedToBottom.current = transcript.scrollHeight - transcript.scrollTop - transcript.clientHeight < 64
+    const pinned = transcript.scrollHeight - transcript.scrollTop - transcript.clientHeight <= 64
+    pinnedToBottom.current = pinned
+    setIsPinnedToBottom(pinned)
   }
-  const latestItem = conversation.items.at(-1)
-  const latestItemIsActivelyWaiting = latestItem?.state === 'waiting' && latestItem.turnId === conversation.activeTurn?.turnId
+
+  const handleTurnLayoutChange = useCallback(() => {
+    if (pinnedToBottom.current) scrollToLatest()
+  }, [scrollToLatest])
+
+  const activePresentation = conversation.activeTurn
+    ? conversation.items.find(item => item.kind === 'agent-turn' && item.turnId === conversation.activeTurn?.turnId)
+    : undefined
+  const activeActionCount = activePresentation?.kind === 'agent-turn' ? activePresentation.activities.length : 0
+  const latestTurn = [...conversation.items].reverse().find(item => item.kind === 'agent-turn')
+  const activeStatus = conversation.activeTurn?.cancelRequested
+    ? 'Stopping agent…'
+    : conversation.activeTurn?.status === 'waiting'
+      ? 'Agent waiting for you'
+      : `Agent working · ${activeActionCount} ${activeActionCount === 1 ? 'action' : 'actions'}`
   const announcement = conversation.connection === 'reconnecting'
     ? 'Reconnecting to agent'
-    : latestItemIsActivelyWaiting
-      ? latestItem?.kind === 'assistant' ? 'Agent is waiting' : 'Agent is waiting for you'
-      : latestItem?.state === 'failed'
-        ? 'Agent turn failed'
-        : latestItem?.state === 'completed'
-          ? 'Agent response completed'
-          : ''
+    : conversation.activeTurn?.cancelRequested
+      ? 'Stopping agent'
+      : conversation.activeTurn?.status === 'waiting'
+        ? 'Agent waiting for you'
+        : conversation.activeTurn
+          ? 'Agent working'
+          : latestTurn?.kind === 'agent-turn' && latestTurn.state === 'failed'
+            ? 'Agent turn failed'
+            : latestTurn?.kind === 'agent-turn' && latestTurn.state === 'interrupted'
+              ? 'Agent turn interrupted'
+              : latestTurn?.kind === 'agent-turn' && latestTurn.state === 'completed'
+                ? 'Agent response completed'
+                : ''
 
   return (
     <aside aria-label="Agent chat" className="agent-panel panel-region">
@@ -221,6 +239,7 @@ export function AgentPanel({ contextLabel, apiState = 'connected', onArtifactRen
                 disabled={!canReset}
                 onClick={() => void conversation.reset().then(reset => {
                   if (!reset) return
+                  scrollToLatest()
                   setConfirmingReset(false)
                   onModalOpenChange?.(false)
                 })}
@@ -235,7 +254,7 @@ export function AgentPanel({ contextLabel, apiState = 'connected', onArtifactRen
         document.body
       )}
 
-      <div className="agent-body" onScroll={handleScroll} ref={scrollRef}>
+      <div className="agent-body" onScroll={handleScroll} ref={scrollRef} tabIndex={-1}>
         <ConnectionNotice apiState={apiState} connection={conversation.connection} />
         {conversation.restoring && <div className="agent-restore"><LoaderCircle aria-hidden="true" className="spin" size={17} /> Restoring conversation…</div>}
         {!conversation.restoring && conversation.items.length === 0 && !conversation.error && (
@@ -255,23 +274,52 @@ export function AgentPanel({ contextLabel, apiState = 'connected', onArtifactRen
                   <p>{item.text}</p>
                 </article>
               )
-              if (item.kind === 'assistant') {
-                const terminal = item.turnId ? terminalByTurn.get(item.turnId) : undefined
-                const laterTerminal = terminal && terminal.eventId > item.eventId ? terminal : undefined
-                const streaming = item.state === 'working' && item.turnId === conversation.activeTurn?.turnId && !laterTerminal
-                const visualState = laterTerminal?.state ?? (item.state === 'working' && !streaming ? 'completed' : item.state)
+              if (item.kind === 'agent-turn') {
+                const active = item.turnId === conversation.activeTurn?.turnId
+                const terminal = item.terminal
+                const waiting = terminal?.state === 'waiting' && active
+                const assistant = item.assistant
+                const streaming = Boolean(assistant && assistant.state === 'working' && active && !terminal)
+                const visualState = terminal?.state ?? (assistant?.state === 'working' && !streaming ? 'completed' : assistant?.state)
                 return (
-                  <article className={`message assistant-message ${visualState}`} key={item.id}>
-                    <header><Bot aria-hidden="true" size={16} /> Agent {streaming && <span>Streaming</span>}</header>
-                    <AssistantMarkdown>{item.text}</AssistantMarkdown>
-                  </article>
+                  <section className={`agent-turn ${item.state}`} data-testid="agent-turn" key={item.id}>
+                    {item.activities.length > 0 && (
+                      <AgentActivityGroup
+                        active={active}
+                        activities={item.activities}
+                        onLayoutChange={handleTurnLayoutChange}
+                        state={item.state}
+                        working={active && conversation.activeTurn?.status === 'running' && !conversation.activeTurn.cancelRequested}
+                      />
+                    )}
+                    {terminal && (
+                      <article className={`agent-notice ${terminal.kind} ${waiting ? 'waiting' : terminal.state}`}>
+                        <strong><CircleAlert aria-hidden="true" size={14} /> {waiting ? 'Waiting for you' : terminal.state === 'waiting' ? 'Turn paused' : terminal.state === 'interrupted' ? 'Turn interrupted' : 'Turn failed'}</strong>
+                        <p>{terminal.label}</p>
+                        {terminal.retryable && !conversation.activeTurn && (
+                          <button aria-label="Retry turn" className="retry-button" onClick={() => void conversation.retry(item.turnId)} type="button">
+                            <RotateCcw aria-hidden="true" size={13} /> Retry
+                          </button>
+                        )}
+                      </article>
+                    )}
+                    {assistant && assistant.text && (
+                      <article className={`message assistant-message ${visualState}`}>
+                        <header><Bot aria-hidden="true" size={16} /> Agent {streaming && <span>Streaming</span>}</header>
+                        <AssistantMarkdown>{assistant.text}</AssistantMarkdown>
+                      </article>
+                    )}
+                  </section>
                 )
               }
-              const waiting = item.kind === 'status' && item.state === 'waiting' && item.turnId === conversation.activeTurn?.turnId
-              const noticeState = item.state === 'waiting' && !waiting ? 'completed' : item.state
+              const noticeLabel = item.state === 'waiting'
+                ? 'Turn paused'
+                : item.state === 'interrupted'
+                  ? 'Turn interrupted'
+                  : 'Turn failed'
               return (
-                <article className={`agent-notice ${item.kind} ${noticeState}`} key={item.id}>
-                  <strong><CircleAlert aria-hidden="true" size={14} /> {waiting ? 'Waiting for you' : item.state === 'waiting' ? 'Turn paused' : item.state === 'interrupted' ? 'Turn interrupted' : 'Turn failed'}</strong>
+                <article className={`agent-notice ${item.kind} ${item.state}`} key={item.id}>
+                  <strong><CircleAlert aria-hidden="true" size={14} /> {noticeLabel}</strong>
                   <p>{item.label}</p>
                   {item.retryable && !conversation.activeTurn && (
                     <button aria-label="Retry turn" className="retry-button" onClick={() => void conversation.retry(item.turnId ?? '')} type="button">
@@ -285,6 +333,17 @@ export function AgentPanel({ contextLabel, apiState = 'connected', onArtifactRen
         )}
         {conversation.error && <p className="agent-inline-error" role="alert">{conversation.error}</p>}
       </div>
+      {!isPinnedToBottom && (
+        <button aria-label="Jump to latest" className="jump-to-latest" onClick={() => scrollToLatest(true)} type="button">
+          <ArrowDown aria-hidden="true" size={13} /> Jump to latest
+        </button>
+      )}
+      {conversation.activeTurn && (
+        <div aria-label="Agent turn status" className="agent-turn-status">
+          {conversation.activeTurn.status === 'running' && !conversation.activeTurn.cancelRequested && <LoaderCircle aria-hidden="true" className="spin" size={13} />}
+          {activeStatus}
+        </div>
+      )}
 
       <form className="composer" onSubmit={event => { event.preventDefault(); if (canSend) void conversation.send() }}>
         <label className="sr-only" htmlFor="agent-message">Message the agent</label>
