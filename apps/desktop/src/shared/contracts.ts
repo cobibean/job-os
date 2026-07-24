@@ -13,11 +13,6 @@ export interface JobListItem {
   lastSeenAt: string
 }
 
-export interface JobDetail extends JobListItem {
-  description: string
-  location: string | null
-}
-
 export interface JobWorkspaceSnapshot {
   jobs: JobListItem[]
   selectedJobId: string | null
@@ -254,7 +249,6 @@ export interface JobOsRendererBridge {
     getState: () => Promise<JobWorkspaceSnapshot>
 
     list: (sort: JobSortMode, query?: string, statusGroup?: string) => Promise<JobListItem[]>
-    inspect: (jobId: string) => Promise<JobDetail>
     select: (jobId: string) => Promise<JobMutationResult>
     reorder: (jobIds: string[]) => Promise<JobMutationResult>
     setSort: (sort: JobSortMode) => Promise<JobMutationResult>

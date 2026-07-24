@@ -110,10 +110,6 @@ function registerJobsInterface(): void {
     if (!sortModes.has(sort)) throw new Error('Invalid job ordering')
     return trusted(event).list(sort, query, statusGroup)
   })
-  ipcMain.handle('jobos:jobs:inspect', (event, jobId: string) => {
-    if (typeof jobId !== 'string' || !jobId || jobId.length > 512) throw new Error('Invalid job')
-    return trusted(event).inspect(jobId)
-  })
   ipcMain.handle('jobos:jobs:select', (event, jobId: string) => {
     if (typeof jobId !== 'string' || !jobId) throw new Error('Invalid job selection')
     return trusted(event).select(jobId)

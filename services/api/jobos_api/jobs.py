@@ -49,15 +49,6 @@ class JobFacade(Protocol):
         reason: str | None = None,
     ) -> dict[str, Any]: ...
 
-    def update_job_description(
-        self,
-        job_id: str,
-        description_text: str,
-        *,
-        source: str,
-        provenance: str | None = None,
-    ) -> dict[str, Any]: ...
-
     def list_job_artifacts(self, job_id: str) -> list[dict[str, Any]]:
         """Return the full manifest with a unique non-negative render_sequence per item."""
         ...
@@ -88,16 +79,6 @@ class EmptyJobFacade:
         target_state: str,
         *,
         reason: str | None = None,
-    ) -> dict[str, Any]:
-        raise KeyError(job_id)
-
-    def update_job_description(
-        self,
-        job_id: str,
-        description_text: str,
-        *,
-        source: str,
-        provenance: str | None = None,
     ) -> dict[str, Any]:
         raise KeyError(job_id)
 
@@ -242,33 +223,6 @@ class StatusChangeResponse(BaseModel):
     job: JobDetail
 
 
-class JobDescriptionUpdateRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-    description_text: str = Field(min_length=1, max_length=100_000)
-    source: str = Field(min_length=1, max_length=100)
-    provenance: str | None = Field(default=None, max_length=500)
-    origin: Literal["user", "mcp"]
-    idempotency_key: str = Field(default_factory=lambda: str(uuid4()), min_length=1, max_length=128)
-
-    @field_validator("description_text", "source", "provenance")
-    @classmethod
-    def strip_description_metadata(cls, value: str | None) -> str | None:
-        if value is None:
-            return None
-        stripped = value.strip()
-        if not stripped:
-            raise ValueError("field must not be blank")
-        return stripped
-
-
-class JobDescriptionUpdateResponse(BaseModel):
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-    event_id: int
-    job: JobDetail
-
-
 class LeadHistoryEvent(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -299,8 +253,6 @@ class JobEvent(BaseModel):
     selected_job_id: str | None = None
     job_ids: list[str] | None = None
     sort_mode: SortMode | None = None
-    source: str | None = None
-    description_length: int | None = None
 
 
 class JobEventsResponse(BaseModel):

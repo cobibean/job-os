@@ -1659,28 +1659,6 @@ class JobOsStateStore:
             )
         return int(cursor.lastrowid)
 
-    def record_description_event(
-        self,
-        *,
-        job_id: str,
-        origin: str,
-        source: str,
-        description_length: int,
-    ) -> int:
-        payload = json.dumps(
-            {"source": source, "description_length": description_length},
-            separators=(",", ":"),
-        )
-        with sqlite3.connect(self._path) as connection:
-            cursor = connection.execute(
-                """
-                INSERT INTO job_events(event_type, job_id, origin, payload_json)
-                VALUES ('job_description_updated', ?, ?, ?)
-                """,
-                (job_id, origin, payload),
-            )
-        return int(cursor.lastrowid)
-
     def list_job_events(self, after: int = 0) -> list[dict[str, object]]:
         with sqlite3.connect(f"file:{self._path}?mode=ro", uri=True) as connection:
             connection.row_factory = sqlite3.Row

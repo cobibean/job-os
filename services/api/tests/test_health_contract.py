@@ -76,7 +76,6 @@ def test_version_and_openapi_describe_the_shared_workspace_contract(tmp_path):
         "/v1/jobs",
         "/v1/jobs/order",
         "/v1/jobs/{job_id}",
-        "/v1/jobs/{job_id}/description",
         "/v1/jobs/{job_id}/status",
         "/v1/jobs/{job_id}/history",
         "/v1/jobs/{job_id}/artifacts",
