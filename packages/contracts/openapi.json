@@ -739,6 +739,74 @@
         "title": "JobArtifactsResponse",
         "type": "object"
       },
+      "JobDescriptionUpdateRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "description_text": {
+            "maxLength": 100000,
+            "minLength": 1,
+            "title": "Description Text",
+            "type": "string"
+          },
+          "idempotency_key": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Idempotency Key",
+            "type": "string"
+          },
+          "origin": {
+            "enum": [
+              "user",
+              "mcp"
+            ],
+            "title": "Origin",
+            "type": "string"
+          },
+          "provenance": {
+            "anyOf": [
+              {
+                "maxLength": 500,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provenance"
+          },
+          "source": {
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Source",
+            "type": "string"
+          }
+        },
+        "required": [
+          "description_text",
+          "source",
+          "origin"
+        ],
+        "title": "JobDescriptionUpdateRequest",
+        "type": "object"
+      },
+      "JobDescriptionUpdateResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "event_id": {
+            "title": "Event Id",
+            "type": "integer"
+          },
+          "job": {
+            "$ref": "#/components/schemas/JobDetail"
+          }
+        },
+        "required": [
+          "event_id",
+          "job"
+        ],
+        "title": "JobDescriptionUpdateResponse",
+        "type": "object"
+      },
       "JobDetail": {
         "additionalProperties": false,
         "properties": {
@@ -811,6 +879,17 @@
       "JobEvent": {
         "additionalProperties": false,
         "properties": {
+          "description_length": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description Length"
+          },
           "event_id": {
             "title": "Event Id",
             "type": "integer"
@@ -894,6 +973,17 @@
               }
             ],
             "title": "Sort Mode"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source"
           },
           "to_status": {
             "anyOf": [
@@ -3123,6 +3213,82 @@
         "summary": "Approve Job Artifact",
         "tags": [
           "documents"
+        ]
+      }
+    },
+    "/v1/jobs/{job_id}/description": {
+      "put": {
+        "operationId": "job_update_description_v1_jobs__job_id__description_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "title": "Job Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-JobOS-MCP-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Jobos-Mcp-Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/JobDescriptionUpdateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobDescriptionUpdateResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "Trusted MCP credential required"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Job Update Description",
+        "tags": [
+          "jobs"
         ]
       }
     },

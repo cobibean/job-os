@@ -122,6 +122,26 @@ class JobOsMcpClient:
             payload["reason"] = reason
         return await self._request("PUT", f"/v1/jobs/{job_id}/status", json=payload)
 
+    async def update_description(
+        self,
+        job_id: str,
+        description_text: str,
+        *,
+        source_note: str | None = None,
+        idempotency_key: str | None = None,
+    ) -> dict[str, Any]:
+        return await self._request(
+            "PUT",
+            f"/v1/jobs/{job_id}/description",
+            json={
+                "description_text": description_text,
+                "source": "jobhunter_agent",
+                "provenance": source_note,
+                "origin": "mcp",
+                "idempotency_key": self._key(idempotency_key),
+            },
+        )
+
     async def inspect_workspace(self, *, idempotency_key: str | None = None) -> dict[str, Any]:
         return await self._request(
             "GET",

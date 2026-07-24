@@ -116,3 +116,33 @@ test('a selection event emitted by the same successful user action does not inva
   expect(selected).toBe(true)
   expect(result.current.selectedJobId).toBe('job-1')
 })
+
+test('selecting a job fetches its full detail separately from the lightweight list', async () => {
+  const inspect = vi.fn().mockResolvedValue({
+    ...discoveredJob,
+    description: 'Complete responsibilities and qualifications.',
+    location: 'Remote'
+  })
+  Object.defineProperty(window, 'jobos', {
+    configurable: true,
+    value: {
+      jobs: {
+        getState: vi.fn().mockResolvedValue({
+          jobs: [discoveredJob], selectedJobId: null, sortMode: 'manual', manualOrder: ['job-1']
+        }),
+        list: vi.fn().mockResolvedValue([discoveredJob]),
+        inspect,
+        select: vi.fn().mockResolvedValue({ eventId: 2 }),
+        reorder: vi.fn(), setSort: vi.fn(), updateStatus: vi.fn(),
+        subscribe: vi.fn().mockReturnValue(() => undefined)
+      }
+    }
+  })
+  const { result } = renderHook(() => useJobs())
+  await waitFor(() => expect(result.current.loading).toBe(false))
+
+  await act(async () => { await result.current.selectJob('job-1') })
+
+  expect(inspect).toHaveBeenCalledWith('job-1')
+  expect(result.current.selectedJobDetail?.description).toBe('Complete responsibilities and qualifications.')
+})
