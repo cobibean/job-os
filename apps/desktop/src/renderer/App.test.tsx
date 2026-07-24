@@ -186,6 +186,7 @@ test('saving dispatches job-hunter and reconciles a failure emitted before send 
   }
   const browserState = { tabs: [browserTab], activeTabId: browserTab.tabId, download: null, notice: null }
   const associate = vi.fn()
+  const create = vi.fn()
   let saveOutcome: 'idle' | 'failed' | 'completed' | 'running' | 'interrupted' = 'idle'
   let currentTurnId = ''
   let sendCount = 0
@@ -261,7 +262,7 @@ test('saving dispatches job-hunter and reconciles a failure emitted before send 
         tabs: [{ ...browserTab, associatedJobId: successfulJob.jobId }]
       } : browserState),
       restore: vi.fn().mockResolvedValue(browserState),
-      associate, create: vi.fn(), select: vi.fn(), close: vi.fn(), reorder: vi.fn(), navigate: vi.fn(), back: vi.fn(), forward: vi.fn(),
+      associate, create, select: vi.fn(), close: vi.fn(), reorder: vi.fn(), navigate: vi.fn(), back: vi.fn(), forward: vi.fn(),
       reload: vi.fn(), stop: vi.fn(), copyBlockedUrl: vi.fn(), setBounds: vi.fn().mockResolvedValue(undefined),
       subscribe: vi.fn(listener => { browserListener = listener; return () => undefined })
     }
@@ -334,6 +335,7 @@ test('saving dispatches job-hunter and reconciles a failure emitted before send 
   fireEvent.click(screen.getByRole('button', { name: 'Save this job to JobOS' }))
   await waitFor(() => expect(send).toHaveBeenCalledTimes(5))
   expect(saveFromBrowser).not.toHaveBeenCalled()
+  expect(create).not.toHaveBeenCalled()
   expect(await screen.findByText(`Saved to JobOS: Northstar Labs · ${listing.title}`)).not.toBeNull()
   expect(await screen.findByRole('button', {
     name: `Select Northstar Labs ${listing.title}`
@@ -342,18 +344,36 @@ test('saving dispatches job-hunter and reconciles a failure emitted before send 
 })
 
 
-test('changing jobs never selects, closes, navigates, or reassociates an unrelated browser tab', async () => {
-  const jobs = [
-    { jobId: 'job-1', company: 'Example Co', title: 'Product Builder', status: 'reviewed' as const, statusGroup: 'Inbox', canonicalUrl: 'https://example.com/jobs/1', discoveredAt: '', lastSeenAt: '' },
-    { jobId: 'job-2', company: 'Northstar', title: 'Staff PM', status: 'shortlisted' as const, statusGroup: 'Considering', canonicalUrl: 'https://example.com/jobs/2', discoveredAt: '', lastSeenAt: '' }
-  ]
-  const browserTab = {
-    tabId: 'gmail', url: 'https://mail.google.com/', title: 'Gmail', faviconUrl: null,
-    associatedJobId: null, loading: false, canGoBack: false, canGoForward: false, error: null, crashed: false
-  }
-  const browserActions = {
-    select: vi.fn(), close: vi.fn(), navigate: vi.fn(), associate: vi.fn()
-  }
+const navigationJobs = [
+  { jobId: 'job-1', company: 'Example Co', title: 'Product Builder', status: 'reviewed' as const, statusGroup: 'Inbox', canonicalUrl: 'https://example.com/jobs/1', discoveredAt: '', lastSeenAt: '' },
+  { jobId: 'job-2', company: 'Northstar', title: 'Staff PM', status: 'shortlisted' as const, statusGroup: 'Considering', canonicalUrl: 'https://example.com/jobs/2', discoveredAt: '', lastSeenAt: '' }
+]
+
+function setupJobListingNavigation(initialTabs: Array<{
+  tabId: string
+  url: string
+  title: string
+  associatedJobId: string | null
+}>, selectedJobId: string | null = null) {
+  const browserTabs = initialTabs.map(tab => ({
+    ...tab,
+    faviconUrl: null,
+    loading: false,
+    canGoBack: false,
+    canGoForward: false,
+    error: null,
+    crashed: false,
+    blockedUrl: null
+  }))
+  const browserState = (activeTabId: string, tabs = browserTabs) => ({
+    tabs, activeTabId, download: null, notice: null
+  })
+  const create = vi.fn((url: string, jobId: string) => Promise.resolve(browserState('created', [
+    ...browserTabs,
+    { ...browserTabs[0]!, tabId: 'created', url, title: 'Northstar', associatedJobId: jobId }
+  ])))
+  const select = vi.fn((tabId: string) => Promise.resolve(browserState(tabId)))
+  const selectJob = vi.fn().mockResolvedValue({ eventId: 1 })
   const workspace = {
     revision: 1,
     selectedPreset: 'research' as const,
@@ -363,42 +383,149 @@ test('changing jobs never selects, closes, navigates, or reassociates an unrelat
       'agent-focus': { order: ['jobs', 'center', 'agent'] as const, widths: { jobs: 220, center: 420, agent: 650 }, collapsed: [] }
     },
     selectedJobId: null,
-    activeCenterSurface: 'browser' as const,
+    activeCenterSurface: 'document' as const,
     repairedPresets: [],
-    browserTabs: [{ tabId: 'gmail', url: browserTab.url, title: browserTab.title, faviconUrl: null, associatedJobId: null }],
-    activeBrowserTabId: 'gmail',
+    browserTabs: initialTabs.map(tab => ({ ...tab, faviconUrl: null })),
+    activeBrowserTabId: initialTabs[0]!.tabId,
     repairedBrowser: false
   }
+  const close = vi.fn()
+  const navigate = vi.fn()
+  const associate = vi.fn()
+  const workspaceSave = vi.fn().mockImplementation(value => Promise.resolve({ ...value, revision: value.revision + 1 }))
+  let jobListener: ((event: { eventId: number; eventType: string; origin: 'mcp'; jobId?: string }) => void) | undefined
   Object.defineProperty(window, 'jobos', {
     configurable: true,
     value: {
       connectivity: { get: vi.fn().mockRejectedValue(new Error('offline')) },
       jobs: {
-        getState: vi.fn().mockResolvedValue({ jobs, selectedJobId: null, sortMode: 'manual', manualOrder: ['job-1', 'job-2'] }),
-        list: vi.fn().mockResolvedValue(jobs), select: vi.fn().mockResolvedValue({ eventId: 1 }), reorder: vi.fn(), setSort: vi.fn(), updateStatus: vi.fn(),
-        subscribe: vi.fn().mockReturnValue(() => undefined)
+        getState: vi.fn().mockResolvedValue({ jobs: navigationJobs, selectedJobId, sortMode: 'manual', manualOrder: ['job-1', 'job-2'] }),
+        list: vi.fn().mockResolvedValue(navigationJobs), select: selectJob, reorder: vi.fn(), setSort: vi.fn(), updateStatus: vi.fn(),
+        subscribe: vi.fn().mockImplementation(listener => {
+          jobListener = listener
+          return () => undefined
+        })
       },
-      workspace: { get: vi.fn().mockResolvedValue(workspace), save: vi.fn().mockImplementation(value => Promise.resolve({ ...value, revision: value.revision + 1 })) },
+      workspace: { get: vi.fn().mockResolvedValue(workspace), save: workspaceSave },
       browser: {
-        getState: vi.fn(),
-        restore: vi.fn().mockResolvedValue({ tabs: [browserTab], activeTabId: 'gmail', download: null, notice: null }),
-        create: vi.fn(), reorder: vi.fn(), back: vi.fn(), forward: vi.fn(), reload: vi.fn(), stop: vi.fn(), setBounds: vi.fn().mockResolvedValue(undefined),
-        subscribe: vi.fn().mockReturnValue(() => undefined),
-        ...browserActions
+        getState: vi.fn(), restore: vi.fn().mockResolvedValue(browserState(initialTabs[0]!.tabId)),
+        create, select, close, navigate, associate,
+        reorder: vi.fn(), back: vi.fn(), forward: vi.fn(), reload: vi.fn(), stop: vi.fn(), setBounds: vi.fn().mockResolvedValue(undefined),
+        subscribe: vi.fn().mockReturnValue(() => undefined)
       }
     }
   })
+  return {
+    associate, close, create, navigate, select, selectJob, workspaceSave,
+    emitJobEvent: (event: { eventId: number; eventType: string; origin: 'mcp'; jobId?: string }) => jobListener?.(event)
+  }
+}
+
+test('clicking a job opens its listing in a new associated tab without disturbing the active tab', async () => {
+  const actions = setupJobListingNavigation([
+    { tabId: 'gmail', url: 'https://mail.google.com/', title: 'Gmail', associatedJobId: null }
+  ])
 
   render(<App />)
-  expect(await screen.findByRole('tab', { name: 'Select Gmail' })).not.toBeNull()
-  fireEvent.click(screen.getByRole('button', { name: 'Select Northstar Staff PM' }))
+  fireEvent.click(await screen.findByRole('button', { name: 'Select Northstar Staff PM' }))
 
-  await waitFor(() => expect(screen.getByText('Northstar · Staff PM')).not.toBeNull())
+  await waitFor(() => expect(actions.create).toHaveBeenCalledWith(navigationJobs[1]!.canonicalUrl, navigationJobs[1]!.jobId))
+  expect(actions.selectJob).toHaveBeenCalledWith(navigationJobs[1]!.jobId)
   expect(screen.getByRole('tab', { name: 'Select Gmail' })).not.toBeNull()
-  expect(browserActions.select).not.toHaveBeenCalled()
-  expect(browserActions.close).not.toHaveBeenCalled()
-  expect(browserActions.navigate).not.toHaveBeenCalled()
-  expect(browserActions.associate).not.toHaveBeenCalled()
+  expect(await screen.findByRole('tab', { name: 'Select Northstar' })).not.toBeNull()
+  expect(actions.close).not.toHaveBeenCalled()
+  expect(actions.navigate).not.toHaveBeenCalled()
+  expect(actions.associate).not.toHaveBeenCalled()
+})
+
+test('a layout save failure does not suppress job listing navigation', async () => {
+  const actions = setupJobListingNavigation([
+    { tabId: 'gmail', url: 'https://mail.google.com/', title: 'Gmail', associatedJobId: null }
+  ])
+  actions.workspaceSave.mockRejectedValue(new Error('disk unavailable'))
+
+  render(<App />)
+  fireEvent.click(await screen.findByRole('button', { name: 'Select Northstar Staff PM' }))
+
+  await waitFor(() => expect(actions.create).toHaveBeenCalledWith(navigationJobs[1]!.canonicalUrl, navigationJobs[1]!.jobId))
+})
+
+test('overlapping navigator selections only open the latest clicked job', async () => {
+  const actions = setupJobListingNavigation([
+    { tabId: 'gmail', url: 'https://mail.google.com/', title: 'Gmail', associatedJobId: null }
+  ])
+  const resolveSelection = new Map<string, () => void>()
+  actions.selectJob.mockImplementation((jobId: string) => new Promise(resolve => {
+    resolveSelection.set(jobId, () => resolve({ eventId: 1 }))
+  }))
+
+  render(<App />)
+  fireEvent.click(await screen.findByRole('button', { name: 'Select Example Co Product Builder' }))
+  await waitFor(() => expect(resolveSelection.has('job-1')).toBe(true))
+  fireEvent.click(screen.getByRole('button', { name: 'Select Northstar Staff PM' }))
+  await act(async () => { resolveSelection.get('job-1')?.() })
+  await waitFor(() => expect(resolveSelection.has('job-2')).toBe(true))
+  await act(async () => { resolveSelection.get('job-2')?.() })
+  await waitFor(() => expect(actions.create).toHaveBeenCalledWith(navigationJobs[1]!.canonicalUrl, navigationJobs[1]!.jobId))
+
+  expect(actions.selectJob.mock.calls.map(([jobId]) => jobId)).toEqual(['job-1', 'job-2'])
+  expect(actions.create).toHaveBeenCalledTimes(1)
+  expect(screen.getByText('Northstar · Staff PM')).not.toBeNull()
+})
+
+test('clicking a job focuses its associated listing tab without creating a duplicate', async () => {
+  const actions = setupJobListingNavigation([
+    { tabId: 'gmail', url: 'https://mail.google.com/', title: 'Gmail', associatedJobId: null },
+    { tabId: 'northstar', url: 'https://example.com/company', title: 'Northstar', associatedJobId: 'job-2' }
+  ])
+
+  render(<App />)
+  fireEvent.click(await screen.findByRole('button', { name: 'Select Northstar Staff PM' }))
+
+  await waitFor(() => expect(actions.select).toHaveBeenCalledWith('northstar'))
+  expect(actions.create).not.toHaveBeenCalled()
+  expect(screen.getByRole('tab', { name: 'Select Gmail' })).not.toBeNull()
+})
+
+test('clicking a job focuses its normalized-URL listing tab without creating a duplicate', async () => {
+  const actions = setupJobListingNavigation([
+    { tabId: 'gmail', url: 'https://mail.google.com/', title: 'Gmail', associatedJobId: null },
+    { tabId: 'northstar', url: 'https://EXAMPLE.com/jobs/2#details', title: 'Northstar', associatedJobId: null }
+  ])
+
+  render(<App />)
+  fireEvent.click(await screen.findByRole('button', { name: 'Select Northstar Staff PM' }))
+
+  await waitFor(() => expect(actions.select).toHaveBeenCalledWith('northstar'))
+  expect(actions.create).not.toHaveBeenCalled()
+})
+
+test('startup selection does not open a job listing tab', async () => {
+  const actions = setupJobListingNavigation([
+    { tabId: 'gmail', url: 'https://mail.google.com/', title: 'Gmail', associatedJobId: null }
+  ], 'job-2')
+
+  render(<App />)
+
+  expect(await screen.findByText('Northstar · Staff PM')).not.toBeNull()
+  expect(actions.create).not.toHaveBeenCalled()
+  expect(actions.select).not.toHaveBeenCalled()
+})
+
+test('an MCP job selection does not open a job listing tab', async () => {
+  const actions = setupJobListingNavigation([
+    { tabId: 'gmail', url: 'https://mail.google.com/', title: 'Gmail', associatedJobId: null }
+  ])
+
+  render(<App />)
+  await screen.findByRole('button', { name: 'Select Northstar Staff PM' })
+  await act(async () => {
+    actions.emitJobEvent({ eventId: 4, eventType: 'job_selected', origin: 'mcp', jobId: 'job-2' })
+  })
+
+  expect(await screen.findByText('Northstar · Staff PM')).not.toBeNull()
+  expect(actions.create).not.toHaveBeenCalled()
+  expect(actions.select).not.toHaveBeenCalled()
 })
 
 test('an MCP status event refreshes the navigator without a manual action', async () => {

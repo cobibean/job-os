@@ -82,6 +82,13 @@ interface CenterWorkspaceProps {
   activeArtifactZoom: number
   onDocumentPersist: (artifactId: string | null, page: number, zoom: number) => void
   onJobSaved: (jobId: string) => Promise<void>
+  jobListingRequest: JobListingRequest | null
+}
+
+export interface JobListingRequest {
+  requestId: number
+  jobId: string
+  canonicalUrl: string
 }
 
 export function CenterWorkspace(props: CenterWorkspaceProps) {
@@ -106,7 +113,15 @@ export function CenterWorkspace(props: CenterWorkspaceProps) {
   const saveIdempotencyKey = useRef<string | null>(null)
   const saveReconcilingTurn = useRef<string | null>(null)
   const saveReconcilePending = useRef(false)
+  const lastHandledRequestId = useRef(0)
   const active = browser.activeTab
+
+  useEffect(() => {
+    const request = props.jobListingRequest
+    if (!request || !browser.restorationReady || request.requestId === lastHandledRequestId.current) return
+    lastHandledRequestId.current = request.requestId
+    void browser.openJobListing(request.jobId, request.canonicalUrl)
+  }, [browser.openJobListing, browser.restorationReady, props.jobListingRequest])
 
   const clearSaveCorrelation = () => {
     saveTurnId.current = null

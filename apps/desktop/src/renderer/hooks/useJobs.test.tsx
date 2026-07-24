@@ -83,3 +83,36 @@ test('an unknown transition-shaped IPC error stays generic', async () => {
 
   expect(result.current.error).toBe('Status change failed')
 })
+
+test('a selection event emitted by the same successful user action does not invalidate it', async () => {
+  let listener: ((event: { eventId: number; eventType: string; origin: 'user'; jobId: string }) => void) | undefined
+  const select = vi.fn().mockImplementation(async () => {
+    listener?.({ eventId: 3, eventType: 'job_selected', origin: 'user', jobId: 'job-1' })
+    return { eventId: 3 }
+  })
+  Object.defineProperty(window, 'jobos', {
+    configurable: true,
+    value: {
+      jobs: {
+        getState: vi.fn().mockResolvedValue({
+          jobs: [discoveredJob], selectedJobId: 'job-1', sortMode: 'manual', manualOrder: ['job-1']
+        }),
+        list: vi.fn().mockResolvedValue([discoveredJob]),
+        select,
+        reorder: vi.fn(), setSort: vi.fn(), updateStatus: vi.fn(),
+        subscribe: vi.fn().mockImplementation(callback => {
+          listener = callback
+          return () => undefined
+        })
+      }
+    }
+  })
+  const { result } = renderHook(() => useJobs())
+  await waitFor(() => expect(result.current.loading).toBe(false))
+
+  let selected = false
+  await act(async () => { selected = await result.current.selectJob('job-1') })
+
+  expect(selected).toBe(true)
+  expect(result.current.selectedJobId).toBe('job-1')
+})
