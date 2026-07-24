@@ -42,11 +42,12 @@ Interactive background clicks reached the exact Electron control coordinates but
 - Bundle SHA-256: `7d080868b816de76a413f5930f1b089bdac9a7202047b7865466b8726557fb31`.
 - The updater preserves the existing MacBook runtime configuration and Keychain credential.
 - Outer ZIP integrity, updater shell syntax/executable bit, nested ZIP integrity, nested deep signature, arm64 app/helper, and the nested package SHA-256 all passed after clean extraction.
-- Direct Taildrop was attempted, but Tailscale reported the MacBook offline and returned `502 Bad Gateway`.
-- A bounded five-minute watchdog now checks for the MacBook and sends the already-verified artifact once it is online. It writes a local receipt after a successful Taildrop and stays silent while the peer remains offline.
+- Direct Taildrop initially failed while the MacBook was offline.
+- After the MacBook returned online, the verified updater was successfully sent to `jacobis-macbook-pro:` and a local receipt recorded the exact filename, size, and SHA-256.
+- The temporary sender watchdog was removed after successful delivery.
 
 ## Rollback and limitations
 
 - Mini rollback copy: `/Users/jacobilangemm/.hermes/profiles/devonte/cache/jobos-backups/JobOS-before-turn-order-20260724-170720.app`.
 - The app is ad-hoc signed and private-demo scoped; it is not notarized or public-distribution ready.
-- MacBook receipt/install are still pending until the MacBook returns online and Cobi runs `Update JobOS.command`.
+- MacBook installation confirmation remains pending until Cobi accepts the Taildrop, unzips it, and runs `Update JobOS.command`.
