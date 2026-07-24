@@ -50,7 +50,7 @@ Passed:
 
 ## Commit and remote
 
-- Implementation commit: `b713095` (`feat: save complete browser job descriptions`)
+- Implementation commit: `3062adc` (`feat: save complete browser job descriptions`)
 - Pushed to `origin/main`; local `HEAD` and `origin/main` matched after push.
 
 ## Installed artifact proof
