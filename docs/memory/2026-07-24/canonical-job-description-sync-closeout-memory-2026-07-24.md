@@ -99,15 +99,41 @@ The app was quit and relaunched into a new process. After resolving the service 
 
 Local screenshot evidence is under the Devonte cache, including `jobos-black-duck-full-listing.png` and `jobos-final-proof-relaunch.png`; these are not repository artifacts.
 
-## MacBook delivery
+## MacBook delivery correction
 
-The verified `JobOS-0.1.0-arm64.zip` was sent through Taildrop to `jacobis-macbook-pro` (`100.111.119.83`).
+An initial Taildrop mistakenly sent the inner `JobOS-0.1.0-arm64.zip` by itself. That artifact did not contain the operator-facing update command and must not be used as the MacBook handoff. Cobi identified the artifact-shape error, and the delivery was corrected through the repository-owned two-layer updater workflow.
 
-- Peer replied directly before transfer.
-- Taildrop completed with: `sent "JobOS-0.1.0-arm64.zip"`.
-- Source checksum remained `b6d6a6f6a3db1d72f99722c10f117d179f86a821721a77efbfeb89ef4c3ce276`.
+Corrected build command:
 
-This was the raw application ZIP, not the outer `Update JobOS.command` updater bundle. Cobi still needs to confirm receipt on the MacBook, verify the checksum when appropriate, and install/replace the MacBook application.
+```bash
+pnpm --filter @jobos/desktop package:macbook-update
+```
+
+Correct outer updater artifact:
+
+- filename: `JobOS-MacBook-Update-20260724202117365-6faa7bb9-af9d2b3a90ea2273c75b61f21059a502.zip`;
+- source commit recorded by the receipt: `6faa7bb96cc3034f764aa9efbfa365d8fd16432a`;
+- outer size: `143494382` bytes;
+- outer SHA-256: `b1a638c2faf9bedd1040dc4ebd21ce387628d0c58744a1d2131a923cd40059c3`;
+- embedded app ZIP size: `143883555` bytes;
+- embedded app ZIP SHA-256: `b1bc69e427268d48ffbcbc2b7f90bd34ba433d665c42e9d3b9c065114a4ff8ec`.
+
+The packaging command rebuilt the contracts and desktop app, ad-hoc signed and deeply verified the app, verified both ZIP layers, extracted the outer archive, required the exact member set, syntax-checked the updater, validated `VERIFIED.txt`, and ran `Update JobOS.command` against a disposable installation path. The updater smoke installation passed.
+
+The verified outer ZIP contains exactly:
+
+- `Update JobOS.command` (executable operator entry point);
+- `VERIFIED.txt`;
+- `JobOS-0.1.0-arm64.zip` (inner payload consumed by the updater).
+
+Delivery:
+
+- Taildrop target: `jacobis-macbook-pro` (`100.111.119.83`);
+- peer replied directly before transfer;
+- the first corrected transfer printed `sent` but returned a non-zero process status, so it was not accepted as clean evidence;
+- the immediate retry printed `sent "JobOS-MacBook-Update-20260724202117365-6faa7bb9-af9d2b3a90ea2273c75b61f21059a502.zip"` and returned `TAILDROP_EXIT=0`.
+
+Cobi should discard the earlier generic inner ZIP, confirm the uniquely named outer updater arrived, unzip it, and double-click `Update JobOS.command`. Taildrop proves delivery only; the MacBook is not considered updated until that command runs successfully on the destination.
 
 ## Runtime gotcha discovered
 
@@ -154,7 +180,7 @@ Primary JobHunter areas:
 
 ## Remaining follow-ups
 
-1. Confirm the ZIP appeared on the MacBook and install it there; verify the destination checksum for release-grade receipt proof.
+1. Confirm the uniquely named outer updater ZIP appeared on the MacBook, discard the earlier generic inner ZIP, run `Update JobOS.command`, and verify the installed MacBook application afterward.
 2. Add a source-controlled fix for the API service's open-file/SQLite stream pressure, then remove dependence on the local wrapper mitigation.
 3. Capture a fresh standalone MCP `tools/list` transcript containing `job_update_description` if catalog-level acceptance evidence is still desired.
 4. Capture the live same-key replay and changed-payload conflict HTTP responses if explicit runtime idempotency transcripts are still desired; automated tests and event `1115` already cover the contract and stored replay identity.
