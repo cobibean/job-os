@@ -373,19 +373,31 @@ test('main-process emission enforces Workspace bounds and keeps later saves viab
   manager.dispose()
 })
 
-test('agent browser operations use bounded semantic targets and fixed internal scripts', async () => {
+test('agent browser operations paginate long page text with bounded overlapping semantic snapshots', async () => {
+  const descriptionStart = `FULL-DESCRIPTION-START\n${'A'.repeat(49_000)}\nFULL-DESCRIPTION-MIDDLE\n`
+  const descriptionEnd = '\nFULL-DESCRIPTION-END'
+  const description = `${descriptionStart}${'B'.repeat(100_000 - descriptionStart.length - descriptionEnd.length)}${descriptionEnd}`
+  const detailPageText = `${'N'.repeat(10_000)}\n${description}`
+  let pageText = 'Job results\nExample job'
   const executeJavaScript = vi.fn(async (script: string) => {
     if (script.includes('candidates.map')) {
       const textStart = Number(script.match(/Math\.min\((\d+)/)?.[1] ?? 0)
       return {
-        text: 'Apply now',
+        text: pageText.slice(textStart, textStart + 5_000),
         textStart,
-        textLength: 12_000,
+        textLength: pageText.length,
         scrollY: 900,
         scrollHeight: 2_400,
         viewportHeight: 800,
-        elements: [{ index: 0, role: 'link', name: 'Apply', disabled: false, type: '',
-          href: 'https://example.com/apply' }]
+        elements: pageText.startsWith('Job results')
+          ? [
+              { index: 0, role: 'link', name: 'Example job', disabled: false, type: '',
+                href: 'https://example.com/jobs/1' },
+              { index: 1, role: 'link', name: 'Apply', disabled: false, type: '',
+                href: 'https://example.com/apply' }
+            ]
+          : [{ index: 0, role: 'link', name: 'Apply', disabled: false, type: '',
+              href: 'https://example.com/apply' }]
       }
     }
     return { ok: true }
@@ -418,36 +430,64 @@ test('agent browser operations use bounded semantic targets and fixed internal s
     tabs: [{ tabId: 'tab-1', url: 'https://example.com/jobs/1', title: 'Example job', faviconUrl: null, associatedJobId: null }],
     activeTabId: 'tab-1'
   })
-  const snapshot = await manager.snapshot('tab-1')
-  const targetId = snapshot.elements[0]!.targetId
-  await manager.click('tab-1', targetId)
-  await manager.type('tab-1', targetId, 'hello', true)
-  await manager.scroll('tab-1', 'down', 600)
-  const nextSnapshot = await manager.snapshot('tab-1')
+  const listSnapshot = await manager.snapshot('tab-1')
+  const detailTarget = listSnapshot.elements.find(element => element.name === 'Example job')
+  const applyTarget = listSnapshot.elements.find(element => element.name === 'Apply')
+  if (!detailTarget || !applyTarget) throw new Error('Expected list and Apply targets')
+  await manager.click('tab-1', detailTarget.targetId)
+  pageText = detailPageText
+  contents.emit('did-navigate')
+  const detailSnapshots = [await manager.snapshot('tab-1')]
+  while (detailSnapshots.at(-1)!.textStart + detailSnapshots.at(-1)!.text.length < detailSnapshots.at(-1)!.textLength
+    && detailSnapshots.length < 30) {
+    await manager.scroll('tab-1', 'down', 600)
+    detailSnapshots.push(await manager.snapshot('tab-1'))
+  }
 
-  expect(snapshot.elements).toEqual([
-    { targetId, role: 'link', name: 'Apply', disabled: false, href: 'https://example.com/apply' }
+  expect(listSnapshot.elements).toEqual([
+    { targetId: detailTarget.targetId, role: 'link', name: 'Example job', disabled: false,
+      href: 'https://example.com/jobs/1' },
+    { targetId: applyTarget.targetId, role: 'link', name: 'Apply', disabled: false,
+      href: 'https://example.com/apply' }
   ])
-  expect(snapshot.text).toBe('Apply now')
-  expect(snapshot).toMatchObject({
+  expect(description).toHaveLength(100_000)
+  expect(listSnapshot.textStart).toBe(0)
+  expect(detailSnapshots).toHaveLength(28)
+  expect(detailSnapshots[0]!.textStart).toBe(0)
+  expect(detailSnapshots.at(-1)!.textStart).toBe(108_000)
+  expect(detailSnapshots.some(item => item.text.includes('FULL-DESCRIPTION-START'))).toBe(true)
+  expect(detailSnapshots.some(item => item.text.includes('FULL-DESCRIPTION-MIDDLE'))).toBe(true)
+  expect(detailSnapshots.at(-1)!.text).toContain('FULL-DESCRIPTION-END')
+  expect(detailSnapshots.at(-1)!.textStart + detailSnapshots.at(-1)!.text.length).toBe(detailPageText.length)
+  for (let index = 1; index < detailSnapshots.length; index += 1) {
+    expect(detailSnapshots[index]!.textLength).toBe(detailPageText.length)
+    expect(detailSnapshots[index - 1]!.text.slice(-1_000)).toBe(detailSnapshots[index]!.text.slice(0, 1_000))
+  }
+  expect(detailSnapshots[0]).toMatchObject({
     textStart: 0,
-    textLength: 12_000,
+    textLength: detailPageText.length,
     scrollY: 900,
     scrollHeight: 2_400,
     viewportHeight: 800
   })
-  expect(nextSnapshot.textStart).toBe(4_000)
-  expect(executeJavaScript).toHaveBeenCalledTimes(5)
   const snapshotScript = String(executeJavaScript.mock.calls[0]?.[0])
   expect(snapshotScript).toContain('getClientRects().length')
   expect(snapshotScript).toContain('pageText.slice(textStart, textStart + 5000)')
   expect(snapshotScript).not.toContain('window.scrollY / maxScroll')
   expect(snapshotScript).toContain('filter(visible).slice(0, 100)')
   const allScripts = executeJavaScript.mock.calls.flat().join('\n')
+  const clickScripts = executeJavaScript.mock.calls
+    .map(call => String(call[0]))
+    .filter(script => script.includes('element.click()'))
+  expect(clickScripts).toHaveLength(1)
+  expect(clickScripts[0]).toContain('candidates[0]')
+  expect(clickScripts[0]).not.toContain('candidates[1]')
   expect(allScripts).not.toContain('querySelector(\'button\')')
   expect(allScripts).not.toContain('data-jobos-target-id')
   expect(allScripts).not.toContain('__jobosTargetId')
-  expect(JSON.stringify(snapshot).length).toBeLessThan(20_000)
+  for (const snapshot of [listSnapshot, ...detailSnapshots]) {
+    expect(JSON.stringify(snapshot).length).toBeLessThan(20_000)
+  }
 })
 
 test('semantic targets are main-process owned, ignore spoofed page identity, and expire on snapshot or navigation', async () => {

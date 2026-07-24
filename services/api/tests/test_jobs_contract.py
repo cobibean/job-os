@@ -65,6 +65,7 @@ class FakeJobHunterFacade:
         self.add_job_calls = 0
         self.description_update_calls = 0
         self.descriptions = {}
+        self.locations = {}
 
     def list_jobs(self):
         return list(self.jobs)
@@ -85,6 +86,8 @@ class FakeJobHunterFacade:
             None,
         )
         if existing is not None:
+            self.descriptions[existing["job_id"]] = description_text
+            self.locations[existing["job_id"]] = location_text
             return {"created": False, "job": self.inspect_job(existing["job_id"])}
         job_id = f"browser-job-{len(self.jobs)}"
         self.jobs.append(
@@ -98,11 +101,9 @@ class FakeJobHunterFacade:
                 "last_seen_at": "2026-07-21T16:00:00+00:00",
             }
         )
-        return {"created": True, "job": {
-            **self.inspect_job(job_id),
-            "description": description_text,
-            "location": location_text,
-        }}
+        self.descriptions[job_id] = description_text
+        self.locations[job_id] = location_text
+        return {"created": True, "job": self.inspect_job(job_id)}
 
     def inspect_job(self, job_id):
         job = next((job for job in self.jobs if job["job_id"] == job_id), None)
@@ -111,7 +112,7 @@ class FakeJobHunterFacade:
         return {
             **job,
             "description": self.descriptions.get(job_id, "A job description"),
-            "location": "Remote",
+            "location": self.locations.get(job_id, "Remote"),
         }
 
     def update_job_description(
@@ -178,6 +179,62 @@ def browser_job_payload(**overrides):
         "idempotency_key": "browser-save-1",
         **overrides,
     }
+
+
+def long_browser_description():
+    return "\n\n".join(
+        [
+            "FULL-DESCRIPTION-START\n## Role overview\n"
+            + "Build reliable agent workflows with customers. " * 70,
+            "FULL-DESCRIPTION-MIDDLE\n## Responsibilities\n"
+            + "Own discovery, delivery, measurement, and iteration. " * 70,
+            "## Qualifications\n" + "Translate complex systems into clear product decisions. " * 70,
+            "## Benefits and compensation\n"
+            + "Competitive salary, healthcare, and flexible work. " * 70,
+            "## Equal opportunity\nWe welcome qualified applicants.\nFULL-DESCRIPTION-END",
+        ]
+    )
+
+
+def test_browser_save_persists_complete_long_description_for_new_and_existing_job(tmp_path):
+    facade = FakeJobHunterFacade()
+    description = long_browser_description()
+    refreshed_description = f"{description}\n\nFULL-DESCRIPTION-REFRESH"
+
+    with make_client(tmp_path, facade) as client:
+        first = client.post(
+            "/v1/jobs",
+            headers=auth_headers(),
+            json=browser_job_payload(description_text=description),
+        )
+        replay = client.post(
+            "/v1/jobs",
+            headers=auth_headers(),
+            json=browser_job_payload(description_text=description),
+        )
+        refreshed = client.post(
+            "/v1/jobs",
+            headers=auth_headers(),
+            json=browser_job_payload(
+                description_text=refreshed_description,
+                idempotency_key="browser-save-long-description-2",
+            ),
+        )
+        inspected = client.get(
+            f"/v1/jobs/{first.json()['job']['job_id']}", headers=auth_headers()
+        )
+
+    assert len(description) > 5_000
+    assert first.status_code == 200
+    assert first.json()["created"] is True
+    assert first.json()["job"]["description"] == description
+    assert replay.json() == first.json()
+    assert refreshed.status_code == 200
+    assert refreshed.json()["created"] is False
+    assert refreshed.json()["job"]["job_id"] == first.json()["job"]["job_id"]
+    assert refreshed.json()["job"]["description"] == refreshed_description
+    assert inspected.json()["description"] == refreshed_description
+    assert facade.add_job_calls == 2
 
 
 def test_browser_save_creates_selects_and_immediately_lists_the_canonical_job(tmp_path):
