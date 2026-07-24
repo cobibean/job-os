@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 
-import type { JobListItem, JobSortMode, JobStatus } from '../../shared/contracts'
+import type { JobDetail, JobListItem, JobSortMode, JobStatus } from '../../shared/contracts'
 
 const JOB_STATUSES = new Set<string>([
   'discovered', 'scored', 'reviewed', 'shortlisted', 'apply_now', 'maybe',
@@ -20,6 +20,7 @@ export function useJobs() {
   const [jobs, setJobs] = useState<JobListItem[]>([])
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null)
   const [selectedJob, setSelectedJob] = useState<JobListItem | null>(null)
+  const [selectedJobDetail, setSelectedJobDetail] = useState<JobDetail | null>(null)
   const [sortMode, setSortMode] = useState<JobSortMode>('manual')
   const [query, setQuery] = useState('')
   const [statusGroup, setStatusGroup] = useState('')
@@ -29,6 +30,24 @@ export function useJobs() {
   const [feedback, setFeedback] = useState<string | null>(null)
 
   const bridge = useRef(window.jobos?.jobs).current
+  const detailRequest = useRef(0)
+  const selectionRevision = useRef(0)
+
+  const loadDetail = useCallback(async (jobId: string | null) => {
+    const request = detailRequest.current + 1
+    detailRequest.current = request
+    if (!jobId || !bridge || typeof bridge.inspect !== 'function') {
+      setSelectedJobDetail(null)
+      return
+    }
+    setSelectedJobDetail(null)
+    try {
+      const detail = await bridge.inspect(jobId)
+      if (request === detailRequest.current) setSelectedJobDetail(detail)
+    } catch {
+      if (request === detailRequest.current) setSelectedJobDetail(null)
+    }
+  }, [bridge])
 
   const refresh = useCallback(async () => {
     if (!bridge) return
@@ -52,18 +71,40 @@ export function useJobs() {
   }, [bridge, query, sortMode, statusGroup])
 
   useEffect(() => {
+    if (!bridge) return
+    return bridge.subscribe(event => {
+      if (event.eventType === 'job_selected' && event.jobId) {
+        selectionRevision.current += 1
+        setSelectedJobId(event.jobId)
+        setSelectedJob(current => (
+          jobs.find(job => job.jobId === event.jobId) ?? current
+        ))
+        void loadDetail(event.jobId)
+      } else if (event.eventType === 'job_description_updated' && event.jobId === selectedJobId) {
+        void loadDetail(event.jobId)
+      }
+      setFeedback(event.origin === 'mcp' ? 'Agent changes synced' : 'Job changes synced')
+      void refresh()
+    })
+  }, [bridge, jobs, loadDetail, refresh, selectedJobId])
+
+  useEffect(() => {
     if (!bridge) {
       setLoading(false)
       return
     }
     let active = true
+    const initialSelectionRevision = selectionRevision.current
     bridge.getState().then(snapshot => {
       if (!active) return
       setJobs(snapshot.jobs)
-      setSelectedJobId(snapshot.selectedJobId)
-      setSelectedJob(
-        snapshot.jobs.find(job => job.jobId === snapshot.selectedJobId) ?? null
-      )
+      if (selectionRevision.current === initialSelectionRevision) {
+        setSelectedJobId(snapshot.selectedJobId)
+        setSelectedJob(
+          snapshot.jobs.find(job => job.jobId === snapshot.selectedJobId) ?? null
+        )
+        void loadDetail(snapshot.selectedJobId)
+      }
       setSortMode(snapshot.sortMode)
       setLoading(false)
       setReady(true)
@@ -73,7 +114,7 @@ export function useJobs() {
       setLoading(false)
     })
     return () => { active = false }
-  }, [bridge])
+  }, [bridge, loadDetail])
 
   useEffect(() => {
     if (!bridge || !ready) return
@@ -81,40 +122,30 @@ export function useJobs() {
     return () => window.clearTimeout(timeout)
   }, [bridge, ready, refresh])
 
-  useEffect(() => {
-    if (!bridge) return
-    return bridge.subscribe(event => {
-      if (event.eventType === 'job_selected' && event.jobId) {
-        setSelectedJobId(event.jobId)
-        setSelectedJob(current => (
-          jobs.find(job => job.jobId === event.jobId) ?? current
-        ))
-      }
-      setFeedback(event.origin === 'mcp' ? 'Agent changes synced' : 'Job changes synced')
-      void refresh()
-    })
-  }, [bridge, jobs, refresh])
-
   const selectJob = useCallback(async (jobId: string) => {
     if (!bridge) return false
+    const requestRevision = selectionRevision.current + 1
+    selectionRevision.current = requestRevision
     try {
       await bridge.select(jobId)
       const [snapshot, refreshed] = await Promise.all([
         bridge.getState(),
         bridge.list(sortMode, query.trim() || undefined, statusGroup || undefined)
       ])
+      if (selectionRevision.current !== requestRevision) return true
       setJobs(refreshed)
       setSelectedJobId(jobId)
       setSelectedJob(snapshot.jobs.find(job => job.jobId === jobId) ?? null)
       setSortMode(snapshot.sortMode)
       setFeedback('Active job selected')
       setError(null)
+      await loadDetail(jobId)
       return true
     } catch {
-      setError('Selection failed')
+      if (selectionRevision.current === requestRevision) setError('Selection failed')
       return false
     }
-  }, [bridge, query, sortMode, statusGroup])
+  }, [bridge, loadDetail, query, sortMode, statusGroup])
 
   const changeStatus = useCallback(async (jobId: string, status: JobStatus) => {
     if (!bridge) return
@@ -122,12 +153,13 @@ export function useJobs() {
       const result = await bridge.updateStatus(jobId, status)
       setJobs(current => current.map(job => job.jobId === jobId ? result.job : job))
       setSelectedJob(current => current?.jobId === jobId ? result.job : current)
+      if (selectedJobId === jobId) void loadDetail(jobId)
       setFeedback(`Status changed to ${status}`)
       setError(null)
     } catch (statusError) {
       setError(statusChangeError(statusError))
     }
-  }, [bridge])
+  }, [bridge, loadDetail, selectedJobId])
 
   const changeSort = useCallback(async (sort: JobSortMode) => {
     if (!bridge) return
@@ -182,6 +214,7 @@ export function useJobs() {
   return {
     jobs,
     selectedJob,
+    selectedJobDetail,
     selectedJobId,
     sortMode,
     query,

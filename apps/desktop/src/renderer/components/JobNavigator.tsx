@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { ArrowDown, ArrowUp, BriefcaseBusiness, ChevronRight, Search, UserRound } from 'lucide-react'
 
-import type { JobListItem, JobSortMode, JobStatus } from '../../shared/contracts'
+import type { JobDetail, JobListItem, JobSortMode, JobStatus } from '../../shared/contracts'
 
 const STATUS_TRANSITIONS: Record<JobStatus, JobStatus[]> = {
   discovered: ['scored', 'reviewed', 'skipped', 'archived'],
@@ -22,6 +22,7 @@ const STATUS_GROUPS = ['Inbox', 'Considering', 'Applied', 'Interviewing', 'Close
 interface JobNavigatorProps {
   jobs: JobListItem[]
   selectedJobId: string | null
+  selectedJobDetail?: JobDetail | null
   sortMode: JobSortMode
   query: string
   statusGroup: string
@@ -60,7 +61,15 @@ export function JobNavigator(props: JobNavigatorProps) {
     })
   }
 
-  const renderJob = (job: JobListItem, index: number) => (
+  const renderJob = (job: JobListItem, index: number) => {
+    const detail = job.jobId === props.selectedJobId
+      && props.selectedJobDetail?.jobId === job.jobId
+      ? props.selectedJobDetail
+      : null
+    const preview = detail?.description.length && detail.description.length > 180
+      ? `${detail.description.slice(0, 177).trimEnd()}…`
+      : detail?.description
+    return (
     <div
       className={`job-row${job.jobId === props.selectedJobId ? ' selected' : ''}`}
       draggable={canReorder}
@@ -93,8 +102,19 @@ export function JobNavigator(props: JobNavigatorProps) {
       <select aria-label={`Change ${job.company} status`} className="status-select" onChange={event => props.onStatusChange(job.jobId, event.target.value as JobStatus)} value={job.status}>
         {[job.status, ...STATUS_TRANSITIONS[job.status]].map(status => <option key={status} value={status}>{statusLabel(status)}</option>)}
       </select>
+      {detail ? (
+        <div className="job-description-card">
+          {detail.location ? <span className="job-location">{detail.location}</span> : null}
+          <p>{preview}</p>
+          <details>
+            <summary>Full listing</summary>
+            <div className="full-listing-text">{detail.description}</div>
+          </details>
+        </div>
+      ) : null}
     </div>
-  )
+    )
+  }
 
   return (
     <aside aria-label="Job navigation" className="job-navigator panel-region">

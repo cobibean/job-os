@@ -41,6 +41,12 @@ async def test_job_tools_use_only_the_authenticated_jobos_http_contract():
     await client.update_status(
         "job-1", "reviewed", reason="Agent review", idempotency_key="status-1"
     )
+    await client.update_description(
+        "job-1",
+        "Full canonical listing text.",
+        source_note="Supplied by the user",
+        idempotency_key="description-1",
+    )
     await client.aclose()
 
     assert [(request.method, request.url.path) for request in requests] == [
@@ -50,6 +56,7 @@ async def test_job_tools_use_only_the_authenticated_jobos_http_contract():
         ("PUT", "/v1/workspace/jobs/selection"),
         ("PUT", "/v1/jobs/order"),
         ("PUT", "/v1/jobs/job-1/status"),
+        ("PUT", "/v1/jobs/job-1/description"),
     ]
     assert all(
         request.headers["authorization"] == "Bearer test-device-token" for request in requests
@@ -75,6 +82,13 @@ async def test_job_tools_use_only_the_authenticated_jobos_http_contract():
         "reason": "Agent review",
         "idempotency_key": "status-1",
     }
+    assert json.loads(requests[6].content) == {
+        "description_text": "Full canonical listing text.",
+        "source": "jobhunter_agent",
+        "provenance": "Supplied by the user",
+        "origin": "mcp",
+        "idempotency_key": "description-1",
+    }
 
 
 @pytest.mark.anyio
@@ -97,6 +111,7 @@ async def test_mcp_server_exposes_phase_seven_parity_tools_while_retaining_job_t
         "job_select",
         "job_reorder",
         "job_update_status",
+        "job_update_description",
         "workspace_inspect",
         "workspace_update",
         "document_list",
