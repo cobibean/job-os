@@ -1,4 +1,5 @@
-import { ArrowDown, ArrowUp, BriefcaseBusiness, Search, UserRound } from 'lucide-react'
+import { useState } from 'react'
+import { ArrowDown, ArrowUp, BriefcaseBusiness, ChevronRight, Search, UserRound } from 'lucide-react'
 
 import type { JobListItem, JobSortMode, JobStatus } from '../../shared/contracts'
 
@@ -41,7 +42,60 @@ function statusLabel(status: string) {
 }
 
 export function JobNavigator(props: JobNavigatorProps) {
+  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(() => new Set())
   const canReorder = props.sortMode === 'manual' && !props.query && !props.statusGroup
+  const groupedJobs = props.jobs.reduce<Array<{ name: string, jobs: Array<{ job: JobListItem, index: number }> }>>((groups, job, index) => {
+    const existingGroup = groups.find(group => group.name === job.statusGroup)
+    if (existingGroup) existingGroup.jobs.push({ job, index })
+    else groups.push({ name: job.statusGroup, jobs: [{ job, index }] })
+    return groups
+  }, [])
+
+  const toggleGroup = (group: string) => {
+    setExpandedGroups(current => {
+      const next = new Set(current)
+      if (next.has(group)) next.delete(group)
+      else next.add(group)
+      return next
+    })
+  }
+
+  const renderJob = (job: JobListItem, index: number) => (
+    <div
+      className={`job-row${job.jobId === props.selectedJobId ? ' selected' : ''}`}
+      draggable={canReorder}
+      key={job.jobId}
+      onDragOver={event => { if (canReorder) event.preventDefault() }}
+      onDragStart={event => {
+        event.dataTransfer.effectAllowed = 'move'
+        event.dataTransfer.setData('text/jobos-job-id', job.jobId)
+      }}
+      onDrop={event => {
+        if (!canReorder) return
+        event.preventDefault()
+        const sourceJobId = event.dataTransfer.getData('text/jobos-job-id')
+        if (sourceJobId && sourceJobId !== job.jobId) props.onReorder(sourceJobId, job.jobId)
+      }}
+      role="listitem"
+    >
+      <div className="job-row-main">
+        <button aria-label={`Select ${job.company} ${job.title}`} className="job-select" onClick={() => props.onSelect(job.jobId)} type="button">
+          <BriefcaseBusiness aria-hidden="true" size={17} strokeWidth={1.45} />
+          <span><strong>{job.company}</strong><small>{job.title}</small></span>
+        </button>
+        {canReorder ? (
+          <span className="order-buttons">
+            <button aria-label={`Move ${job.company} up`} className="icon-button" disabled={index === 0} onClick={() => props.onMove(job.jobId, -1)} type="button"><ArrowUp aria-hidden="true" size={13} /></button>
+            <button aria-label={`Move ${job.company} down`} className="icon-button" disabled={index === props.jobs.length - 1} onClick={() => props.onMove(job.jobId, 1)} type="button"><ArrowDown aria-hidden="true" size={13} /></button>
+          </span>
+        ) : null}
+      </div>
+      <select aria-label={`Change ${job.company} status`} className="status-select" onChange={event => props.onStatusChange(job.jobId, event.target.value as JobStatus)} value={job.status}>
+        {[job.status, ...STATUS_TRANSITIONS[job.status]].map(status => <option key={status} value={status}>{statusLabel(status)}</option>)}
+      </select>
+    </div>
+  )
+
   return (
     <aside aria-label="Job navigation" className="job-navigator panel-region">
       <div className="navigator-controls">
@@ -68,7 +122,7 @@ export function JobNavigator(props: JobNavigatorProps) {
         </select>
       </div>
 
-      <div className="job-list" role="list">
+      <div className="job-list" role={props.sortMode === 'status' ? undefined : 'list'}>
         {props.loading ? <p className="navigator-message">Loading opportunities…</p> : null}
         {!props.loading && props.jobs.length === 0 ? (
           <div className="navigator-empty">
@@ -77,42 +131,30 @@ export function JobNavigator(props: JobNavigatorProps) {
             <p>Try another filter or reconnect the shared job source.</p>
           </div>
         ) : null}
-        {props.jobs.map((job, index) => (
-          <div
-            className={`job-row${job.jobId === props.selectedJobId ? ' selected' : ''}`}
-            draggable={canReorder}
-            key={job.jobId}
-            onDragOver={event => { if (canReorder) event.preventDefault() }}
-            onDragStart={event => {
-              event.dataTransfer.effectAllowed = 'move'
-              event.dataTransfer.setData('text/jobos-job-id', job.jobId)
-            }}
-            onDrop={event => {
-              if (!canReorder) return
-              event.preventDefault()
-              const sourceJobId = event.dataTransfer.getData('text/jobos-job-id')
-              if (sourceJobId && sourceJobId !== job.jobId) props.onReorder(sourceJobId, job.jobId)
-            }}
-            role="listitem"
-          >
-            {props.sortMode === 'status' && props.jobs[index - 1]?.statusGroup !== job.statusGroup ? <div className="status-heading">{job.statusGroup}</div> : null}
-            <div className="job-row-main">
-              <button aria-label={`Select ${job.company} ${job.title}`} className="job-select" onClick={() => props.onSelect(job.jobId)} type="button">
-                <BriefcaseBusiness aria-hidden="true" size={17} strokeWidth={1.45} />
-                <span><strong>{job.company}</strong><small>{job.title}</small></span>
+        {props.sortMode === 'status' ? groupedJobs.map(group => {
+          const expanded = expandedGroups.has(group.name)
+          const panelId = `job-status-${group.name.toLowerCase().replaceAll(' ', '-')}`
+          const jobCount = `${group.jobs.length} ${group.jobs.length === 1 ? 'job' : 'jobs'}`
+          return (
+            <section className="status-section" key={group.name}>
+              <button
+                aria-controls={panelId}
+                aria-expanded={expanded}
+                aria-label={`${group.name}, ${jobCount}`}
+                className="status-heading"
+                onClick={() => toggleGroup(group.name)}
+                type="button"
+              >
+                <ChevronRight aria-hidden="true" className="status-heading-chevron" size={13} strokeWidth={1.7} />
+                <span>{group.name}</span>
+                <small>{group.jobs.length}</small>
               </button>
-              {canReorder ? (
-                <span className="order-buttons">
-                  <button aria-label={`Move ${job.company} up`} className="icon-button" disabled={index === 0} onClick={() => props.onMove(job.jobId, -1)} type="button"><ArrowUp aria-hidden="true" size={13} /></button>
-                  <button aria-label={`Move ${job.company} down`} className="icon-button" disabled={index === props.jobs.length - 1} onClick={() => props.onMove(job.jobId, 1)} type="button"><ArrowDown aria-hidden="true" size={13} /></button>
-                </span>
-              ) : null}
-            </div>
-            <select aria-label={`Change ${job.company} status`} className="status-select" onChange={event => props.onStatusChange(job.jobId, event.target.value as JobStatus)} value={job.status}>
-              {[job.status, ...STATUS_TRANSITIONS[job.status]].map(status => <option key={status} value={status}>{statusLabel(status)}</option>)}
-            </select>
-          </div>
-        ))}
+              <div aria-label={`${group.name} jobs`} hidden={!expanded} id={panelId} role="list">
+                {group.jobs.map(({ job, index }) => renderJob(job, index))}
+              </div>
+            </section>
+          )
+        }) : props.jobs.map(renderJob)}
       </div>
 
       <div aria-live="polite" className={`navigator-feedback${props.error ? ' error' : ''}`}>{props.error ?? props.feedback ?? ''}</div>

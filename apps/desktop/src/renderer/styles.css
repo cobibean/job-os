@@ -311,7 +311,31 @@ button:focus-visible {
 .order-buttons { display: flex; }
 .order-buttons .icon-button { width: 22px; height: 22px; }
 .order-buttons .icon-button:disabled { opacity: 0.25; }
-.status-heading { margin: 2px 0 9px; color: var(--quiet); font-size: 9px; font-weight: 650; letter-spacing: 0.12em; text-transform: uppercase; }
+.status-section { border-bottom: 1px solid var(--border-soft); }
+.status-heading {
+  width: 100%;
+  min-height: 34px;
+  display: grid;
+  grid-template-columns: 15px 1fr auto;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 9px;
+  border: 0;
+  color: var(--quiet);
+  background: transparent;
+  font-size: 9px;
+  font-weight: 650;
+  letter-spacing: 0.12em;
+  text-align: left;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+.status-heading:hover { color: var(--text-soft); background: var(--surface-inset); }
+.status-heading:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
+.status-heading-chevron { transition: transform 140ms ease; }
+.status-heading[aria-expanded='true'] .status-heading-chevron { transform: rotate(90deg); }
+.status-heading small { font-size: 9px; font-weight: 560; letter-spacing: 0; }
+.status-section .job-row:last-child { border-bottom: 0; }
 .navigator-feedback { min-height: 28px; padding: 7px 17px; border-top: 1px solid var(--border-soft); color: var(--green); font-size: 10px; }
 .navigator-feedback.error { color: var(--danger); }
 
