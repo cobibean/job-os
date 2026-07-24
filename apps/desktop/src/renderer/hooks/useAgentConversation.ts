@@ -145,75 +145,209 @@ interface BaseProjectedItem {
   occurredAt: string
 }
 
-export type ProjectedConversationItem =
-  | BaseProjectedItem & { kind: 'user'; text: string }
-  | BaseProjectedItem & { kind: 'assistant'; text: string }
-  | BaseProjectedItem & { kind: 'activity'; activityId: string; label: string; detail: ConversationEvent['detail'] }
-  | BaseProjectedItem & { kind: 'status'; label: string; retryable: boolean }
-  | BaseProjectedItem & { kind: 'error'; label: string; retryable: boolean }
+export interface ProjectedUserItem extends BaseProjectedItem {
+  kind: 'user'
+  text: string
+}
+
+export interface AssistantItem extends BaseProjectedItem {
+  kind: 'assistant'
+  text: string
+}
+
+export interface ActivityItem extends BaseProjectedItem {
+  kind: 'activity'
+  activityId: string
+  label: string
+  detail: ConversationEvent['detail']
+}
+
+export interface StatusOrErrorItem extends BaseProjectedItem {
+  kind: 'status' | 'error'
+  label: string
+  retryable: boolean
+}
+
+export interface ProjectedAgentTurn {
+  kind: 'agent-turn'
+  id: string
+  turnId: string
+  eventId: number
+  state: ConversationEvent['state']
+  occurredAt: string
+  activities: ActivityItem[]
+  assistant: AssistantItem | null
+  terminal: StatusOrErrorItem | null
+}
+
+export type ProjectedConversationItem = ProjectedUserItem | ProjectedAgentTurn | ActivityItem | StatusOrErrorItem
 
 function detailString(event: ConversationEvent, key: string): string | undefined {
   const value = event.detail[key]
   return typeof value === 'string' ? value : undefined
 }
 
+function projectedBase(entry: ConversationEvent): BaseProjectedItem {
+  return {
+    id: `event-${entry.eventId}`,
+    eventId: entry.eventId,
+    turnId: entry.turnId,
+    state: entry.state,
+    occurredAt: entry.occurredAt
+  }
+}
+
+function statusOrErrorItem(entry: ConversationEvent): StatusOrErrorItem {
+  return {
+    ...projectedBase(entry),
+    kind: entry.type === 'error' ? 'error' : 'status',
+    label: entry.summary,
+    retryable: entry.detail.retry === true || (entry.type === 'error' && entry.detail.actionable === true)
+  }
+}
+
 export function projectConversation(entries: ConversationEvent[]): ProjectedConversationItem[] {
   const projected: ProjectedConversationItem[] = []
-  const activities = new Map<string, number>()
-  const assistants = new Map<string, number>()
+  const turns = new Map<string, ProjectedAgentTurn>()
+  const activityIndexes = new Map<string, Map<string, number>>()
+  const ownerlessActivityIndexes = new Map<string, number>()
+  const terminalStates = new Map<string, ConversationEvent['state']>()
+
   for (const entry of [...entries].sort((a, b) => a.eventId - b.eventId)) {
-    const base: BaseProjectedItem = {
-      id: `event-${entry.eventId}`,
-      eventId: entry.eventId,
-      turnId: entry.turnId,
-      state: entry.state,
-      occurredAt: entry.occurredAt
-    }
+    const base = projectedBase(entry)
     if (entry.type === 'user_message') {
       projected.push({ ...base, kind: 'user', text: entry.text ?? entry.summary })
       continue
     }
+
+    if (!entry.turnId) {
+      if (entry.type === 'activity') {
+        const activityId = detailString(entry, 'activity_id') ?? `event-${entry.eventId}`
+        const existing = ownerlessActivityIndexes.get(activityId)
+        const item: ActivityItem = {
+          ...base,
+          id: `activity-ownerless-${activityId}`,
+          kind: 'activity',
+          activityId,
+          label: entry.summary,
+          detail: entry.detail
+        }
+        if (existing === undefined) {
+          ownerlessActivityIndexes.set(activityId, projected.length)
+          projected.push(item)
+        } else {
+          const first = projected[existing]!
+          projected[existing] = { ...item, eventId: first.eventId, occurredAt: first.occurredAt }
+        }
+      } else if (entry.type === 'error') {
+        projected.push(statusOrErrorItem(entry))
+      } else if (entry.type === 'status' && ['waiting', 'interrupted', 'failed'].includes(entry.state)) {
+        projected.push(statusOrErrorItem(entry))
+      }
+      continue
+    }
+
+    let turn = turns.get(entry.turnId)
+    if (!turn) {
+      turn = {
+        kind: 'agent-turn',
+        id: `turn-${entry.turnId}`,
+        turnId: entry.turnId,
+        eventId: entry.eventId,
+        state: entry.state,
+        occurredAt: entry.occurredAt,
+        activities: [],
+        assistant: null,
+        terminal: null
+      }
+      turns.set(entry.turnId, turn)
+      activityIndexes.set(entry.turnId, new Map())
+      projected.push(turn)
+    }
+
+    const isTerminalEntry = (
+      ['assistant_message', 'error', 'status'].includes(entry.type)
+      && ['completed', 'failed', 'interrupted'].includes(entry.state)
+    )
+    if (isTerminalEntry) {
+      terminalStates.set(entry.turnId, entry.state)
+      turn.state = entry.state
+      if (entry.state === 'completed') turn.terminal = null
+    } else if (
+      !terminalStates.has(entry.turnId)
+      && !(turn.terminal?.state === 'waiting' && entry.state !== 'working')
+    ) {
+      turn.state = entry.state
+    }
+
+    const resolvesWaiting = turn.terminal?.state === 'waiting' && entry.state === 'working'
+    if (resolvesWaiting) turn.terminal = null
+
     if (entry.type === 'activity') {
       const activityId = detailString(entry, 'activity_id') ?? `event-${entry.eventId}`
-      const existing = activities.get(activityId)
-      const item: ProjectedConversationItem = { ...base, id: `activity-${activityId}`, kind: 'activity', activityId, label: entry.summary, detail: entry.detail }
+      const indexes = activityIndexes.get(entry.turnId)!
+      const existing = indexes.get(activityId)
+      const item: ActivityItem = {
+        ...base,
+        id: `activity-${entry.turnId}-${activityId}`,
+        kind: 'activity',
+        activityId,
+        label: entry.summary,
+        detail: entry.detail
+      }
       if (existing === undefined) {
-        activities.set(activityId, projected.length)
-        projected.push(item)
+        indexes.set(activityId, turn.activities.length)
+        turn.activities.push(item)
       } else {
-        const first = projected[existing]!
-        projected[existing] = { ...item, eventId: first.eventId, occurredAt: first.occurredAt }
+        const first = turn.activities[existing]!
+        turn.activities[existing] = { ...item, eventId: first.eventId, occurredAt: first.occurredAt }
       }
       continue
     }
+
     if (entry.type === 'assistant_message') {
-      if (!entry.turnId) continue
-      const key = entry.turnId
-      const existing = assistants.get(key)
       const phase = detailString(entry, 'type')
       const nextText = phase === 'message.start' ? '' : entry.summary
-      if (existing === undefined) {
-        assistants.set(key, projected.length)
-        projected.push({ ...base, id: `assistant-${key}`, kind: 'assistant', text: nextText })
+      if (!turn.assistant) {
+        turn.assistant = { ...base, id: `assistant-${entry.turnId}`, kind: 'assistant', text: nextText }
       } else {
-        const current = projected[existing]
-        if (!current || current.kind !== 'assistant') continue
         const text = phase === 'message.complete' || ['completed', 'failed', 'interrupted'].includes(entry.state)
           ? entry.summary
-          : `${current.text}${entry.summary}`
-        projected[existing] = { ...current, state: entry.state, text }
+          : `${turn.assistant.text}${entry.summary}`
+        turn.assistant = { ...turn.assistant, state: entry.state, text }
+      }
+      if (entry.state === 'failed' || entry.state === 'interrupted') {
+        turn.terminal = {
+          ...base,
+          kind: 'status',
+          label: entry.summary,
+          retryable: true
+        }
       }
       continue
     }
+
     if (entry.type === 'error') {
-      projected.push({ ...base, kind: 'error', label: entry.summary, retryable: entry.detail.retry === true || entry.detail.actionable === true })
+      turn.terminal = {
+        ...base,
+        kind: 'error',
+        label: entry.summary,
+        retryable: entry.detail.retry === true || entry.detail.actionable === true
+      }
       continue
     }
-    if (entry.type === 'status' && (entry.state === 'waiting' || entry.state === 'interrupted' || entry.state === 'failed')) {
-      projected.push({ ...base, kind: 'status', label: entry.summary, retryable: entry.detail.retry === true })
+
+    if (entry.type === 'status' && ['waiting', 'interrupted', 'failed'].includes(entry.state)) {
+      turn.terminal = {
+        ...base,
+        kind: 'status',
+        label: entry.summary,
+        retryable: entry.detail.retry === true
+      }
     }
   }
-  return projected.sort((a, b) => a.eventId - b.eventId)
+
+  return projected.sort((left, right) => left.eventId - right.eventId)
 }
 
 function identifier(prefix: string): string {

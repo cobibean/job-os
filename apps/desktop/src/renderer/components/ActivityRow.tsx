@@ -1,9 +1,7 @@
 import { Check, ChevronRight, CircleAlert, LoaderCircle, Pause } from 'lucide-react'
 import { useId, useState } from 'react'
 
-import type { ProjectedConversationItem } from '../hooks/useAgentConversation'
-
-type ActivityItem = Extract<ProjectedConversationItem, { kind: 'activity' }>
+import type { ActivityItem } from '../hooks/useAgentConversation'
 
 const hiddenDetailKeys = new Set(['activity_id', 'phase', 'type', 'redacted', 'redactions'])
 
