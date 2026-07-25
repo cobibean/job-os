@@ -40,6 +40,7 @@ const normalizedDetailKeys = new Set([
   'retry', 'redacted', 'redactions', 'transport_confirmed', 'text',
   'agent_connection', 'recovery_pending'
 ])
+const MAX_ASSISTANT_TRANSCRIPT_DETAIL = 100_001
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
@@ -64,12 +65,18 @@ function safeValue(value: unknown, depth = 0): SafeConversationDetailValue | und
   return undefined
 }
 
-function normalizedDetail(value: unknown): Record<string, SafeConversationDetailValue> | null {
+function normalizedDetail(
+  value: unknown,
+  eventType: ConversationEntryType
+): Record<string, SafeConversationDetailValue> | null {
   if (!isRecord(value)) return null
   const result: Record<string, SafeConversationDetailValue> = {}
+  const isAssistantCompletion = eventType === 'assistant_message' && value.type === 'message.complete'
   for (const [key, item] of Object.entries(value)) {
     if (!normalizedDetailKeys.has(key)) continue
-    const safe = safeValue(item)
+    const safe = isAssistantCompletion && key === 'text' && typeof item === 'string'
+      ? item.slice(0, MAX_ASSISTANT_TRANSCRIPT_DETAIL)
+      : safeValue(item)
     if (safe !== undefined) result[key] = safe
   }
   return result
@@ -82,7 +89,7 @@ export function normalizeConversationEvent(value: unknown): ConversationEvent | 
     || typeof value.type !== 'string' || !entryTypes.has(value.type as ConversationEntryType)
     || typeof value.state !== 'string' || !entryStates.has(value.state as ConversationEntryState)
     || typeof value.summary !== 'string' || typeof value.occurred_at !== 'string') return null
-  const detail = normalizedDetail(value.detail)
+  const detail = normalizedDetail(value.detail, value.type as ConversationEntryType)
   if (!detail) return null
   const normalized: ConversationEvent = {
     eventId: Number(value.event_id),
