@@ -197,6 +197,22 @@ function projectedBase(entry: ConversationEvent): BaseProjectedItem {
   }
 }
 
+const destructiveRedactionPlaceholders = new Set([
+  '[protected path]',
+  '[protected signed URL]'
+])
+
+function terminalAssistantText(streamedText: string, terminalText: string): string {
+  const streamed = streamedText.trim()
+  const terminal = terminalText.trim()
+  if (
+    streamed
+    && !destructiveRedactionPlaceholders.has(streamed)
+    && destructiveRedactionPlaceholders.has(terminal)
+  ) return streamedText
+  return terminalText
+}
+
 function statusOrErrorItem(entry: ConversationEvent): StatusOrErrorItem {
   return {
     ...projectedBase(entry),
@@ -312,7 +328,7 @@ export function projectConversation(entries: ConversationEvent[]): ProjectedConv
         turn.assistant = { ...base, id: `assistant-${entry.turnId}`, kind: 'assistant', text: nextText }
       } else {
         const text = phase === 'message.complete' || ['completed', 'failed', 'interrupted'].includes(entry.state)
-          ? entry.summary
+          ? terminalAssistantText(turn.assistant.text, entry.summary)
           : `${turn.assistant.text}${entry.summary}`
         turn.assistant = { ...turn.assistant, state: entry.state, text }
       }

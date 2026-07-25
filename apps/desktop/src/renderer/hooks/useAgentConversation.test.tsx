@@ -127,6 +127,19 @@ test('assistant deltas form one streaming response and completion replaces it wi
   }))
 })
 
+test.each(['[protected path]', '[protected signed URL]'])('%s cannot erase an already streamed assistant response', placeholder => {
+  const visible = 'Saved the cover letter to /Users/person/.hermes/workspaces/acme/cover-letter.pdf.'
+  const [turn] = projectConversation([
+    event(1, { type: 'assistant_message', summary: visible, detail: { type: 'message.delta', text: visible } }),
+    event(2, { type: 'assistant_message', state: 'completed', summary: placeholder, detail: { type: 'message.complete', text: placeholder } })
+  ])
+
+  expect(turn).toEqual(expect.objectContaining({
+    kind: 'agent-turn',
+    assistant: expect.objectContaining({ text: visible, state: 'completed' })
+  }))
+})
+
 test.each([
   ['running', event(2, { type: 'assistant_message', state: 'working', summary: 'Drafting', detail: { type: 'message.delta' } })],
   ['waiting', event(2, { type: 'status', state: 'waiting', summary: 'Choose one', detail: { actionable: true } })],

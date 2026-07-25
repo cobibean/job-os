@@ -13,7 +13,7 @@ _SENSITIVE_VALUE = re.compile(
     r"(?:"
     r"(?:authorization|proxy-authorization|cookie|set-cookie)\s*:\s*[^\r\n]+"
     r"|bearer\s+\S+"
-    r"|(?:token|api[_-]?key|password|secret|credential|authorization[_-]?code)"
+    r"|(?<![?&])(?:token|api[_-]?key|password|secret|credential|authorization[_-]?code)"
     r"\s*[:=]\s*\S+"
     r")",
     re.IGNORECASE,
@@ -31,7 +31,7 @@ _STANDALONE_CREDENTIAL = re.compile(
 )
 _CREDENTIAL_PATH = re.compile(r"(?:^|/)(?:\.hermes|\.ssh|mcp-tokens|auth\.json|\.env)(?:/|$)")
 _SIGNED_URL = re.compile(
-    r"[?&](?:x-amz-signature|signature|signed|sig|token|api[_-]?key)=[^&#]+",
+    r"([?&](?:x-amz-signature|signature|signed|sig|token|api[_-]?key)=)([^&#\s]+)",
     re.IGNORECASE,
 )
 _PATH_KEY = re.compile(r"(?:^|[_-])(?:path|file)(?:$|[_-])", re.IGNORECASE)
@@ -47,8 +47,20 @@ _PRIVATE_EVENT_KEYS = {
 }
 
 
+def _redact_signed_url(match: re.Match[str]) -> str:
+    value = match.group(2)
+    secret = value.rstrip(".,;:!?)]}")
+    trailing = value[len(secret) :]
+    return f"{match.group(1)}[redacted]{trailing}"
+
+
 def _safe_value(
-    value: Any, *, key: str = "", depth: int = 0, max_string: int = MAX_STRING
+    value: Any,
+    *,
+    key: str = "",
+    depth: int = 0,
+    max_string: int = MAX_STRING,
+    protect_paths: bool = True,
 ) -> tuple[Any, bool]:
     if _SENSITIVE_KEY.search(key):
         return "[redacted]", True
@@ -57,19 +69,18 @@ def _safe_value(
     if value is None or isinstance(value, (bool, int, float)):
         return value, False
     if isinstance(value, str):
-        if _PATH_KEY.search(key) and value.startswith(("/", "~")):
+        if protect_paths and _PATH_KEY.search(key) and value.startswith(("/", "~")):
             return "[protected path]", True
         redacted = bool(
             _SENSITIVE_VALUE.search(value)
             or _STANDALONE_CREDENTIAL.search(value)
-            or _CREDENTIAL_PATH.search(value)
+            or (protect_paths and _CREDENTIAL_PATH.search(value))
             or _SIGNED_URL.search(value)
         )
         safe = _SENSITIVE_VALUE.sub("[redacted]", value)
         safe = _STANDALONE_CREDENTIAL.sub("[redacted]", safe)
-        if _SIGNED_URL.search(safe):
-            safe = "[protected signed URL]"
-        if _CREDENTIAL_PATH.search(safe):
+        safe = _SIGNED_URL.sub(_redact_signed_url, safe)
+        if protect_paths and _CREDENTIAL_PATH.search(safe):
             safe = "[protected path]"
         if len(safe) > max_string:
             safe = safe[:max_string] + "…"
@@ -87,22 +98,29 @@ def _safe_value(
                 output[f"redacted_field_{len(output) + 1}"] = "[redacted]"
                 changed = True
                 continue
-            output[safe_key], item_changed = _safe_value(item, key=safe_key, depth=depth + 1)
+            output[safe_key], item_changed = _safe_value(
+                item,
+                key=safe_key,
+                depth=depth + 1,
+                protect_paths=protect_paths,
+            )
             changed = changed or item_changed
         return output, changed
     if isinstance(value, (list, tuple)):
         output = []
         changed = len(value) > MAX_ITEMS
         for item in list(value)[:MAX_ITEMS]:
-            safe, item_changed = _safe_value(item, depth=depth + 1)
+            safe, item_changed = _safe_value(
+                item, depth=depth + 1, protect_paths=protect_paths
+            )
             output.append(safe)
             changed = changed or item_changed
         return output, changed
     return str(value)[:MAX_STRING], True
 
 
-def redact_detail(value: Any) -> dict[str, Any]:
-    safe, changed = _safe_value(value)
+def redact_detail(value: Any, *, protect_paths: bool = True) -> dict[str, Any]:
+    safe, changed = _safe_value(value, protect_paths=protect_paths)
     detail = safe if isinstance(safe, dict) else {"value": safe}
     if changed:
         detail["redacted"] = True
@@ -111,19 +129,19 @@ def redact_detail(value: Any) -> dict[str, Any]:
 
 def sanitize_text(value: str) -> str:
     """Return generic-detail-bounded safe text using shared credential rules."""
-    safe, _ = _safe_value(value)
+    safe, _ = _safe_value(value, protect_paths=False)
     return str(safe)
 
 
 def sanitize_user_text(value: str) -> str:
     """Return credential-safe user text without shrinking the accepted API bound."""
-    safe, _ = _safe_value(value, max_string=MAX_USER_TEXT)
+    safe, _ = _safe_value(value, max_string=MAX_USER_TEXT, protect_paths=False)
     return str(safe)
 
 
 def sanitize_summary(value: str) -> str:
     """Return credential-safe text bounded for event summaries."""
-    safe, _ = _safe_value(value, max_string=MAX_SUMMARY)
+    safe, _ = _safe_value(value, max_string=MAX_SUMMARY, protect_paths=False)
     return str(safe)
 
 

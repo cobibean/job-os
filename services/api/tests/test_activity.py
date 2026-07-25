@@ -1,6 +1,11 @@
 import pytest
 from jobos_api.activity import ActivityNormalizer
-from jobos_api.redaction import redact_detail, sanitize_text, sanitize_user_text
+from jobos_api.redaction import (
+    redact_detail,
+    sanitize_summary,
+    sanitize_text,
+    sanitize_user_text,
+)
 
 
 @pytest.mark.parametrize(
@@ -98,3 +103,31 @@ def test_standalone_basic_credentials_are_redacted_without_an_authorization_head
 
     assert sanitize_user_text(f"Use {raw} for the request") == ("Use [redacted] for the request")
     assert raw not in str(redact_detail({"message": f"transport rejected {raw}"}))
+
+
+def test_public_text_preserves_local_paths_but_structured_activity_still_hides_them():
+    path = "/Users/person/.hermes/profiles/job-hunter/workspaces/acme/cover-letter.pdf"
+    response = f"Saved the cover letter to {path}."
+
+    assert sanitize_text(response) == response
+    assert sanitize_user_text(response) == response
+    assert sanitize_summary(response) == response
+    assert redact_detail({"path": path})["path"] == "[protected path]"
+
+
+def test_signed_url_redaction_preserves_the_rest_of_public_text():
+    value = (
+        "Download (https://example.test/file?signature=top-secret-value&download=1#ready) "
+        "when ready."
+    )
+
+    assert sanitize_text(value) == (
+        "Download (https://example.test/file?signature=[redacted]&download=1#ready) "
+        "when ready."
+    )
+    assert sanitize_text("Use https://example.test/file?token=secret&download=1.") == (
+        "Use https://example.test/file?token=[redacted]&download=1."
+    )
+    assert sanitize_text("Use https://example.test/file?signature=secret.") == (
+        "Use https://example.test/file?signature=[redacted]."
+    )
