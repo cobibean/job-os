@@ -76,6 +76,48 @@ def metadata_columns(path):
         }
 
 
+def test_store_closes_read_write_and_failed_connections(tmp_path, monkeypatch):
+    database = tmp_path / "jobos.db"
+    real_connect = sqlite3.connect
+    opened = []
+
+    class TrackedConnection:
+        def __init__(self, connection):
+            self.connection = connection
+            self.closed = False
+
+        def __getattr__(self, name):
+            return getattr(self.connection, name)
+
+        def __enter__(self):
+            self.connection.__enter__()
+            return self
+
+        def __exit__(self, *args):
+            return self.connection.__exit__(*args)
+
+        def close(self):
+            self.closed = True
+            self.connection.close()
+
+    def tracked_connect(*args, **kwargs):
+        connection = TrackedConnection(real_connect(*args, **kwargs))
+        opened.append(connection)
+        return connection
+
+    monkeypatch.setattr("jobos_api.state_store.sqlite3.connect", tracked_connect)
+    store = JobOsStateStore(database)
+
+    store.initialize()
+    store.health()
+    store.save_stored_session_id("stored-test")
+    with pytest.raises(RuntimeError, match="forced failure"), store._connection():
+        raise RuntimeError("forced failure")
+
+    assert len(opened) == 4
+    assert all(connection.closed for connection in opened)
+
+
 def test_initialization_applies_every_migration_once(tmp_path):
     database = tmp_path / "jobos.db"
     store = JobOsStateStore(database)

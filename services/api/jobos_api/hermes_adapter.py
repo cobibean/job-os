@@ -129,6 +129,7 @@ class HermesWebSocketGateway:
         self._pending_session_info: dict[str, tuple[bool, GatewayEvent | None]] = {}
         self._activity = ActivityNormalizer()
         self._closed = False
+        self._start_lock = asyncio.Lock()
 
     def __repr__(self) -> str:
         parsed = urlsplit(self._url)
@@ -181,6 +182,10 @@ class HermesWebSocketGateway:
         )
 
     async def start(self) -> None:
+        async with self._start_lock:
+            await self._start_unlocked()
+
+    async def _start_unlocked(self) -> None:
         if self._reader_task and not self._reader_task.done():
             if self._ready is not None:
                 await asyncio.wait_for(asyncio.shield(self._ready), timeout=self._request_timeout)

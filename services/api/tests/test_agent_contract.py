@@ -1,5 +1,6 @@
 import asyncio
 import json
+import sqlite3
 import time
 
 from fastapi.testclient import TestClient
@@ -118,6 +119,34 @@ class ReconnectingGateway(FakeGateway):
         )
 
     async def stream_events(self):
+        while True:
+            yield await self.events.get()
+
+
+class DelayedStartGateway(ReconnectingGateway):
+    def __init__(self, failures=2) -> None:
+        super().__init__()
+        self.failures = failures
+        self.start_attempts = 0
+
+    async def start(self):
+        self.started = True
+        self.start_attempts += 1
+        if self.start_attempts <= self.failures:
+            raise ConnectionError("dashboard not ready")
+        self.online = True
+
+
+class RestartingStreamGateway(ReconnectingGateway):
+    def __init__(self) -> None:
+        super().__init__()
+        self.online = True
+        self.stream_calls = 0
+
+    async def stream_events(self):
+        self.stream_calls += 1
+        if self.stream_calls == 1:
+            raise RuntimeError("event stream ended unexpectedly")
         while True:
             yield await self.events.get()
 
@@ -1350,3 +1379,201 @@ def test_working_status_moves_waiting_turn_back_to_running_without_settling(tmp_
     snapshot = store.conversation_snapshot()
     assert snapshot["active_turn"]["status"] == "running"
     assert snapshot["entries"][-1]["state"] == "working"
+
+
+def test_service_reconnects_when_gateway_becomes_available_without_a_new_session(tmp_path):
+    async def scenario():
+        store = JobOsStateStore(tmp_path / "jobos.db")
+        store.initialize()
+        gateway = DelayedStartGateway(failures=2)
+        service = ConversationService(store, gateway)
+        await service.start()
+        try:
+            for _ in range(50):
+                if gateway.connection_state == "online":
+                    break
+                await asyncio.sleep(0.02)
+            return gateway.connection_state, gateway.start_attempts
+        finally:
+            await service.close()
+
+    state, attempts = asyncio.run(scenario())
+
+    assert state == "online"
+    assert attempts == 3
+
+
+def test_gateway_event_persistence_retries_the_same_event_after_sqlite_failure(
+    tmp_path, monkeypatch
+):
+    async def scenario():
+        store = JobOsStateStore(tmp_path / "jobos.db")
+        store.initialize()
+        gateway = ReconnectingGateway()
+        gateway.online = True
+        service = ConversationService(store, gateway)
+        real_append = store.append_conversation_event
+        attempts = 0
+
+        def flaky_append(*args, **kwargs):
+            nonlocal attempts
+            attempts += 1
+            if attempts == 1:
+                raise sqlite3.OperationalError("transient database failure")
+            return real_append(*args, **kwargs)
+
+        monkeypatch.setattr(store, "append_conversation_event", flaky_append)
+        await service.start()
+        try:
+            await gateway.events.put(
+                GatewayEvent(
+                    event_type="connection",
+                    state="working",
+                    summary="",
+                    detail={"agent_connection": "online"},
+                )
+            )
+            for _ in range(50):
+                snapshot = store.conversation_snapshot()
+                entries = snapshot["entries"]
+                assert isinstance(entries, list)
+                if any(entry["summary"] == "Agent online" for entry in entries):
+                    event_task = service._event_task
+                    assert event_task is not None
+                    return attempts, event_task.done()
+                await asyncio.sleep(0.02)
+            raise AssertionError("retried event was not persisted")
+        finally:
+            await service.close()
+
+    attempts, consumer_done = asyncio.run(scenario())
+
+    assert attempts == 2
+    assert consumer_done is False
+
+
+def test_gateway_event_supervisor_restarts_an_ended_stream(tmp_path):
+    async def scenario():
+        store = JobOsStateStore(tmp_path / "jobos.db")
+        store.initialize()
+        gateway = RestartingStreamGateway()
+        service = ConversationService(store, gateway)
+        await service.start()
+        try:
+            await gateway.events.put(
+                GatewayEvent(
+                    event_type="connection",
+                    state="working",
+                    summary="",
+                    detail={"agent_connection": "online"},
+                )
+            )
+            for _ in range(50):
+                entries = store.conversation_snapshot()["entries"]
+                assert isinstance(entries, list)
+                if any(entry["summary"] == "Agent online" for entry in entries):
+                    return gateway.stream_calls
+                await asyncio.sleep(0.02)
+            raise AssertionError("restarted event stream did not persist its event")
+        finally:
+            await service.close()
+
+    assert asyncio.run(scenario()) == 2
+
+
+def test_terminal_retry_restores_isolated_session_before_settling_turn(tmp_path, monkeypatch):
+    store = JobOsStateStore(tmp_path / "jobos.db")
+    store.initialize()
+    store.save_stored_session_id("stored-original")
+    created = store.create_conversation_turn(
+        text="Create documents",
+        context={"selected_job_id": None, "workspace": {}},
+        idempotency_key="terminal-restore-retry",
+        actor_id="device-a",
+    )
+    turn_id = str(created["turn_id"])
+    store.begin_isolated_agent_session(turn_id)
+    store.record_isolated_agent_session(turn_id, "stored-isolated")
+    real_restore = store.restore_isolated_agent_session
+    restore_attempts = 0
+
+    def flaky_restore(changed_turn_id):
+        nonlocal restore_attempts
+        restore_attempts += 1
+        if restore_attempts == 1:
+            raise sqlite3.OperationalError("transient restore failure")
+        return real_restore(changed_turn_id)
+
+    monkeypatch.setattr(store, "restore_isolated_agent_session", flaky_restore)
+    gateway = FakeGateway()
+    gateway._events = [
+        GatewayEvent(
+            event_type="assistant_message",
+            state="completed",
+            summary="Done",
+            turn_id=turn_id,
+            source_event_id="terminal-restore-complete",
+        )
+    ]
+
+    asyncio.run(ConversationService(store, gateway)._consume_gateway_events())
+
+    assert restore_attempts == 2
+    turn = store.turn_record(turn_id)
+    assert turn is not None
+    assert turn["status"] == "completed"
+    assert store.stored_session_id() == "stored-original"
+    entries = store.conversation_snapshot()["entries"]
+    assert isinstance(entries, list)
+    terminal_entries = [
+        entry
+        for entry in entries
+        if entry["summary"] == "Done"
+    ]
+    assert len(terminal_entries) == 1
+
+
+def test_status_retry_transitions_before_appending_exactly_one_event(tmp_path, monkeypatch):
+    store = JobOsStateStore(tmp_path / "jobos.db")
+    store.initialize()
+    created = store.create_conversation_turn(
+        text="Wait",
+        context={"selected_job_id": None, "workspace": {}},
+        idempotency_key="status-append-retry",
+        actor_id="device-a",
+    )
+    turn_id = str(created["turn_id"])
+    real_append = store.append_conversation_event
+    append_attempts = 0
+
+    def flaky_append(*args, **kwargs):
+        nonlocal append_attempts
+        append_attempts += 1
+        if append_attempts == 1:
+            raise sqlite3.OperationalError("transient append failure")
+        return real_append(*args, **kwargs)
+
+    monkeypatch.setattr(store, "append_conversation_event", flaky_append)
+    gateway = FakeGateway()
+    gateway._events = [
+        GatewayEvent(
+            event_type="status",
+            state="waiting",
+            summary="Choose one",
+            turn_id=turn_id,
+            source_event_id="status-append-waiting",
+        )
+    ]
+
+    asyncio.run(ConversationService(store, gateway)._consume_gateway_events())
+
+    assert append_attempts == 2
+    turn = store.turn_record(turn_id)
+    assert turn is not None
+    assert turn["status"] == "waiting"
+    entries = store.conversation_snapshot()["entries"]
+    assert isinstance(entries, list)
+    matching_entries = [
+        entry for entry in entries if entry["summary"] == "Choose one"
+    ]
+    assert len(matching_entries) == 1

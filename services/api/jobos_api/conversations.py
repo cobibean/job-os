@@ -1,14 +1,14 @@
 import asyncio
 import json
 import logging
+import sqlite3
 import time
 from collections.abc import AsyncIterator
-from contextlib import suppress
 from typing import Literal, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from .agent_gateway import AgentContext, AgentGateway
+from .agent_gateway import AgentContext, AgentGateway, GatewayEvent
 from .redaction import safe_error_summary, sanitize_user_text
 from .state_store import ConversationBusy, JobOsStateStore
 
@@ -62,18 +62,45 @@ class ConversationService:
         self.store = store
         self.gateway = gateway
         self._event_task: asyncio.Task[None] | None = None
+        self._connection_task: asyncio.Task[None] | None = None
         self._recovery_turn_id: str | None = None
         self._isolated_session_ids: set[str] = set()
         self._submission_lock = asyncio.Lock()
+        self._closing = False
 
     def _restore_session_after_isolated_turn(self, turn_id: str) -> None:
         self.store.restore_isolated_agent_session(turn_id)
 
     async def start(self) -> None:
-        with suppress(Exception):
+        self._closing = False
+        try:
             await self.gateway.start()
-        self._event_task = asyncio.create_task(self._consume_gateway_events())
+        except Exception as error:
+            logger.info("Agent gateway startup deferred (%s)", type(error).__name__)
+        self._event_task = asyncio.create_task(self._supervise_gateway_events())
+        self._connection_task = asyncio.create_task(self._maintain_gateway_connection())
         await self._recover_persisted_active_turn()
+
+    async def _maintain_gateway_connection(self) -> None:
+        delay = 0.25
+        while True:
+            try:
+                if self.gateway.connection_state == "online":
+                    delay = 0.25
+                    await asyncio.sleep(delay)
+                    continue
+                await self.gateway.start()
+                if self.gateway.connection_state == "online":
+                    delay = 0.25
+                else:
+                    await asyncio.sleep(delay)
+                    delay = min(delay * 2, 5.0)
+            except asyncio.CancelledError:
+                raise
+            except Exception as error:
+                logger.info("Agent gateway reconnect pending (%s)", type(error).__name__)
+                await asyncio.sleep(delay)
+                delay = min(delay * 2, 5.0)
 
     async def _recover_persisted_active_turn(self) -> None:
         recovery_turn_id = self.store.recovery_turn_id()
@@ -164,6 +191,10 @@ class ConversationService:
             ) from error
 
     async def close(self) -> None:
+        self._closing = True
+        if self._connection_task:
+            self._connection_task.cancel()
+            await asyncio.gather(self._connection_task, return_exceptions=True)
         if self._event_task:
             self._event_task.cancel()
             await asyncio.gather(self._event_task, return_exceptions=True)
@@ -189,7 +220,7 @@ class ConversationService:
                 self._recovery_turn_id = None
             finally:
                 if event_task is not None:
-                    self._event_task = asyncio.create_task(self._consume_gateway_events())
+                    self._event_task = asyncio.create_task(self._supervise_gateway_events())
         return self.snapshot()
 
     async def send(
@@ -382,82 +413,100 @@ class ConversationService:
             )
             self._restore_session_after_isolated_turn(turn_id)
 
-    async def _consume_gateway_events(self) -> None:
-        try:
-            async for event in self.gateway.stream_events():
-                if event.event_type == "connection":
-                    state = event.detail.get("agent_connection")
-                    if state in {"online", "connecting", "offline"}:
-                        self.store.append_conversation_event(
-                            turn_id=None,
-                            event_type="status",
-                            state="working",
-                            summary=f"Agent {state}",
-                            detail={"agent_connection": state},
-                        )
-                    continue
-                if event.event_type == "reconciliation":
-                    stored_session_id = event.detail.get("stored_session_id")
-                    if isinstance(stored_session_id, str) and (
-                        stored_session_id in self._isolated_session_ids
-                        or self.store.consume_ignored_agent_session(stored_session_id)
-                    ):
-                        self._isolated_session_ids.discard(stored_session_id)
-                        continue
-                    if isinstance(stored_session_id, str) and 0 < len(stored_session_id) <= 256:
-                        self.store.save_stored_session_id(stored_session_id)
-                    continue
-                turn_id = event.turn_id
-                if turn_id and self.store.turn_record(turn_id) is None:
-                    continue
-                is_terminal = bool(
-                    turn_id
-                    and event.state in {"completed", "failed", "interrupted"}
-                    and event.event_type in {"assistant_message", "error"}
+    def _persist_gateway_event(self, event: GatewayEvent) -> None:
+        if event.event_type == "connection":
+            state = event.detail.get("agent_connection")
+            if state in {"online", "connecting", "offline"}:
+                self.store.append_conversation_event(
+                    turn_id=None,
+                    event_type="status",
+                    state="working",
+                    summary=f"Agent {state}",
+                    detail={"agent_connection": state},
                 )
-                if is_terminal:
-                    won = self.store.settle_active_turn(
-                        str(turn_id),
-                        event.state,
-                        event_type=event.event_type,
-                        summary=event.summary,
-                        detail={**event.detail, "activity_id": event.activity_id},
-                        source_event_id=event.source_event_id,
-                        quarantine=event.detail.get("reason") == "transport_lost",
-                    )
-                    if won:
-                        self._restore_session_after_isolated_turn(str(turn_id))
-                    continue
-                event_id = self.store.append_conversation_event(
-                    turn_id=turn_id,
-                    event_type=event.event_type,
-                    state=event.state,
-                    summary=event.summary,
-                    detail={**event.detail, "activity_id": event.activity_id},
-                    source_event_id=event.source_event_id,
-                )
-                if (
-                    event_id is not None
-                    and turn_id
-                    and event.event_type == "status"
-                    and event.state == "waiting"
-                ):
-                    self.store.transition_active_turn_status(
-                        turn_id, "waiting", expected=("queued", "running")
-                    )
-                elif (
-                    event_id is not None
-                    and turn_id
-                    and event.event_type == "status"
-                    and event.state == "working"
-                ):
-                    self.store.transition_active_turn_status(
-                        turn_id, "running", expected=("waiting",)
-                    )
-        except asyncio.CancelledError:
-            raise
-        except Exception:
             return
+        if event.event_type == "reconciliation":
+            stored_session_id = event.detail.get("stored_session_id")
+            if isinstance(stored_session_id, str) and (
+                stored_session_id in self._isolated_session_ids
+                or self.store.consume_ignored_agent_session(stored_session_id)
+            ):
+                self._isolated_session_ids.discard(stored_session_id)
+                return
+            if isinstance(stored_session_id, str) and 0 < len(stored_session_id) <= 256:
+                self.store.save_stored_session_id(stored_session_id)
+            return
+        turn_id = event.turn_id
+        if turn_id and self.store.turn_record(turn_id) is None:
+            return
+        is_terminal = bool(
+            turn_id
+            and event.state in {"completed", "failed", "interrupted"}
+            and event.event_type in {"assistant_message", "error"}
+        )
+        if is_terminal:
+            self._restore_session_after_isolated_turn(str(turn_id))
+            self.store.settle_active_turn(
+                str(turn_id),
+                event.state,
+                event_type=event.event_type,
+                summary=event.summary,
+                detail={**event.detail, "activity_id": event.activity_id},
+                source_event_id=event.source_event_id,
+                quarantine=event.detail.get("reason") == "transport_lost",
+            )
+            return
+        if (
+            turn_id
+            and event.event_type == "status"
+            and event.state == "waiting"
+        ):
+            self.store.transition_active_turn_status(
+                turn_id, "waiting", expected=("queued", "running")
+            )
+        elif (
+            turn_id
+            and event.event_type == "status"
+            and event.state == "working"
+        ):
+            self.store.transition_active_turn_status(
+                turn_id, "running", expected=("waiting",)
+            )
+        self.store.append_conversation_event(
+            turn_id=turn_id,
+            event_type=event.event_type,
+            state=event.state,
+            summary=event.summary,
+            detail={**event.detail, "activity_id": event.activity_id},
+            source_event_id=event.source_event_id,
+        )
+
+    async def _consume_gateway_events(self) -> None:
+        async for event in self.gateway.stream_events():
+            retry_delay = 0.05
+            while True:
+                try:
+                    self._persist_gateway_event(event)
+                    break
+                except asyncio.CancelledError:
+                    raise
+                except (sqlite3.Error, OSError) as error:
+                    logger.warning(
+                        "Agent event persistence retrying (%s)", type(error).__name__
+                    )
+                    await asyncio.sleep(retry_delay)
+                    retry_delay = min(retry_delay * 2, 1.0)
+
+    async def _supervise_gateway_events(self) -> None:
+        while not self._closing:
+            try:
+                await self._consume_gateway_events()
+            except asyncio.CancelledError:
+                raise
+            except Exception as error:
+                logger.warning("Agent event stream restarting (%s)", type(error).__name__)
+            if not self._closing:
+                await asyncio.sleep(0.1)
 
 
 def encode_sse(entry: dict[str, object]) -> str:
