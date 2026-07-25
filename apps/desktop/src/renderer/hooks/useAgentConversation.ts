@@ -323,13 +323,14 @@ export function projectConversation(entries: ConversationEvent[]): ProjectedConv
 
     if (entry.type === 'assistant_message') {
       const phase = detailString(entry, 'type')
-      const nextText = phase === 'message.start' ? '' : entry.summary
+      const eventText = detailString(entry, 'text') ?? entry.summary
+      const nextText = phase === 'message.start' ? '' : eventText
       if (!turn.assistant) {
         turn.assistant = { ...base, id: `assistant-${entry.turnId}`, kind: 'assistant', text: nextText }
       } else {
         const text = phase === 'message.complete' || ['completed', 'failed', 'interrupted'].includes(entry.state)
-          ? terminalAssistantText(turn.assistant.text, entry.summary)
-          : `${turn.assistant.text}${entry.summary}`
+          ? terminalAssistantText(turn.assistant.text, eventText)
+          : `${turn.assistant.text}${eventText}`
         turn.assistant = { ...turn.assistant, state: entry.state, text }
       }
       if (entry.state === 'failed' || entry.state === 'interrupted') {

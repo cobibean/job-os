@@ -972,6 +972,21 @@ def test_message_complete_keeps_turn_id_then_clears_association_exactly_once(tmp
     assert repeated is None
 
 
+def test_message_complete_preserves_long_assistant_text_separately_from_summary(tmp_path):
+    gateway = HermesWebSocketGateway(url="ws://127.0.0.1:9119/api/ws", token=TOKEN, cwd=tmp_path)
+    gateway._live_session_id = "live-1"
+    gateway._active_turn_id = "turn-1"
+    text = "x" * 100_050
+
+    normalized = gateway.normalize_frame(
+        event("message.complete", "live-1", {"status": "complete", "text": text})
+    )
+
+    assert normalized is not None
+    assert normalized.summary == text[:1_000]
+    assert normalized.detail["text"] == text[:100_000] + "…"
+
+
 def test_connection_url_preserves_query_and_never_exposes_token_in_repr_or_errors(tmp_path):
     class FailingConnector:
         def __init__(self):
