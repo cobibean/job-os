@@ -12,7 +12,12 @@ import websockets
 from .activity import ActivityNormalizer
 from .agent_gateway import AgentContext, ConnectionState, GatewayEvent
 from .browser_policy import browser_title_contains_credentials
-from .redaction import redact_detail, safe_error_summary, sanitize_text
+from .redaction import (
+    redact_detail,
+    safe_error_summary,
+    sanitize_assistant_text,
+    sanitize_text,
+)
 
 
 def _bounded_reference(value: object, limit: int) -> str | None:
@@ -609,7 +614,15 @@ class HermesWebSocketGateway:
             text = frame.get("text") or frame.get("delta") or ""
             frame["text"] = text
             safe_detail = redact_detail(frame)
-            safe_text = str(safe_detail.get("text") or "Agent response")
+            safe_text = (
+                sanitize_assistant_text(str(text))
+                if frame_type == "message.complete"
+                else sanitize_text(str(text))
+            )
+            safe_detail["text"] = safe_text
+            delta = frame.get("delta")
+            if isinstance(delta, str):
+                safe_detail["delta"] = sanitize_text(delta)
             state = "working"
             if frame_type == "message.complete":
                 state = {

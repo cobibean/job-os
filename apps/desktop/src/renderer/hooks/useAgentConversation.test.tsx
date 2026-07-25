@@ -141,6 +141,37 @@ test('assistant deltas form one streaming response and completion replaces it wi
   }))
 })
 
+test('assistant completion renders full transcript text instead of its bounded event summary', () => {
+  const fullText = `Long response ${'x'.repeat(2_000)}`
+  const [turn] = projectConversation([
+    event(1, { type: 'assistant_message', summary: 'Long ', detail: { type: 'message.delta', text: 'Long ' } }),
+    event(2, {
+      type: 'assistant_message',
+      state: 'completed',
+      summary: `${fullText.slice(0, 500)}…`,
+      detail: { type: 'message.complete', text: fullText }
+    })
+  ])
+
+  expect(turn).toEqual(expect.objectContaining({
+    kind: 'agent-turn',
+    assistant: expect.objectContaining({ text: fullText, state: 'completed' })
+  }))
+})
+
+test.each(['[protected path]', '[protected signed URL]'])('%s cannot erase an already streamed assistant response', placeholder => {
+  const visible = 'Saved the cover letter to /Users/person/.hermes/workspaces/acme/cover-letter.pdf.'
+  const [turn] = projectConversation([
+    event(1, { type: 'assistant_message', summary: visible, detail: { type: 'message.delta', text: visible } }),
+    event(2, { type: 'assistant_message', state: 'completed', summary: placeholder, detail: { type: 'message.complete', text: placeholder } })
+  ])
+
+  expect(turn).toEqual(expect.objectContaining({
+    kind: 'agent-turn',
+    assistant: expect.objectContaining({ text: visible, state: 'completed' })
+  }))
+})
+
 test.each([
   ['running', event(2, { type: 'assistant_message', state: 'working', summary: 'Drafting', detail: { type: 'message.delta' } })],
   ['waiting', event(2, { type: 'status', state: 'waiting', summary: 'Choose one', detail: { actionable: true } })],
