@@ -12,7 +12,14 @@ import {
   RefreshCw
 } from 'lucide-react'
 
-import type { JobArtifactsState, JobListItem, PdfArtifactPayload } from '../../shared/contracts'
+import type {
+  ArtifactMediaType,
+  DocumentArtifact,
+  DocumentKey,
+  JobArtifactsState,
+  JobListItem,
+  PdfArtifactPayload
+} from '../../shared/contracts'
 import { PdfPreview } from './PdfPreview'
 
 interface DocumentWorkspaceProps {
@@ -24,6 +31,25 @@ interface DocumentWorkspaceProps {
   onViewChange: (artifactId: string | null, page: number, zoom: number) => void
 }
 
+const PDF: ArtifactMediaType = 'application/pdf'
+const DOCX: ArtifactMediaType = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+const documentOrder: DocumentKey[] = ['resume', 'cover_letter']
+
+interface LogicalRevision {
+  documentKey: DocumentKey
+  documentLabel: string
+  sourceRevision: string
+  renderSequence: number
+  artifacts: DocumentArtifact[]
+  representative: DocumentArtifact
+}
+
+interface LogicalDocument {
+  documentKey: DocumentKey
+  documentLabel: string
+  revisions: LogicalRevision[]
+}
+
 const emptyState = (jobId = ''): JobArtifactsState => ({
   jobId,
   artifacts: [],
@@ -31,6 +57,68 @@ const emptyState = (jobId = ''): JobArtifactsState => ({
   lastSuccessfulArtifactId: null,
   approvedArtifactId: null
 })
+
+function latestByFormat(artifacts: DocumentArtifact[], mediaType: ArtifactMediaType) {
+  return artifacts
+    .filter(artifact => artifact.mediaType === mediaType)
+    .sort((left, right) => right.renderSequence - left.renderSequence)[0]
+}
+
+function revisionRepresentative(artifacts: DocumentArtifact[]) {
+  const succeeded = artifacts.filter(artifact => artifact.renderStatus === 'succeeded')
+  return latestByFormat(succeeded, PDF)
+    ?? latestByFormat(succeeded, DOCX)
+    ?? latestByFormat(artifacts, PDF)
+    ?? latestByFormat(artifacts, DOCX)
+}
+
+function buildDocuments(artifacts: DocumentArtifact[]): LogicalDocument[] {
+  return documentOrder.flatMap(documentKey => {
+    const matching = artifacts.filter(artifact => artifact.documentKey === documentKey)
+    if (!matching.length) return []
+    const grouped = new Map<string, DocumentArtifact[]>()
+    for (const artifact of matching) {
+      const revision = grouped.get(artifact.sourceRevision) ?? []
+      revision.push(artifact)
+      grouped.set(artifact.sourceRevision, revision)
+    }
+    const revisions = Array.from(grouped.entries()).map(([sourceRevision, variants]) => ({
+      documentKey,
+      documentLabel: variants[0]?.documentLabel ?? (documentKey === 'resume' ? 'Resume' : 'Cover Letter'),
+      sourceRevision,
+      renderSequence: Math.max(...variants.map(artifact => artifact.renderSequence)),
+      artifacts: variants,
+      representative: revisionRepresentative(variants)!
+    })).sort((left, right) => right.renderSequence - left.renderSequence)
+    return [{
+      documentKey,
+      documentLabel: revisions[0]?.documentLabel ?? (documentKey === 'resume' ? 'Resume' : 'Cover Letter'),
+      revisions
+    }]
+  })
+}
+
+function findRevision(documents: LogicalDocument[], artifactId: string | null) {
+  if (!artifactId) return null
+  for (const document of documents) {
+    const revision = document.revisions.find(item => item.artifacts.some(artifact => artifact.artifactId === artifactId))
+    if (revision) return { document, revision }
+  }
+  return null
+}
+
+function chooseLogicalPreview(next: JobArtifactsState, preferredId: string | null) {
+  const documents = buildDocuments(next.artifacts)
+  const preferred = findRevision(documents, preferredId)
+  if (preferred?.revision.representative.renderStatus === 'succeeded') return preferred
+  for (const document of documents) {
+    const revision = document.revisions.find(item => item.representative.renderStatus === 'succeeded')
+    if (revision) return { document, revision }
+  }
+  const document = documents[0]
+  const revision = document?.revisions[0]
+  return document && revision ? { document, revision } : null
+}
 
 export function DocumentWorkspace(props: DocumentWorkspaceProps) {
   const bridge = useRef(window.jobos?.documents).current
@@ -42,10 +130,12 @@ export function DocumentWorkspace(props: DocumentWorkspaceProps) {
   const [payload, setPayload] = useState<PdfArtifactPayload | null>(null)
   const [loading, setLoading] = useState(false)
   const [message, setMessage] = useState('')
+  const [exportOpen, setExportOpen] = useState(false)
+  const [exportBusy, setExportBusy] = useState(false)
+  const exportButton = useRef<HTMLButtonElement>(null)
+  const exportMenu = useRef<HTMLDivElement>(null)
   const incomingViewKey = `${props.restoredArtifactId ?? ''}:${props.restoredPage}:${props.restoredZoom}`
-  const persistedView = useRef(
-    incomingViewKey
-  )
+  const persistedView = useRef(incomingViewKey)
   const restoredPropsView = useRef(incomingViewKey)
   const restoringIncomingView = props.hydrated && incomingViewKey !== restoredPropsView.current
   const selectedId = useRef<string | null>(props.restoredArtifactId)
@@ -67,43 +157,44 @@ export function DocumentWorkspace(props: DocumentWorkspaceProps) {
   }, [incomingViewKey, props.hydrated, props.restoredArtifactId, props.restoredPage, props.restoredZoom])
 
   const stateMatchesJob = state.jobId === props.job?.jobId
-  const artifactById = useMemo(
-    () => new Map(
-      stateMatchesJob
-        ? state.artifacts.map(artifact => [artifact.artifactId, artifact])
-        : []
-    ),
+  const documents = useMemo(
+    () => buildDocuments(stateMatchesJob ? state.artifacts : []),
     [state.artifacts, stateMatchesJob]
   )
-  const activeArtifact = activeId ? artifactById.get(activeId) ?? null : null
-  const currentArtifact = state.currentArtifactId
-    ? artifactById.get(state.currentArtifactId) ?? null
-    : null
-  const lastSuccessful = state.lastSuccessfulArtifactId
-    ? artifactById.get(state.lastSuccessfulArtifactId) ?? null
-    : null
+  const activeSelection = useMemo(() => findRevision(documents, activeId), [activeId, documents])
+  const activeDocument = activeSelection?.document ?? null
+  const activeRevision = activeSelection?.revision ?? null
+  const activeArtifact = activeRevision?.representative ?? null
+  const activeDocumentIndex = activeDocument
+    ? documents.findIndex(document => document.documentKey === activeDocument.documentKey)
+    : -1
+  const currentRevision = activeDocument?.revisions[0] ?? null
+  const currentArtifact = currentRevision?.artifacts
+    .slice()
+    .sort((left, right) => right.renderSequence - left.renderSequence)[0] ?? null
+  const lastSuccessful = activeDocument?.revisions.find(revision => revision.representative.renderStatus === 'succeeded')?.representative ?? null
+  const exportArtifacts = activeRevision?.artifacts.filter(artifact => artifact.renderStatus === 'succeeded') ?? []
+  const exportPdf = latestByFormat(exportArtifacts, PDF)
+  const exportDocx = latestByFormat(exportArtifacts, DOCX)
 
   const choosePreview = useCallback((next: JobArtifactsState, preferredId: string | null) => {
-    const byId = new Map(next.artifacts.map(artifact => [artifact.artifactId, artifact]))
-    const current = next.currentArtifactId ? byId.get(next.currentArtifactId) : undefined
-    const lastGood = next.lastSuccessfulArtifactId
-      ? byId.get(next.lastSuccessfulArtifactId)
-      : undefined
-    const preferred = preferredId ? byId.get(preferredId) : undefined
-    const usable = (artifact: typeof current) => artifact?.renderStatus === 'succeeded'
-    const chosen = usable(preferred)
-      ? preferred
-      : usable(current)
-        ? current
-        : usable(lastGood)
-          ? lastGood
-          : next.artifacts.find(artifact => artifact.renderStatus === 'succeeded')
-    const nextId = chosen?.artifactId ?? null
+    const chosen = chooseLogicalPreview(next, preferredId)
+    const nextId = chosen?.revision.representative.artifactId ?? null
     const changed = selectedId.current !== nextId
+    const restoredLogicalRevision = findRevision(buildDocuments(next.artifacts), restoredArtifactId.current)
+    const preservesRestoredRevision = Boolean(
+      restoredLogicalRevision
+      && chosen
+      && restoredLogicalRevision.document.documentKey === chosen.document.documentKey
+      && restoredLogicalRevision.revision.sourceRevision === chosen.revision.sourceRevision
+    )
     selectedId.current = nextId
     setActiveId(nextId)
-    if (changed) setPayload(null)
-    if (changed && nextId !== restoredArtifactId.current) {
+    if (changed) {
+      setPayload(null)
+      setExportOpen(false)
+    }
+    if (changed && !preservesRestoredRevision) {
       setPage(1)
       setZoom(1)
       setPageCount(0)
@@ -112,11 +203,7 @@ export function DocumentWorkspace(props: DocumentWorkspaceProps) {
   }, [])
 
   useEffect(() => {
-    const jobChanged = Boolean(
-      jobId
-      && lastNonNullJobId.current
-      && lastNonNullJobId.current !== jobId
-    )
+    const jobChanged = Boolean(jobId && lastNonNullJobId.current && lastNonNullJobId.current !== jobId)
     if (jobId) lastNonNullJobId.current = jobId
     if (!jobId || !bridge) {
       setState(emptyState(jobId ?? undefined))
@@ -131,14 +218,14 @@ export function DocumentWorkspace(props: DocumentWorkspaceProps) {
     selectedId.current = pendingId
     setActiveId(pendingId)
     setPayload(null)
+    setExportOpen(false)
     setLoading(true)
     setMessage('Loading registered artifacts…')
     bridge.list(jobId).then(listed => {
       if (!active) return
       setState(listed)
-      const listedId = choosePreview(listed, restoredArtifactId.current)
-      return bridge.refresh(jobId)
-        .then(refreshed => ({ refreshed, listedId }))
+      const listedId = choosePreview(listed, pendingId)
+      return bridge.refresh(jobId).then(refreshed => ({ refreshed, listedId }))
     }).then(result => {
       if (!active || !result) return
       const { refreshed, listedId } = result
@@ -155,9 +242,7 @@ export function DocumentWorkspace(props: DocumentWorkspaceProps) {
 
   useEffect(() => {
     setPayload(null)
-    if (!activeArtifact?.previewAvailable || !bridge) {
-      return
-    }
+    if (!activeArtifact?.previewAvailable || !bridge) return
     let active = true
     setLoading(true)
     bridge.loadPdf(activeArtifact.artifactId).then(value => {
@@ -186,22 +271,36 @@ export function DocumentWorkspace(props: DocumentWorkspaceProps) {
     if (pageCount > 0 && page > pageCount) setPage(pageCount)
   }, [page, pageCount])
 
+  useEffect(() => {
+    if (!exportOpen) return
+    const closeOnPointerDown = (event: PointerEvent) => {
+      const target = event.target as Node
+      if (!exportMenu.current?.contains(target) && !exportButton.current?.contains(target)) {
+        setExportOpen(false)
+      }
+    }
+    document.addEventListener('pointerdown', closeOnPointerDown)
+    return () => document.removeEventListener('pointerdown', closeOnPointerDown)
+  }, [exportOpen])
+
   const refresh = async () => {
     if (!props.job || !bridge) return
+    const requestJobId = props.job.jobId
     setLoading(true)
     try {
-      const refreshed = await bridge.refresh(props.job.jobId)
+      const refreshed = await bridge.refresh(requestJobId)
+      if (activeJobId.current !== requestJobId) return
       setState(refreshed)
       choosePreview(refreshed, selectedId.current)
       setMessage('Checked for newer artifacts')
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : 'Artifact refresh failed')
+      if (activeJobId.current === requestJobId) setMessage(error instanceof Error ? error.message : 'Artifact refresh failed')
     } finally {
-      setLoading(false)
+      if (activeJobId.current === requestJobId) setLoading(false)
     }
   }
 
-  const action = async (name: 'export' | 'reveal' | 'open') => {
+  const nativeAction = async (name: 'reveal' | 'open') => {
     const presentedArtifact = activeArtifact
     if (!presentedArtifact || !bridge) return
     try {
@@ -211,11 +310,45 @@ export function DocumentWorkspace(props: DocumentWorkspaceProps) {
     }
   }
 
+  const exportArtifact = async (artifact: DocumentArtifact) => {
+    const requestJobId = props.job?.jobId
+    if (!bridge || !requestJobId || exportBusy) return
+    setExportOpen(false)
+    setExportBusy(true)
+    try {
+      const result = await bridge.export(artifact.artifactId)
+      if (activeJobId.current === requestJobId) setMessage(result)
+    } catch (error) {
+      if (activeJobId.current === requestJobId) {
+        setMessage(error instanceof Error ? error.message : 'Document export failed')
+      }
+    } finally {
+      setExportBusy(false)
+    }
+  }
+
+  const selectRevision = (revision: LogicalRevision) => {
+    const nextId = revision.representative.artifactId
+    if (nextId === activeId) return
+    selectedId.current = nextId
+    setActiveId(nextId)
+    setPayload(null)
+    setExportOpen(false)
+    setPage(1)
+    setZoom(1)
+    setPageCount(0)
+  }
+
+  const selectDocument = (index: number) => {
+    const document = documents[index]
+    if (!document) return
+    const revision = document.revisions.find(item => item.representative.renderStatus === 'succeeded') ?? document.revisions[0]
+    if (revision) selectRevision(revision)
+  }
+
   const approve = async () => {
     const presentedArtifact = activeArtifact
-    if (!props.job || !presentedArtifact || !bridge || presentedArtifact.renderStatus !== 'succeeded') {
-      return
-    }
+    if (!props.job || !presentedArtifact || presentedArtifact.documentKey !== 'resume' || !bridge || presentedArtifact.renderStatus !== 'succeeded') return
     const requestJobId = props.job.jobId
     setLoading(true)
     try {
@@ -225,7 +358,7 @@ export function DocumentWorkspace(props: DocumentWorkspaceProps) {
       setMessage(`Approved revision ${presentedArtifact.artifactRevision}`)
     } catch (error) {
       if (activeJobId.current !== requestJobId) return
-      setMessage(error instanceof Error ? error.message : 'Resume approval failed')
+      setMessage(error instanceof Error ? error.message : 'Document approval failed')
     } finally {
       if (activeJobId.current === requestJobId) setLoading(false)
     }
@@ -236,8 +369,8 @@ export function DocumentWorkspace(props: DocumentWorkspaceProps) {
       <main className="document-workspace panel-region">
         <section className="workspace-empty">
           <span className="empty-orbit"><FileText aria-hidden="true" size={23} /></span>
-          <h1>Select a job to review its resume</h1>
-          <p>Registered artifacts appear here without filesystem browsing.</p>
+          <h1>Select a job to review its documents</h1>
+          <p>Registered document artifacts appear here without filesystem browsing.</p>
         </section>
       </main>
     )
@@ -247,46 +380,62 @@ export function DocumentWorkspace(props: DocumentWorkspaceProps) {
     <main className="document-workspace panel-region">
       <div className="document-heading">
         <div>
-          <span className="document-job">Resume for {props.job.company} · {props.job.title}</span>
-          <strong>{activeArtifact?.filename ?? 'Resume artifacts'}</strong>
+          <span className="document-job">Documents for {props.job.company} · {props.job.title}</span>
+          <strong>{activeArtifact?.filename ?? 'Document artifacts'}</strong>
         </div>
+        <nav aria-label="Job documents" className="document-navigation">
+          <button aria-label="Previous document" disabled={activeDocumentIndex <= 0} onClick={() => selectDocument(activeDocumentIndex - 1)} type="button"><ChevronLeft aria-hidden="true" size={14} /></button>
+          <span className="document-position">
+            <strong>{activeDocument?.documentLabel ?? 'Document'}</strong>
+            <span>{activeDocumentIndex >= 0 ? `${activeDocumentIndex + 1} of ${documents.length}` : `0 of ${documents.length}`}</span>
+          </span>
+          <button aria-label="Next document" disabled={activeDocumentIndex < 0 || activeDocumentIndex >= documents.length - 1} onClick={() => selectDocument(activeDocumentIndex + 1)} type="button"><ChevronRight aria-hidden="true" size={14} /></button>
+        </nav>
         <select
-          aria-label="Resume revision"
+          aria-label={`${activeDocument?.documentLabel ?? 'Document'} revision`}
           onChange={event => {
-            const nextId = event.target.value || null
-            selectedId.current = nextId
-            setActiveId(nextId)
-            setPayload(null)
-            setPage(1)
-            setZoom(1)
-            setPageCount(0)
+            const revision = activeDocument?.revisions.find(item => item.representative.artifactId === event.target.value)
+            if (revision) selectRevision(revision)
           }}
-          value={activeId ?? ''}
+          value={activeArtifact?.artifactId ?? ''}
         >
           <option value="">No artifact</option>
-          {state.artifacts.map(artifact => (
-            <option key={artifact.artifactId} value={artifact.artifactId}>
-              {artifact.artifactRevision} · {artifact.renderStatus}
-              {artifact.isApproved ? ' · approved' : artifact.isCurrent ? ' · newest' : ''}
-            </option>
-          ))}
+          {activeDocument?.revisions.map(revision => {
+            const artifact = revision.representative
+            return (
+              <option key={`${revision.documentKey}:${revision.sourceRevision}`} value={artifact.artifactId}>
+                {artifact.artifactRevision} · {artifact.renderStatus}
+                {artifact.isApproved ? ' · approved' : revision === currentRevision ? ' · newest' : ''}
+              </option>
+            )
+          })}
         </select>
       </div>
 
       <div className="document-toolbar" role="toolbar" aria-label="Document controls">
         <button disabled={!bridge || loading} onClick={refresh} type="button"><RefreshCw aria-hidden="true" size={14} /> Refresh</button>
-        <button disabled={!activeArtifact || !bridge} onClick={() => action('open')} type="button"><ExternalLink aria-hidden="true" size={14} /> Open</button>
-        <button disabled={!activeArtifact || !bridge} onClick={() => action('reveal')} type="button"><FolderOpen aria-hidden="true" size={14} /> Reveal</button>
-        <button disabled={!activeArtifact || !bridge} onClick={() => action('export')} type="button"><Download aria-hidden="true" size={14} /> Export</button>
-        <button
-          className="approve-revision"
-          disabled={!activeArtifact || activeArtifact.renderStatus !== 'succeeded' || activeArtifact.isApproved || !bridge || loading}
-          onClick={approve}
-          type="button"
-        >
-          <CheckCircle2 aria-hidden="true" size={14} />
-          {activeArtifact?.isApproved ? 'Approved revision' : 'Approve this revision'}
-        </button>
+        <button disabled={!activeArtifact || !bridge} onClick={() => nativeAction('open')} type="button"><ExternalLink aria-hidden="true" size={14} /> Open</button>
+        <button disabled={!activeArtifact || !bridge} onClick={() => nativeAction('reveal')} type="button"><FolderOpen aria-hidden="true" size={14} /> Reveal</button>
+        <div className="document-export">
+          <button ref={exportButton} aria-expanded={exportOpen} aria-haspopup="menu" disabled={!bridge || exportBusy || (!exportPdf && !exportDocx)} onClick={() => setExportOpen(value => !value)} type="button"><Download aria-hidden="true" size={14} /> Export</button>
+          {exportOpen ? (
+            <div ref={exportMenu} aria-label="Export document" className="document-export-menu" onKeyDown={event => { if (event.key === 'Escape') { setExportOpen(false); exportButton.current?.focus() } }} role="menu">
+              {exportPdf ? <button disabled={exportBusy} onClick={() => exportArtifact(exportPdf)} role="menuitem" type="button">Export PDF</button> : null}
+              {exportDocx ? <button disabled={exportBusy} onClick={() => exportArtifact(exportDocx)} role="menuitem" type="button">Export DOCX</button> : null}
+            </div>
+          ) : null}
+        </div>
+        {activeArtifact?.documentKey === 'resume' && activeArtifact.mediaType === PDF ? (
+          <button
+            className="approve-revision"
+            disabled={activeArtifact.renderStatus !== 'succeeded' || activeArtifact.isApproved || !bridge || loading}
+            onClick={approve}
+            type="button"
+          >
+            <CheckCircle2 aria-hidden="true" size={14} />
+            {activeArtifact.isApproved ? 'Approved revision' : 'Approve this revision'}
+          </button>
+        ) : null}
         <span className="document-toolbar-spacer" />
         <button aria-label="Previous page" disabled={page <= 1 || !payload} onClick={() => setPage(value => Math.max(1, value - 1))} type="button"><ChevronLeft aria-hidden="true" size={14} /></button>
         <span className="page-count">Page {page} of {pageCount || '—'}</span>
@@ -302,11 +451,11 @@ export function DocumentWorkspace(props: DocumentWorkspaceProps) {
           {lastSuccessful ? ` Showing last successful revision ${lastSuccessful.artifactRevision}.` : ''}
         </div>
       ) : currentArtifact?.renderStatus === 'rendering' ? (
-        <div className="render-progress" role="status">A newer revision is rendering. The last successful artifact remains available.</div>
+        <div className="render-progress" role="status">A newer revision is rendering. The last successful document remains available.</div>
       ) : currentArtifact ? (
         <div className="render-current" role="status">Newest successful revision · {currentArtifact.artifactRevision} · source {currentArtifact.sourceRevision}</div>
       ) : (
-        <div className="render-progress" role="status">No registered render is available for this job.</div>
+        <div className="render-progress" role="status">No registered render is available for this document.</div>
       )}
 
       {activeArtifact ? (
@@ -318,7 +467,7 @@ export function DocumentWorkspace(props: DocumentWorkspaceProps) {
       <section className="document-canvas">
         {payload && activeArtifact && payload.artifactId === activeArtifact.artifactId && activeArtifact.previewAvailable ? (
           <PdfPreview key={payload.artifactId} bytes={payload.bytes} onPageCount={setPageCount} page={page} zoom={zoom} />
-        ) : activeArtifact?.mediaType === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' ? (
+        ) : activeArtifact?.mediaType === DOCX ? (
           <div className="document-external-only">
             <FileText aria-hidden="true" size={28} />
             <h1>DOCX stays external</h1>
@@ -328,7 +477,7 @@ export function DocumentWorkspace(props: DocumentWorkspaceProps) {
           <div className="document-external-only">
             <FileText aria-hidden="true" size={28} />
             <h1>No trusted preview yet</h1>
-            <p>Refresh after the agent produces and registers a PDF resume for this job.</p>
+            <p>Refresh after the agent produces and registers a PDF document for this job.</p>
           </div>
         )}
       </section>

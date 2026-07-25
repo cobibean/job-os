@@ -14,6 +14,7 @@ ARTIFACT_ID_PATTERN = re.compile(r"^art_[A-Za-z0-9_-]{16,80}$")
 PDF_MEDIA_TYPE = "application/pdf"
 DOCX_MEDIA_TYPE = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 ALLOWED_MEDIA_TYPES = {PDF_MEDIA_TYPE, DOCX_MEDIA_TYPE}
+DOCUMENT_KEYS = {"resume", "cover_letter"}
 
 
 class ArtifactTrustError(ValueError):
@@ -31,6 +32,8 @@ class ArtifactSource(Protocol):
 @dataclass(frozen=True)
 class VerifiedArtifact:
     job_id: str
+    document_key: Literal["resume", "cover_letter"]
+    document_label: str
     source_revision: str
     artifact_revision: str
     media_type: str
@@ -63,6 +66,9 @@ class ArtifactRecord(BaseModel):
 
     artifact_id: str
     job_id: str
+    document_key: Literal["resume", "cover_letter"]
+    document_label: str
+    render_sequence: int
     source_revision: str
     artifact_revision: str
     media_type: str
@@ -142,6 +148,13 @@ def read_source_artifact(
     media_type = raw["media_type"]
     if media_type not in ALLOWED_MEDIA_TYPES:
         raise ArtifactTrustError("Artifact media type is not allowlisted")
+    document_key = raw.get("document_key", "resume")
+    document_label = raw.get("document_label", "Resume")
+    if document_key not in DOCUMENT_KEYS:
+        raise ArtifactTrustError("Artifact document key is invalid")
+    if not isinstance(document_label, str) or not 1 <= len(document_label.strip()) <= 80:
+        raise ArtifactTrustError("Artifact document label is invalid")
+    document_label = document_label.strip()
     render_sequence = raw.get("render_sequence")
     if (
         not isinstance(render_sequence, int)
@@ -154,6 +167,8 @@ def read_source_artifact(
         message = raw.get("failure_message")
         return VerifiedArtifact(
             job_id=raw["job_id"],
+            document_key=document_key,
+            document_label=document_label,
             source_revision=raw["source_revision"],
             artifact_revision=raw["artifact_revision"],
             media_type=media_type,
@@ -186,6 +201,8 @@ def read_source_artifact(
         raise ArtifactTrustError("Artifact bytes do not match DOCX metadata")
     return VerifiedArtifact(
         job_id=raw["job_id"],
+        document_key=document_key,
+        document_label=document_label,
         source_revision=raw["source_revision"],
         artifact_revision=raw["artifact_revision"],
         media_type=media_type,
@@ -220,6 +237,9 @@ def artifact_record(
     return ArtifactRecord(
         artifact_id=artifact_id,
         job_id=str(row["job_id"]),
+        document_key=row["document_key"],
+        document_label=str(row["document_label"]),
+        render_sequence=int(row["render_sequence"]),
         source_revision=str(row["source_revision"]),
         artifact_revision=str(row["artifact_revision"]),
         media_type=str(row["media_type"]),

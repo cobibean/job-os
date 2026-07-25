@@ -224,6 +224,35 @@ MIGRATIONS = (
             "ALTER TABLE conversations ADD COLUMN ignored_agent_session_id TEXT",
         ),
     ),
+    Migration(
+        version=11,
+        statements=(
+            "ALTER TABLE document_artifacts ADD COLUMN document_key TEXT NOT NULL DEFAULT 'resume'",
+            "ALTER TABLE document_artifacts ADD COLUMN document_label TEXT "
+            "NOT NULL DEFAULT 'Resume'",
+            "ALTER TABLE document_artifacts ADD COLUMN render_sequence INTEGER NOT NULL DEFAULT 0",
+            """
+            UPDATE document_artifacts AS artifact
+            SET render_sequence = (
+                SELECT COUNT(*)
+                FROM document_artifacts AS ordered
+                WHERE ordered.job_id = artifact.job_id
+                  AND ordered.rowid <= artifact.rowid
+            )
+            """,
+            """
+            UPDATE job_document_state
+            SET approved_artifact_id = NULL,
+                approved_at = NULL,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE approved_artifact_id IN (
+                SELECT artifact_id
+                FROM document_artifacts
+                WHERE media_type != 'application/pdf'
+            )
+            """,
+        ),
+    ),
 )
 SCHEMA_VERSION = MIGRATIONS[-1].version
 
@@ -1318,7 +1347,8 @@ class JobOsStateStore:
             ids_by_sequence: dict[int, tuple[str, str]] = {}
             for artifact in artifacts:
                 row = connection.execute(
-                    "SELECT artifact_id FROM document_artifacts WHERE registry_key = ?",
+                    "SELECT artifact_id, document_key, document_label, render_sequence "
+                    "FROM document_artifacts WHERE registry_key = ?",
                     (artifact.registry_key,),
                 ).fetchone()
                 artifact_id = row[0] if row else f"art_{secrets.token_urlsafe(18)}"
@@ -1326,15 +1356,18 @@ class JobOsStateStore:
                     connection.execute(
                         """
                         INSERT INTO document_artifacts(
-                            artifact_id, registry_key, job_id, source_revision,
-                            artifact_revision, media_type, sha256, render_status,
-                            canonical_path, filename, failure_message
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            artifact_id, registry_key, job_id, document_key, document_label,
+                            render_sequence, source_revision, artifact_revision, media_type,
+                            sha256, render_status, canonical_path, filename, failure_message
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         """,
                         (
                             artifact_id,
                             artifact.registry_key,
                             artifact.job_id,
+                            artifact.document_key,
+                            artifact.document_label,
+                            artifact.render_sequence,
                             artifact.source_revision,
                             artifact.artifact_revision,
                             artifact.media_type,
@@ -1345,6 +1378,34 @@ class JobOsStateStore:
                             artifact.failure_message,
                         ),
                     )
+                elif (
+                    row[1] != artifact.document_key
+                    or row[2] != artifact.document_label
+                    or row[3] != artifact.render_sequence
+                ):
+                    connection.execute(
+                        """
+                        UPDATE document_artifacts
+                        SET document_key = ?, document_label = ?, render_sequence = ?
+                        WHERE artifact_id = ?
+                        """,
+                        (
+                            artifact.document_key,
+                            artifact.document_label,
+                            artifact.render_sequence,
+                            artifact_id,
+                        ),
+                    )
+                    if artifact.document_key != "resume":
+                        connection.execute(
+                            """
+                            UPDATE job_document_state
+                            SET approved_artifact_id = NULL,
+                                updated_at = CURRENT_TIMESTAMP
+                            WHERE approved_artifact_id = ?
+                            """,
+                            (artifact_id,),
+                        )
                 ids_by_sequence[artifact.render_sequence] = (
                     artifact_id,
                     artifact.render_status,
@@ -1399,15 +1460,17 @@ class JobOsStateStore:
     def approve_document_artifact(self, job_id: str, artifact_id: str) -> None:
         with sqlite3.connect(self._path) as connection:
             artifact = connection.execute(
-                "SELECT job_id, render_status, sha256 "
+                "SELECT job_id, document_key, media_type, render_status, sha256 "
                 "FROM document_artifacts WHERE artifact_id = ?",
                 (artifact_id,),
             ).fetchone()
             if (
                 artifact is None
                 or artifact[0] != job_id
-                or artifact[1] != "succeeded"
-                or not artifact[2]
+                or artifact[1] != "resume"
+                or artifact[2] != "application/pdf"
+                or artifact[3] != "succeeded"
+                or not artifact[4]
             ):
                 raise ValueError(
                     "Only a successful artifact registered for this job can be approved"

@@ -1465,6 +1465,48 @@ def test_duplicate_facade_render_sequences_are_rejected(tmp_path):
     assert "sequences must be unique" in response.json()["detail"]
 
 
+def test_explicit_resume_identity_does_not_duplicate_a_legacy_registered_artifact(tmp_path):
+    facade = FakeJobHunterFacade()
+    facade.jobs = facade.jobs[:1]
+    pdf = tmp_path / "resume.pdf"
+    pdf.write_bytes(b"%PDF-1.7\nlegacy resume\n%%EOF\n")
+    legacy = artifact_metadata(pdf)
+    facade.artifacts["job-0"] = [legacy]
+
+    with make_client(tmp_path, facade) as client:
+        first = client.post(
+            "/v1/jobs/job-0/artifacts/refresh", headers=auth_headers()
+        ).json()
+        facade.artifacts["job-0"] = [
+            {**legacy, "document_key": "resume", "document_label": "Resume"}
+        ]
+        second = client.post(
+            "/v1/jobs/job-0/artifacts/refresh", headers=auth_headers()
+        ).json()
+        artifact_id = second["artifacts"][0]["artifact_id"]
+        approved = client.post(
+            f"/v1/jobs/job-0/artifacts/{artifact_id}/approve",
+            headers=auth_headers(),
+            json={"origin": "user", "idempotency_key": "approve-legacy"},
+        )
+        assert approved.status_code == 200
+
+        facade.artifacts["job-0"] = [
+            {**legacy, "document_key": "cover_letter", "document_label": "Cover Letter"}
+        ]
+        reclassified = client.post(
+            "/v1/jobs/job-0/artifacts/refresh", headers=auth_headers()
+        ).json()
+
+    assert len(first["artifacts"]) == len(second["artifacts"]) == 1
+    assert first["artifacts"][0]["artifact_id"] == artifact_id
+    assert second["artifacts"][0]["render_sequence"] == legacy["render_sequence"]
+    assert reclassified["artifacts"][0]["artifact_id"] == artifact_id
+    assert reclassified["artifacts"][0]["document_key"] == "cover_letter"
+    assert reclassified["artifacts"][0]["is_approved"] is False
+    assert reclassified["approved_artifact_id"] is None
+
+
 def test_artifact_response_hashes_and_serves_one_byte_snapshot(tmp_path, monkeypatch):
     facade = FakeJobHunterFacade()
     facade.jobs = facade.jobs[:1]
@@ -1563,6 +1605,69 @@ def test_unregistered_ids_paths_and_docx_preview_are_rejected(tmp_path):
     assert docx_download.status_code == 200
     assert unregistered.status_code == 404
     assert arbitrary_path.status_code in {404, 422}
+
+
+def test_multiple_document_formats_keep_identity_and_resume_only_approval(tmp_path):
+    facade = FakeJobHunterFacade()
+    facade.jobs = facade.jobs[:1]
+    resume_pdf = tmp_path / "resume.pdf"
+    resume_docx = tmp_path / "resume.docx"
+    cover_pdf = tmp_path / "cover-letter.pdf"
+    cover_docx = tmp_path / "cover-letter.docx"
+    resume_pdf.write_bytes(b"%PDF-1.7\nresume\n%%EOF\n")
+    resume_docx.write_bytes(b"PK\x03\x04resume docx")
+    cover_pdf.write_bytes(b"%PDF-1.7\ncover letter\n%%EOF\n")
+    cover_docx.write_bytes(b"PK\x03\x04cover letter docx")
+    docx_media = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    facade.artifacts["job-0"] = [
+        {**artifact_metadata(resume_pdf, source="resume-source", sequence=1),
+         "document_key": "resume", "document_label": "Resume"},
+        {
+            **artifact_metadata(
+                resume_docx, source="resume-source", revision="resume-docx", sequence=2
+            ),
+            "document_key": "resume",
+            "document_label": "Resume",
+            "media_type": docx_media,
+        },
+        {**artifact_metadata(cover_pdf, source="cover-source", revision="cover-pdf", sequence=3),
+         "document_key": "cover_letter", "document_label": "Cover Letter"},
+        {
+            **artifact_metadata(
+                cover_docx, source="cover-source", revision="cover-docx", sequence=4
+            ),
+            "document_key": "cover_letter",
+            "document_label": "Cover Letter",
+            "media_type": docx_media,
+        },
+    ]
+
+    with make_client(tmp_path, facade) as client:
+        body = client.post(
+            "/v1/jobs/job-0/artifacts/refresh", headers=auth_headers()
+        ).json()
+        resume = [item for item in body["artifacts"] if item["document_key"] == "resume"]
+        cover = [item for item in body["artifacts"] if item["document_key"] == "cover_letter"]
+        resume_pdf_artifact = next(
+            item for item in resume if item["media_type"] == "application/pdf"
+        )
+        resume_approval = client.post(
+            f"/v1/jobs/job-0/artifacts/{resume_pdf_artifact['artifact_id']}/approve",
+            headers=auth_headers(),
+        )
+        cover_approval = client.post(
+            f"/v1/jobs/job-0/artifacts/{cover[0]['artifact_id']}/approve",
+            headers=auth_headers(),
+        )
+
+    assert {item["media_type"] for item in resume} == {"application/pdf", docx_media}
+    assert {item["media_type"] for item in cover} == {"application/pdf", docx_media}
+    assert {item["source_revision"] for item in resume} == {"resume-source"}
+    assert {item["source_revision"] for item in cover} == {"cover-source"}
+    assert {item["document_label"] for item in cover} == {"Cover Letter"}
+    assert {item["render_sequence"] for item in body["artifacts"]} == {1, 2, 3, 4}
+    assert resume_approval.status_code == 200
+    assert cover_approval.status_code == 409
 
 
 def test_workspace_restores_only_an_active_artifact_owned_by_the_selected_job(tmp_path):

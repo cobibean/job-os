@@ -13,6 +13,9 @@ const ARTIFACT_ID = /^art_[A-Za-z0-9_-]{16,80}$/
 interface ApiArtifact {
   artifact_id: string
   job_id: string
+  document_key: DocumentArtifact['documentKey']
+  document_label: string
+  render_sequence: number
   source_revision: string
   artifact_revision: string
   media_type: DocumentArtifact['mediaType']
@@ -39,6 +42,9 @@ function toArtifact(value: ApiArtifact): DocumentArtifact {
   return {
     artifactId: value.artifact_id,
     jobId: value.job_id,
+    documentKey: value.document_key,
+    documentLabel: value.document_label,
+    renderSequence: value.render_sequence,
     sourceRevision: value.source_revision,
     artifactRevision: value.artifact_revision,
     mediaType: value.media_type,

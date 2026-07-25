@@ -54,6 +54,9 @@ describe('trusted document client', () => {
         artifacts: [{
           artifact_id: artifactId,
           job_id: 'job-7',
+          document_key: 'resume',
+          document_label: 'Resume',
+          render_sequence: 2,
           source_revision: 'source-2',
           artifact_revision: 'render-2',
           media_type: 'application/pdf',
@@ -76,6 +79,8 @@ describe('trusted document client', () => {
     expect(state.approvedArtifactId).toBe(artifactId)
     expect(state.artifacts[0]?.isApproved).toBe(true)
     expect(state.artifacts[0]?.previewAvailable).toBe(true)
+    expect(state.artifacts[0]?.documentKey).toBe('resume')
+    expect(state.artifacts[0]?.renderSequence).toBe(2)
   })
 
   it('approves an exact artifact through its owning job route', async () => {
@@ -134,5 +139,41 @@ describe('trusted document client', () => {
     expect(revealed).toContain(artifactId)
     expect(await readFile(revealed)).toEqual(Buffer.from(pdf))
     await rm(cacheRoot, { recursive: true, force: true })
+  })
+
+  it('exports the exact registered DOCX bytes with its filename', async () => {
+    const outputRoot = await mkdtemp(path.join(os.tmpdir(), 'jobos-docx-export-test-'))
+    const output = path.join(outputRoot, 'Jacobi_Lange_Cover_Letter.docx')
+    const docx = Buffer.from('PK\x03\x04trusted docx fixture')
+    const docxHash = createHash('sha256').update(docx).digest('hex')
+    globalThis.fetch = vi.fn(async () => new Response(docx, {
+      status: 200,
+      headers: {
+        'Content-Type': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        'Content-Length': String(docx.length),
+        'Content-Disposition': "attachment; filename*=UTF-8''Jacobi_Lange_Cover_Letter.docx",
+        'X-Artifact-ID': artifactId,
+        'X-Artifact-Revision': 'cover-docx-1',
+        'X-Source-Revision': 'cover-source-1',
+        'X-Content-SHA256': docxHash
+      }
+    })) as typeof fetch
+    const documents = createMainDocumentsClient(
+      { baseUrl: 'http://127.0.0.1:8766', deviceToken: 'test-device-token' },
+      {
+        cacheRoot: outputRoot,
+        dialog: { showSaveDialog: vi.fn(async options => {
+          expect(options.defaultPath).toBe('Jacobi_Lange_Cover_Letter.docx')
+          return { canceled: false, filePath: output, bookmark: '' }
+        }) },
+        shell: { openPath: vi.fn(async () => ''), showItemInFolder: vi.fn() }
+      }
+    )
+
+    await expect(documents.exportArtifact(artifactId)).resolves.toBe(
+      'Exported Jacobi_Lange_Cover_Letter.docx'
+    )
+    expect(await readFile(output)).toEqual(docx)
+    await rm(outputRoot, { recursive: true, force: true })
   })
 })
