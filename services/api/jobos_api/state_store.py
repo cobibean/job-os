@@ -16,7 +16,12 @@ from .browser_policy import (
 )
 from .document_files import DocumentFileRecord
 from .documents import VerifiedArtifact
-from .redaction import redact_detail, sanitize_summary, sanitize_user_text
+from .redaction import (
+    redact_detail,
+    sanitize_assistant_text,
+    sanitize_summary,
+    sanitize_user_text,
+)
 
 
 class IncompatibleSchemaError(RuntimeError):
@@ -47,6 +52,21 @@ def mutation_activity_source_id(
         separators=(",", ":"),
     )
     return f"action:{sha256(identity.encode()).hexdigest()}"
+
+
+def _conversation_detail(
+    event_type: str, detail: dict[str, object] | None
+) -> dict[str, object]:
+    raw_detail = detail or {}
+    safe_detail = redact_detail(raw_detail)
+    assistant_text = raw_detail.get("text")
+    if (
+        event_type == "assistant_message"
+        and raw_detail.get("type") == "message.complete"
+        and isinstance(assistant_text, str)
+    ):
+        safe_detail["text"] = sanitize_assistant_text(assistant_text)
+    return safe_detail
 
 
 class ConversationBusy(RuntimeError):
@@ -1175,7 +1195,7 @@ class JobOsStateStore:
         detail: dict[str, object] | None = None,
         source_event_id: str | None = None,
     ) -> int | None:
-        safe_detail = redact_detail(detail or {})
+        safe_detail = _conversation_detail(event_type, detail)
         with sqlite3.connect(self._path) as connection:
             try:
                 cursor = connection.execute(
@@ -1320,7 +1340,7 @@ class JobOsStateStore:
         """Atomically let exactly one terminal status and durable event win."""
         if status not in {"completed", "failed", "interrupted"}:
             raise ValueError("Turn settlement must be terminal")
-        safe_detail = redact_detail(detail or {})
+        safe_detail = _conversation_detail(event_type, detail)
         with sqlite3.connect(self._path) as connection:
             connection.execute("BEGIN IMMEDIATE")
             cursor = connection.execute(

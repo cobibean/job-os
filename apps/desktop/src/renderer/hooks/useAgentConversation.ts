@@ -208,6 +208,22 @@ function statusOrErrorItem(entry: ConversationEvent): StatusOrErrorItem {
   }
 }
 
+const destructiveRedactionPlaceholders = new Set([
+  '[protected path]',
+  '[protected signed URL]'
+])
+
+function terminalAssistantText(streamedText: string, terminalText: string): string {
+  const streamed = streamedText.trim()
+  const terminal = terminalText.trim()
+  if (
+    streamed
+    && !destructiveRedactionPlaceholders.has(streamed)
+    && destructiveRedactionPlaceholders.has(terminal)
+  ) return streamedText
+  return terminalText
+}
+
 export function projectConversation(entries: ConversationEvent[]): ProjectedConversationItem[] {
   const projected: ProjectedConversationItem[] = []
   const turns = new Map<string, ProjectedAgentTurn>()
@@ -309,13 +325,14 @@ export function projectConversation(entries: ConversationEvent[]): ProjectedConv
 
     if (entry.type === 'assistant_message') {
       const phase = detailString(entry, 'type')
-      const nextText = phase === 'message.start' ? '' : entry.summary
+      const eventText = detailString(entry, 'text') ?? entry.summary
+      const nextText = phase === 'message.start' ? '' : eventText
       if (!turn.assistant) {
         turn.assistant = { ...base, id: `assistant-${entry.turnId}`, kind: 'assistant', text: nextText }
       } else {
         const text = phase === 'message.complete' || ['completed', 'failed', 'interrupted'].includes(entry.state)
-          ? entry.summary
-          : `${turn.assistant.text}${entry.summary}`
+          ? terminalAssistantText(turn.assistant.text, eventText)
+          : `${turn.assistant.text}${eventText}`
         turn.assistant = { ...turn.assistant, state: entry.state, text }
       }
       if (entry.state === 'failed' || entry.state === 'interrupted') {

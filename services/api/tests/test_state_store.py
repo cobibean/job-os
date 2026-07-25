@@ -262,6 +262,88 @@ def test_conversation_events_restore_in_monotonic_order_from_fresh_store(tmp_pat
     assert restored["entries"][1]["context"]["selected_job_id"] is None
 
 
+def test_completed_assistant_text_uses_transcript_bound_while_summary_stays_concise(tmp_path):
+    database = tmp_path / "jobos.db"
+    store = JobOsStateStore(database)
+    store.initialize()
+    created = store.create_conversation_turn(
+        text="Write a detailed response",
+        context={"selected_job_id": None, "workspace": {}},
+        idempotency_key="conversation-long-assistant-text",
+        actor_id="device-a",
+    )
+    text = ("x" * 1_500) + " api_key=raw-secret tail"
+    safe_text = ("x" * 1_500) + " [redacted] tail"
+
+    assert store.settle_active_turn(
+        str(created["turn_id"]),
+        "completed",
+        event_type="assistant_message",
+        summary=text,
+        detail={"type": "message.complete", "text": text},
+    )
+
+    entries = store.conversation_snapshot()["entries"]
+    assert isinstance(entries, list)
+    completed = entries[-1]
+    assert isinstance(completed, dict)
+    detail = completed["detail"]
+    assert isinstance(detail, dict)
+    assert completed["summary"] == text[:500] + "…"
+    assert detail["text"] == safe_text
+    assert b"raw-secret" not in database.read_bytes()
+
+
+def test_completed_assistant_text_has_a_hard_transcript_bound(tmp_path):
+    database = tmp_path / "jobos.db"
+    store = JobOsStateStore(database)
+    store.initialize()
+    created = store.create_conversation_turn(
+        text="Write a huge response",
+        context={"selected_job_id": None, "workspace": {}},
+        idempotency_key="conversation-huge-assistant-text",
+        actor_id="device-a",
+    )
+    text = "x" * 100_050
+
+    assert store.settle_active_turn(
+        str(created["turn_id"]),
+        "completed",
+        event_type="assistant_message",
+        summary=text,
+        detail={"type": "message.complete", "text": text},
+    )
+
+    entries = store.conversation_snapshot()["entries"]
+    assert isinstance(entries, list)
+    completed = entries[-1]
+    assert isinstance(completed, dict)
+    detail = completed["detail"]
+    assert isinstance(detail, dict)
+    assert detail["text"] == text[:100_000] + "…"
+
+
+def test_streaming_assistant_delta_keeps_generic_event_detail_bound(tmp_path):
+    database = tmp_path / "jobos.db"
+    store = JobOsStateStore(database)
+    store.initialize()
+    text = "x" * 2_000
+
+    store.append_conversation_event(
+        turn_id=None,
+        event_type="assistant_message",
+        state="working",
+        summary=text,
+        detail={"type": "message.delta", "text": text},
+    )
+
+    entries = store.conversation_snapshot()["entries"]
+    assert isinstance(entries, list)
+    detail = entries[-1]["detail"]
+    assert isinstance(detail, dict)
+    assert detail["text"] == text[:1_000] + "…"
+
+
 def test_conversation_persistence_never_stores_raw_secret_fields(tmp_path):
     database = tmp_path / "jobos.db"
     store = JobOsStateStore(database)

@@ -2,6 +2,7 @@ import re
 from typing import Any
 
 MAX_STRING = 1000
+MAX_ASSISTANT_TEXT = 100_000
 MAX_USER_TEXT = 12_000
 MAX_SUMMARY = 500
 MAX_ITEMS = 30
@@ -112,6 +113,12 @@ def redact_detail(value: Any) -> dict[str, Any]:
 def sanitize_text(value: str) -> str:
     """Return generic-detail-bounded safe text using shared credential rules."""
     safe, _ = _safe_value(value)
+    return str(safe)
+
+
+def sanitize_assistant_text(value: str) -> str:
+    """Return credential-safe assistant transcript text with a generous hard bound."""
+    safe, _ = _safe_value(value, max_string=MAX_ASSISTANT_TEXT, protect_paths=False)
     return str(safe)
 
 
