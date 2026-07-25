@@ -57,6 +57,31 @@ test('normalization strips Hermes routing, credentials, and unknown raw frame fi
   expect(JSON.stringify(normalized)).not.toMatch(/session_id|authorization|raw_frame|Bearer secret/)
 })
 
+test('normalization preserves bounded completion transcripts but not oversized deltas', () => {
+  const decoder = new AgentEventDecoder()
+  const text = 'x'.repeat(100_050)
+  const complete = event(9, {
+    type: 'assistant_message',
+    state: 'completed',
+    summary: text,
+    detail: { type: 'message.complete', text }
+  })
+  const delta = event(10, {
+    type: 'assistant_message',
+    state: 'working',
+    summary: text,
+    detail: { type: 'message.delta', text }
+  })
+
+  const [normalizedComplete, normalizedDelta] = decoder.push(
+    `data: ${JSON.stringify(complete)}\n\ndata: ${JSON.stringify(delta)}\n\n`
+  )
+
+  expect(normalizedComplete?.detail.text).toBe(text.slice(0, 100_001))
+  expect(normalizedDelta?.detail.text).toBe(text.slice(0, 2_000))
+  expect(normalizedComplete?.summary).toBe(text.slice(0, 2_000))
+})
+
 test('the resumable stream starts at the snapshot cursor, reconnects at the latest cursor, and dedupes overlap', async () => {
   const urls: string[] = []
   const fetcher = vi.fn(async (input: string | URL | Request) => {
