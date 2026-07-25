@@ -11,7 +11,7 @@ import { AssistantMarkdown } from './AssistantMarkdown'
 interface AgentPanelProps {
   contextLabel: string
   apiState?: ConnectivityState
-  onArtifactRendered?: () => void
+  onArtifactRendered?: (jobId?: string) => void
   onModalOpenChange?: (open: boolean) => void
 }
 
@@ -138,14 +138,17 @@ export function AgentPanel({ contextLabel, apiState = 'connected', onArtifactRen
       (latest, entry) => Math.max(latest, entry.eventId),
       0
     )
-    const rendered = conversation.entries.some(entry => (
+    const rendered = conversation.entries.find(entry => (
       entry.eventId > (observedEventId.current ?? 0)
       && entry.type === 'activity'
       && entry.state === 'completed'
-      && entry.detail.command === 'document.render'
+      && ['document.render', 'document.publish'].includes(String(entry.detail.command))
     ))
     observedEventId.current = Math.max(observedEventId.current, latestEventId)
-    if (rendered) onArtifactRendered?.()
+    if (rendered) {
+      const jobId = typeof rendered.detail.job_id === 'string' ? rendered.detail.job_id : undefined
+      onArtifactRendered?.(jobId)
+    }
   }, [conversation.entries, conversation.restoredEventId, conversation.restoring, onArtifactRendered])
 
   const scrollToLatest = useCallback((focusTranscript = false) => {

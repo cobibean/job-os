@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any, Literal, Protocol
 from uuid import uuid4
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 ARTIFACT_ID_PATTERN = re.compile(r"^art_[A-Za-z0-9_-]{16,80}$")
 PDF_MEDIA_TYPE = "application/pdf"
@@ -106,6 +106,25 @@ class ArtifactRefreshRequest(BaseModel):
 
     origin: Literal["user", "mcp"] = "user"
     idempotency_key: str = Field(default_factory=lambda: str(uuid4()), min_length=1, max_length=128)
+
+
+class ArtifactPublishRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    document_key: Literal["resume", "cover_letter"]
+    document_label: str = Field(min_length=1, max_length=80)
+    source_path: str = Field(min_length=1, max_length=4096)
+    artifact_path: str = Field(min_length=1, max_length=4096)
+    origin: Literal["user", "mcp"] = "user"
+    idempotency_key: str = Field(default_factory=lambda: str(uuid4()), min_length=1, max_length=128)
+
+    @field_validator("document_label", "source_path", "artifact_path")
+    @classmethod
+    def strip_publish_text(cls, value: str) -> str:
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("field must not be blank")
+        return stripped
 
 
 class ArtifactApprovalRequest(BaseModel):

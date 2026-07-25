@@ -64,6 +64,7 @@ class FakeJobHunterFacade:
         self.artifacts = {}
         self.add_job_calls = 0
         self.description_update_calls = 0
+        self.publish_calls = 0
         self.descriptions = {}
         self.locations = {}
 
@@ -145,6 +146,29 @@ class FakeJobHunterFacade:
             for artifact in self.list_job_artifacts(job_id)
             if artifact.get("artifact_reference") == artifact_reference
         )
+
+    def publish_document_artifact(
+        self, job_id, document_key, document_label, source_path, artifact_path
+    ):
+        self.inspect_job(job_id)
+        self.publish_calls += 1
+        source = Path(source_path)
+        artifact = Path(artifact_path)
+        existing = self.artifacts.setdefault(job_id, [])
+        record = {
+            "job_id": job_id,
+            "document_key": document_key,
+            "document_label": document_label,
+            "source_revision": sha256(source.read_bytes()).hexdigest(),
+            "artifact_revision": sha256(artifact.read_bytes()).hexdigest(),
+            "media_type": "application/pdf",
+            "sha256": sha256(artifact.read_bytes()).hexdigest(),
+            "render_status": "succeeded",
+            "render_sequence": 1 + max((item["render_sequence"] for item in existing), default=0),
+            "path": str(artifact),
+        }
+        existing.append(record)
+        return record
 
 
 def make_client(tmp_path, facade=None):
@@ -1540,6 +1564,55 @@ def test_artifact_response_hashes_and_serves_one_byte_snapshot(tmp_path, monkeyp
     assert streamed.content == original_bytes
     assert streamed.headers["x-content-sha256"] == sha256(original_bytes).hexdigest()
     assert streamed.headers["x-artifact-revision"] == "render-1"
+
+
+def test_publish_document_registers_new_cover_letter_and_emits_invalidation_activity(tmp_path):
+    facade = FakeJobHunterFacade()
+    facade.jobs = facade.jobs[:1]
+    source = tmp_path / "cover-letter.md"
+    artifact = tmp_path / "cover-letter.pdf"
+    source.write_text("Dear hiring team")
+    artifact.write_bytes(b"%PDF-1.7\ncover letter\n%%EOF\n")
+    command = {
+        "document_key": "cover_letter",
+        "document_label": "Cover Letter",
+        "source_path": str(source),
+        "artifact_path": str(artifact),
+        "origin": "mcp",
+        "idempotency_key": "publish-cover-letter-1",
+    }
+    with make_client(tmp_path, facade) as client:
+        forbidden = client.post(
+            "/v1/jobs/job-0/artifacts/publish",
+            headers={"Authorization": "Bearer test-device-token"},
+            json=command,
+        )
+        response = client.post(
+            "/v1/jobs/job-0/artifacts/publish",
+            headers=auth_headers(),
+            json=command,
+        )
+        replay = client.post(
+            "/v1/jobs/job-0/artifacts/publish",
+            headers=auth_headers(),
+            json=command,
+        )
+
+        assert forbidden.status_code == 403
+        assert response.status_code == 200
+        assert replay.json() == response.json()
+        assert facade.publish_calls == 1
+        payload = response.json()
+        assert [item["document_key"] for item in payload["artifacts"]] == ["cover_letter"]
+        assert payload["artifacts"][0]["document_label"] == "Cover Letter"
+        entries = client.get(
+            "/v1/conversations/current", headers=auth_headers()
+        ).json()["entries"]
+        assert any(
+            entry["detail"].get("command") == "document.publish"
+            and entry["detail"].get("document_key") == "cover_letter"
+            for entry in entries
+        )
 
 
 @pytest.mark.parametrize("attack", ["root_escape", "wrong_media", "hash_mismatch"])

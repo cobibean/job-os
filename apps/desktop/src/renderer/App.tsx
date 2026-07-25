@@ -20,6 +20,7 @@ export function App() {
   const [settingsPreparing, setSettingsPreparing] = useState(false)
   const [agentModalOpen, setAgentModalOpen] = useState(false)
   const [jobListingRequest, setJobListingRequest] = useState<JobListingRequest | null>(null)
+  const [documentRefreshSignal, setDocumentRefreshSignal] = useState(0)
   const nextJobListingRequestId = useRef(0)
   const latestNavigatorSelection = useRef(0)
   const navigatorSelectionQueue = useRef(Promise.resolve())
@@ -82,7 +83,11 @@ export function App() {
         agent={<AgentPanel
           apiState={connectivity.state}
           contextLabel={jobState.selectedJob ? `${jobState.selectedJob.company} · ${jobState.selectedJob.title}` : 'No active job'}
-          onArtifactRendered={layoutState.showDocument}
+          onArtifactRendered={jobId => {
+            if (jobId && jobId !== jobState.selectedJobId) return
+            setDocumentRefreshSignal(signal => signal + 1)
+            void layoutState.showDocument()
+          }}
           onModalOpenChange={setAgentModalOpen}
         />}
         center={<CenterWorkspace
@@ -91,6 +96,7 @@ export function App() {
           activeArtifactId={layoutState.workspace.activeArtifactId ?? null}
           activeArtifactPage={layoutState.workspace.activeArtifactPage ?? 1}
           activeArtifactZoom={layoutState.workspace.activeArtifactZoom ?? 1}
+          documentRefreshSignal={documentRefreshSignal}
           browserState={{
             tabs: layoutState.workspace.browserTabs ?? [],
             activeTabId: layoutState.workspace.activeBrowserTabId ?? null

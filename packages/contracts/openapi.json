@@ -77,6 +77,60 @@
         "title": "ArtifactApprovalRequest",
         "type": "object"
       },
+      "ArtifactPublishRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "artifact_path": {
+            "maxLength": 4096,
+            "minLength": 1,
+            "title": "Artifact Path",
+            "type": "string"
+          },
+          "document_key": {
+            "enum": [
+              "resume",
+              "cover_letter"
+            ],
+            "title": "Document Key",
+            "type": "string"
+          },
+          "document_label": {
+            "maxLength": 80,
+            "minLength": 1,
+            "title": "Document Label",
+            "type": "string"
+          },
+          "idempotency_key": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Idempotency Key",
+            "type": "string"
+          },
+          "origin": {
+            "default": "user",
+            "enum": [
+              "user",
+              "mcp"
+            ],
+            "title": "Origin",
+            "type": "string"
+          },
+          "source_path": {
+            "maxLength": 4096,
+            "minLength": 1,
+            "title": "Source Path",
+            "type": "string"
+          }
+        },
+        "required": [
+          "document_key",
+          "document_label",
+          "source_path",
+          "artifact_path"
+        ],
+        "title": "ArtifactPublishRequest",
+        "type": "object"
+      },
       "ArtifactRecord": {
         "additionalProperties": false,
         "properties": {
@@ -3023,6 +3077,79 @@
           }
         ],
         "summary": "Job Artifacts",
+        "tags": [
+          "documents"
+        ]
+      }
+    },
+    "/v1/jobs/{job_id}/artifacts/publish": {
+      "post": {
+        "operationId": "publish_job_artifact_v1_jobs__job_id__artifacts_publish_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "title": "Job Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-JobOS-MCP-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Jobos-Mcp-Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ArtifactPublishRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobArtifactsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Publish Job Artifact",
         "tags": [
           "documents"
         ]

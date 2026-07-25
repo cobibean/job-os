@@ -24,6 +24,7 @@ import { PdfPreview } from './PdfPreview'
 
 interface DocumentWorkspaceProps {
   job: JobListItem | null
+  refreshSignal?: number
   restoredArtifactId: string | null
   restoredPage: number
   restoredZoom: number
@@ -213,7 +214,7 @@ export function DocumentWorkspace(props: DocumentWorkspaceProps) {
       return
     }
     let active = true
-    const pendingId = jobChanged ? null : restoredArtifactId.current
+    const pendingId = jobChanged ? null : (selectedId.current ?? restoredArtifactId.current)
     setState(emptyState(jobId))
     selectedId.current = pendingId
     setActiveId(pendingId)
@@ -224,13 +225,12 @@ export function DocumentWorkspace(props: DocumentWorkspaceProps) {
     bridge.list(jobId).then(listed => {
       if (!active) return
       setState(listed)
-      const listedId = choosePreview(listed, pendingId)
-      return bridge.refresh(jobId).then(refreshed => ({ refreshed, listedId }))
-    }).then(result => {
-      if (!active || !result) return
-      const { refreshed, listedId } = result
+      choosePreview(listed, pendingId)
+      return bridge.refresh(jobId)
+    }).then(refreshed => {
+      if (!active || !refreshed) return
       setState(refreshed)
-      choosePreview(refreshed, listedId)
+      choosePreview(refreshed, selectedId.current)
       setMessage(refreshed.artifacts.length ? 'Artifact registry is current' : 'No artifacts registered for this job')
     }).catch(error => {
       if (active) setMessage(error instanceof Error ? error.message : 'Artifact refresh failed')
@@ -238,7 +238,7 @@ export function DocumentWorkspace(props: DocumentWorkspaceProps) {
       if (active) setLoading(false)
     })
     return () => { active = false }
-  }, [bridge, choosePreview, jobId])
+  }, [bridge, choosePreview, jobId, props.refreshSignal])
 
   useEffect(() => {
     setPayload(null)

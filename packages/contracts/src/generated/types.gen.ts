@@ -57,6 +57,36 @@ export type ArtifactApprovalRequest = {
 };
 
 /**
+ * ArtifactPublishRequest
+ */
+export type ArtifactPublishRequest = {
+    /**
+     * Artifact Path
+     */
+    artifact_path: string;
+    /**
+     * Document Key
+     */
+    document_key: 'resume' | 'cover_letter';
+    /**
+     * Document Label
+     */
+    document_label: string;
+    /**
+     * Idempotency Key
+     */
+    idempotency_key?: string;
+    /**
+     * Origin
+     */
+    origin?: 'user' | 'mcp';
+    /**
+     * Source Path
+     */
+    source_path: string;
+};
+
+/**
  * ArtifactRecord
  */
 export type ArtifactRecord = {
@@ -1623,6 +1653,42 @@ export type JobArtifactsV1JobsJobIdArtifactsGetResponses = {
 };
 
 export type JobArtifactsV1JobsJobIdArtifactsGetResponse = JobArtifactsV1JobsJobIdArtifactsGetResponses[keyof JobArtifactsV1JobsJobIdArtifactsGetResponses];
+
+export type PublishJobArtifactV1JobsJobIdArtifactsPublishPostData = {
+    body: ArtifactPublishRequest;
+    headers?: {
+        /**
+         * X-Jobos-Mcp-Token
+         */
+        'X-JobOS-MCP-Token'?: string | null;
+    };
+    path: {
+        /**
+         * Job Id
+         */
+        job_id: string;
+    };
+    query?: never;
+    url: '/v1/jobs/{job_id}/artifacts/publish';
+};
+
+export type PublishJobArtifactV1JobsJobIdArtifactsPublishPostErrors = {
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type PublishJobArtifactV1JobsJobIdArtifactsPublishPostError = PublishJobArtifactV1JobsJobIdArtifactsPublishPostErrors[keyof PublishJobArtifactV1JobsJobIdArtifactsPublishPostErrors];
+
+export type PublishJobArtifactV1JobsJobIdArtifactsPublishPostResponses = {
+    /**
+     * Successful Response
+     */
+    200: JobArtifactsResponse;
+};
+
+export type PublishJobArtifactV1JobsJobIdArtifactsPublishPostResponse = PublishJobArtifactV1JobsJobIdArtifactsPublishPostResponses[keyof PublishJobArtifactV1JobsJobIdArtifactsPublishPostResponses];
 
 export type RefreshJobArtifactsV1JobsJobIdArtifactsRefreshPostData = {
     /**

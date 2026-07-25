@@ -176,6 +176,29 @@ class JobOsMcpClient:
             json={"origin": "mcp", "idempotency_key": self._key(idempotency_key)},
         )
 
+    async def publish_document(
+        self,
+        job_id: str,
+        document_key: str,
+        document_label: str,
+        source_path: str,
+        artifact_path: str,
+        *,
+        idempotency_key: str | None = None,
+    ) -> dict[str, Any]:
+        return await self._request(
+            "POST",
+            f"/v1/jobs/{job_id}/artifacts/publish",
+            json={
+                "document_key": document_key,
+                "document_label": document_label,
+                "source_path": source_path,
+                "artifact_path": artifact_path,
+                "origin": "mcp",
+                "idempotency_key": self._key(idempotency_key),
+            },
+        )
+
     async def render_document(
         self, job_id: str, source_id: str, *, idempotency_key: str | None = None
     ) -> dict[str, Any]:

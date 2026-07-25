@@ -126,6 +126,88 @@ describe('trusted document workspace', () => {
     ))
   })
 
+  it('refreshes the mounted registry and cycles to a newly published cover letter', async () => {
+    const resume = artifact({ isCurrent: false, isLastSuccessful: false })
+    const coverLetter = artifact({
+      artifactId: 'art_COVERNEWABCDEFGHIJKLMNOPQ',
+      documentKey: 'cover_letter',
+      documentLabel: 'Cover Letter',
+      sourceRevision: 'cover-source-1',
+      artifactRevision: 'cover-1',
+      renderSequence: 3,
+      isCurrent: true,
+      isLastSuccessful: true
+    })
+    const refresh = vi
+      .fn<JobOsRendererBridge['documents']['refresh']>()
+      .mockResolvedValueOnce(state([resume]))
+      .mockResolvedValue(state([resume, coverLetter]))
+    const documents = installDocuments({ refresh })
+    const props = {
+      hydrated: true,
+      job,
+      onViewChange: vi.fn(),
+      restoredArtifactId: null,
+      restoredPage: 1,
+      restoredZoom: 1
+    }
+    const view = render(<DocumentWorkspace {...props} refreshSignal={0} />)
+
+    await screen.findByText('1 of 1')
+    view.rerender(<DocumentWorkspace {...props} refreshSignal={1} />)
+
+    await screen.findByText('1 of 2')
+    expect(documents.refresh).toHaveBeenCalledTimes(2)
+    fireEvent.click(screen.getByRole('button', { name: 'Next document' }))
+    expect(await screen.findByText('2 of 2')).not.toBeNull()
+    expect(screen.getByRole('combobox', { name: 'Cover Letter revision' })).not.toBeNull()
+  })
+
+  it('preserves a document switch while a live registry refresh is pending', async () => {
+    const resume = artifact()
+    const coverLetter = artifact({
+      artifactId: 'art_COVERNEWABCDEFGHIJKLMNOPQ',
+      documentKey: 'cover_letter',
+      documentLabel: 'Cover Letter',
+      sourceRevision: 'cover-source-1',
+      artifactRevision: 'cover-1',
+      renderSequence: 3,
+      isCurrent: false,
+      isLastSuccessful: false
+    })
+    const registry = state([resume, coverLetter])
+    const pendingRefresh = deferred<JobArtifactsState>()
+    const refresh = vi
+      .fn<JobOsRendererBridge['documents']['refresh']>()
+      .mockResolvedValueOnce(registry)
+      .mockReturnValueOnce(pendingRefresh.promise)
+    const documents = installDocuments({
+      list: vi.fn(async () => registry),
+      refresh
+    })
+    const props = {
+      hydrated: true,
+      job,
+      onViewChange: vi.fn(),
+      restoredArtifactId: null,
+      restoredPage: 1,
+      restoredZoom: 1
+    }
+    const view = render(<DocumentWorkspace {...props} refreshSignal={0} />)
+
+    await screen.findByText('1 of 2')
+    view.rerender(<DocumentWorkspace {...props} refreshSignal={1} />)
+    await waitFor(() => expect(documents.refresh).toHaveBeenCalledTimes(2))
+    fireEvent.click(screen.getByRole('button', { name: 'Next document' }))
+    await screen.findByText('2 of 2')
+
+    pendingRefresh.resolve(registry)
+
+    await screen.findByText('Artifact registry is current')
+    expect(screen.getByText('2 of 2')).not.toBeNull()
+    expect(screen.getByRole('combobox', { name: 'Cover Letter revision' })).not.toBeNull()
+  })
+
   it('approves the exact visible successful revision and shows its durable state', async () => {
     const pending = artifact()
     const approved = artifact({ isApproved: true })

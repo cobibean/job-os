@@ -79,6 +79,7 @@ interface CenterWorkspaceProps {
   workspaceHydrated: boolean
   onBrowserPersist: (state: BrowserRestoreState) => void
   activeJob: JobListItem | null
+  documentRefreshSignal?: number
   activeArtifactId: string | null
   activeArtifactPage: number
   activeArtifactZoom: number
@@ -280,6 +281,7 @@ export function CenterWorkspace(props: CenterWorkspaceProps) {
   if (props.activeSurface === 'document') {
     return <DocumentWorkspace
       job={props.activeJob}
+      refreshSignal={props.documentRefreshSignal}
       hydrated={props.workspaceHydrated}
       onViewChange={props.onDocumentPersist}
       restoredArtifactId={props.activeArtifactId}

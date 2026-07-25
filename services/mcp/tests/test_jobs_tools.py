@@ -116,6 +116,7 @@ async def test_mcp_server_exposes_phase_seven_parity_tools_while_retaining_job_t
         "workspace_update",
         "document_list",
         "document_refresh",
+        "document_publish",
         "document_render",
         "document_register",
         "document_approve",
@@ -247,4 +248,41 @@ async def test_document_select_reads_workspace_silently_then_emits_one_shared_mu
         "active_artifact_zoom": 1.0,
         "origin": "mcp",
         "idempotency_key": "select-document-1",
+    }
+
+
+@pytest.mark.anyio
+async def test_publish_document_is_one_authenticated_api_mutation():
+    requests = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, json={"job_id": "job-1", "artifacts": []})
+
+    client = JobOsMcpClient(
+        base_url="http://jobos.test",
+        device_token="test-device-token",
+        mcp_token="test-mcp-trusted-token",
+        transport=httpx.MockTransport(handler),
+    )
+    await client.publish_document(
+        "job-1",
+        "cover_letter",
+        "Cover Letter",
+        "/workspace/cover-letter.md",
+        "/workspace/cover-letter.pdf",
+        idempotency_key="publish-1",
+    )
+    await client.aclose()
+
+    assert [(item.method, item.url.path) for item in requests] == [
+        ("POST", "/v1/jobs/job-1/artifacts/publish")
+    ]
+    assert json.loads(requests[0].content) == {
+        "document_key": "cover_letter",
+        "document_label": "Cover Letter",
+        "source_path": "/workspace/cover-letter.md",
+        "artifact_path": "/workspace/cover-letter.pdf",
+        "origin": "mcp",
+        "idempotency_key": "publish-1",
     }

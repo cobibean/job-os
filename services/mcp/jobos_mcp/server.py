@@ -4,7 +4,7 @@ import asyncio
 import os
 import subprocess
 import sys
-from typing import Any
+from typing import Any, Literal
 
 from mcp.server.fastmcp import FastMCP
 
@@ -139,6 +139,25 @@ def create_server(client: JobOsMcpClient) -> FastMCP:
     async def document_refresh(job_id: str, idempotency_key: str | None = None) -> dict[str, Any]:
         """Refresh a job's trusted artifact manifest."""
         return await client.refresh_documents(job_id, idempotency_key=idempotency_key)
+
+    @server.tool(name="document_publish", structured_output=True)
+    async def document_publish(
+        job_id: str,
+        document_key: Literal["resume", "cover_letter"],
+        document_label: str,
+        source_path: str,
+        artifact_path: str,
+        idempotency_key: str | None = None,
+    ) -> dict[str, Any]:
+        """Publish a newly created job document and refresh JobOS's trusted registry."""
+        return await client.publish_document(
+            job_id,
+            document_key,
+            document_label,
+            source_path,
+            artifact_path,
+            idempotency_key=idempotency_key,
+        )
 
     @server.tool(name="document_render", structured_output=True)
     async def document_render(

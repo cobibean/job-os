@@ -37,6 +37,7 @@ from jobos_api.documents import (
     ARTIFACT_ID_PATTERN,
     PDF_MEDIA_TYPE,
     ArtifactApprovalRequest,
+    ArtifactPublishRequest,
     ArtifactRefreshRequest,
     ArtifactRegistrationRequest,
     ArtifactTrustError,
@@ -1362,6 +1363,83 @@ def create_app(
             outcome="completed" if render_succeeded else "failed",
             job_id=job_id,
             detail={"source_id": command.source_id, "artifact_id": result.current_artifact_id},
+        )
+        return result
+
+    @app.post("/v1/jobs/{job_id}/artifacts/publish", tags=["documents"])
+    @serialized_mutation_route
+    def publish_job_artifact(
+        job_id: str,
+        command: ArtifactPublishRequest,
+        identity: Annotated[DeviceIdentity, Depends(authenticated_device)],
+        mcp_token: Annotated[str | None, Header(alias="X-JobOS-MCP-Token")] = None,
+    ) -> JobArtifactsResponse:
+        require_trusted_mcp(identity, command.origin, mcp_token)
+        ensure_job(job_id)
+        request_hash = mutation_hash(
+            "document.publish",
+            {
+                "job_id": job_id,
+                "document_key": command.document_key,
+                "document_label": command.document_label,
+                "source_path": command.source_path,
+                "artifact_path": command.artifact_path,
+                "origin": command.origin,
+            },
+        )
+        try:
+            replay = mutation_replay(
+                identity=identity,
+                target=f"jobs/{job_id}/artifacts",
+                command_name="document.publish",
+                idempotency_key=command.idempotency_key,
+                request_hash=request_hash,
+            )
+        except IdempotencyConflict as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
+        if replay is not None:
+            return JobArtifactsResponse.model_validate(replay)
+        try:
+            published = jobs.publish_document_artifact(
+                job_id,
+                command.document_key,
+                command.document_label,
+                command.source_path,
+                command.artifact_path,
+            )
+            raw_artifacts = jobs.list_job_artifacts(job_id)
+            verified = verify_facade_artifacts(raw_artifacts, settings.artifact_roots)
+            state_store.register_document_artifacts(job_id, verified)
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail="Job not found") from error
+        except (ArtifactTrustError, OSError, ValueError) as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
+        result = artifact_list(job_id)
+        published_revision = str(published.get("artifact_revision", ""))
+        published_artifact_id = next(
+            (
+                artifact.artifact_id
+                for artifact in result.artifacts
+                if artifact.document_key == command.document_key
+                and artifact.artifact_revision == published_revision
+            ),
+            None,
+        )
+        record_mutation(
+            identity=identity,
+            target=f"jobs/{job_id}/artifacts",
+            command_name="document.publish",
+            origin=command.origin,
+            idempotency_key=command.idempotency_key,
+            request_hash=request_hash,
+            result=result.model_dump(mode="json"),
+            label=f"Published {command.document_label} artifact",
+            job_id=job_id,
+            detail={
+                "artifact_id": published_artifact_id,
+                "document_key": command.document_key,
+                "job_id": job_id,
+            },
         )
         return result
 

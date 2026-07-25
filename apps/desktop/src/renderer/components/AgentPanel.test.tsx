@@ -477,7 +477,7 @@ test('API-online users can use Send to reconnect an initially offline agent', as
   await waitFor(() => expect(agent.send).toHaveBeenCalledOnce())
 })
 
-test('focuses the document surface when a live resume render completes', async () => {
+test.each(['document.render', 'document.publish'])('focuses and refreshes the document surface when %s completes', async command => {
   let stream!: (update: unknown) => void
   installAgent(
     { conversationId: 'conv-current', connection: 'online', activeTurn: null, latestEventId: 0, entries: [] },
@@ -489,10 +489,17 @@ test('focuses the document surface when a live resume render completes', async (
 
   act(() => stream({
     kind: 'event',
-    event: event(1, { detail: { command: 'document.render', outcome: 'completed' } })
+    event: event(1, { detail: {
+      command,
+      outcome: 'completed',
+      ...(command === 'document.publish' ? { job_id: 'job-1' } : {})
+    } })
   }))
 
   await waitFor(() => expect(onArtifactRendered).toHaveBeenCalledOnce())
+  expect(onArtifactRendered).toHaveBeenCalledWith(
+    command === 'document.publish' ? 'job-1' : undefined
+  )
 })
 
 test('focuses a live resume render that arrives before hydration resolves', async () => {
