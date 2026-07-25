@@ -1163,6 +1163,8 @@ def create_app(
             _, payload = read_source_artifact(
                 {
                     "job_id": record["job_id"],
+                    "document_key": record["document_key"],
+                    "document_label": record["document_label"],
                     "source_revision": record["source_revision"],
                     "artifact_revision": record["artifact_revision"],
                     "media_type": record["media_type"],
@@ -1220,6 +1222,8 @@ def create_app(
         if (
             artifact is None
             or artifact["job_id"] != job_id
+            or artifact["document_key"] != "resume"
+            or artifact["media_type"] != PDF_MEDIA_TYPE
             or artifact["render_status"] != "succeeded"
             or not artifact["canonical_path"]
         ):

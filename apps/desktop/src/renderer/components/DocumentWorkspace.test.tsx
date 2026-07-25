@@ -37,6 +37,9 @@ function artifact(overrides: Partial<DocumentArtifact> = {}): DocumentArtifact {
   return {
     artifactId: 'art_ABCDEFGHIJKLMNOPQRSTUVWX',
     jobId: job.jobId,
+    documentKey: 'resume',
+    documentLabel: 'Resume',
+    renderSequence: 2,
     sourceRevision: 'source-2',
     artifactRevision: 'render-2',
     mediaType: 'application/pdf',
@@ -212,6 +215,8 @@ describe('trusted document workspace', () => {
     fireEvent.click(screen.getByRole('button', { name: /^Open$/ }))
     fireEvent.click(screen.getByRole('button', { name: /^Reveal$/ }))
     fireEvent.click(screen.getByRole('button', { name: /^Export$/ }))
+    expect(screen.queryByRole('menuitem', { name: 'Export PDF' })).toBeNull()
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Export DOCX' }))
 
     await waitFor(() => expect(documents.open).toHaveBeenCalledWith(docx.artifactId))
     expect(documents.reveal).toHaveBeenCalledWith(docx.artifactId)
@@ -277,6 +282,7 @@ describe('trusted document workspace', () => {
     expect(screen.queryByText(/PDF bytes 1/)).toBeNull()
     expect(screen.getByText(/Viewing northstar-resume-v3.pdf · revision render-3 · source source-3/)).not.toBeNull()
     fireEvent.click(screen.getByRole('button', { name: /^Export$/ }))
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Export PDF' }))
     await waitFor(() => expect(documents.export).toHaveBeenCalledWith(revisionB.artifactId))
 
     pendingB.reject(new Error('revision B failed to load'))
@@ -368,7 +374,7 @@ describe('trusted document workspace', () => {
       />
     )
 
-    await waitFor(() => expect(screen.getByText('Select a job to review its resume')).not.toBeNull())
+    await waitFor(() => expect(screen.getByText('Select a job to review its documents')).not.toBeNull())
     expect(onViewChange).not.toHaveBeenCalled()
 
     view.rerender(
@@ -467,11 +473,19 @@ describe('trusted document workspace', () => {
   })
 
   it('shows a last-successful DOCX instead of an older PDF when the newest render failed', async () => {
-    const olderPdf = artifact({ isCurrent: false, isLastSuccessful: false, artifactRevision: 'render-1' })
+    const olderPdf = artifact({
+      isCurrent: false,
+      isLastSuccessful: false,
+      sourceRevision: 'source-1',
+      artifactRevision: 'render-1',
+      renderSequence: 1
+    })
     const lastGoodDocx = artifact({
       artifactId: 'art_FFFFFFFFFFFFFFFFFFFFFFFF',
       mediaType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      sourceRevision: 'source-2',
       artifactRevision: 'render-2',
+      renderSequence: 2,
       filename: 'northstar-resume.docx',
       previewAvailable: false,
       isCurrent: false,
@@ -479,7 +493,9 @@ describe('trusted document workspace', () => {
     })
     const failed = artifact({
       artifactId: 'art_GGGGGGGGGGGGGGGGGGGGGGGG',
+      sourceRevision: 'source-3',
       artifactRevision: 'render-3',
+      renderSequence: 3,
       renderStatus: 'failed',
       failureMessage: 'newest failed',
       filename: null,
@@ -496,6 +512,124 @@ describe('trusted document workspace', () => {
     expect(screen.getByText(/Viewing northstar-resume.docx · revision render-2/)).not.toBeNull()
     expect(screen.queryByText(/PDF bytes/)).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: /^Export$/ }))
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Export DOCX' }))
     await waitFor(() => expect(documents.export).toHaveBeenCalledWith(lastGoodDocx.artifactId))
+  })
+
+  it('navigates ordered logical documents, scopes revisions, resets the view, and hides cover letter approval', async () => {
+    const resumePdf = artifact({
+      artifactId: 'art_RESUMEPDFABCDEFGHIJKLMNOP',
+      sourceRevision: 'resume-source',
+      artifactRevision: 'resume-pdf',
+      renderSequence: 4,
+      filename: 'northstar-resume.pdf'
+    })
+    const resumeDocx = artifact({
+      artifactId: 'art_RESUMEDOCXABCDEFGHIJKLMNO',
+      sourceRevision: 'resume-source',
+      artifactRevision: 'resume-docx',
+      renderSequence: 5,
+      mediaType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      filename: 'northstar-resume.docx',
+      previewAvailable: false
+    })
+    const coverOlder = artifact({
+      artifactId: 'art_COVEROLDABCDEFGHIJKLMNOPQ',
+      documentKey: 'cover_letter',
+      documentLabel: 'Cover Letter',
+      sourceRevision: 'cover-source-1',
+      artifactRevision: 'cover-1',
+      renderSequence: 6,
+      filename: 'northstar-cover-1.pdf',
+      isCurrent: false
+    })
+    const coverNewest = artifact({
+      artifactId: 'art_COVERNEWABCDEFGHIJKLMNOPQ',
+      documentKey: 'cover_letter',
+      documentLabel: 'Cover Letter',
+      sourceRevision: 'cover-source-2',
+      artifactRevision: 'cover-2',
+      renderSequence: 8,
+      filename: 'northstar-cover-2.pdf'
+    })
+    const artifacts = state([coverNewest, resumeDocx, coverOlder, resumePdf])
+    installDocuments({ list: vi.fn(async () => artifacts), refresh: vi.fn(async () => artifacts) })
+
+    render(<DocumentWorkspace hydrated job={job} onViewChange={vi.fn()} restoredArtifactId={resumePdf.artifactId} restoredPage={2} restoredZoom={1.4} />)
+
+    expect(await screen.findByText('PDF bytes 2 · page 2 at 140%')).not.toBeNull()
+    expect(screen.getByText('1 of 2')).not.toBeNull()
+    expect((screen.getByRole('button', { name: 'Previous document' }) as HTMLButtonElement).disabled).toBe(true)
+    expect((screen.getByRole('combobox', { name: 'Resume revision' }) as HTMLSelectElement).options).toHaveLength(2)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Next document' }))
+
+    expect(await screen.findByText('PDF bytes 2 · page 1 at 100%')).not.toBeNull()
+    expect(screen.getByText('2 of 2')).not.toBeNull()
+    expect((screen.getByRole('button', { name: 'Next document' }) as HTMLButtonElement).disabled).toBe(true)
+    const coverSelector = screen.getByRole('combobox', { name: 'Cover Letter revision' }) as HTMLSelectElement
+    expect(Array.from(coverSelector.options).map(option => option.textContent)).toEqual([
+      'No artifact',
+      'cover-2 · succeeded · newest',
+      'cover-1 · succeeded'
+    ])
+    expect(screen.queryByRole('button', { name: /Approve/ })).toBeNull()
+  })
+
+  it('exports the chosen succeeded PDF or latest DOCX variant from one logical revision', async () => {
+    const pdf = artifact({
+      artifactId: 'art_PAIREDPDFABCDEFGHIJKLMNOP',
+      sourceRevision: 'paired-source',
+      artifactRevision: 'paired-pdf',
+      renderSequence: 9
+    })
+    const olderDocx = artifact({
+      artifactId: 'art_OLDDOCXABCDEFGHIJKLMNOPQ',
+      sourceRevision: 'paired-source',
+      artifactRevision: 'paired-docx-old',
+      renderSequence: 8,
+      mediaType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      previewAvailable: false
+    })
+    const latestDocx = artifact({
+      artifactId: 'art_NEWDOCXABCDEFGHIJKLMNOPQ',
+      sourceRevision: 'paired-source',
+      artifactRevision: 'paired-docx-new',
+      renderSequence: 10,
+      mediaType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      previewAvailable: false
+    })
+    const failedPdf = artifact({
+      artifactId: 'art_FAILEDPDFABCDEFGHIJKLMNOP',
+      sourceRevision: 'paired-source',
+      artifactRevision: 'paired-pdf-failed',
+      renderSequence: 11,
+      renderStatus: 'failed',
+      previewAvailable: false
+    })
+    const artifacts = state([failedPdf, latestDocx, pdf, olderDocx])
+    const documents = installDocuments({ list: vi.fn(async () => artifacts), refresh: vi.fn(async () => artifacts) })
+    render(<DocumentWorkspace hydrated job={job} onViewChange={vi.fn()} restoredArtifactId={null} restoredPage={1} restoredZoom={1} />)
+
+    await screen.findByText(/Viewing northstar-resume.pdf/)
+    const exportButton = screen.getByRole('button', { name: /^Export$/ })
+    fireEvent.click(exportButton)
+    expect(screen.getByRole('menuitem', { name: 'Export PDF' })).not.toBeNull()
+    expect(screen.getByRole('menuitem', { name: 'Export DOCX' })).not.toBeNull()
+    fireEvent.keyDown(screen.getByRole('menu', { name: 'Export document' }), { key: 'Escape' })
+    expect(screen.queryByRole('menu', { name: 'Export document' })).toBeNull()
+    expect(document.activeElement).toBe(exportButton)
+    fireEvent.click(exportButton)
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Export PDF' }))
+    await waitFor(() => expect(documents.export).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect((exportButton as HTMLButtonElement).disabled).toBe(false))
+    fireEvent.click(exportButton)
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Export DOCX' }))
+
+    await waitFor(() => expect(documents.export).toHaveBeenCalledTimes(2))
+    expect(documents.export).toHaveBeenNthCalledWith(1, pdf.artifactId)
+    expect(documents.export).toHaveBeenNthCalledWith(2, latestDocx.artifactId)
+    expect(documents.export).not.toHaveBeenCalledWith(failedPdf.artifactId)
+    expect(documents.export).not.toHaveBeenCalledWith(olderDocx.artifactId)
   })
 })

@@ -9,6 +9,7 @@ from jobos_api.browser_policy import (
     sanitize_browser_title,
 )
 from jobos_api.state_store import (
+    MIGRATIONS,
     SCHEMA_VERSION,
     IncompatibleSchemaError,
     JobOsStateStore,
@@ -82,9 +83,9 @@ def test_initialization_applies_every_migration_once(tmp_path):
     first = store.initialize()
     second = store.initialize()
 
-    assert first.schema_version == SCHEMA_VERSION == 10
+    assert first.schema_version == SCHEMA_VERSION == 11
     assert second.schema_version == SCHEMA_VERSION
-    assert applied_versions(database) == [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+    assert applied_versions(database) == [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
     assert metadata_columns(database) == {"key", "value", "updated_at"}
 
 
@@ -99,11 +100,69 @@ def test_initialization_upgrades_a_behind_database(tmp_path):
     result = JobOsStateStore(database).initialize()
 
     assert result.schema_version == SCHEMA_VERSION
-    assert applied_versions(database) == [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+    assert applied_versions(database) == [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
     assert metadata_columns(database) == {"key", "value", "updated_at"}
 
 
-@pytest.mark.parametrize("versions", ([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11], [2]))
+def test_document_identity_migration_clears_legacy_docx_approval(tmp_path):
+    database = tmp_path / "jobos.db"
+    with sqlite3.connect(database) as connection:
+        connection.execute(
+            "CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT)"
+        )
+        for migration in MIGRATIONS[:10]:
+            JobOsStateStore._apply_migration(connection, migration)
+        connection.execute(
+            """
+            INSERT INTO document_artifacts(
+                artifact_id, registry_key, job_id, source_revision,
+                artifact_revision, media_type, sha256, render_status
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "art_legacy_docx_123456",
+                "legacy-registry-key",
+                "job-legacy",
+                "source-1",
+                "render-1",
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                "0" * 64,
+                "succeeded",
+            ),
+        )
+        connection.execute(
+            """
+            INSERT INTO job_document_state(
+                job_id, current_artifact_id, last_successful_artifact_id,
+                approved_artifact_id
+            ) VALUES (?, ?, ?, ?)
+            """,
+            (
+                "job-legacy",
+                "art_legacy_docx_123456",
+                "art_legacy_docx_123456",
+                "art_legacy_docx_123456",
+            ),
+        )
+
+    JobOsStateStore(database).initialize()
+
+    with sqlite3.connect(database) as connection:
+        approved = connection.execute(
+            "SELECT approved_artifact_id FROM job_document_state WHERE job_id = ?",
+            ("job-legacy",),
+        ).fetchone()
+        identity = connection.execute(
+            "SELECT document_key, document_label, render_sequence "
+            "FROM document_artifacts WHERE artifact_id = ?",
+            ("art_legacy_docx_123456",),
+        ).fetchone()
+
+    assert approved == (None,)
+    assert identity == ("resume", "Resume", 1)
+
+
+@pytest.mark.parametrize("versions", ([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12], [2]))
 def test_initialization_rejects_ahead_or_incompatible_history(tmp_path, versions):
     database = tmp_path / "jobos.db"
     with sqlite3.connect(database) as connection:

@@ -150,10 +150,14 @@ export interface WorkspaceSnapshot {
 
 export type ArtifactMediaType = 'application/pdf' | 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
 export type ArtifactRenderStatus = 'succeeded' | 'failed' | 'rendering'
+export type DocumentKey = 'resume' | 'cover_letter'
 
 export interface DocumentArtifact {
   artifactId: string
   jobId: string
+  documentKey: DocumentKey
+  documentLabel: string
+  renderSequence: number
   sourceRevision: string
   artifactRevision: string
   mediaType: ArtifactMediaType

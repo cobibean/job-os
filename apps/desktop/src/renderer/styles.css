@@ -515,6 +515,12 @@ button:focus-visible {
 .document-heading strong { color: var(--text); font-size: 12px; font-weight: 570; }
 .document-job { color: var(--muted); font-size: 10px; }
 .document-heading select { max-width: 220px; height: 30px; padding: 0 8px; border: 1px solid var(--border); border-radius: 5px; color: var(--text-soft); background: var(--surface-inset); font-size: 10px; }
+.document-navigation { display: flex; align-items: center; gap: 4px; }
+.document-navigation button { width: 28px; height: 28px; display: inline-flex; align-items: center; justify-content: center; padding: 0; border: 0; border-radius: 4px; color: var(--muted); background: transparent; cursor: pointer; }
+.document-navigation button:hover:not(:disabled) { color: var(--text); background: var(--surface-hover); }
+.document-navigation button:disabled { opacity: 0.3; cursor: default; }
+.document-position { min-width: 82px; display: flex; flex-direction: column; align-items: center; gap: 1px; color: var(--muted); font-size: 9px; }
+.document-position strong { max-width: 110px; font-size: 10px; }
 
 .document-toolbar { min-width: 0; display: flex; align-items: center; gap: 3px; padding: 5px 9px; border-bottom: 1px solid var(--border); background: var(--surface); }
 .document-toolbar button { height: 30px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 0 9px; border: 0; border-radius: 4px; color: var(--muted); background: transparent; cursor: pointer; font-size: 10px; white-space: nowrap; }
@@ -523,6 +529,9 @@ button:focus-visible {
 .document-toolbar .approve-revision { color: var(--green); }
 .document-toolbar .approve-revision:disabled { opacity: 0.72; }
 .document-toolbar-spacer { min-width: 8px; flex: 1; }
+.document-export { position: relative; }
+.document-export-menu { position: absolute; z-index: 5; top: calc(100% + 3px); left: 0; min-width: 116px; padding: 4px; border: 1px solid var(--border); border-radius: 5px; background: var(--surface-raised); box-shadow: 0 8px 24px var(--shadow-color); }
+.document-toolbar .document-export-menu button { width: 100%; justify-content: flex-start; color: var(--text-soft); }
 .page-count, .zoom-value { color: var(--text-soft); font-size: 10px; white-space: nowrap; }
 .zoom-value { width: 38px; text-align: center; }
 

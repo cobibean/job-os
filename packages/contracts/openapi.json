@@ -92,6 +92,18 @@
             "title": "Created At",
             "type": "string"
           },
+          "document_key": {
+            "enum": [
+              "resume",
+              "cover_letter"
+            ],
+            "title": "Document Key",
+            "type": "string"
+          },
+          "document_label": {
+            "title": "Document Label",
+            "type": "string"
+          },
           "failure_message": {
             "anyOf": [
               {
@@ -138,6 +150,10 @@
             "title": "Preview Available",
             "type": "boolean"
           },
+          "render_sequence": {
+            "title": "Render Sequence",
+            "type": "integer"
+          },
           "render_status": {
             "enum": [
               "succeeded",
@@ -166,6 +182,9 @@
         "required": [
           "artifact_id",
           "job_id",
+          "document_key",
+          "document_label",
+          "render_sequence",
           "source_revision",
           "artifact_revision",
           "media_type",

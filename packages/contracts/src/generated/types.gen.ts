@@ -73,6 +73,14 @@ export type ArtifactRecord = {
      */
     created_at: string;
     /**
+     * Document Key
+     */
+    document_key: 'resume' | 'cover_letter';
+    /**
+     * Document Label
+     */
+    document_label: string;
+    /**
      * Failure Message
      */
     failure_message: string | null;
@@ -104,6 +112,10 @@ export type ArtifactRecord = {
      * Preview Available
      */
     preview_available: boolean;
+    /**
+     * Render Sequence
+     */
+    render_sequence: number;
     /**
      * Render Status
      */
