@@ -58,8 +58,10 @@ function activeTurnAfterEvent(activeTurn: AgentTurn | null, event: ConversationE
   if (event.turnId !== activeTurn.turnId) return activeTurn
   const terminalTurnEvent = event.type === 'assistant_message' || event.type === 'error' || event.type === 'status'
   if (terminalTurnEvent && (event.state === 'completed' || event.state === 'failed' || event.state === 'interrupted')) return null
-  if (event.state === 'waiting') return { ...activeTurn, status: 'waiting' }
-  if (event.state === 'working') return { ...activeTurn, status: 'running' }
+  // Activity state describes one tool call, not the whole turn. Only an
+  // explicit runtime status event may pause or resume the active turn.
+  if (event.type === 'status' && event.state === 'waiting') return { ...activeTurn, status: 'waiting' }
+  if (event.type === 'status' && event.state === 'working') return { ...activeTurn, status: 'running' }
   return activeTurn
 }
 

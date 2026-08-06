@@ -30,6 +30,35 @@ def test_progress_and_completion_update_one_activity_identity():
     assert [started.state, progress.state, complete.state] == ["working", "working", "completed"]
 
 
+def test_tool_output_risk_is_advisory_and_does_not_pause_a_completed_mcp_call():
+    normalizer = ActivityNormalizer()
+    normalizer.normalize(
+        {"type": "tool.start", "tool_id": "tool-1", "name": "mcp_jobos_job_inspect"}
+    )
+    normalizer.normalize(
+        {
+            "type": "tool.complete",
+            "tool_id": "tool-1",
+            "name": "mcp_jobos_job_inspect",
+            "status": "complete",
+        }
+    )
+
+    advisory = normalizer.normalize(
+        {
+            "type": "tool.output_risk",
+            "tool_id": "tool-1",
+            "name": "mcp_jobos_job_inspect",
+            "risk": "high",
+            "findings": ["prompt_injection"],
+            "redacted": False,
+        }
+    )
+
+    assert advisory.state == "completed"
+    assert advisory.detail["risk"] == "high"
+
+
 def test_fifteen_unique_tools_remain_fifteen_ordered_actions():
     normalizer = ActivityNormalizer()
     events = []
