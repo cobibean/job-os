@@ -50,6 +50,20 @@ test('activity completion does not clear the active Hermes turn', () => {
   expect(next.activeTurn).toEqual(running.activeTurn)
 })
 
+test('an advisory waiting activity does not pause the active Hermes turn', () => {
+  const running = { ...initialAgentConversationState, activeTurn: { turnId: 'turn-1', status: 'running' as const, cancelRequested: false } }
+  const next = agentConversationReducer(running, {
+    type: 'event',
+    event: event(4, {
+      type: 'activity',
+      state: 'waiting',
+      detail: { activity_id: 'tool-1', type: 'tool.output_risk', risk: 'high' }
+    })
+  })
+
+  expect(next.activeTurn).toEqual(running.activeTurn)
+})
+
 test('hydration applies terminal events streamed after its snapshot cursor', () => {
   const completed = event(4, { type: 'assistant_message', state: 'completed', summary: 'Done' })
   const streamed = agentConversationReducer(initialAgentConversationState, { type: 'event', event: completed })

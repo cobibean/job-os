@@ -69,7 +69,11 @@ class ActivityNormalizer:
                 "completed" if status in {"", "complete", "completed", "succeeded"} else "failed"
             )
         elif frame_type == "tool.output_risk":
-            state = "waiting"
+            # Hermes emits this advisory *after* tool.complete. It explicitly
+            # does not block or redact the tool result, so preserve the real
+            # lifecycle state instead of making a successful MCP call look
+            # paused in JobOS.
+            state = previous.state if previous is not None else "working"
         detail = redact_detail(frame)
         event = GatewayEvent(
             event_type="activity",
