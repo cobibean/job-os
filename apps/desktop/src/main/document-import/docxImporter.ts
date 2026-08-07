@@ -7,7 +7,7 @@ import mammoth from 'mammoth'
 
 import type { DocumentImportIssue, DocumentImportReport, DocumentKey, DocumentSettings, TiptapDocumentJson } from '../../shared/editableDocuments.js'
 import { MAX_IMAGE_BYTES } from '../../shared/editableDocumentSchema.js'
-import { createDocumentExtensions } from '../../renderer/document-editor/extensions.js'
+import { createCoreDocumentExtensions } from '../../shared/documentExtensions.js'
 import { parseDocxMetadata } from './docxMetadataParser.js'
 import { normalizeImportedDocument } from './normalizeImportedDocument.js'
 import { sanitizeImportedHtml } from './sanitizeImportedHtml.js'
@@ -190,7 +190,7 @@ export async function importDocx(bytesLike: Uint8Array, sourceFilename: string, 
   for (const message of converted.messages) issues.push(warning('mammoth_conversion_warning', 'normalized', String(message.message).slice(0, 500)))
   const sanitizedHtml = sanitizeImportedHtml(converted.value)
   const parseHtml = `<section data-jobos-section>${sanitizedHtml}</section>`
-  const parsed = generateJSON(parseHtml, createDocumentExtensions()) as TiptapDocumentJson
+  const parsed = generateJSON(parseHtml, createCoreDocumentExtensions()) as TiptapDocumentJson
   const wrapper = parsed.content?.[0]
   const raw: TiptapDocumentJson = {
     type: 'doc',
