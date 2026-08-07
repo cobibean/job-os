@@ -98,6 +98,36 @@ describe('bounded DOCX importer', () => {
     await expect(importDocx(new Uint8Array(MAX_DOCX_BYTES + 1), 'large.docx', 'resume', fixedNow)).rejects.toThrow('20 MB')
   })
 
+  it('accepts normal Word styles-with-effects content and tel hyperlinks', async () => {
+    const wordDocx = await JSZip.loadAsync(await fixture('one-page-resume.docx'))
+    const contentTypes = await wordDocx.file('[Content_Types].xml')!.async('string')
+    wordDocx.file(
+      '[Content_Types].xml',
+      contentTypes.replace('</Types>', '<Default Extension="stylesWithEffects" ContentType="application/vnd.ms-word.stylesWithEffects+xml"/></Types>')
+    )
+    const relationships = await wordDocx.file('word/_rels/document.xml.rels')!.async('string')
+    wordDocx.file(
+      'word/_rels/document.xml.rels',
+      relationships.replace('</Relationships>', '<Relationship Id="phone" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink" Target="tel:+17125553500" TargetMode="External"/></Relationships>')
+    )
+
+    const result = await importDocx(await wordDocx.generateAsync({ type: 'uint8array' }), 'normal-word.docx', 'resume', fixedNow)
+    validateEditableContent(result.content, result.settings, [], result.importReport)
+  })
+
+  it('still rejects macro-enabled package content types', async () => {
+    const macroDocx = await JSZip.loadAsync(await fixture('one-page-resume.docx'))
+    const contentTypes = await macroDocx.file('[Content_Types].xml')!.async('string')
+    macroDocx.file(
+      '[Content_Types].xml',
+      contentTypes.replace(
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml',
+        'application/vnd.ms-word.document.macroEnabled.main+xml'
+      )
+    )
+    await expect(importDocx(await macroDocx.generateAsync({ type: 'uint8array' }), 'macro-content.docx', 'resume', fixedNow)).rejects.toThrow('Macro-enabled')
+  })
+
   it('rejects the advertised ZIP bomb budget before extraction and rejects XML entities', async () => {
     await expect(importDocx(await advertisedZipBombDocx(), 'bomb.docx', 'resume', fixedNow)).rejects.toThrow('uncompressed budget')
     await expect(importDocx(await advertisedEntryCountOverflowDocx(), 'entries.docx', 'resume', fixedNow)).rejects.toThrow('entry limit')
