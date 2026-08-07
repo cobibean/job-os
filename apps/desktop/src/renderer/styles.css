@@ -1013,6 +1013,8 @@ button:focus-visible {
 
 .document-editor-main { min-width: 0; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) 294px; overflow: hidden; }
 .document-editor-workarea { min-width: 0; min-height: 0; display: grid; grid-template-rows: auto minmax(0, 1fr); overflow: hidden; background: color-mix(in srgb, var(--surface-inset) 88%, var(--page-backdrop)); }
+.document-editor-workarea.document-editor-preview-mode { grid-template-rows: minmax(0, 1fr); }
+.document-editor-preview-mode > * { min-height: 0; }
 
 .document-ribbon {
   position: relative;
