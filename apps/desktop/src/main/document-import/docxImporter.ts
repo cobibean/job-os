@@ -124,7 +124,10 @@ async function verifyRelationships(zip: JSZip, entries: CentralEntry[]): Promise
         } catch {
           throw new Error('DOCX contains an unsafe external hyperlink')
         }
-        if (!['http:', 'https:', 'mailto:'].includes(protocol)) {
+        // Word commonly stores phone numbers as external tel: hyperlinks.
+        // They are safe to inspect here and are intentionally flattened to
+        // plain text by canonical normalization rather than kept as links.
+        if (!['http:', 'https:', 'mailto:', 'tel:'].includes(protocol)) {
           throw new Error('DOCX contains an unsafe external hyperlink')
         }
         continue
@@ -157,7 +160,7 @@ export async function importDocx(bytesLike: Uint8Array, sourceFilename: string, 
   }
   await verifyRelationships(zip, entries)
   const contentTypes = await zip.file('[Content_Types].xml')?.async('string')
-  if (!contentTypes || /macroEnabled|vbaProject|application\/vnd\.ms-word/i.test(contentTypes)) throw new Error('Macro-enabled .docm content is not supported')
+  if (!contentTypes || /macroEnabled|vbaProject/i.test(contentTypes)) throw new Error('Macro-enabled .docm content is not supported')
   if (!/application\/vnd\.openxmlformats-officedocument\.wordprocessingml\.document\.main\+xml/i.test(contentTypes)) {
     throw new Error('ZIP archive is not a valid DOCX package')
   }
