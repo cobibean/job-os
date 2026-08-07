@@ -28,6 +28,7 @@ interface DocumentWorkspaceProps {
   restoredPage: number
   restoredZoom: number
   hydrated: boolean
+  refreshGeneration?: number
   onViewChange: (artifactId: string | null, page: number, zoom: number) => void
 }
 
@@ -145,6 +146,8 @@ export function DocumentWorkspace(props: DocumentWorkspaceProps) {
   const activeJobId = useRef(jobId)
   activeJobId.current = jobId
   const lastNonNullJobId = useRef<string | null>(null)
+  const refreshGeneration = props.refreshGeneration ?? 0
+  const observedRefreshGeneration = useRef(refreshGeneration)
 
   useEffect(() => {
     if (!props.hydrated) return
@@ -283,9 +286,9 @@ export function DocumentWorkspace(props: DocumentWorkspaceProps) {
     return () => document.removeEventListener('pointerdown', closeOnPointerDown)
   }, [exportOpen])
 
-  const refresh = async () => {
-    if (!props.job || !bridge) return
-    const requestJobId = props.job.jobId
+  const refresh = useCallback(async () => {
+    if (!jobId || !bridge) return
+    const requestJobId = jobId
     setLoading(true)
     try {
       const refreshed = await bridge.refresh(requestJobId)
@@ -298,7 +301,13 @@ export function DocumentWorkspace(props: DocumentWorkspaceProps) {
     } finally {
       if (activeJobId.current === requestJobId) setLoading(false)
     }
-  }
+  }, [bridge, choosePreview, jobId])
+
+  useEffect(() => {
+    if (observedRefreshGeneration.current === refreshGeneration) return
+    observedRefreshGeneration.current = refreshGeneration
+    void refresh()
+  }, [refresh, refreshGeneration])
 
   const nativeAction = async (name: 'reveal' | 'open') => {
     const presentedArtifact = activeArtifact

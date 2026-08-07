@@ -118,6 +118,14 @@ The document indicator remains `2 of 2` by design because it counts logical docu
 
 A local Codex CLI commit review was attempted with medium reasoning. The command could not run because the local ChatGPT OAuth token could not refresh (`401 Unauthorized`). This was an authentication blocker, not a review finding. No independent Codex review pass is claimed.
 
+## Late review disposition
+
+The delayed independent review arrived after the first push. Its user-visible finding was valid: `document.publish` focused the document surface but did not force an already-mounted `DocumentWorkspace` to reload. A monotonically increasing document-mutation generation now flows from `App` through `CenterWorkspace`; `DocumentWorkspace` refreshes in place when that generation changes, preserving the selected logical revision and view state. A regression starts with only PDF while Documents is already open, advances the generation, and requires the paired DOCX export option to appear.
+
+The review also recommended three additional local threat-model hardenings: descriptor-anchored MCP reads, directory-descriptor-anchored API writes, and a transport-level pre-parse request-body cap. Cobi explicitly accepted deferring those items because JobOS is a one-person local/private app. Existing root containment, symlink rejection, authenticated trusted-MCP checks, payload-field limits, and tests remain in place; no claim is made that the deferred hardening was implemented.
+
+Post-fix full verification passed with 215 desktop tests, 347 Python tests (1 skipped), lint, TypeScript, generated contracts, and production build.
+
 ## Preserved boundaries
 
 - No arbitrary filesystem export path was added.

@@ -9,7 +9,7 @@ import { useConnectivity } from './hooks/useConnectivity'
 import { useJobs } from './hooks/useJobs'
 import { useWorkspace } from './hooks/useWorkspace'
 import { useTheme } from './theme/useTheme'
-import { useRef, useState } from 'react'
+import { useCallback, useRef, useState } from 'react'
 
 export function App() {
   const connectivity = useConnectivity()
@@ -20,11 +20,17 @@ export function App() {
   const [settingsPreparing, setSettingsPreparing] = useState(false)
   const [agentModalOpen, setAgentModalOpen] = useState(false)
   const [jobListingRequest, setJobListingRequest] = useState<JobListingRequest | null>(null)
+  const [documentMutationGeneration, setDocumentMutationGeneration] = useState(0)
   const nextJobListingRequestId = useRef(0)
   const latestNavigatorSelection = useRef(0)
   const navigatorSelectionQueue = useRef(Promise.resolve())
   const activePreset = layoutState.workspace.selectedPreset
   const activeLayout = layoutState.workspace.layouts[activePreset]
+
+  const showPublishedDocument = useCallback(() => {
+    setDocumentMutationGeneration(generation => generation + 1)
+    return layoutState.showDocument()
+  }, [layoutState.showDocument])
 
   const openSettings = async () => {
     if (settingsOpen || settingsPreparing) return
@@ -82,7 +88,7 @@ export function App() {
         agent={<AgentPanel
           apiState={connectivity.state}
           contextLabel={jobState.selectedJob ? `${jobState.selectedJob.company} · ${jobState.selectedJob.title}` : 'No active job'}
-          onArtifactRendered={layoutState.showDocument}
+          onArtifactRendered={showPublishedDocument}
           onModalOpenChange={setAgentModalOpen}
         />}
         center={<CenterWorkspace
@@ -98,6 +104,7 @@ export function App() {
           browserRepaired={Boolean(layoutState.workspace.repairedBrowser)}
           browserRepairReasons={layoutState.workspace.browserRepairReasons ?? []}
           browserVisible={!activeLayout.collapsed.includes('center') && !agentModalOpen && !settingsOpen && !settingsPreparing}
+          documentMutationGeneration={documentMutationGeneration}
           jobListingRequest={jobListingRequest}
           jobs={jobState.jobs}
           layoutSignal={`${activePreset}:${activeLayout.order.join(',')}:${activeLayout.collapsed.join(',')}`}
