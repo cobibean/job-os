@@ -224,6 +224,40 @@ describe('trusted document workspace', () => {
     expect(documents.loadPdf).not.toHaveBeenCalled()
   })
 
+  it('refreshes paired export formats when publication completes while documents are already open', async () => {
+    const pdf = artifact()
+    const docx = artifact({
+      artifactId: 'art_DOCXABCDEFGHIJKLMNOPQRST',
+      mediaType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      filename: 'northstar-resume.docx',
+      previewAvailable: false,
+      isCurrent: false,
+      isLastSuccessful: false
+    })
+    const initial = state([pdf])
+    const paired = state([pdf, docx])
+    const documents = installDocuments({
+      list: vi.fn(async () => initial),
+      refresh: vi.fn()
+        .mockResolvedValueOnce(initial)
+        .mockResolvedValue(paired)
+    })
+    const view = render(
+      <DocumentWorkspace hydrated job={job} onViewChange={vi.fn()} refreshGeneration={0} restoredArtifactId={null} restoredPage={1} restoredZoom={1} />
+    )
+
+    fireEvent.click(await screen.findByRole('button', { name: /^Export$/ }))
+    expect(screen.getByRole('menuitem', { name: 'Export PDF' })).not.toBeNull()
+    expect(screen.queryByRole('menuitem', { name: 'Export DOCX' })).toBeNull()
+
+    view.rerender(
+      <DocumentWorkspace hydrated job={job} onViewChange={vi.fn()} refreshGeneration={1} restoredArtifactId={null} restoredPage={1} restoredZoom={1} />
+    )
+
+    await waitFor(() => expect(documents.refresh).toHaveBeenCalledTimes(2))
+    expect(await screen.findByRole('menuitem', { name: 'Export DOCX' })).not.toBeNull()
+  })
+
   it('invalidates job A bytes and actions while job B is pending, then keeps them cleared on failure', async () => {
     const jobAArtifact = artifact()
     const jobBArtifact = artifact({

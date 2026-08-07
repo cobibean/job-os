@@ -74,6 +74,7 @@ interface CenterWorkspaceProps {
   browserRepaired: boolean
   browserRepairReasons: BrowserRepairReason[]
   browserVisible: boolean
+  documentMutationGeneration?: number
   jobs: JobListItem[]
   layoutSignal: string
   workspaceHydrated: boolean
@@ -282,6 +283,7 @@ export function CenterWorkspace(props: CenterWorkspaceProps) {
       job={props.activeJob}
       hydrated={props.workspaceHydrated}
       onViewChange={props.onDocumentPersist}
+      refreshGeneration={props.documentMutationGeneration ?? 0}
       restoredArtifactId={props.activeArtifactId}
       restoredPage={props.activeArtifactPage}
       restoredZoom={props.activeArtifactZoom}
