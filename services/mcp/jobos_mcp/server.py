@@ -172,6 +172,44 @@ def create_server(
         """List trusted registered artifacts for a job."""
         return await client.list_documents(job_id, idempotency_key=idempotency_key)
 
+    @server.tool(name="document_draft_get", structured_output=True)
+    async def document_draft_get(
+        job_id: str, document_key: str, idempotency_key: str | None = None
+    ) -> dict[str, Any]:
+        """Read a bounded semantic outline for one editable job document."""
+        return await client.get_document_draft(
+            job_id, document_key, idempotency_key=idempotency_key
+        )
+
+    @server.tool(name="document_draft_apply", structured_output=True)
+    async def document_draft_apply(
+        job_id: str,
+        document_id: str,
+        base_revision: int,
+        operations: list[dict[str, Any]],
+        idempotency_key: str | None = None,
+    ) -> dict[str, Any]:
+        """Atomically apply only the five allowlisted editable-document operations."""
+        return await client.apply_document_draft(
+            job_id,
+            document_id,
+            base_revision,
+            operations,
+            idempotency_key=idempotency_key,
+        )
+
+    @server.tool(name="document_draft_snapshot", structured_output=True)
+    async def document_draft_snapshot(
+        job_id: str,
+        document_id: str,
+        label: str,
+        idempotency_key: str | None = None,
+    ) -> dict[str, Any]:
+        """Create a durable manual checkpoint for one job-owned editable document."""
+        return await client.snapshot_document_draft(
+            job_id, document_id, label, idempotency_key=idempotency_key
+        )
+
     @server.tool(name="document_refresh", structured_output=True)
     async def document_refresh(job_id: str, idempotency_key: str | None = None) -> dict[str, Any]:
         """Refresh a job's trusted artifact manifest."""

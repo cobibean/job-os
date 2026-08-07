@@ -7,6 +7,19 @@ from jobos_mcp.jobs import JobOsMcpClient
 from jobos_mcp.server import _read_document_input, create_server
 
 
+@pytest.mark.parametrize("value", ["../job", "job/other", "job\\other", "job\nother", ""])
+def test_mcp_path_segments_reject_traversal_and_control_characters(value):
+    with pytest.raises(ValueError, match="Invalid job ID"):
+        JobOsMcpClient._segment(value, "job ID")
+
+
+def test_mcp_path_segments_are_url_encoded_and_document_keys_are_allowlisted():
+    assert JobOsMcpClient._segment("job:123", "job ID") == "job%3A123"
+    assert JobOsMcpClient._document_key("references") == "references"
+    with pytest.raises(ValueError, match="document key"):
+        JobOsMcpClient._document_key("resume/../../secrets")
+
+
 @pytest.mark.anyio
 async def test_job_tools_use_only_the_authenticated_jobos_http_contract():
     requests = []
@@ -180,6 +193,9 @@ async def test_mcp_server_exposes_phase_seven_parity_tools_while_retaining_job_t
         "workspace_inspect",
         "workspace_update",
         "document_list",
+        "document_draft_get",
+        "document_draft_apply",
+        "document_draft_snapshot",
         "document_refresh",
         "document_render",
         "document_register",
@@ -314,3 +330,118 @@ async def test_document_select_reads_workspace_silently_then_emits_one_shared_mu
         "origin": "mcp",
         "idempotency_key": "select-document-1",
     }
+
+
+
+@pytest.mark.anyio
+async def test_document_draft_tools_are_bounded_owned_authenticated_api_calls():
+    requests = []
+    document_id = "edoc_123456789012345678901234"
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if request.url.path.endswith("/editable-documents"):
+            return httpx.Response(
+                200,
+                json={
+                    "documents": [
+                        {
+                            "document_id": document_id,
+                            "job_id": "job-1",
+                            "document_key": "references",
+                            "document_label": "References",
+                            "revision": 3,
+                            "source_artifact_id": None,
+                            "published_revision": None,
+                            "created_at": "2026-08-07",
+                            "updated_at": "2026-08-07",
+                        }
+                    ]
+                },
+            )
+        if "editable-document-outlines" in request.url.path:
+            return httpx.Response(
+                200,
+                json={
+                    "document_id": document_id,
+                    "document_key": "references",
+                    "revision": 3,
+                    "outline": [],
+                },
+            )
+        return httpx.Response(200, json={"document_id": document_id})
+
+    client = JobOsMcpClient(
+        base_url="http://jobos.test",
+        device_token="test-device-token",
+        mcp_token="test-mcp-trusted-token",
+        transport=httpx.MockTransport(handler),
+    )
+    outline = await client.get_document_draft(
+        "job-1", "references", idempotency_key="draft-get-1"
+    )
+    await client.apply_document_draft(
+        "job-1",
+        document_id,
+        3,
+        [
+            {
+                "type": "replace_block_text",
+                "block_id": "node_12345678-1234-4123-8123-123456789012",
+                "expected_text": "Before",
+                "replacement_text": "After",
+            }
+        ],
+        idempotency_key="draft-apply-1",
+    )
+    await client.snapshot_document_draft(
+        "job-1", document_id, "Agent checkpoint", idempotency_key="draft-snapshot-1"
+    )
+    await client.aclose()
+
+    assert "content" not in outline
+    assert [(request.method, request.url.path) for request in requests] == [
+        ("GET", "/v1/jobs/job-1/editable-document-outlines/references"),
+        ("GET", "/v1/jobs/job-1/editable-documents"),
+        ("POST", f"/v1/editable-documents/{document_id}/operations"),
+        ("GET", "/v1/jobs/job-1/editable-documents"),
+        ("POST", f"/v1/editable-documents/{document_id}/snapshots"),
+    ]
+    assert requests[0].url.params["origin"] == "mcp"
+    assert json.loads(requests[2].content)["origin"] == "mcp"
+    assert json.loads(requests[4].content) == {
+        "base_revision": 3,
+        "reason": "manual",
+        "label": "Agent checkpoint",
+        "origin": "mcp",
+        "idempotency_key": "draft-snapshot-1",
+    }
+
+
+@pytest.mark.anyio
+async def test_document_draft_mutations_reject_cross_job_document_ids_before_posting():
+    requests = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, json={"documents": []})
+
+    client = JobOsMcpClient(
+        base_url="http://jobos.test",
+        device_token="test-device-token",
+        mcp_token="test-mcp-trusted-token",
+        transport=httpx.MockTransport(handler),
+    )
+    with pytest.raises(ValueError, match="not owned"):
+        await client.apply_document_draft(
+            "job-wrong",
+            "edoc_123456789012345678901234",
+            1,
+            [],
+            idempotency_key="cross-job-1",
+        )
+    await client.aclose()
+
+    assert [(request.method, request.url.path) for request in requests] == [
+        ("GET", "/v1/jobs/job-wrong/editable-documents")
+    ]

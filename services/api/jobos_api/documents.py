@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import json
 import re
 from dataclasses import dataclass
 from hashlib import sha256
@@ -8,13 +9,13 @@ from pathlib import Path
 from typing import Any, Literal, Protocol
 from uuid import uuid4
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 ARTIFACT_ID_PATTERN = re.compile(r"^art_[A-Za-z0-9_-]{16,80}$")
 PDF_MEDIA_TYPE = "application/pdf"
 DOCX_MEDIA_TYPE = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 ALLOWED_MEDIA_TYPES = {PDF_MEDIA_TYPE, DOCX_MEDIA_TYPE}
-DOCUMENT_KEYS = {"resume", "cover_letter"}
+DOCUMENT_KEYS = {"resume", "cover_letter", "references"}
 
 
 class ArtifactTrustError(ValueError):
@@ -32,7 +33,7 @@ class ArtifactSource(Protocol):
 @dataclass(frozen=True)
 class VerifiedArtifact:
     job_id: str
-    document_key: Literal["resume", "cover_letter"]
+    document_key: Literal["resume", "cover_letter", "references"]
     document_label: str
     source_revision: str
     artifact_revision: str
@@ -66,7 +67,7 @@ class ArtifactRecord(BaseModel):
 
     artifact_id: str
     job_id: str
-    document_key: Literal["resume", "cover_letter"]
+    document_key: Literal["resume", "cover_letter", "references"]
     document_label: str
     render_sequence: int
     source_revision: str
@@ -104,13 +105,13 @@ class ArtifactRegistrationRequest(BaseModel):
 class ArtifactPublishRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    document_key: Literal["resume", "cover_letter"]
+    document_key: Literal["resume", "cover_letter", "references"]
     document_label: str = Field(min_length=1, max_length=80)
     source_filename: str = Field(min_length=1, max_length=255)
-    source_base64: str = Field(min_length=1, max_length=2_800_000)
+    source_base64: str = Field(min_length=1, max_length=28_000_000)
     artifact_filename: str = Field(min_length=1, max_length=255)
     artifact_base64: str = Field(min_length=1, max_length=28_000_000)
-    origin: Literal["mcp"] = "mcp"
+    origin: Literal["user", "mcp"] = "mcp"
     idempotency_key: str = Field(min_length=1, max_length=128)
 
     @field_validator("document_label")
@@ -121,6 +122,12 @@ class ArtifactPublishRequest(BaseModel):
             raise ValueError("document label must not be blank")
         return stripped
 
+    @model_validator(mode="after")
+    def fixed_document_label(self) -> ArtifactPublishRequest:
+        if self.document_key == "references" and self.document_label != "References":
+            raise ValueError("document label must be References")
+        return self
+
     @field_validator("source_filename", "artifact_filename")
     @classmethod
     def require_plain_filename(cls, value: str) -> str:
@@ -129,12 +136,10 @@ class ArtifactPublishRequest(BaseModel):
         return value
 
     def source_bytes(self) -> bytes:
-        return _decode_published_bytes(self.source_base64, maximum=2_000_000, label="source")
+        return _decode_published_bytes(self.source_base64, maximum=20_000_000, label="source")
 
     def artifact_bytes(self) -> bytes:
-        return _decode_published_bytes(
-            self.artifact_base64, maximum=20_000_000, label="artifact"
-        )
+        return _decode_published_bytes(self.artifact_base64, maximum=20_000_000, label="artifact")
 
 
 class ArtifactRefreshRequest(BaseModel):
@@ -199,6 +204,49 @@ def materialize_published_document(
         publication_root, command.artifact_filename, command.artifact_bytes()
     )
     return source, artifact
+
+
+def materialize_external_import(
+    *,
+    job_id: str,
+    document_id: str,
+    document_key: str,
+    source_filename: str,
+    source_sha256: str,
+    source_bytes: bytes,
+    workspace_root: Path,
+) -> tuple[Path, Path]:
+    """Materialize a manifest source plus the verified original DOCX for facade publication."""
+    if not re.fullmatch(r"[A-Za-z0-9._-]{1,256}", job_id):
+        raise ArtifactTrustError("Job ID is not safe for document publication")
+    if not re.fullmatch(r"edoc_[A-Za-z0-9_-]{24}", document_id):
+        raise ArtifactTrustError("Editable document ID is not safe for publication")
+    computed_hash = sha256(source_bytes).hexdigest()
+    if computed_hash != source_sha256:
+        raise ArtifactTrustError("External DOCX SHA-256 does not match")
+    manifest = json.dumps(
+        {
+            "schema_version": 1,
+            "kind": "jobos_editable_document_import",
+            "job_id": job_id,
+            "document_id": document_id,
+            "document_key": document_key,
+            "original_filename": source_filename,
+            "original_sha256": source_sha256,
+        },
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
+    root = workspace_root.expanduser().resolve(strict=True)
+    publication_root = (root / "resume" / "exports" / "jobos" / job_id / "imports").resolve()
+    if root not in publication_root.parents:
+        raise ArtifactTrustError("Document publication root escapes the Job Hunter workspace")
+    publication_root.mkdir(parents=True, exist_ok=True)
+    manifest_path = _materialize_content_addressed(
+        publication_root, f"{document_id}-import-source.json", manifest
+    )
+    artifact_path = _materialize_content_addressed(publication_root, source_filename, source_bytes)
+    return manifest_path, artifact_path
 
 
 def _materialize_content_addressed(root: Path, filename: str, content: bytes) -> Path:
@@ -312,8 +360,11 @@ def verify_facade_artifacts(
 
 
 def artifact_record(
-    row: dict[str, Any], *, current_id: str | None, last_successful_id: str | None,
-    approved_id: str | None
+    row: dict[str, Any],
+    *,
+    current_id: str | None,
+    last_successful_id: str | None,
+    approved_id: str | None,
 ) -> ArtifactRecord:
     artifact_id = str(row["artifact_id"])
     return ArtifactRecord(

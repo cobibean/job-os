@@ -89,6 +89,12 @@ function installDocuments(overrides: Partial<JobOsRendererBridge['documents']> =
       sha256: 'a'.repeat(64),
       bytes: Uint8Array.of(2).buffer
     })),
+    loadOriginalDocx: vi.fn(async artifactId => ({
+      artifactId,
+      filename: 'northstar-resume.docx',
+      sha256: 'b'.repeat(64),
+      bytes: Uint8Array.of(0x50, 0x4b).buffer
+    })),
     export: vi.fn(async () => 'Exported northstar-resume.pdf'),
     reveal: vi.fn(async () => 'Revealed northstar-resume.pdf'),
     open: vi.fn(async () => 'Opened northstar-resume.pdf'),

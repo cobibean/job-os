@@ -43,6 +43,28 @@ export type ActivityReportResponse = {
 };
 
 /**
+ * ApplyOperationsRequest
+ */
+export type ApplyOperationsRequest = {
+    /**
+     * Base Revision
+     */
+    base_revision: number;
+    /**
+     * Idempotency Key
+     */
+    idempotency_key: string;
+    /**
+     * Operations
+     */
+    operations: Array<ReplaceBlockText | InsertBlockAfter | DeleteBlock | MoveBlockAfter | SetBlockRole>;
+    /**
+     * Origin
+     */
+    origin?: 'user' | 'mcp';
+};
+
+/**
  * ArtifactApprovalRequest
  */
 export type ArtifactApprovalRequest = {
@@ -71,7 +93,7 @@ export type ArtifactPublishRequest = {
     /**
      * Document Key
      */
-    document_key: 'resume' | 'cover_letter';
+    document_key: 'resume' | 'cover_letter' | 'references';
     /**
      * Document Label
      */
@@ -83,7 +105,7 @@ export type ArtifactPublishRequest = {
     /**
      * Origin
      */
-    origin?: 'mcp';
+    origin?: 'user' | 'mcp';
     /**
      * Source Base64
      */
@@ -113,7 +135,7 @@ export type ArtifactRecord = {
     /**
      * Document Key
      */
-    document_key: 'resume' | 'cover_letter';
+    document_key: 'resume' | 'cover_letter' | 'references';
     /**
      * Document Label
      */
@@ -384,6 +406,136 @@ export type ConversationResponse = {
 };
 
 /**
+ * CreateBlankRequest
+ */
+export type CreateBlankRequest = {
+    /**
+     * Document Key
+     */
+    document_key: 'resume' | 'cover_letter' | 'references';
+    /**
+     * Idempotency Key
+     */
+    idempotency_key: string;
+    /**
+     * Mode
+     */
+    mode: 'blank';
+};
+
+/**
+ * CreateExternalImportRequest
+ */
+export type CreateExternalImportRequest = {
+    /**
+     * Content
+     */
+    content: {
+        [key: string]: unknown;
+    };
+    /**
+     * Document Key
+     */
+    document_key: 'resume' | 'cover_letter' | 'references';
+    /**
+     * Idempotency Key
+     */
+    idempotency_key: string;
+    import_report: DocumentImportReport;
+    /**
+     * Mode
+     */
+    mode: 'import_external_docx';
+    settings: DocumentSettings;
+    /**
+     * Source Base64
+     */
+    source_base64: string;
+    /**
+     * Source Filename
+     */
+    source_filename: string;
+    /**
+     * Source Sha256
+     */
+    source_sha256: string;
+};
+
+/**
+ * CreateRegisteredImportRequest
+ */
+export type CreateRegisteredImportRequest = {
+    /**
+     * Content
+     */
+    content: {
+        [key: string]: unknown;
+    };
+    /**
+     * Document Key
+     */
+    document_key: 'resume' | 'cover_letter' | 'references';
+    /**
+     * Idempotency Key
+     */
+    idempotency_key: string;
+    import_report: DocumentImportReport;
+    /**
+     * Mode
+     */
+    mode: 'import_registered_artifact';
+    settings: DocumentSettings;
+    /**
+     * Source Artifact Id
+     */
+    source_artifact_id: string;
+};
+
+/**
+ * CreateSnapshotRequest
+ */
+export type CreateSnapshotRequest = {
+    /**
+     * Base Revision
+     */
+    base_revision: number;
+    /**
+     * Idempotency Key
+     */
+    idempotency_key: string;
+    /**
+     * Label
+     */
+    label: string;
+    /**
+     * Origin
+     */
+    origin?: 'user' | 'mcp';
+    /**
+     * Reason
+     */
+    reason?: 'manual';
+};
+
+/**
+ * DeleteBlock
+ */
+export type DeleteBlock = {
+    /**
+     * Block Id
+     */
+    block_id: string;
+    /**
+     * Expected Text
+     */
+    expected_text: string;
+    /**
+     * Type
+     */
+    type: 'delete_block';
+};
+
+/**
  * DesktopCapabilityPresence
  */
 export type DesktopCapabilityPresence = {
@@ -420,6 +572,302 @@ export type DeviceSessionResponse = {
 };
 
 /**
+ * DocumentComment
+ */
+export type DocumentComment = {
+    /**
+     * Author
+     */
+    author: 'user' | 'jobhunter';
+    /**
+     * Block Id
+     */
+    block_id: string;
+    /**
+     * Body
+     */
+    body: string;
+    /**
+     * Comment Id
+     */
+    comment_id: string;
+    /**
+     * Created At
+     */
+    created_at: string;
+    /**
+     * Resolved At
+     */
+    resolved_at?: string | null;
+};
+
+/**
+ * DocumentDraftOutline
+ */
+export type DocumentDraftOutline = {
+    /**
+     * Comment Count
+     */
+    comment_count: number;
+    /**
+     * Document Id
+     */
+    document_id: string;
+    /**
+     * Document Key
+     */
+    document_key: 'resume' | 'cover_letter' | 'references';
+    /**
+     * Document Label
+     */
+    document_label: string;
+    /**
+     * Outline
+     */
+    outline: Array<SemanticOutlineBlock>;
+    /**
+     * Revision
+     */
+    revision: number;
+    settings: DocumentSettings;
+    /**
+     * Unresolved Suggestion Count
+     */
+    unresolved_suggestion_count: number;
+};
+
+/**
+ * DocumentImportIssue
+ */
+export type DocumentImportIssue = {
+    /**
+     * Code
+     */
+    code: string;
+    /**
+     * Count
+     */
+    count: number;
+    /**
+     * Message
+     */
+    message: string;
+    /**
+     * Severity
+     */
+    severity: 'normalized' | 'dropped';
+};
+
+/**
+ * DocumentImportReport
+ */
+export type DocumentImportReport = {
+    /**
+     * Imported At
+     */
+    imported_at?: string | null;
+    /**
+     * Issues
+     */
+    issues?: Array<DocumentImportIssue>;
+    /**
+     * Source Filename
+     */
+    source_filename?: string | null;
+};
+
+/**
+ * DocumentSettings
+ */
+export type DocumentSettings = {
+    /**
+     * Default Font Family
+     */
+    default_font_family?: 'Arial' | 'Calibri' | 'Times New Roman' | 'Georgia' | 'Garamond';
+    /**
+     * Default Font Size Pt
+     */
+    default_font_size_pt?: number;
+    footer?: HeaderFooter;
+    header?: HeaderFooter;
+    margins_inches?: Margins;
+    /**
+     * Orientation
+     */
+    orientation?: 'portrait';
+    /**
+     * Page Size
+     */
+    page_size?: 'letter' | 'a4';
+    /**
+     * Show Page Numbers
+     */
+    show_page_numbers?: boolean;
+};
+
+/**
+ * EditableDocument
+ */
+export type EditableDocument = {
+    /**
+     * Comments
+     */
+    comments: Array<DocumentComment>;
+    /**
+     * Content
+     */
+    content: {
+        [key: string]: unknown;
+    };
+    /**
+     * Created At
+     */
+    created_at: string;
+    /**
+     * Document Id
+     */
+    document_id: string;
+    /**
+     * Document Key
+     */
+    document_key: 'resume' | 'cover_letter' | 'references';
+    /**
+     * Document Label
+     */
+    document_label: 'Resume' | 'Cover Letter' | 'References';
+    import_report: DocumentImportReport;
+    /**
+     * Job Id
+     */
+    job_id: string;
+    /**
+     * Published Revision
+     */
+    published_revision: number | null;
+    /**
+     * Revision
+     */
+    revision: number;
+    /**
+     * Schema Version
+     */
+    schema_version: 1;
+    settings: DocumentSettings;
+    /**
+     * Source Artifact Id
+     */
+    source_artifact_id: string | null;
+    /**
+     * Source Filename
+     */
+    source_filename: string | null;
+    /**
+     * Source Sha256
+     */
+    source_sha256: string | null;
+    /**
+     * Updated At
+     */
+    updated_at: string;
+};
+
+/**
+ * EditableDocumentList
+ */
+export type EditableDocumentList = {
+    /**
+     * Documents
+     */
+    documents: Array<EditableDocumentSummary>;
+};
+
+/**
+ * EditableDocumentSnapshot
+ */
+export type EditableDocumentSnapshot = {
+    /**
+     * Actor
+     */
+    actor: 'user' | 'jobhunter' | 'import' | 'system';
+    /**
+     * Created At
+     */
+    created_at: string;
+    /**
+     * Document Id
+     */
+    document_id: string;
+    /**
+     * Document Revision
+     */
+    document_revision: number;
+    /**
+     * Label
+     */
+    label: string | null;
+    /**
+     * Reason
+     */
+    reason: 'import' | 'before_agent_edit' | 'manual' | 'before_publish' | 'before_restore';
+    /**
+     * Snapshot Id
+     */
+    snapshot_id: string;
+};
+
+/**
+ * EditableDocumentSnapshotList
+ */
+export type EditableDocumentSnapshotList = {
+    /**
+     * Snapshots
+     */
+    snapshots: Array<EditableDocumentSnapshot>;
+};
+
+/**
+ * EditableDocumentSummary
+ */
+export type EditableDocumentSummary = {
+    /**
+     * Created At
+     */
+    created_at: string;
+    /**
+     * Document Id
+     */
+    document_id: string;
+    /**
+     * Document Key
+     */
+    document_key: 'resume' | 'cover_letter' | 'references';
+    /**
+     * Document Label
+     */
+    document_label: string;
+    /**
+     * Job Id
+     */
+    job_id: string;
+    /**
+     * Published Revision
+     */
+    published_revision: number | null;
+    /**
+     * Revision
+     */
+    revision: number;
+    /**
+     * Source Artifact Id
+     */
+    source_artifact_id: string | null;
+    /**
+     * Updated At
+     */
+    updated_at: string;
+};
+
+/**
  * HTTPValidationError
  */
 export type HttpValidationError = {
@@ -427,6 +875,28 @@ export type HttpValidationError = {
      * Detail
      */
     detail?: Array<ValidationError>;
+};
+
+/**
+ * HeaderFooter
+ */
+export type HeaderFooter = {
+    /**
+     * Center
+     */
+    center?: string;
+    /**
+     * First Page Different
+     */
+    first_page_different?: boolean;
+    /**
+     * Left
+     */
+    left?: string;
+    /**
+     * Right
+     */
+    right?: string;
 };
 
 /**
@@ -453,6 +923,32 @@ export type HealthResponse = {
      * Version
      */
     version: string;
+};
+
+/**
+ * InsertBlockAfter
+ */
+export type InsertBlockAfter = {
+    /**
+     * After Block Id
+     */
+    after_block_id: string;
+    /**
+     * Node Type
+     */
+    node_type: 'paragraph' | 'listItem';
+    /**
+     * Semantic Role
+     */
+    semantic_role: 'contact' | 'summary' | 'experience' | 'experience_achievement' | 'education' | 'skills' | 'reference' | 'cover_letter_body' | 'closing' | 'custom';
+    /**
+     * Text
+     */
+    text: string;
+    /**
+     * Type
+     */
+    type: 'insert_block_after';
 };
 
 /**
@@ -797,6 +1293,83 @@ export type ManualOrderRequest = {
 };
 
 /**
+ * Margins
+ */
+export type Margins = {
+    /**
+     * Bottom
+     */
+    bottom?: number;
+    /**
+     * Left
+     */
+    left?: number;
+    /**
+     * Right
+     */
+    right?: number;
+    /**
+     * Top
+     */
+    top?: number;
+};
+
+/**
+ * MoveBlockAfter
+ */
+export type MoveBlockAfter = {
+    /**
+     * After Block Id
+     */
+    after_block_id: string;
+    /**
+     * Block Id
+     */
+    block_id: string;
+    /**
+     * Type
+     */
+    type: 'move_block_after';
+};
+
+/**
+ * OperationChange
+ */
+export type OperationChange = {
+    /**
+     * After
+     */
+    after: string;
+    /**
+     * Before
+     */
+    before: string;
+    /**
+     * Block Id
+     */
+    block_id: string;
+};
+
+/**
+ * OperationReceipt
+ */
+export type OperationReceipt = {
+    /**
+     * Changed Block Ids
+     */
+    changed_block_ids: Array<string>;
+    /**
+     * Changes
+     */
+    changes: Array<OperationChange>;
+    document: EditableDocument;
+    /**
+     * Snapshot Id
+     */
+    snapshot_id: string;
+};
+
+/**
  * PanelLayout
  */
 export type PanelLayout = {
@@ -814,6 +1387,102 @@ export type PanelLayout = {
     widths: {
         [key: string]: number;
     };
+};
+
+/**
+ * PublishEditableDocumentRequest
+ */
+export type PublishEditableDocumentRequest = {
+    /**
+     * Docx Base64
+     */
+    docx_base64: string;
+    /**
+     * Docx Filename
+     */
+    docx_filename: string;
+    /**
+     * Docx Sha256
+     */
+    docx_sha256: string;
+    /**
+     * Expected Revision
+     */
+    expected_revision: number;
+    /**
+     * Idempotency Key
+     */
+    idempotency_key: string;
+    /**
+     * Pdf Base64
+     */
+    pdf_base64: string;
+    /**
+     * Pdf Filename
+     */
+    pdf_filename: string;
+    /**
+     * Pdf Sha256
+     */
+    pdf_sha256: string;
+};
+
+/**
+ * ReplaceBlockText
+ */
+export type ReplaceBlockText = {
+    /**
+     * Block Id
+     */
+    block_id: string;
+    /**
+     * Expected Text
+     */
+    expected_text: string;
+    /**
+     * Replacement Text
+     */
+    replacement_text: string;
+    /**
+     * Type
+     */
+    type: 'replace_block_text';
+};
+
+/**
+ * ReplaceFromDocxRequest
+ */
+export type ReplaceFromDocxRequest = {
+    /**
+     * Base Revision
+     */
+    base_revision: number;
+    /**
+     * Idempotency Key
+     */
+    idempotency_key: string;
+    /**
+     * Source
+     */
+    source: ({
+        mode: 'import_registered_artifact';
+    } & CreateRegisteredImportRequest) | ({
+        mode: 'import_external_docx';
+    } & CreateExternalImportRequest);
+};
+
+/**
+ * RestoreSnapshotRequest
+ */
+export type RestoreSnapshotRequest = {
+    /**
+     * Base Revision
+     */
+    base_revision: number;
+    /**
+     * Idempotency Key
+     */
+    idempotency_key: string;
 };
 
 /**
@@ -849,6 +1518,61 @@ export type RetryTurnRequest = {
 };
 
 /**
+ * SaveEditableDocumentRequest
+ */
+export type SaveEditableDocumentRequest = {
+    /**
+     * Base Revision
+     */
+    base_revision: number;
+    /**
+     * Comments
+     */
+    comments: Array<DocumentComment>;
+    /**
+     * Content
+     */
+    content: {
+        [key: string]: unknown;
+    };
+    /**
+     * Idempotency Key
+     */
+    idempotency_key: string;
+    settings: DocumentSettings;
+};
+
+/**
+ * SemanticOutlineBlock
+ */
+export type SemanticOutlineBlock = {
+    /**
+     * Block Id
+     */
+    block_id: string;
+    /**
+     * Locked
+     */
+    locked: boolean;
+    /**
+     * Node Type
+     */
+    node_type: string;
+    /**
+     * Parent Section Id
+     */
+    parent_section_id: string | null;
+    /**
+     * Semantic Role
+     */
+    semantic_role: 'contact' | 'summary' | 'experience' | 'experience_achievement' | 'education' | 'skills' | 'reference' | 'cover_letter_body' | 'closing' | 'custom' | null;
+    /**
+     * Text
+     */
+    text: string;
+};
+
+/**
  * SendMessageRequest
  */
 export type SendMessageRequest = {
@@ -860,6 +1584,24 @@ export type SendMessageRequest = {
      * Text
      */
     text: string;
+};
+
+/**
+ * SetBlockRole
+ */
+export type SetBlockRole = {
+    /**
+     * Block Id
+     */
+    block_id: string;
+    /**
+     * Semantic Role
+     */
+    semantic_role: 'contact' | 'summary' | 'experience' | 'experience_achievement' | 'education' | 'skills' | 'reference' | 'cover_letter_body' | 'closing' | 'custom';
+    /**
+     * Type
+     */
+    type: 'set_block_role';
 };
 
 /**
@@ -1390,6 +2132,262 @@ export type DeviceSessionV1DeviceSessionGetResponses = {
 
 export type DeviceSessionV1DeviceSessionGetResponse = DeviceSessionV1DeviceSessionGetResponses[keyof DeviceSessionV1DeviceSessionGetResponses];
 
+export type EditableDocumentGetV1EditableDocumentsDocumentIdGetData = {
+    body?: never;
+    path: {
+        /**
+         * Document Id
+         */
+        document_id: string;
+    };
+    query?: never;
+    url: '/v1/editable-documents/{document_id}';
+};
+
+export type EditableDocumentGetV1EditableDocumentsDocumentIdGetErrors = {
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type EditableDocumentGetV1EditableDocumentsDocumentIdGetError = EditableDocumentGetV1EditableDocumentsDocumentIdGetErrors[keyof EditableDocumentGetV1EditableDocumentsDocumentIdGetErrors];
+
+export type EditableDocumentGetV1EditableDocumentsDocumentIdGetResponses = {
+    /**
+     * Successful Response
+     */
+    200: EditableDocument;
+};
+
+export type EditableDocumentGetV1EditableDocumentsDocumentIdGetResponse = EditableDocumentGetV1EditableDocumentsDocumentIdGetResponses[keyof EditableDocumentGetV1EditableDocumentsDocumentIdGetResponses];
+
+export type EditableDocumentSaveV1EditableDocumentsDocumentIdPutData = {
+    body: SaveEditableDocumentRequest;
+    path: {
+        /**
+         * Document Id
+         */
+        document_id: string;
+    };
+    query?: never;
+    url: '/v1/editable-documents/{document_id}';
+};
+
+export type EditableDocumentSaveV1EditableDocumentsDocumentIdPutErrors = {
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type EditableDocumentSaveV1EditableDocumentsDocumentIdPutError = EditableDocumentSaveV1EditableDocumentsDocumentIdPutErrors[keyof EditableDocumentSaveV1EditableDocumentsDocumentIdPutErrors];
+
+export type EditableDocumentSaveV1EditableDocumentsDocumentIdPutResponses = {
+    /**
+     * Successful Response
+     */
+    200: EditableDocument;
+};
+
+export type EditableDocumentSaveV1EditableDocumentsDocumentIdPutResponse = EditableDocumentSaveV1EditableDocumentsDocumentIdPutResponses[keyof EditableDocumentSaveV1EditableDocumentsDocumentIdPutResponses];
+
+export type EditableDocumentImportV1EditableDocumentsDocumentIdImportPostData = {
+    body: ReplaceFromDocxRequest;
+    path: {
+        /**
+         * Document Id
+         */
+        document_id: string;
+    };
+    query?: never;
+    url: '/v1/editable-documents/{document_id}/import';
+};
+
+export type EditableDocumentImportV1EditableDocumentsDocumentIdImportPostErrors = {
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type EditableDocumentImportV1EditableDocumentsDocumentIdImportPostError = EditableDocumentImportV1EditableDocumentsDocumentIdImportPostErrors[keyof EditableDocumentImportV1EditableDocumentsDocumentIdImportPostErrors];
+
+export type EditableDocumentImportV1EditableDocumentsDocumentIdImportPostResponses = {
+    /**
+     * Successful Response
+     */
+    200: EditableDocument;
+};
+
+export type EditableDocumentImportV1EditableDocumentsDocumentIdImportPostResponse = EditableDocumentImportV1EditableDocumentsDocumentIdImportPostResponses[keyof EditableDocumentImportV1EditableDocumentsDocumentIdImportPostResponses];
+
+export type EditableOperationsV1EditableDocumentsDocumentIdOperationsPostData = {
+    body: ApplyOperationsRequest;
+    headers?: {
+        /**
+         * X-Jobos-Mcp-Token
+         */
+        'X-JobOS-MCP-Token'?: string | null;
+    };
+    path: {
+        /**
+         * Document Id
+         */
+        document_id: string;
+    };
+    query?: never;
+    url: '/v1/editable-documents/{document_id}/operations';
+};
+
+export type EditableOperationsV1EditableDocumentsDocumentIdOperationsPostErrors = {
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type EditableOperationsV1EditableDocumentsDocumentIdOperationsPostError = EditableOperationsV1EditableDocumentsDocumentIdOperationsPostErrors[keyof EditableOperationsV1EditableDocumentsDocumentIdOperationsPostErrors];
+
+export type EditableOperationsV1EditableDocumentsDocumentIdOperationsPostResponses = {
+    /**
+     * Successful Response
+     */
+    200: OperationReceipt;
+};
+
+export type EditableOperationsV1EditableDocumentsDocumentIdOperationsPostResponse = EditableOperationsV1EditableDocumentsDocumentIdOperationsPostResponses[keyof EditableOperationsV1EditableDocumentsDocumentIdOperationsPostResponses];
+
+export type EditableDocumentPublishV1EditableDocumentsDocumentIdPublishPostData = {
+    body: PublishEditableDocumentRequest;
+    path: {
+        /**
+         * Document Id
+         */
+        document_id: string;
+    };
+    query?: never;
+    url: '/v1/editable-documents/{document_id}/publish';
+};
+
+export type EditableDocumentPublishV1EditableDocumentsDocumentIdPublishPostErrors = {
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type EditableDocumentPublishV1EditableDocumentsDocumentIdPublishPostError = EditableDocumentPublishV1EditableDocumentsDocumentIdPublishPostErrors[keyof EditableDocumentPublishV1EditableDocumentsDocumentIdPublishPostErrors];
+
+export type EditableDocumentPublishV1EditableDocumentsDocumentIdPublishPostResponses = {
+    /**
+     * Successful Response
+     */
+    200: EditableDocument;
+};
+
+export type EditableDocumentPublishV1EditableDocumentsDocumentIdPublishPostResponse = EditableDocumentPublishV1EditableDocumentsDocumentIdPublishPostResponses[keyof EditableDocumentPublishV1EditableDocumentsDocumentIdPublishPostResponses];
+
+export type EditableSnapshotListV1EditableDocumentsDocumentIdSnapshotsGetData = {
+    body?: never;
+    path: {
+        /**
+         * Document Id
+         */
+        document_id: string;
+    };
+    query?: never;
+    url: '/v1/editable-documents/{document_id}/snapshots';
+};
+
+export type EditableSnapshotListV1EditableDocumentsDocumentIdSnapshotsGetErrors = {
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type EditableSnapshotListV1EditableDocumentsDocumentIdSnapshotsGetError = EditableSnapshotListV1EditableDocumentsDocumentIdSnapshotsGetErrors[keyof EditableSnapshotListV1EditableDocumentsDocumentIdSnapshotsGetErrors];
+
+export type EditableSnapshotListV1EditableDocumentsDocumentIdSnapshotsGetResponses = {
+    /**
+     * Successful Response
+     */
+    200: EditableDocumentSnapshotList;
+};
+
+export type EditableSnapshotListV1EditableDocumentsDocumentIdSnapshotsGetResponse = EditableSnapshotListV1EditableDocumentsDocumentIdSnapshotsGetResponses[keyof EditableSnapshotListV1EditableDocumentsDocumentIdSnapshotsGetResponses];
+
+export type EditableSnapshotCreateV1EditableDocumentsDocumentIdSnapshotsPostData = {
+    body: CreateSnapshotRequest;
+    headers?: {
+        /**
+         * X-Jobos-Mcp-Token
+         */
+        'X-JobOS-MCP-Token'?: string | null;
+    };
+    path: {
+        /**
+         * Document Id
+         */
+        document_id: string;
+    };
+    query?: never;
+    url: '/v1/editable-documents/{document_id}/snapshots';
+};
+
+export type EditableSnapshotCreateV1EditableDocumentsDocumentIdSnapshotsPostErrors = {
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type EditableSnapshotCreateV1EditableDocumentsDocumentIdSnapshotsPostError = EditableSnapshotCreateV1EditableDocumentsDocumentIdSnapshotsPostErrors[keyof EditableSnapshotCreateV1EditableDocumentsDocumentIdSnapshotsPostErrors];
+
+export type EditableSnapshotCreateV1EditableDocumentsDocumentIdSnapshotsPostResponses = {
+    /**
+     * Successful Response
+     */
+    201: EditableDocumentSnapshot;
+};
+
+export type EditableSnapshotCreateV1EditableDocumentsDocumentIdSnapshotsPostResponse = EditableSnapshotCreateV1EditableDocumentsDocumentIdSnapshotsPostResponses[keyof EditableSnapshotCreateV1EditableDocumentsDocumentIdSnapshotsPostResponses];
+
+export type EditableSnapshotRestoreV1EditableDocumentsDocumentIdSnapshotsSnapshotIdRestorePostData = {
+    body: RestoreSnapshotRequest;
+    path: {
+        /**
+         * Document Id
+         */
+        document_id: string;
+        /**
+         * Snapshot Id
+         */
+        snapshot_id: string;
+    };
+    query?: never;
+    url: '/v1/editable-documents/{document_id}/snapshots/{snapshot_id}/restore';
+};
+
+export type EditableSnapshotRestoreV1EditableDocumentsDocumentIdSnapshotsSnapshotIdRestorePostErrors = {
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type EditableSnapshotRestoreV1EditableDocumentsDocumentIdSnapshotsSnapshotIdRestorePostError = EditableSnapshotRestoreV1EditableDocumentsDocumentIdSnapshotsSnapshotIdRestorePostErrors[keyof EditableSnapshotRestoreV1EditableDocumentsDocumentIdSnapshotsSnapshotIdRestorePostErrors];
+
+export type EditableSnapshotRestoreV1EditableDocumentsDocumentIdSnapshotsSnapshotIdRestorePostResponses = {
+    /**
+     * Successful Response
+     */
+    200: EditableDocument;
+};
+
+export type EditableSnapshotRestoreV1EditableDocumentsDocumentIdSnapshotsSnapshotIdRestorePostResponse = EditableSnapshotRestoreV1EditableDocumentsDocumentIdSnapshotsSnapshotIdRestorePostResponses[keyof EditableSnapshotRestoreV1EditableDocumentsDocumentIdSnapshotsSnapshotIdRestorePostResponses];
+
 export type EventsListV1EventsGetData = {
     body?: never;
     path?: never;
@@ -1867,6 +2865,158 @@ export type JobUpdateDescriptionV1JobsJobIdDescriptionPutResponses = {
 };
 
 export type JobUpdateDescriptionV1JobsJobIdDescriptionPutResponse = JobUpdateDescriptionV1JobsJobIdDescriptionPutResponses[keyof JobUpdateDescriptionV1JobsJobIdDescriptionPutResponses];
+
+export type EditableDocumentOutlineV1JobsJobIdEditableDocumentOutlinesDocumentKeyGetData = {
+    body?: never;
+    headers?: {
+        /**
+         * X-Jobos-Mcp-Token
+         */
+        'X-JobOS-MCP-Token'?: string | null;
+    };
+    path: {
+        /**
+         * Job Id
+         */
+        job_id: string;
+        /**
+         * Document Key
+         */
+        document_key: 'resume' | 'cover_letter' | 'references';
+    };
+    query?: {
+        /**
+         * Origin
+         */
+        origin?: 'mcp' | null;
+        /**
+         * Idempotency Key
+         */
+        idempotency_key?: string | null;
+    };
+    url: '/v1/jobs/{job_id}/editable-document-outlines/{document_key}';
+};
+
+export type EditableDocumentOutlineV1JobsJobIdEditableDocumentOutlinesDocumentKeyGetErrors = {
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type EditableDocumentOutlineV1JobsJobIdEditableDocumentOutlinesDocumentKeyGetError = EditableDocumentOutlineV1JobsJobIdEditableDocumentOutlinesDocumentKeyGetErrors[keyof EditableDocumentOutlineV1JobsJobIdEditableDocumentOutlinesDocumentKeyGetErrors];
+
+export type EditableDocumentOutlineV1JobsJobIdEditableDocumentOutlinesDocumentKeyGetResponses = {
+    /**
+     * Successful Response
+     */
+    200: DocumentDraftOutline;
+};
+
+export type EditableDocumentOutlineV1JobsJobIdEditableDocumentOutlinesDocumentKeyGetResponse = EditableDocumentOutlineV1JobsJobIdEditableDocumentOutlinesDocumentKeyGetResponses[keyof EditableDocumentOutlineV1JobsJobIdEditableDocumentOutlinesDocumentKeyGetResponses];
+
+export type EditableDocumentsListV1JobsJobIdEditableDocumentsGetData = {
+    body?: never;
+    path: {
+        /**
+         * Job Id
+         */
+        job_id: string;
+    };
+    query?: never;
+    url: '/v1/jobs/{job_id}/editable-documents';
+};
+
+export type EditableDocumentsListV1JobsJobIdEditableDocumentsGetErrors = {
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type EditableDocumentsListV1JobsJobIdEditableDocumentsGetError = EditableDocumentsListV1JobsJobIdEditableDocumentsGetErrors[keyof EditableDocumentsListV1JobsJobIdEditableDocumentsGetErrors];
+
+export type EditableDocumentsListV1JobsJobIdEditableDocumentsGetResponses = {
+    /**
+     * Successful Response
+     */
+    200: EditableDocumentList;
+};
+
+export type EditableDocumentsListV1JobsJobIdEditableDocumentsGetResponse = EditableDocumentsListV1JobsJobIdEditableDocumentsGetResponses[keyof EditableDocumentsListV1JobsJobIdEditableDocumentsGetResponses];
+
+export type EditableDocumentCreateV1JobsJobIdEditableDocumentsPostData = {
+    /**
+     * Command
+     */
+    body: ({
+        mode: 'blank';
+    } & CreateBlankRequest) | ({
+        mode: 'import_registered_artifact';
+    } & CreateRegisteredImportRequest) | ({
+        mode: 'import_external_docx';
+    } & CreateExternalImportRequest);
+    path: {
+        /**
+         * Job Id
+         */
+        job_id: string;
+    };
+    query?: never;
+    url: '/v1/jobs/{job_id}/editable-documents';
+};
+
+export type EditableDocumentCreateV1JobsJobIdEditableDocumentsPostErrors = {
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type EditableDocumentCreateV1JobsJobIdEditableDocumentsPostError = EditableDocumentCreateV1JobsJobIdEditableDocumentsPostErrors[keyof EditableDocumentCreateV1JobsJobIdEditableDocumentsPostErrors];
+
+export type EditableDocumentCreateV1JobsJobIdEditableDocumentsPostResponses = {
+    /**
+     * Successful Response
+     */
+    201: EditableDocument;
+};
+
+export type EditableDocumentCreateV1JobsJobIdEditableDocumentsPostResponse = EditableDocumentCreateV1JobsJobIdEditableDocumentsPostResponses[keyof EditableDocumentCreateV1JobsJobIdEditableDocumentsPostResponses];
+
+export type EditableDocumentForJobV1JobsJobIdEditableDocumentsDocumentKeyGetData = {
+    body?: never;
+    path: {
+        /**
+         * Job Id
+         */
+        job_id: string;
+        /**
+         * Document Key
+         */
+        document_key: 'resume' | 'cover_letter' | 'references';
+    };
+    query?: never;
+    url: '/v1/jobs/{job_id}/editable-documents/{document_key}';
+};
+
+export type EditableDocumentForJobV1JobsJobIdEditableDocumentsDocumentKeyGetErrors = {
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type EditableDocumentForJobV1JobsJobIdEditableDocumentsDocumentKeyGetError = EditableDocumentForJobV1JobsJobIdEditableDocumentsDocumentKeyGetErrors[keyof EditableDocumentForJobV1JobsJobIdEditableDocumentsDocumentKeyGetErrors];
+
+export type EditableDocumentForJobV1JobsJobIdEditableDocumentsDocumentKeyGetResponses = {
+    /**
+     * Successful Response
+     */
+    200: EditableDocument;
+};
+
+export type EditableDocumentForJobV1JobsJobIdEditableDocumentsDocumentKeyGetResponse = EditableDocumentForJobV1JobsJobIdEditableDocumentsDocumentKeyGetResponses[keyof EditableDocumentForJobV1JobsJobIdEditableDocumentsDocumentKeyGetResponses];
 
 export type JobHistoryV1JobsJobIdHistoryGetData = {
     body?: never;

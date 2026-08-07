@@ -20,6 +20,7 @@ import type {
   JobListItem,
   PdfArtifactPayload
 } from '../../shared/contracts'
+import type { EditableDocument, EditableDocumentSummary } from '../../shared/editableDocuments'
 import { PdfPreview } from './PdfPreview'
 
 interface DocumentWorkspaceProps {
@@ -30,11 +31,17 @@ interface DocumentWorkspaceProps {
   hydrated: boolean
   refreshGeneration?: number
   onViewChange: (artifactId: string | null, page: number, zoom: number) => void
+  onOpenEditor?: (document: EditableDocument) => void
 }
 
 const PDF: ArtifactMediaType = 'application/pdf'
 const DOCX: ArtifactMediaType = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
-const documentOrder: DocumentKey[] = ['resume', 'cover_letter']
+const documentOrder: DocumentKey[] = ['resume', 'cover_letter', 'references']
+const documentLabels: Record<DocumentKey, string> = {
+  resume: 'Resume',
+  cover_letter: 'Cover Letter',
+  references: 'References'
+}
 
 interface LogicalRevision {
   documentKey: DocumentKey
@@ -85,7 +92,7 @@ function buildDocuments(artifacts: DocumentArtifact[]): LogicalDocument[] {
     }
     const revisions = Array.from(grouped.entries()).map(([sourceRevision, variants]) => ({
       documentKey,
-      documentLabel: variants[0]?.documentLabel ?? (documentKey === 'resume' ? 'Resume' : 'Cover Letter'),
+      documentLabel: variants[0]?.documentLabel ?? documentLabels[documentKey],
       sourceRevision,
       renderSequence: Math.max(...variants.map(artifact => artifact.renderSequence)),
       artifacts: variants,
@@ -93,7 +100,7 @@ function buildDocuments(artifacts: DocumentArtifact[]): LogicalDocument[] {
     })).sort((left, right) => right.renderSequence - left.renderSequence)
     return [{
       documentKey,
-      documentLabel: revisions[0]?.documentLabel ?? (documentKey === 'resume' ? 'Resume' : 'Cover Letter'),
+      documentLabel: revisions[0]?.documentLabel ?? documentLabels[documentKey],
       revisions
     }]
   })
@@ -123,6 +130,7 @@ function chooseLogicalPreview(next: JobArtifactsState, preferredId: string | nul
 
 export function DocumentWorkspace(props: DocumentWorkspaceProps) {
   const bridge = useRef(window.jobos?.documents).current
+  const editableBridge = useRef(window.jobos?.editableDocuments).current
   const [state, setState] = useState<JobArtifactsState>(emptyState(props.job?.jobId))
   const [activeId, setActiveId] = useState<string | null>(props.restoredArtifactId)
   const [page, setPage] = useState(Math.max(1, props.restoredPage))
@@ -133,6 +141,10 @@ export function DocumentWorkspace(props: DocumentWorkspaceProps) {
   const [message, setMessage] = useState('')
   const [exportOpen, setExportOpen] = useState(false)
   const [exportBusy, setExportBusy] = useState(false)
+  const [drafts, setDrafts] = useState<EditableDocumentSummary[]>([])
+  const [editorBusyKey, setEditorBusyKey] = useState<DocumentKey | null>(null)
+  const [importKey, setImportKey] = useState<DocumentKey>('resume')
+  const [blankChoiceKey, setBlankChoiceKey] = useState<DocumentKey | null>(null)
   const exportButton = useRef<HTMLButtonElement>(null)
   const exportMenu = useRef<HTMLDivElement>(null)
   const incomingViewKey = `${props.restoredArtifactId ?? ''}:${props.restoredPage}:${props.restoredZoom}`
@@ -242,6 +254,20 @@ export function DocumentWorkspace(props: DocumentWorkspaceProps) {
     })
     return () => { active = false }
   }, [bridge, choosePreview, jobId])
+
+  useEffect(() => {
+    if (!jobId || !editableBridge) {
+      setDrafts([])
+      return
+    }
+    let active = true
+    editableBridge.list(jobId).then(value => {
+      if (active) setDrafts(value)
+    }).catch(error => {
+      if (active) setMessage(error instanceof Error ? error.message : 'Editable documents unavailable')
+    })
+    return () => { active = false }
+  }, [editableBridge, jobId, refreshGeneration])
 
   useEffect(() => {
     setPayload(null)
@@ -373,6 +399,77 @@ export function DocumentWorkspace(props: DocumentWorkspaceProps) {
     }
   }
 
+  const openEditor = async (documentKey: DocumentKey) => {
+    if (!jobId || !editableBridge || editorBusyKey) return
+    setEditorBusyKey(documentKey)
+    setMessage('Opening editable document…')
+    try {
+      const existing = drafts.some(draft => draft.documentKey === documentKey)
+      let document: EditableDocument
+      if (existing) {
+        document = await editableBridge.getForJob(jobId, documentKey)
+      } else {
+        const logicalDocument = documents.find(item => item.documentKey === documentKey)
+        const selectedRevision = activeDocument?.documentKey === documentKey
+          ? activeRevision
+          : logicalDocument?.revisions[0]
+        const selectedDocx = selectedRevision?.artifacts.find(artifact =>
+          artifact.mediaType === DOCX && artifact.renderStatus === 'succeeded')
+        if (selectedDocx) {
+          document = await editableBridge.importRegisteredArtifact(jobId, documentKey, selectedDocx.artifactId)
+        } else if (selectedRevision) {
+          setBlankChoiceKey(documentKey)
+          return
+        } else {
+          document = await editableBridge.createBlank(
+            jobId,
+            documentKey,
+            `create-${documentKey}-${globalThis.crypto.randomUUID()}`
+          )
+        }
+      }
+      props.onOpenEditor?.(document)
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : 'Could not open the document editor')
+    } finally {
+      setEditorBusyKey(null)
+    }
+  }
+
+  const startBlankFromChoice = async () => {
+    if (!blankChoiceKey || !jobId || !editableBridge) return
+    const documentKey = blankChoiceKey
+    setBlankChoiceKey(null)
+    setEditorBusyKey(documentKey)
+    try {
+      const document = await editableBridge.createBlank(
+        jobId,
+        documentKey,
+        `create-${documentKey}-${globalThis.crypto.randomUUID()}`
+      )
+      props.onOpenEditor?.(document)
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : 'Could not create a blank document')
+    } finally {
+      setEditorBusyKey(null)
+    }
+  }
+
+  const importDocx = async (requestedKey: DocumentKey = importKey) => {
+    if (!jobId || !editableBridge || editorBusyKey) return
+    setEditorBusyKey(requestedKey)
+    setMessage(`Importing ${documentLabels[requestedKey]} DOCX…`)
+    try {
+      const document = await editableBridge.importFile(jobId, requestedKey)
+      if (document) props.onOpenEditor?.(document)
+      else setMessage('Import cancelled')
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : 'Could not import the DOCX')
+    } finally {
+      setEditorBusyKey(null)
+    }
+  }
+
   if (!props.job) {
     return (
       <main className="document-workspace panel-region">
@@ -423,6 +520,32 @@ export function DocumentWorkspace(props: DocumentWorkspaceProps) {
 
       <div className="document-toolbar" role="toolbar" aria-label="Document controls">
         <button disabled={!bridge || loading} onClick={refresh} type="button"><RefreshCw aria-hidden="true" size={14} /> Refresh</button>
+        {documentOrder.map(documentKey => {
+          const draft = drafts.find(item => item.documentKey === documentKey)
+          return (
+            <button
+              className="edit-document-button"
+              disabled={!editableBridge || !props.onOpenEditor || Boolean(editorBusyKey)}
+              key={documentKey}
+              onClick={() => { void openEditor(documentKey) }}
+              type="button"
+            >
+              <FileText aria-hidden="true" size={14} />
+              {editorBusyKey === documentKey
+                ? 'Opening…'
+                : `${draft ? 'Edit' : 'Create'} ${documentLabels[documentKey]}`}
+            </button>
+          )
+        })}
+        <select
+          aria-label="Document type to import"
+          disabled={!editableBridge || Boolean(editorBusyKey)}
+          onChange={event => setImportKey(event.target.value as DocumentKey)}
+          value={importKey}
+        >
+          {documentOrder.map(documentKey => <option key={documentKey} value={documentKey}>{documentLabels[documentKey]}</option>)}
+        </select>
+        <button disabled={!editableBridge || !props.onOpenEditor || Boolean(editorBusyKey)} onClick={() => { void importDocx() }} type="button"><FolderOpen aria-hidden="true" size={14} /> Import DOCX</button>
         <button disabled={!activeArtifact || !bridge} onClick={() => nativeAction('open')} type="button"><ExternalLink aria-hidden="true" size={14} /> Open</button>
         <button disabled={!activeArtifact || !bridge} onClick={() => nativeAction('reveal')} type="button"><FolderOpen aria-hidden="true" size={14} /> Reveal</button>
         <div className="document-export">
@@ -490,6 +613,20 @@ export function DocumentWorkspace(props: DocumentWorkspaceProps) {
           </div>
         )}
       </section>
+      {blankChoiceKey ? (
+        <div aria-labelledby="document-source-choice-title" aria-modal="true" className="document-exit-dialog" role="dialog">
+          <div>
+            <FileText aria-hidden="true" size={22} />
+            <h2 id="document-source-choice-title">This revision has PDF only</h2>
+            <p>Choose a Word file to import, or start a clean {documentLabels[blankChoiceKey]} draft.</p>
+            <div>
+              <button onClick={() => { const key = blankChoiceKey; setBlankChoiceKey(null); void importDocx(key) }} type="button">Import DOCX</button>
+              <button onClick={() => { void startBlankFromChoice() }} type="button">Start blank</button>
+              <button onClick={() => setBlankChoiceKey(null)} type="button">Cancel</button>
+            </div>
+          </div>
+        </div>
+      ) : null}
       <p aria-live="polite" className="document-announcement">{loading ? 'Loading document…' : message}</p>
     </main>
   )

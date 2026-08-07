@@ -10,6 +10,8 @@ import { createMainDocumentsClient } from './documents.js'
 const artifactId = 'art_ABCDEFGHIJKLMNOPQRSTUVWX'
 const pdf = new TextEncoder().encode('%PDF-1.7\ntrusted fixture\n%%EOF\n')
 const hash = createHash('sha256').update(pdf).digest('hex')
+const docx = new Uint8Array([0x50, 0x4b, 0x03, 0x04])
+const docxHash = createHash('sha256').update(docx).digest('hex')
 const originalFetch = globalThis.fetch
 
 afterEach(() => {
@@ -27,6 +29,20 @@ function artifactResponse() {
       'X-Artifact-Revision': 'render-2',
       'X-Source-Revision': 'source-2',
       'X-Content-SHA256': hash
+    }
+  })
+}
+
+function docxArtifactResponse() {
+  return new Response(docx, {
+    status: 200,
+    headers: {
+      'Content-Type': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      'Content-Disposition': "attachment; filename*=UTF-8''trusted-original.docx",
+      'X-Artifact-ID': artifactId,
+      'X-Artifact-Revision': 'source-2',
+      'X-Source-Revision': 'source-2',
+      'X-Content-SHA256': docxHash
     }
   })
 }
@@ -107,6 +123,22 @@ describe('trusted document client', () => {
     expect(result.artifactRevision).toBe('render-2')
     expect(result.sha256).toBe(hash)
     expect(Array.from(new Uint8Array(result.bytes))).toEqual(Array.from(pdf))
+  })
+
+  it('loads a checksum-verified DOCX original without exposing a file path', async () => {
+    globalThis.fetch = vi.fn(async () => docxArtifactResponse()) as typeof fetch
+
+    const result = await client().loadOriginalDocx(artifactId)
+
+    expect(result.filename).toBe('trusted-original.docx')
+    expect(result.sha256).toBe(docxHash)
+    expect(Array.from(new Uint8Array(result.bytes))).toEqual(Array.from(docx))
+    expect(result).not.toHaveProperty('path')
+  })
+
+  it('refuses a non-DOCX artifact on the Original boundary', async () => {
+    globalThis.fetch = vi.fn(async () => artifactResponse()) as typeof fetch
+    await expect(client().loadOriginalDocx(artifactId)).rejects.toThrow('Only DOCX')
   })
 
   it('rejects arbitrary IDs and mismatched content hashes before rendering', async () => {

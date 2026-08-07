@@ -100,7 +100,11 @@ async function apiJson<T>(config: JobsConfig, route: string, method = 'GET'): Pr
   return response.json() as Promise<T>
 }
 
-async function artifactBytes(config: JobsConfig, artifactId: string, preview: boolean) {
+export async function loadVerifiedArtifactBytes(
+  config: JobsConfig,
+  artifactId: string,
+  preview: boolean
+) {
   const id = safeId(artifactId)
   const response = await fetch(
     new URL(`/v1/artifacts/${encodeURIComponent(id)}/${preview ? 'content' : 'download'}`, config.baseUrl),
@@ -147,7 +151,7 @@ export function createMainDocumentsClient(
   native: { dialog: Pick<Dialog, 'showSaveDialog'>, shell: Pick<Shell, 'openPath' | 'showItemInFolder'>, cacheRoot: string }
 ) {
   const downloadToCache = async (artifactId: string) => {
-    const artifact = await artifactBytes(config, artifactId, false)
+    const artifact = await loadVerifiedArtifactBytes(config, artifactId, false)
     await mkdir(native.cacheRoot, { recursive: true })
     const target = path.join(native.cacheRoot, `${artifact.artifactId}-${artifact.filename}`)
     await writeFile(target, Buffer.from(artifact.bytes), { mode: 0o600 })
@@ -168,7 +172,7 @@ export function createMainDocumentsClient(
       ))
     },
     async loadPdf(artifactId: string): Promise<PdfArtifactPayload> {
-      const artifact = await artifactBytes(config, artifactId, true)
+      const artifact = await loadVerifiedArtifactBytes(config, artifactId, true)
       return {
         artifactId: artifact.artifactId,
         artifactRevision: artifact.artifactRevision,
@@ -177,8 +181,20 @@ export function createMainDocumentsClient(
         bytes: artifact.bytes
       }
     },
+    async loadOriginalDocx(artifactId: string) {
+      const artifact = await loadVerifiedArtifactBytes(config, artifactId, false)
+      if (artifact.mediaType !== 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
+        throw new Error('Only DOCX artifacts can be shown as an original document')
+      }
+      return {
+        artifactId: artifact.artifactId,
+        filename: artifact.filename,
+        sha256: artifact.sha256,
+        bytes: artifact.bytes
+      }
+    },
     async exportArtifact(artifactId: string): Promise<string> {
-      const artifact = await artifactBytes(config, artifactId, false)
+      const artifact = await loadVerifiedArtifactBytes(config, artifactId, false)
       const result = await native.dialog.showSaveDialog({ defaultPath: artifact.filename })
       if (result.canceled || !result.filePath) return 'Export cancelled'
       await writeFile(result.filePath, Buffer.from(artifact.bytes))

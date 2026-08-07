@@ -20,17 +20,38 @@
   },
   "dependencies": {
     "@jobos/contracts": "workspace:*",
+    "@tiptap/core": "3.29.2",
+    "@tiptap/extension-highlight": "3.29.2",
+    "@tiptap/extension-image": "3.29.2",
+    "@tiptap/extension-placeholder": "3.29.2",
+    "@tiptap/extension-table": "3.29.2",
+    "@tiptap/extension-text-align": "3.29.2",
+    "@tiptap/extension-text-style": "3.29.2",
+    "@tiptap/extension-unique-id": "3.29.2",
+    "@tiptap/html": "3.29.2",
+    "@tiptap/react": "3.29.2",
+    "@tiptap/starter-kit": "3.29.2",
+    "docx": "9.7.1",
+    "docx-preview": "0.4.0",
+    "fast-xml-parser": "5.10.1",
+    "jszip": "3.10.1",
     "lucide-react": "1.25.0",
+    "mammoth": "1.12.0",
+    "pagedjs": "0.4.3",
     "pdfjs-dist": "6.1.200",
+    "prosemirror-docx": "0.6.1",
     "react": "19.2.7",
     "react-dom": "19.2.7",
-    "react-markdown": "^10.1.0"
+    "react-markdown": "^10.1.0",
+    "sanitize-html": "2.17.6",
+    "tiptap-pagination-plus": "3.1.0"
   },
   "devDependencies": {
     "@testing-library/react": "16.3.2",
     "@types/node": "26.1.1",
     "@types/react": "19.2.17",
     "@types/react-dom": "19.2.3",
+    "@types/sanitize-html": "2.16.1",
     "@vitejs/plugin-react": "6.0.3",
     "concurrently": "10.0.3",
     "electron": "43.1.1",
@@ -57,6 +78,10 @@
       {
         "from": "build/jobos-keychain",
         "to": "jobos-keychain"
+      },
+      {
+        "from": "../../THIRD_PARTY_NOTICES.md",
+        "to": "THIRD_PARTY_NOTICES.md"
       }
     ],
     "mac": {

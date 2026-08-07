@@ -9,12 +9,34 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 from jobos_api.app import create_app
+from jobos_api.documents import ArtifactPublishRequest
+from jobos_api.editable_documents import blank_content, default_settings
 from jobos_api.settings import Settings
 from jobos_api.state_store import mutation_activity_source_id
 
 TITLE_POLICY_FIXTURES = json.loads(
     (Path(__file__).parents[3] / "tests/fixtures/browser-title-policy.json").read_text()
 )
+
+
+def test_publish_request_preserves_custom_existing_labels_and_fixes_references_label():
+    common = {
+        "source_filename": "source.docx",
+        "source_base64": base64.b64encode(b"source").decode(),
+        "artifact_filename": "artifact.pdf",
+        "artifact_base64": base64.b64encode(b"artifact").decode(),
+        "origin": "mcp",
+        "idempotency_key": "publish-label-contract",
+    }
+    request = ArtifactPublishRequest.model_validate(
+        {"document_key": "resume", "document_label": "Tailored Resume", **common}
+    )
+    assert request.document_label == "Tailored Resume"
+    with pytest.raises(ValueError, match="References"):
+        ArtifactPublishRequest.model_validate(
+            {"document_key": "references", "document_label": "Reference Sheet", **common}
+        )
+
 
 STATUSES = (
     "discovered",
@@ -67,6 +89,7 @@ class FakeJobHunterFacade:
         self.description_update_calls = 0
         self.descriptions = {}
         self.locations = {}
+        self.publish_calls = []
 
     def list_jobs(self):
         return list(self.jobs)
@@ -153,6 +176,14 @@ class FakeJobHunterFacade:
         self.inspect_job(job_id)
         source = Path(source_path)
         artifact = Path(artifact_path)
+        self.publish_calls.append(
+            {
+                "job_id": job_id,
+                "document_key": document_key,
+                "source_path": source_path,
+                "artifact_path": artifact_path,
+            }
+        )
         content = artifact.read_bytes()
         rows = self.artifacts.setdefault(job_id, [])
         published = {
@@ -1264,6 +1295,143 @@ def test_trusted_mcp_can_publish_paired_pdf_and_docx_into_one_logical_revision(t
     )
 
 
+def test_editable_document_publish_pairs_docx_pdf_marks_revision_and_replays(tmp_path, monkeypatch):
+    facade = FakeJobHunterFacade()
+    client = make_client(tmp_path, facade)
+    client.__enter__()
+    created = client.post(
+        "/v1/jobs/job-0/editable-documents",
+        headers=auth_headers(),
+        json={
+            "mode": "blank",
+            "document_key": "resume",
+            "idempotency_key": "create-publishable-resume",
+        },
+    )
+    assert created.status_code == 201
+    document = created.json()
+    docx = b"PK\x03\x04jobos-docx"
+    pdf = b"%PDF-1.4\njobos-pdf"
+    payload = {
+        "expected_revision": document["revision"],
+        "docx_filename": "Resume-r1.docx",
+        "docx_base64": base64.b64encode(docx).decode(),
+        "docx_sha256": sha256(docx).hexdigest(),
+        "pdf_filename": "Resume-r1.pdf",
+        "pdf_base64": base64.b64encode(pdf).decode(),
+        "pdf_sha256": sha256(pdf).hexdigest(),
+        "idempotency_key": "publish-editable-r1",
+    }
+
+    original_publish = facade.publish_document_artifact
+    failed_pdf_once = False
+
+    def flaky_publish(*args):
+        nonlocal failed_pdf_once
+        if str(args[-1]).endswith(".pdf") and not failed_pdf_once:
+            failed_pdf_once = True
+            raise OSError("injected PDF publication failure")
+        return original_publish(*args)
+
+    monkeypatch.setattr(facade, "publish_document_artifact", flaky_publish)
+    partial = client.post(
+        f"/v1/editable-documents/{document['document_id']}/publish",
+        headers=auth_headers(),
+        json=payload,
+    )
+    assert partial.status_code == 422
+    assert len(facade.artifacts["job-0"]) == 1
+    partial_snapshots = client.get(
+        f"/v1/editable-documents/{document['document_id']}/snapshots",
+        headers=auth_headers(),
+    )
+    assert partial_snapshots.status_code == 200
+    assert [item["reason"] for item in partial_snapshots.json()["snapshots"]] == ["before_publish"]
+
+    published = client.post(
+        f"/v1/editable-documents/{document['document_id']}/publish",
+        headers=auth_headers(),
+        json=payload,
+    )
+    assert published.status_code == 200, published.text
+    assert published.json()["published_revision"] == 1
+    assert {row["media_type"] for row in facade.artifacts["job-0"]} == {
+        "application/pdf",
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    }
+    source_paths = {Path(call["source_path"]) for call in facade.publish_calls}
+    assert len(source_paths) == 1
+    publication_source_path = source_paths.pop()
+    assert publication_source_path.name.endswith("-publication-source.json")
+    publication_source = json.loads(publication_source_path.read_text())
+    assert publication_source["document_id"] == document["document_id"]
+    assert publication_source["document_revision"] == document["revision"]
+    assert {row["source_revision"] for row in facade.artifacts["job-0"]} == {
+        sha256(publication_source_path.read_bytes()).hexdigest()
+    }
+    with sqlite3.connect(tmp_path / "jobos.db") as connection:
+        linked_rows = connection.execute(
+            "SELECT editable_document_id, editable_document_revision FROM document_artifacts"
+        ).fetchall()
+    assert linked_rows == [(document["document_id"], document["revision"])] * 2
+    snapshots = client.get(
+        f"/v1/editable-documents/{document['document_id']}/snapshots",
+        headers=auth_headers(),
+    )
+    assert snapshots.status_code == 200
+    assert snapshots.json()["snapshots"][0]["reason"] == "before_publish"
+
+    advanced = client.put(
+        f"/v1/editable-documents/{document['document_id']}",
+        headers=auth_headers(),
+        json={
+            "base_revision": published.json()["revision"],
+            "content": published.json()["content"],
+            "settings": published.json()["settings"],
+            "comments": published.json()["comments"],
+            "idempotency_key": "advance-after-publication",
+        },
+    )
+    assert advanced.status_code == 200
+    assert advanced.json()["revision"] == published.json()["revision"] + 1
+
+    replay = client.post(
+        f"/v1/editable-documents/{document['document_id']}/publish",
+        headers=auth_headers(),
+        json=payload,
+    )
+    assert replay.status_code == 200
+    assert replay.json() == published.json()
+    assert len(facade.artifacts["job-0"]) == 2
+    client.__exit__(None, None, None)
+
+
+def test_authenticated_desktop_can_publish_without_an_mcp_token(tmp_path):
+    facade = FakeJobHunterFacade()
+    facade.jobs = facade.jobs[:1]
+    source = b"PK\x03\x04canonical-docx"
+    payload = {
+        "document_key": "resume",
+        "document_label": "Resume",
+        "source_filename": "resume-r7.docx",
+        "source_base64": base64.b64encode(source).decode("ascii"),
+        "artifact_filename": "resume-r7.pdf",
+        "artifact_base64": base64.b64encode(b"%PDF-1.7\nrevision seven\n%%EOF\n").decode("ascii"),
+        "origin": "user",
+        "idempotency_key": "desktop-publish-resume-r7-pdf",
+    }
+
+    with make_client(tmp_path, facade) as client:
+        response = client.post(
+            "/v1/jobs/job-0/artifacts/publish",
+            headers={"Authorization": "Bearer test-device-token"},
+            json=payload,
+        )
+
+    assert response.status_code == 200
+    assert response.json()["artifacts"][0]["source_revision"] == sha256(source).hexdigest()
+
+
 def test_newer_success_and_failed_render_preserve_last_successful_preview(tmp_path):
     facade = FakeJobHunterFacade()
     facade.jobs = facade.jobs[:1]
@@ -2018,3 +2186,432 @@ def test_concurrent_identical_artifact_registration_executes_the_facade_once(tmp
     assert [response.status_code for response in responses] == [200, 200]
     assert responses[0].json() == responses[1].json()
     assert facade.register_calls == 1
+
+
+
+def test_editable_document_routes_cover_crud_conflict_snapshots_operations_and_stubs(tmp_path):
+    with make_client(tmp_path) as client:
+        created = client.post(
+            "/v1/jobs/job-0/editable-documents",
+            headers=auth_headers(),
+            json={
+                "mode": "blank",
+                "document_key": "references",
+                "idempotency_key": "draft-create-1",
+            },
+        )
+        replay = client.post(
+            "/v1/jobs/job-0/editable-documents",
+            headers=auth_headers(),
+            json={
+                "mode": "blank",
+                "document_key": "references",
+                "idempotency_key": "draft-create-1",
+            },
+        )
+        assert created.status_code == replay.status_code == 201
+        document = created.json()
+        assert replay.json() == document
+        assert document["document_label"] == "References"
+        document_id = document["document_id"]
+
+        listing = client.get(
+            "/v1/jobs/job-0/editable-documents", headers=auth_headers()
+        )
+        outline = client.get(
+            "/v1/jobs/job-0/editable-document-outlines/references",
+            headers=auth_headers(),
+            params={"origin": "mcp", "idempotency_key": "draft-read-1"},
+        )
+        assert listing.status_code == outline.status_code == 200
+        assert "content" not in listing.json()["documents"][0]
+        assert "content" not in outline.json()
+        assert outline.json()["outline"]
+
+        saved = client.put(
+            f"/v1/editable-documents/{document_id}",
+            headers=auth_headers(),
+            json={
+                "base_revision": 1,
+                "content": document["content"],
+                "settings": document["settings"],
+                "comments": [],
+                "idempotency_key": "draft-save-1",
+            },
+        )
+        stale = client.put(
+            f"/v1/editable-documents/{document_id}",
+            headers=auth_headers(),
+            json={
+                "base_revision": 1,
+                "content": document["content"],
+                "settings": document["settings"],
+                "comments": [],
+                "idempotency_key": "draft-save-stale",
+            },
+        )
+        assert saved.status_code == 200
+        assert saved.json()["revision"] == 2
+        assert stale.status_code == 409
+        assert stale.json()["detail"]["current"]["revision"] == 2
+
+        snapshot = client.post(
+            f"/v1/editable-documents/{document_id}/snapshots",
+            headers=auth_headers(),
+            json={
+                "base_revision": 2,
+                "reason": "manual",
+                "label": "Before agent",
+                "origin": "mcp",
+                "idempotency_key": "draft-snapshot-1",
+            },
+        )
+        assert snapshot.status_code == 201
+        assert snapshot.json()["actor"] == "jobhunter"
+
+        target = saved.json()["content"]["content"][1]["content"][0]
+        applied = client.post(
+            f"/v1/editable-documents/{document_id}/operations",
+            headers=auth_headers(),
+            json={
+                "base_revision": 2,
+                "origin": "mcp",
+                "idempotency_key": "draft-apply-1",
+                "operations": [
+                    {
+                        "type": "replace_block_text",
+                        "block_id": target["attrs"]["jobosId"],
+                        "expected_text": "",
+                        "replacement_text": "Alex Example — alex@example.com",
+                    }
+                ],
+            },
+        )
+        assert applied.status_code == 200
+        assert applied.json()["document"]["revision"] == 3
+        assert applied.json()["snapshot_id"].startswith("dsnap_")
+
+        restored = client.post(
+            f"/v1/editable-documents/{document_id}/snapshots/{snapshot.json()['snapshot_id']}/restore",
+            headers=auth_headers(),
+            json={"base_revision": 3, "idempotency_key": "draft-restore-1"},
+        )
+        assert restored.status_code == 200
+        assert restored.json()["revision"] == 4
+
+        import_source = {
+            "mode": "import_registered_artifact",
+            "document_key": "references",
+            "source_artifact_id": "art_1234567890abcdef",
+            "content": document["content"],
+            "settings": document["settings"],
+            "import_report": {
+                "source_filename": "references.docx",
+                "imported_at": "2026-08-07T00:00:00Z",
+                "issues": [],
+            },
+            "idempotency_key": "nested-source-key",
+        }
+        stale_import = client.post(
+            f"/v1/editable-documents/{document_id}/import",
+            headers=auth_headers(),
+            json={
+                "base_revision": 3,
+                "source": import_source,
+                "idempotency_key": "draft-import-stale",
+            },
+        )
+        deferred_import = client.post(
+            f"/v1/editable-documents/{document_id}/import",
+            headers=auth_headers(),
+            json={
+                "base_revision": 4,
+                "source": import_source,
+                "idempotency_key": "draft-import-deferred",
+            },
+        )
+        assert stale_import.status_code == 409
+        assert deferred_import.status_code == 422
+        assert client.get(
+            f"/v1/editable-documents/{document_id}", headers=auth_headers()
+        ).json()["revision"] == 4
+
+
+def imported_document_payload(document_key, source_artifact_id, *, key="import-create-1"):
+    return {
+        "mode": "import_registered_artifact",
+        "document_key": document_key,
+        "source_artifact_id": source_artifact_id,
+        "content": blank_content(document_key),
+        "settings": default_settings(),
+        "import_report": {
+            "source_filename": f"{document_key}.docx",
+            "imported_at": "2026-08-07T20:00:00Z",
+            "issues": [
+                {
+                    "code": "font_normalized",
+                    "severity": "normalized",
+                    "message": "Unsupported font normalized to Calibri",
+                    "count": 1,
+                }
+            ],
+        },
+        "idempotency_key": key,
+    }
+
+
+def external_document_payload(document_key, content, *, key="external-create-1", digest=None):
+    return {
+        "mode": "import_external_docx",
+        "document_key": document_key,
+        "source_filename": f"{document_key}.docx",
+        "source_base64": base64.b64encode(content).decode("ascii"),
+        "source_sha256": digest or sha256(content).hexdigest(),
+        "content": blank_content(document_key),
+        "settings": default_settings(),
+        "import_report": {
+            "source_filename": f"{document_key}.docx",
+            "imported_at": "2026-08-07T20:00:00Z",
+            "issues": [],
+        },
+        "idempotency_key": key,
+    }
+
+
+def test_registered_import_requires_successful_same_job_docx_and_persists_snapshot(tmp_path):
+    facade = FakeJobHunterFacade()
+    pdf = tmp_path / "wrong-media.pdf"
+    good = tmp_path / "references.docx"
+    other = tmp_path / "other-job.docx"
+    pdf.write_bytes(b"%PDF-1.7\nfixture\n%%EOF\n")
+    good.write_bytes(b"PK\x03\x04registered references")
+    other.write_bytes(b"PK\x03\x04other job")
+    docx_media = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    facade.artifacts["job-0"] = [
+        {
+            **artifact_metadata(pdf, revision="wrong-media", sequence=1),
+            "document_key": "references",
+            "document_label": "References",
+        },
+        {
+            "job_id": "job-0",
+            "document_key": "references",
+            "document_label": "References",
+            "source_revision": "failed-source",
+            "artifact_revision": "failed-docx",
+            "media_type": docx_media,
+            "render_status": "failed",
+            "render_sequence": 2,
+            "failure_message": "fixture failure",
+        },
+        {
+            **artifact_metadata(good, revision="good-docx", sequence=3),
+            "document_key": "references",
+            "document_label": "References",
+            "media_type": docx_media,
+        },
+    ]
+    facade.artifacts["job-1"] = [
+        {
+            **artifact_metadata(other, job_id="job-1", revision="other-docx", sequence=1),
+            "document_key": "references",
+            "document_label": "References",
+            "media_type": docx_media,
+        }
+    ]
+
+    with make_client(tmp_path, facade) as client:
+        job_zero = client.post(
+            "/v1/jobs/job-0/artifacts/refresh",
+            headers=auth_headers(),
+            json={"origin": "user", "idempotency_key": "refresh-import-job-0"},
+        ).json()["artifacts"]
+        job_one = client.post(
+            "/v1/jobs/job-1/artifacts/refresh",
+            headers=auth_headers(),
+            json={"origin": "user", "idempotency_key": "refresh-import-job-1"},
+        ).json()["artifacts"]
+        ids = {artifact["artifact_revision"]: artifact["artifact_id"] for artifact in job_zero}
+        other_id = job_one[0]["artifact_id"]
+
+        for index, artifact_id in enumerate(
+            (ids["wrong-media"], ids["failed-docx"], other_id), start=1
+        ):
+            rejected = client.post(
+                "/v1/jobs/job-0/editable-documents",
+                headers=auth_headers(),
+                json=imported_document_payload(
+                    "references", artifact_id, key=f"rejected-import-{index}"
+                ),
+            )
+            assert rejected.status_code == 422
+
+        created = client.post(
+            "/v1/jobs/job-0/editable-documents",
+            headers=auth_headers(),
+            json=imported_document_payload("references", ids["good-docx"]),
+        )
+        assert created.status_code == 201
+        document = created.json()
+        assert document["source_artifact_id"] == ids["good-docx"]
+        assert document["source_sha256"] == sha256(good.read_bytes()).hexdigest()
+        assert document["import_report"]["issues"][0]["code"] == "font_normalized"
+        snapshots = client.get(
+            f"/v1/editable-documents/{document['document_id']}/snapshots",
+            headers=auth_headers(),
+        ).json()["snapshots"]
+        assert [(item["reason"], item["actor"]) for item in snapshots] == [
+            ("import", "import")
+        ]
+
+
+def test_external_import_uses_manifest_replays_persists_and_preserves_approval(tmp_path):
+    facade = FakeJobHunterFacade()
+    approved_pdf = tmp_path / "approved-resume.pdf"
+    approved_pdf.write_bytes(b"%PDF-1.7\napproved\n%%EOF\n")
+    facade.artifacts["job-0"] = [artifact_metadata(approved_pdf, revision="approved-pdf")]
+    source = b"PK\x03\x04external cover letter"
+    payload = external_document_payload("cover_letter", source)
+
+    with make_client(tmp_path, facade) as client:
+        artifacts = client.post(
+            "/v1/jobs/job-0/artifacts/refresh",
+            headers=auth_headers(),
+            json={"origin": "user", "idempotency_key": "refresh-approved"},
+        ).json()["artifacts"]
+        approved_id = artifacts[0]["artifact_id"]
+        assert client.post(
+            f"/v1/jobs/job-0/artifacts/{approved_id}/approve",
+            headers=auth_headers(),
+            json={"origin": "user", "idempotency_key": "approve-before-import"},
+        ).status_code == 200
+
+        created = client.post(
+            "/v1/jobs/job-0/editable-documents", headers=auth_headers(), json=payload
+        )
+        replay = client.post(
+            "/v1/jobs/job-0/editable-documents", headers=auth_headers(), json=payload
+        )
+        assert created.status_code == replay.status_code == 201
+        assert replay.json() == created.json()
+        document = created.json()
+        assert document["source_filename"] == "cover_letter.docx"
+        assert document["source_sha256"] == sha256(source).hexdigest()
+        manifest = json.loads(Path(facade.publish_calls[-1]["source_path"]).read_text())
+        assert manifest["document_id"] == document["document_id"]
+        assert manifest["original_sha256"] == sha256(source).hexdigest()
+        assert facade.artifacts["job-0"][-1]["source_revision"] != sha256(source).hexdigest()
+        listed = client.get("/v1/jobs/job-0/artifacts", headers=auth_headers()).json()
+        assert listed["approved_artifact_id"] == approved_id
+        published_docx = [
+            row
+            for row in facade.artifacts["job-0"]
+            if row["media_type"].endswith("document")
+        ]
+        assert len(published_docx) == 1
+
+        bad_checksum = client.post(
+            "/v1/jobs/job-0/editable-documents",
+            headers=auth_headers(),
+            json=external_document_payload("references", source, digest="0" * 64),
+        )
+        assert bad_checksum.status_code == 422
+        before_duplicate = len(facade.artifacts["job-0"])
+        duplicate = client.post(
+            "/v1/jobs/job-0/editable-documents",
+            headers=auth_headers(),
+            json=external_document_payload("cover_letter", source, key="external-duplicate"),
+        )
+        assert duplicate.status_code == 409
+        assert len(facade.artifacts["job-0"]) == before_duplicate
+
+    with make_client(tmp_path, facade) as restarted:
+        restarted_replay = restarted.post(
+            "/v1/jobs/job-0/editable-documents", headers=auth_headers(), json=payload
+        )
+        persisted = restarted.get(
+            f"/v1/editable-documents/{document['document_id']}", headers=auth_headers()
+        )
+        assert restarted_replay.status_code == 201
+        assert restarted_replay.json() == document
+        assert len(facade.publish_calls) == 1
+        assert persisted.status_code == 200
+        assert persisted.json()["source_sha256"] == sha256(source).hexdigest()
+        assert persisted.json()["import_report"] == document["import_report"]
+
+
+def test_replace_from_docx_snapshots_once_conflicts_and_protects_source_metadata(tmp_path):
+    facade = FakeJobHunterFacade()
+    replacement = tmp_path / "replacement.docx"
+    replacement.write_bytes(b"PK\x03\x04replacement references")
+    facade.artifacts["job-0"] = [
+        {
+            **artifact_metadata(replacement, revision="replacement-docx"),
+            "document_key": "references",
+            "document_label": "References",
+            "media_type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        }
+    ]
+    with make_client(tmp_path, facade) as client:
+        artifact = client.post(
+            "/v1/jobs/job-0/artifacts/refresh",
+            headers=auth_headers(),
+            json={"origin": "user", "idempotency_key": "refresh-replacement"},
+        ).json()["artifacts"][0]
+        created = client.post(
+            "/v1/jobs/job-0/editable-documents",
+            headers=auth_headers(),
+            json={
+                "mode": "blank",
+                "document_key": "references",
+                "idempotency_key": "blank-before-replace",
+            },
+        ).json()
+        source_payload = imported_document_payload(
+            "references", artifact["artifact_id"], key="nested-replacement"
+        )
+        command = {
+            "base_revision": 1,
+            "source": source_payload,
+            "idempotency_key": "replace-registered-1",
+        }
+        replaced = client.post(
+            f"/v1/editable-documents/{created['document_id']}/import",
+            headers=auth_headers(),
+            json=command,
+        )
+        replay = client.post(
+            f"/v1/editable-documents/{created['document_id']}/import",
+            headers=auth_headers(),
+            json=command,
+        )
+        assert replaced.status_code == replay.status_code == 200
+        assert replay.json() == replaced.json()
+        assert replaced.json()["revision"] == 2
+        assert replaced.json()["source_artifact_id"] == artifact["artifact_id"]
+        snapshots = client.get(
+            f"/v1/editable-documents/{created['document_id']}/snapshots",
+            headers=auth_headers(),
+        ).json()["snapshots"]
+        assert [item["reason"] for item in snapshots] == ["before_restore"]
+
+        stale = client.post(
+            f"/v1/editable-documents/{created['document_id']}/import",
+            headers=auth_headers(),
+            json={**command, "idempotency_key": "replace-stale"},
+        )
+        protected = client.put(
+            f"/v1/editable-documents/{created['document_id']}",
+            headers=auth_headers(),
+            json={
+                "base_revision": 2,
+                "content": replaced.json()["content"],
+                "settings": replaced.json()["settings"],
+                "comments": [],
+                "source_artifact_id": "art_1234567890abcdef",
+                "idempotency_key": "save-protected-source",
+            },
+        )
+        assert stale.status_code == 409
+        assert stale.json()["detail"]["current"]["revision"] == 2
+        assert protected.status_code == 422

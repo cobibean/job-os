@@ -20,6 +20,8 @@ import { createMainJobsClient, startJobEventStream } from './jobs.js'
 import type { JobsConfig } from './jobs.js'
 import { safeExternalUrl } from '../shared/externalLinks.js'
 import { createMainDocumentsClient } from './documents.js'
+import { createMainEditableDocumentsClient } from './editableDocuments.js'
+import { registerEditableDocumentsIpc } from './editableDocumentsIpc.js'
 import { isTrustedRendererUrl } from './security.js'
 import { createMainWorkspaceClient } from './workspace.js'
 
@@ -265,9 +267,24 @@ function registerDocumentsInterface(): void {
     trusted(event).approve(jobId(owner), artifactId(id))
   ))
   ipcMain.handle('jobos:documents:load-pdf', (event, id: string) => trusted(event).loadPdf(artifactId(id)))
+  ipcMain.handle('jobos:documents:load-original-docx', (event, id: string) => (
+    trusted(event).loadOriginalDocx(artifactId(id))
+  ))
   ipcMain.handle('jobos:documents:export', (event, id: string) => trusted(event).exportArtifact(artifactId(id)))
   ipcMain.handle('jobos:documents:reveal', (event, id: string) => trusted(event).reveal(artifactId(id)))
   ipcMain.handle('jobos:documents:open', (event, id: string) => trusted(event).open(artifactId(id)))
+}
+
+function registerEditableDocumentsInterface(): void {
+  const config = jobsConfig()
+  const editableDocuments = config
+    ? createMainEditableDocumentsClient(config, { dialog })
+    : null
+  registerEditableDocumentsIpc(ipcMain, event => {
+    assertTrustedRenderer(event)
+    if (!editableDocuments) throw new Error('Device credential unavailable')
+    return editableDocuments
+  })
 }
 
 async function createWindow(): Promise<BrowserWindow> {
@@ -383,6 +400,7 @@ app.whenReady().then(async () => {
   registerWorkspaceInterface()
   registerBrowserInterface()
   registerDocumentsInterface()
+  registerEditableDocumentsInterface()
   await createWindow()
 
   app.on('activate', async () => {

@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 import { ArrowLeft, ArrowRight, BriefcaseBusiness, Check, Download, Globe2, LoaderCircle, Plus, RefreshCw, Search, Square, X } from 'lucide-react'
 
 import type { BrowserRestoreState, JobListItem } from '../../shared/contracts'
+import type { EditableDocument } from '../../shared/editableDocuments'
 import { useBrowser } from '../hooks/useBrowser'
 import { browserRepairMessage, type BrowserRepairReason } from '../workspaceLayout'
 import { DocumentWorkspace } from './DocumentWorkspace'
@@ -86,6 +87,7 @@ interface CenterWorkspaceProps {
   onDocumentPersist: (artifactId: string | null, page: number, zoom: number) => void
   onJobSaved: (jobId: string) => Promise<void>
   jobListingRequest: JobListingRequest | null
+  onOpenEditor: (document: EditableDocument) => void
 }
 
 export interface JobListingRequest {
@@ -283,6 +285,7 @@ export function CenterWorkspace(props: CenterWorkspaceProps) {
       job={props.activeJob}
       hydrated={props.workspaceHydrated}
       onViewChange={props.onDocumentPersist}
+      onOpenEditor={props.onOpenEditor}
       refreshGeneration={props.documentMutationGeneration ?? 0}
       restoredArtifactId={props.activeArtifactId}
       restoredPage={props.activeArtifactPage}

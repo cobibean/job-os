@@ -1,6 +1,8 @@
 import json
 import secrets
 import sqlite3
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from copy import deepcopy
 from dataclasses import dataclass
 from hashlib import sha256
@@ -28,6 +30,12 @@ class WorkspaceRevisionConflict(RuntimeError):
 
 class IdempotencyConflict(RuntimeError):
     """An idempotency key was reused for a different command payload."""
+
+
+class EditableDocumentConflict(RuntimeError):
+    def __init__(self, current: dict[str, object]) -> None:
+        self.current = current
+        super().__init__("Editable document revision conflict")
 
 
 def mutation_activity_source_id(
@@ -251,6 +259,61 @@ MIGRATIONS = (
                 WHERE media_type != 'application/pdf'
             )
             """,
+        ),
+    ),
+    Migration(
+        version=12,
+        statements=(
+            """
+            CREATE TABLE editable_documents (
+                document_id TEXT PRIMARY KEY,
+                job_id TEXT NOT NULL,
+                document_key TEXT NOT NULL,
+                document_label TEXT NOT NULL,
+                schema_version INTEGER NOT NULL,
+                revision INTEGER NOT NULL CHECK (revision >= 1),
+                content_json TEXT NOT NULL,
+                settings_json TEXT NOT NULL,
+                comments_json TEXT NOT NULL DEFAULT '[]',
+                import_report_json TEXT NOT NULL DEFAULT '{"issues":[]}',
+                source_artifact_id TEXT,
+                source_filename TEXT,
+                source_sha256 TEXT,
+                published_revision INTEGER,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                CHECK (document_key IN ('resume', 'cover_letter', 'references')),
+                UNIQUE(job_id, document_key),
+                FOREIGN KEY(source_artifact_id) REFERENCES document_artifacts(artifact_id)
+            )
+            """,
+            "CREATE INDEX editable_documents_job ON editable_documents(job_id, document_key)",
+            """
+            CREATE TABLE editable_document_snapshots (
+                snapshot_id TEXT PRIMARY KEY,
+                document_id TEXT NOT NULL,
+                document_revision INTEGER NOT NULL CHECK (document_revision >= 1),
+                reason TEXT NOT NULL,
+                actor TEXT NOT NULL,
+                label TEXT,
+                content_json TEXT NOT NULL,
+                settings_json TEXT NOT NULL,
+                comments_json TEXT NOT NULL,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                CHECK (reason IN (
+                    'import', 'before_agent_edit', 'manual', 'before_publish', 'before_restore'
+                )),
+                CHECK (actor IN ('user', 'jobhunter', 'import', 'system')),
+                FOREIGN KEY(document_id)
+                    REFERENCES editable_documents(document_id) ON DELETE CASCADE
+            )
+            """,
+            """
+            CREATE INDEX editable_document_snapshots_document
+                ON editable_document_snapshots(document_id, created_at DESC)
+            """,
+            "ALTER TABLE document_artifacts ADD COLUMN editable_document_id TEXT",
+            "ALTER TABLE document_artifacts ADD COLUMN editable_document_revision INTEGER",
         ),
     ),
 )
@@ -1331,8 +1394,15 @@ class JobOsStateStore:
         }
 
     def register_document_artifacts(
-        self, job_id: str, artifacts: list[VerifiedArtifact]
+        self,
+        job_id: str,
+        artifacts: list[VerifiedArtifact],
+        *,
+        editable_document_id: str | None = None,
+        editable_document_revision: int | None = None,
     ) -> tuple[str | None, str | None]:
+        if (editable_document_id is None) != (editable_document_revision is None):
+            raise ValueError("Editable document ID and revision must be supplied together")
         if any(artifact.job_id != job_id for artifact in artifacts):
             raise ValueError("Artifact job association does not match the requested job")
         with sqlite3.connect(self._path) as connection:
@@ -1358,8 +1428,9 @@ class JobOsStateStore:
                         INSERT INTO document_artifacts(
                             artifact_id, registry_key, job_id, document_key, document_label,
                             render_sequence, source_revision, artifact_revision, media_type,
-                            sha256, render_status, canonical_path, filename, failure_message
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            sha256, render_status, canonical_path, filename, failure_message,
+                            editable_document_id, editable_document_revision
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         """,
                         (
                             artifact_id,
@@ -1376,27 +1447,29 @@ class JobOsStateStore:
                             artifact.canonical_path,
                             artifact.filename,
                             artifact.failure_message,
+                            editable_document_id,
+                            editable_document_revision,
                         ),
                     )
-                elif (
-                    row[1] != artifact.document_key
-                    or row[2] != artifact.document_label
-                    or row[3] != artifact.render_sequence
-                ):
+                else:
                     connection.execute(
                         """
                         UPDATE document_artifacts
-                        SET document_key = ?, document_label = ?, render_sequence = ?
+                        SET document_key = ?, document_label = ?, render_sequence = ?,
+                            editable_document_id = COALESCE(?, editable_document_id),
+                            editable_document_revision = COALESCE(?, editable_document_revision)
                         WHERE artifact_id = ?
                         """,
                         (
                             artifact.document_key,
                             artifact.document_label,
                             artifact.render_sequence,
+                            editable_document_id,
+                            editable_document_revision,
                             artifact_id,
                         ),
                     )
-                    if artifact.document_key != "resume":
+                    if row[1] == "resume" and artifact.document_key != "resume":
                         connection.execute(
                             """
                             UPDATE job_document_state
@@ -1488,6 +1561,570 @@ class JobOsStateStore:
                 raise ValueError("Artifact state is not registered for this job")
             connection.commit()
 
+    @contextmanager
+    def _editable_write_connection(
+        self, connection: sqlite3.Connection | None = None
+    ) -> Iterator[sqlite3.Connection]:
+        if connection is not None:
+            yield connection
+            return
+        with sqlite3.connect(self._path) as owned_connection:
+            owned_connection.row_factory = sqlite3.Row
+            owned_connection.execute("BEGIN IMMEDIATE")
+            yield owned_connection
+
+    @staticmethod
+    def _editable_document_row(row: sqlite3.Row) -> dict[str, object]:
+        value = dict(row)
+        for source, target in (
+            ("content_json", "content"),
+            ("settings_json", "settings"),
+            ("comments_json", "comments"),
+            ("import_report_json", "import_report"),
+        ):
+            value[target] = json.loads(str(value.pop(source)))
+        return value
+
+    @staticmethod
+    def new_editable_document_id() -> str:
+        return f"edoc_{secrets.token_urlsafe(18)}"
+
+    def editable_import_source(self, job_id: str, artifact_id: str) -> dict[str, object]:
+        with sqlite3.connect(f"file:{self._path}?mode=ro", uri=True) as connection:
+            connection.row_factory = sqlite3.Row
+            artifact = connection.execute(
+                "SELECT * FROM document_artifacts WHERE artifact_id = ?",
+                (artifact_id,),
+            ).fetchone()
+        if (
+            artifact is None
+            or artifact["job_id"] != job_id
+            or artifact["media_type"]
+            != "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            or artifact["render_status"] != "succeeded"
+            or not artifact["sha256"]
+        ):
+            raise ValueError("Source artifact must be a successful DOCX owned by this job")
+        return dict(artifact)
+
+    def create_editable_document(
+        self,
+        *,
+        job_id: str,
+        document_key: str,
+        document_label: str,
+        content: dict[str, object],
+        settings: dict[str, object],
+        comments: list[dict[str, object]],
+        import_report: dict[str, object],
+        source_artifact_id: str | None = None,
+        source_filename: str | None = None,
+        source_sha256: str | None = None,
+        imported: bool = False,
+        document_id: str | None = None,
+        connection: sqlite3.Connection | None = None,
+    ) -> dict[str, object]:
+        document_id = document_id or self.new_editable_document_id()
+        with self._editable_write_connection(connection) as connection:
+            if source_artifact_id is not None:
+                artifact = connection.execute(
+                    """
+                    SELECT job_id, media_type, render_status, sha256
+                    FROM document_artifacts
+                    WHERE artifact_id = ?
+                    """,
+                    (source_artifact_id,),
+                ).fetchone()
+                if (
+                    artifact is None
+                    or artifact["job_id"] != job_id
+                    or artifact["media_type"]
+                    != "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                    or artifact["render_status"] != "succeeded"
+                    or not artifact["sha256"]
+                    or artifact["sha256"] != source_sha256
+                ):
+                    raise ValueError("Source artifact must be a successful DOCX owned by this job")
+            try:
+                connection.execute(
+                    """
+                    INSERT INTO editable_documents(
+                        document_id, job_id, document_key, document_label, schema_version,
+                        revision, content_json, settings_json, comments_json, import_report_json,
+                        source_artifact_id, source_filename, source_sha256
+                    ) VALUES (?, ?, ?, ?, 1, 1, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        document_id,
+                        job_id,
+                        document_key,
+                        document_label,
+                        json.dumps(content, separators=(",", ":"), sort_keys=True),
+                        json.dumps(settings, separators=(",", ":"), sort_keys=True),
+                        json.dumps(comments, separators=(",", ":"), sort_keys=True),
+                        json.dumps(import_report, separators=(",", ":"), sort_keys=True),
+                        source_artifact_id,
+                        source_filename,
+                        source_sha256,
+                    ),
+                )
+            except sqlite3.IntegrityError as error:
+                raise ValueError(
+                    "An editable document already exists for this job and type"
+                ) from error
+            if imported:
+                self._insert_editable_snapshot(
+                    connection,
+                    document_id,
+                    1,
+                    "import",
+                    "import",
+                    "Imported DOCX",
+                    content,
+                    settings,
+                    comments,
+                )
+            row = connection.execute(
+                "SELECT * FROM editable_documents WHERE document_id = ?", (document_id,)
+            ).fetchone()
+        assert row is not None
+        return self._editable_document_row(row)
+
+    def replace_editable_document_from_import(
+        self,
+        document_id: str,
+        *,
+        expected_revision: int,
+        content: dict[str, object],
+        settings: dict[str, object],
+        import_report: dict[str, object],
+        source_artifact_id: str,
+        source_filename: str | None,
+        source_sha256: str,
+        connection: sqlite3.Connection | None = None,
+    ) -> dict[str, object]:
+        with self._editable_write_connection(connection) as connection:
+            row = connection.execute(
+                "SELECT * FROM editable_documents WHERE document_id = ?", (document_id,)
+            ).fetchone()
+            if row is None:
+                raise KeyError(document_id)
+            current = self._editable_document_row(row)
+            if current["revision"] != expected_revision:
+                raise EditableDocumentConflict(current)
+            current_content = current["content"]
+            current_settings = current["settings"]
+            current_comments = current["comments"]
+            assert isinstance(current_content, dict)
+            assert isinstance(current_settings, dict)
+            assert isinstance(current_comments, list)
+            artifact = connection.execute(
+                "SELECT job_id, media_type, render_status, sha256 "
+                "FROM document_artifacts WHERE artifact_id = ?",
+                (source_artifact_id,),
+            ).fetchone()
+            if (
+                artifact is None
+                or artifact["job_id"] != current["job_id"]
+                or artifact["media_type"]
+                != "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                or artifact["render_status"] != "succeeded"
+                or not artifact["sha256"]
+                or artifact["sha256"] != source_sha256
+            ):
+                raise ValueError("Source artifact must be a successful DOCX owned by this job")
+            self._insert_editable_snapshot(
+                connection,
+                document_id,
+                expected_revision,
+                "before_restore",
+                "import",
+                "Before Replace from DOCX",
+                current_content,
+                current_settings,
+                current_comments,
+            )
+            connection.execute(
+                """
+                UPDATE editable_documents
+                SET content_json = ?, settings_json = ?, comments_json = '[]',
+                    import_report_json = ?, source_artifact_id = ?, source_filename = ?,
+                    source_sha256 = ?, revision = revision + 1,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE document_id = ?
+                """,
+                (
+                    json.dumps(content, separators=(",", ":"), sort_keys=True),
+                    json.dumps(settings, separators=(",", ":"), sort_keys=True),
+                    json.dumps(import_report, separators=(",", ":"), sort_keys=True),
+                    source_artifact_id,
+                    source_filename,
+                    source_sha256,
+                    document_id,
+                ),
+            )
+            replaced = connection.execute(
+                "SELECT * FROM editable_documents WHERE document_id = ?", (document_id,)
+            ).fetchone()
+        assert replaced is not None
+        return self._editable_document_row(replaced)
+
+    @staticmethod
+    def _insert_editable_snapshot(
+        connection: sqlite3.Connection,
+        document_id: str,
+        revision: int,
+        reason: str,
+        actor: str,
+        label: str | None,
+        content: dict[str, object],
+        settings: dict[str, object],
+        comments: list[dict[str, object]],
+    ) -> str:
+        snapshot_id = f"dsnap_{secrets.token_urlsafe(18)}"
+        connection.execute(
+            """
+            INSERT INTO editable_document_snapshots(
+                snapshot_id, document_id, document_revision, reason, actor, label,
+                content_json, settings_json, comments_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                snapshot_id,
+                document_id,
+                revision,
+                reason,
+                actor,
+                label,
+                json.dumps(content, separators=(",", ":"), sort_keys=True),
+                json.dumps(settings, separators=(",", ":"), sort_keys=True),
+                json.dumps(comments, separators=(",", ":"), sort_keys=True),
+            ),
+        )
+        return snapshot_id
+
+    def get_editable_document(
+        self, document_id: str, *, connection: sqlite3.Connection | None = None
+    ) -> dict[str, object] | None:
+        if connection is not None:
+            row = connection.execute(
+                "SELECT * FROM editable_documents WHERE document_id = ?", (document_id,)
+            ).fetchone()
+        else:
+            with sqlite3.connect(f"file:{self._path}?mode=ro", uri=True) as read_connection:
+                read_connection.row_factory = sqlite3.Row
+                row = read_connection.execute(
+                    "SELECT * FROM editable_documents WHERE document_id = ?", (document_id,)
+                ).fetchone()
+        return self._editable_document_row(row) if row else None
+
+    def get_job_editable_document(self, job_id: str, document_key: str) -> dict[str, object] | None:
+        with sqlite3.connect(f"file:{self._path}?mode=ro", uri=True) as connection:
+            connection.row_factory = sqlite3.Row
+            row = connection.execute(
+                "SELECT * FROM editable_documents WHERE job_id = ? AND document_key = ?",
+                (job_id, document_key),
+            ).fetchone()
+        return self._editable_document_row(row) if row else None
+
+    def list_editable_documents(self, job_id: str) -> list[dict[str, object]]:
+        with sqlite3.connect(f"file:{self._path}?mode=ro", uri=True) as connection:
+            connection.row_factory = sqlite3.Row
+            rows = connection.execute(
+                "SELECT * FROM editable_documents WHERE job_id = ? ORDER BY document_key", (job_id,)
+            ).fetchall()
+        return [self._editable_document_row(row) for row in rows]
+
+    def save_editable_document(
+        self,
+        document_id: str,
+        *,
+        expected_revision: int,
+        content: dict[str, object],
+        settings: dict[str, object],
+        comments: list[dict[str, object]],
+        connection: sqlite3.Connection | None = None,
+    ) -> dict[str, object]:
+        with self._editable_write_connection(connection) as connection:
+            cursor = connection.execute(
+                """
+                UPDATE editable_documents
+                    SET content_json = ?, settings_json = ?, comments_json = ?,
+                    revision = revision + 1, updated_at = CURRENT_TIMESTAMP
+                    WHERE document_id = ? AND revision = ?
+                """,
+                (
+                    json.dumps(content, separators=(",", ":"), sort_keys=True),
+                    json.dumps(settings, separators=(",", ":"), sort_keys=True),
+                    json.dumps(comments, separators=(",", ":"), sort_keys=True),
+                    document_id,
+                    expected_revision,
+                ),
+            )
+            row = connection.execute(
+                "SELECT * FROM editable_documents WHERE document_id = ?", (document_id,)
+            ).fetchone()
+            if cursor.rowcount != 1:
+                if row is None:
+                    raise KeyError(document_id)
+                raise EditableDocumentConflict(self._editable_document_row(row))
+        assert row is not None
+        return self._editable_document_row(row)
+
+    def create_editable_snapshot(
+        self,
+        document_id: str,
+        *,
+        expected_revision: int,
+        reason: str,
+        actor: str,
+        label: str | None,
+        connection: sqlite3.Connection | None = None,
+    ) -> dict[str, object]:
+        with self._editable_write_connection(connection) as connection:
+            row = connection.execute(
+                "SELECT * FROM editable_documents WHERE document_id = ?", (document_id,)
+            ).fetchone()
+            if row is None:
+                raise KeyError(document_id)
+            current = self._editable_document_row(row)
+            if current["revision"] != expected_revision:
+                raise EditableDocumentConflict(current)
+            snapshot_id = self._insert_editable_snapshot(
+                connection,
+                document_id,
+                expected_revision,
+                reason,
+                actor,
+                label,
+                current["content"],
+                current["settings"],
+                current["comments"],
+            )  # type: ignore[arg-type]
+            snapshot = connection.execute(
+                """
+                SELECT snapshot_id, document_id, document_revision, reason, actor, label,
+                    created_at
+                FROM editable_document_snapshots
+                WHERE snapshot_id = ?
+                """,
+                (snapshot_id,),
+            ).fetchone()
+        return dict(snapshot)
+
+    def mark_editable_document_published(
+        self,
+        document_id: str,
+        *,
+        expected_revision: int,
+        connection: sqlite3.Connection | None = None,
+    ) -> dict[str, object]:
+        with self._editable_write_connection(connection) as connection:
+            row = connection.execute(
+                "SELECT * FROM editable_documents WHERE document_id = ?", (document_id,)
+            ).fetchone()
+            if row is None:
+                raise KeyError(document_id)
+            current = self._editable_document_row(row)
+            if current["revision"] != expected_revision:
+                raise EditableDocumentConflict(current)
+            snapshot = connection.execute(
+                """
+                SELECT snapshot_id FROM editable_document_snapshots
+                WHERE document_id = ? AND document_revision = ? AND reason = 'before_publish'
+                LIMIT 1
+                """,
+                (document_id, expected_revision),
+            ).fetchone()
+            if snapshot is None:
+                self._insert_editable_snapshot(
+                    connection,
+                    document_id,
+                    expected_revision,
+                    "before_publish",
+                    "user",
+                    f"Published revision {expected_revision}",
+                    current["content"],  # type: ignore[arg-type]
+                    current["settings"],  # type: ignore[arg-type]
+                    current["comments"],  # type: ignore[arg-type]
+                )
+            cursor = connection.execute(
+                """
+                UPDATE editable_documents
+                SET published_revision = ?, updated_at = CURRENT_TIMESTAMP
+                WHERE document_id = ? AND revision = ?
+                """,
+                (expected_revision, document_id, expected_revision),
+            )
+            if cursor.rowcount != 1:
+                latest = connection.execute(
+                    "SELECT * FROM editable_documents WHERE document_id = ?", (document_id,)
+                ).fetchone()
+                if latest is None:
+                    raise KeyError(document_id)
+                raise EditableDocumentConflict(self._editable_document_row(latest))
+            published = connection.execute(
+                "SELECT * FROM editable_documents WHERE document_id = ?", (document_id,)
+            ).fetchone()
+        assert published is not None
+        return self._editable_document_row(published)
+
+    def ensure_editable_publication_snapshot(
+        self,
+        document_id: str,
+        *,
+        expected_revision: int,
+        actor: str,
+    ) -> str:
+        """Persist the publication checkpoint before any external artifact side effect."""
+        with sqlite3.connect(self._path) as connection:
+            connection.row_factory = sqlite3.Row
+            connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute(
+                "SELECT * FROM editable_documents WHERE document_id = ?", (document_id,)
+            ).fetchone()
+            if row is None:
+                raise KeyError(document_id)
+            current = self._editable_document_row(row)
+            if current["revision"] != expected_revision:
+                raise EditableDocumentConflict(current)
+            prior = connection.execute(
+                """
+                SELECT snapshot_id FROM editable_document_snapshots
+                WHERE document_id = ? AND document_revision = ? AND reason = 'before_publish'
+                LIMIT 1
+                """,
+                (document_id, expected_revision),
+            ).fetchone()
+            if prior is not None:
+                return str(prior["snapshot_id"])
+            return self._insert_editable_snapshot(
+                connection,
+                document_id,
+                expected_revision,
+                "before_publish",
+                actor,
+                f"Published revision {expected_revision}",
+                current["content"],  # type: ignore[arg-type]
+                current["settings"],  # type: ignore[arg-type]
+                current["comments"],  # type: ignore[arg-type]
+            )
+
+    def list_editable_snapshots(self, document_id: str) -> list[dict[str, object]]:
+        with sqlite3.connect(f"file:{self._path}?mode=ro", uri=True) as connection:
+            connection.row_factory = sqlite3.Row
+            rows = connection.execute(
+                """
+                SELECT snapshot_id, document_id, document_revision, reason, actor, label,
+                    created_at
+                FROM editable_document_snapshots
+                WHERE document_id = ?
+                ORDER BY rowid DESC
+                """,
+                (document_id,),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def restore_editable_snapshot(
+        self,
+        document_id: str,
+        snapshot_id: str,
+        *,
+        expected_revision: int,
+        connection: sqlite3.Connection | None = None,
+    ) -> dict[str, object]:
+        with self._editable_write_connection(connection) as connection:
+            row = connection.execute(
+                "SELECT * FROM editable_documents WHERE document_id = ?", (document_id,)
+            ).fetchone()
+            if row is None:
+                raise KeyError(document_id)
+            current = self._editable_document_row(row)
+            if current["revision"] != expected_revision:
+                raise EditableDocumentConflict(current)
+            target = connection.execute(
+                """
+                SELECT * FROM editable_document_snapshots
+                WHERE snapshot_id = ? AND document_id = ?
+                """,
+                (snapshot_id, document_id),
+            ).fetchone()
+            if target is None:
+                raise KeyError(snapshot_id)
+            self._insert_editable_snapshot(
+                connection,
+                document_id,
+                expected_revision,
+                "before_restore",
+                "user",
+                "Before restore",
+                current["content"],
+                current["settings"],
+                current["comments"],
+            )  # type: ignore[arg-type]
+            connection.execute(
+                """
+                UPDATE editable_documents
+                    SET content_json = ?, settings_json = ?, comments_json = ?,
+                        revision = revision + 1, updated_at = CURRENT_TIMESTAMP
+                WHERE document_id = ?
+                """,
+                (
+                    target["content_json"],
+                    target["settings_json"],
+                    target["comments_json"],
+                    document_id,
+                ),
+            )
+            restored = connection.execute(
+                "SELECT * FROM editable_documents WHERE document_id = ?", (document_id,)
+            ).fetchone()
+        assert restored is not None
+        return self._editable_document_row(restored)
+
+    def save_agent_document_operation(
+        self,
+        document_id: str,
+        *,
+        expected_revision: int,
+        content: dict[str, object],
+        connection: sqlite3.Connection | None = None,
+    ) -> tuple[dict[str, object], str]:
+        with self._editable_write_connection(connection) as connection:
+            row = connection.execute(
+                "SELECT * FROM editable_documents WHERE document_id = ?", (document_id,)
+            ).fetchone()
+            if row is None:
+                raise KeyError(document_id)
+            current = self._editable_document_row(row)
+            if current["revision"] != expected_revision:
+                raise EditableDocumentConflict(current)
+            snapshot_id = self._insert_editable_snapshot(
+                connection,
+                document_id,
+                expected_revision,
+                "before_agent_edit",
+                "jobhunter",
+                "Before JobHunter edit",
+                current["content"],
+                current["settings"],
+                current["comments"],
+            )  # type: ignore[arg-type]
+            connection.execute(
+                """
+                UPDATE editable_documents
+                    SET content_json = ?, revision = revision + 1,
+                        updated_at = CURRENT_TIMESTAMP
+                WHERE document_id = ?
+                """,
+                (json.dumps(content, separators=(",", ":"), sort_keys=True), document_id),
+            )
+            saved = connection.execute(
+                "SELECT * FROM editable_documents WHERE document_id = ?", (document_id,)
+            ).fetchone()
+        assert saved is not None
+        return self._editable_document_row(saved), snapshot_id
+
     def get_document_artifact(self, artifact_id: str) -> dict[str, object] | None:
         with sqlite3.connect(f"file:{self._path}?mode=ro", uri=True) as connection:
             connection.row_factory = sqlite3.Row
@@ -1521,6 +2158,126 @@ class JobOsStateStore:
             }
             for row in rows
         ]
+
+    def execute_editable_mutation(
+        self,
+        *,
+        event_type: str,
+        origin: str,
+        actor_id: str,
+        target_resource: str,
+        command_name: str,
+        idempotency_key: str,
+        request_hash: str,
+        detail: dict[str, object],
+        mutation: Callable[[sqlite3.Connection], dict[str, object]],
+        job_id: str | None = None,
+    ) -> tuple[dict[str, object], bool]:
+        """Apply an editable-state change and settle its replay row atomically."""
+        with sqlite3.connect(self._path) as connection:
+            connection.row_factory = sqlite3.Row
+            connection.execute("BEGIN IMMEDIATE")
+            prior = connection.execute(
+                """
+                SELECT request_hash, result_json
+                FROM job_events
+                WHERE actor_id = ? AND target_resource = ? AND command_name = ?
+                    AND idempotency_key = ?
+                """,
+                (actor_id, target_resource, command_name, idempotency_key),
+            ).fetchone()
+            if prior is not None:
+                if prior["request_hash"] != request_hash:
+                    raise IdempotencyConflict(
+                        "Idempotency key was already used for a different command"
+                    )
+                if prior["result_json"] is None:
+                    raise IdempotencyConflict("Mutation reservation is still pending")
+                return json.loads(str(prior["result_json"])), True
+
+            cursor = connection.execute(
+                """
+                INSERT INTO job_events(
+                    event_type, job_id, origin, payload_json, actor_id, target_resource,
+                    command_name, outcome, idempotency_key, request_hash, result_json
+                ) VALUES ('mutation_pending', ?, ?, '{}', ?, ?, ?, 'pending', ?, ?, NULL)
+                """,
+                (
+                    job_id,
+                    origin,
+                    actor_id,
+                    target_resource,
+                    command_name,
+                    idempotency_key,
+                    request_hash,
+                ),
+            )
+            if cursor.lastrowid is None:  # pragma: no cover - SQLite INSERT guarantees this
+                raise RuntimeError("Mutation reservation did not return an event ID")
+            result = mutation(connection)
+            result_job_id = result.get("job_id")
+            if result_job_id is None and isinstance(result.get("document"), dict):
+                result_job_id = result["document"].get("job_id")  # type: ignore[union-attr]
+            settlement_detail = dict(detail)
+            if "changed_block_ids" in result:
+                settlement_detail["changed_block_ids"] = result["changed_block_ids"]
+            self._settle_editable_mutation(
+                connection,
+                event_id=int(cursor.lastrowid),
+                event_type=event_type,
+                origin=origin,
+                actor_id=actor_id,
+                target_resource=target_resource,
+                command_name=command_name,
+                idempotency_key=idempotency_key,
+                request_hash=request_hash,
+                result=result,
+                detail=settlement_detail,
+                job_id=job_id or (str(result_job_id) if result_job_id is not None else None),
+            )
+        return result, False
+
+    def _settle_editable_mutation(
+        self,
+        connection: sqlite3.Connection,
+        *,
+        event_id: int,
+        event_type: str,
+        origin: str,
+        actor_id: str,
+        target_resource: str,
+        command_name: str,
+        idempotency_key: str,
+        request_hash: str,
+        result: dict[str, object],
+        detail: dict[str, object],
+        job_id: str | None,
+    ) -> None:
+        cursor = connection.execute(
+            """
+            UPDATE job_events
+            SET event_type = ?, job_id = ?, origin = ?, payload_json = ?, actor_id = ?,
+                target_resource = ?, command_name = ?, outcome = 'completed',
+                idempotency_key = ?, request_hash = ?, result_json = ?
+            WHERE event_id = ? AND request_hash = ? AND result_json IS NULL
+            """,
+            (
+                event_type,
+                job_id,
+                origin,
+                json.dumps(redact_detail(detail), separators=(",", ":"), sort_keys=True),
+                actor_id,
+                target_resource,
+                command_name,
+                idempotency_key,
+                request_hash,
+                json.dumps(result, separators=(",", ":"), sort_keys=True),
+                event_id,
+                request_hash,
+            ),
+        )
+        if cursor.rowcount != 1:
+            raise IdempotencyConflict("Mutation reservation is no longer pending")
 
     def mutation_result(
         self,
@@ -1660,9 +2417,7 @@ class JobOsStateStore:
         with sqlite3.connect(self._path) as connection:
             if reserved_event_id is not None:
                 event_id = reserved_event_id
-                stored_result = (
-                    {**result, "event_id": event_id} if inject_event_id else result
-                )
+                stored_result = {**result, "event_id": event_id} if inject_event_id else result
                 cursor = connection.execute(
                     """
                     UPDATE job_events
@@ -1835,9 +2590,7 @@ class JobOsStateStore:
             payload = json.loads(row["payload_json"])
             if row["event_type"] == "job_description_updated":
                 payload = {
-                    key: payload[key]
-                    for key in ("source", "description_length")
-                    if key in payload
+                    key: payload[key] for key in ("source", "description_length") if key in payload
                 }
             events.append(
                 {
