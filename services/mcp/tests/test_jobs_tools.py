@@ -1,9 +1,10 @@
+import base64
 import json
 
 import httpx
 import pytest
 from jobos_mcp.jobs import JobOsMcpClient
-from jobos_mcp.server import create_server
+from jobos_mcp.server import _read_document_input, create_server
 
 
 @pytest.mark.anyio
@@ -92,6 +93,70 @@ async def test_job_tools_use_only_the_authenticated_jobos_http_contract():
 
 
 @pytest.mark.anyio
+async def test_document_publish_sends_bounded_bytes_through_the_authenticated_api():
+    requests = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, json={"job_id": "job-1", "artifacts": []})
+
+    client = JobOsMcpClient(
+        base_url="http://jobos.test",
+        device_token="test-device-token",
+        mcp_token="test-mcp-trusted-token",
+        transport=httpx.MockTransport(handler),
+    )
+    await client.publish_document(
+        "job-1",
+        "cover_letter",
+        "Cover Letter",
+        "cover-letter.md",
+        b"Dear team",
+        "cover-letter.docx",
+        b"PK\x03\x04fixture",
+        idempotency_key="publish-1",
+    )
+    await client.aclose()
+
+    assert len(requests) == 1
+    request = requests[0]
+    assert (request.method, request.url.path) == (
+        "POST",
+        "/v1/jobs/job-1/artifacts/publish",
+    )
+    assert request.headers["x-jobos-mcp-token"] == "test-mcp-trusted-token"
+    payload = json.loads(request.content)
+    assert payload == {
+        "document_key": "cover_letter",
+        "document_label": "Cover Letter",
+        "source_filename": "cover-letter.md",
+        "source_base64": base64.b64encode(b"Dear team").decode("ascii"),
+        "artifact_filename": "cover-letter.docx",
+        "artifact_base64": base64.b64encode(b"PK\x03\x04fixture").decode("ascii"),
+        "origin": "mcp",
+        "idempotency_key": "publish-1",
+    }
+
+
+def test_document_publish_input_is_limited_to_explicit_roots(tmp_path):
+    allowed = tmp_path / "allowed"
+    allowed.mkdir()
+    artifact = allowed / "letter.docx"
+    artifact.write_bytes(b"PK\x03\x04fixture")
+    outside = tmp_path / "outside.docx"
+    outside.write_bytes(b"PK\x03\x04private")
+
+    filename, content = _read_document_input(
+        str(artifact), roots=(allowed,), maximum=100, suffixes={".docx"}
+    )
+    assert (filename, content) == ("letter.docx", b"PK\x03\x04fixture")
+    with pytest.raises(ValueError, match="outside"):
+        _read_document_input(
+            str(outside), roots=(allowed,), maximum=100, suffixes={".docx"}
+        )
+
+
+@pytest.mark.anyio
 async def test_mcp_server_exposes_phase_seven_parity_tools_while_retaining_job_tools():
     client = JobOsMcpClient(
         base_url="http://jobos.test",
@@ -118,6 +183,7 @@ async def test_mcp_server_exposes_phase_seven_parity_tools_while_retaining_job_t
         "document_refresh",
         "document_render",
         "document_register",
+        "document_publish",
         "document_approve",
         "document_select",
         "browser_tabs_inspect",

@@ -82,6 +82,7 @@ def test_version_and_openapi_describe_the_shared_workspace_contract(tmp_path):
         "/v1/jobs/{job_id}/artifacts",
         "/v1/jobs/{job_id}/artifacts/refresh",
         "/v1/jobs/{job_id}/artifacts/register",
+        "/v1/jobs/{job_id}/artifacts/publish",
         "/v1/jobs/{job_id}/artifacts/{artifact_id}/approve",
         "/v1/artifacts/{artifact_id}/content",
         "/v1/artifacts/{artifact_id}/download",

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 from typing import Any
 from uuid import uuid4
 
@@ -198,6 +199,33 @@ class JobOsMcpClient:
             f"/v1/jobs/{job_id}/artifacts/register",
             json={
                 "artifact_reference": artifact_reference,
+                "origin": "mcp",
+                "idempotency_key": self._key(idempotency_key),
+            },
+        )
+
+    async def publish_document(
+        self,
+        job_id: str,
+        document_key: str,
+        document_label: str,
+        source_filename: str,
+        source_bytes: bytes,
+        artifact_filename: str,
+        artifact_bytes: bytes,
+        *,
+        idempotency_key: str | None = None,
+    ) -> dict[str, Any]:
+        return await self._request(
+            "POST",
+            f"/v1/jobs/{job_id}/artifacts/publish",
+            json={
+                "document_key": document_key,
+                "document_label": document_label,
+                "source_filename": source_filename,
+                "source_base64": base64.b64encode(source_bytes).decode("ascii"),
+                "artifact_filename": artifact_filename,
+                "artifact_base64": base64.b64encode(artifact_bytes).decode("ascii"),
                 "origin": "mcp",
                 "idempotency_key": self._key(idempotency_key),
             },

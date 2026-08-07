@@ -64,6 +64,15 @@ class JobFacade(Protocol):
 
     def register_artifact(self, job_id: str, artifact_reference: str) -> dict[str, Any]: ...
 
+    def publish_document_artifact(
+        self,
+        job_id: str,
+        document_key: str,
+        document_label: str,
+        source_path: str,
+        artifact_path: str,
+    ) -> dict[str, Any]: ...
+
     def render_resume(
         self, job_id: str, source_id: str, output_options: dict[str, Any]
     ) -> dict[str, Any]: ...
@@ -106,6 +115,16 @@ class EmptyJobFacade:
 
     def register_artifact(self, job_id: str, artifact_reference: str) -> dict[str, Any]:
         raise KeyError(artifact_reference)
+
+    def publish_document_artifact(
+        self,
+        job_id: str,
+        document_key: str,
+        document_label: str,
+        source_path: str,
+        artifact_path: str,
+    ) -> dict[str, Any]:
+        raise KeyError(job_id)
 
     def render_resume(
         self, job_id: str, source_id: str, output_options: dict[str, Any]

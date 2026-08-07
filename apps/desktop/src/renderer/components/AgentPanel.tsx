@@ -138,14 +138,15 @@ export function AgentPanel({ contextLabel, apiState = 'connected', onArtifactRen
       (latest, entry) => Math.max(latest, entry.eventId),
       0
     )
-    const rendered = conversation.entries.some(entry => (
+    const documentChanged = conversation.entries.some(entry => (
       entry.eventId > (observedEventId.current ?? 0)
       && entry.type === 'activity'
       && entry.state === 'completed'
-      && entry.detail.command === 'document.render'
+      && typeof entry.detail.command === 'string'
+      && ['document.render', 'document.refresh', 'document.register', 'document.publish'].includes(entry.detail.command)
     ))
     observedEventId.current = Math.max(observedEventId.current, latestEventId)
-    if (rendered) onArtifactRendered?.()
+    if (documentChanged) onArtifactRendered?.()
   }, [conversation.entries, conversation.restoredEventId, conversation.restoring, onArtifactRendered])
 
   const scrollToLatest = useCallback((focusTranscript = false) => {

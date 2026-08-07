@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import asyncio
 import os
+import re
 import subprocess
 import sys
+from pathlib import Path
 from typing import Any
 
 from mcp.server.fastmcp import FastMCP
@@ -34,7 +36,42 @@ def local_mcp_token() -> str:
     raise RuntimeError("JOBOS_MCP_TOKEN is required")
 
 
-def create_server(client: JobOsMcpClient) -> FastMCP:
+def _document_import_roots() -> tuple[Path, ...]:
+    profile = os.environ.get("HERMES_PROFILE", "job-hunter")
+    if not re.fullmatch(r"[A-Za-z0-9._-]{1,100}", profile):
+        raise RuntimeError("Hermes profile name is invalid")
+    return (
+        Path.cwd().resolve(),
+        (Path.home() / ".hermes" / "profiles" / profile / "cache" / "documents").resolve(),
+    )
+
+
+def _read_document_input(
+    raw_path: str,
+    *,
+    roots: tuple[Path, ...],
+    maximum: int,
+    suffixes: set[str] | None = None,
+) -> tuple[str, bytes]:
+    supplied = Path(raw_path).expanduser()
+    if supplied.is_symlink():
+        raise ValueError("Document input must not be a symbolic link")
+    candidate = supplied.resolve(strict=True)
+    if not any(candidate == root or root in candidate.parents for root in roots):
+        raise ValueError("Document input is outside the Job Hunter workspace and output cache")
+    if not candidate.is_file():
+        raise ValueError("Document input must be a regular file")
+    if suffixes is not None and candidate.suffix.casefold() not in suffixes:
+        raise ValueError("Published artifact must be a PDF or DOCX")
+    content = candidate.read_bytes()
+    if not content or len(content) > maximum:
+        raise ValueError("Document input size is invalid")
+    return candidate.name, content
+
+
+def create_server(
+    client: JobOsMcpClient, *, document_roots: tuple[Path, ...] | None = None
+) -> FastMCP:
     server = FastMCP(
         "JobOS Jobs",
         instructions="Operate JobOS jobs only through the shared authenticated application API.",
@@ -154,6 +191,41 @@ def create_server(client: JobOsMcpClient) -> FastMCP:
         """Register an opaque facade artifact reference through JobOS."""
         return await client.register_document(
             job_id, artifact_reference, idempotency_key=idempotency_key
+        )
+
+    @server.tool(name="document_publish", structured_output=True)
+    async def document_publish(
+        job_id: str,
+        document_key: str,
+        document_label: str,
+        source_path: str,
+        artifact_path: str,
+        idempotency_key: str | None = None,
+    ) -> dict[str, Any]:
+        """Publish one finished PDF/DOCX into JobOS.
+
+        Call once per promised format, use the same source file for paired PDF/DOCX,
+        then confirm every format with document_list before claiming completion.
+        """
+        roots = document_roots or _document_import_roots()
+        source_filename, source_bytes = _read_document_input(
+            source_path, roots=roots, maximum=2_000_000
+        )
+        artifact_filename, artifact_bytes = _read_document_input(
+            artifact_path,
+            roots=roots,
+            maximum=20_000_000,
+            suffixes={".pdf", ".docx"},
+        )
+        return await client.publish_document(
+            job_id,
+            document_key,
+            document_label,
+            source_filename,
+            source_bytes,
+            artifact_filename,
+            artifact_bytes,
+            idempotency_key=idempotency_key,
         )
 
     @server.tool(name="document_approve", structured_output=True)
