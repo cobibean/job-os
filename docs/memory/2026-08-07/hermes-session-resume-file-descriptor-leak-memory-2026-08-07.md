@@ -116,7 +116,7 @@ The key diagnostic rule is to inspect the exact exhausted PID rather than treati
 
 ## Fleet update note
 
-Cobi planned to update Hermes installations across the fleet on 2026-08-07. The corrective commits above are already upstream, so updating other installations to current Hermes should carry this fix.
+Cobi planned to update Hermes installations across the fleet on 2026-08-07. The corrective commits above are present on Hermes `origin/main`, but they are **not** ancestors of the currently visible `v2026.8.3` tag (`v0.20.0`, dated 2026-08-03). A fleet update fixes this incident only if the chosen updater/install channel includes commits `79625e3c0b`, `be14a4bee3`, and `813793db23` or a later release containing them. Do not use the version label alone as proof; verify commit ancestry or rerun the descriptor regression probe.
 
 On the Mac mini, `~/.hermes/hermes-agent` is a customized checkout with local commits. Do not hard-reset it merely to update. Use the normal Hermes update path and verify afterward that:
 
