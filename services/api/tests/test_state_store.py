@@ -83,9 +83,9 @@ def test_initialization_applies_every_migration_once(tmp_path):
     first = store.initialize()
     second = store.initialize()
 
-    assert first.schema_version == SCHEMA_VERSION == 11
+    assert first.schema_version == SCHEMA_VERSION == 12
     assert second.schema_version == SCHEMA_VERSION
-    assert applied_versions(database) == [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
+    assert applied_versions(database) == [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
     assert metadata_columns(database) == {"key", "value", "updated_at"}
 
 
@@ -100,7 +100,7 @@ def test_initialization_upgrades_a_behind_database(tmp_path):
     result = JobOsStateStore(database).initialize()
 
     assert result.schema_version == SCHEMA_VERSION
-    assert applied_versions(database) == [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
+    assert applied_versions(database) == [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
     assert metadata_columns(database) == {"key", "value", "updated_at"}
 
 
@@ -162,7 +162,7 @@ def test_document_identity_migration_clears_legacy_docx_approval(tmp_path):
     assert identity == ("resume", "Resume", 1)
 
 
-@pytest.mark.parametrize("versions", ([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12], [2]))
+@pytest.mark.parametrize("versions", ([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13], [2]))
 def test_initialization_rejects_ahead_or_incompatible_history(tmp_path, versions):
     database = tmp_path / "jobos.db"
     with sqlite3.connect(database) as connection:

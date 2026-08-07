@@ -1,7 +1,9 @@
 import asyncio
+import base64
 import hashlib
 import hmac
 import json
+import sqlite3
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager, contextmanager
 from functools import wraps
@@ -33,6 +35,11 @@ from jobos_api.conversations import (
     conversation_event_source,
 )
 from jobos_api.device_auth import DeviceAuthenticator, DeviceIdentity
+from jobos_api.document_operations import (
+    apply_operations,
+    semantic_outline,
+    unresolved_suggestion_count,
+)
 from jobos_api.documents import (
     ARTIFACT_ID_PATTERN,
     PDF_MEDIA_TYPE,
@@ -45,10 +52,35 @@ from jobos_api.documents import (
     ResumeRenderRequest,
     artifact_record,
     content_headers,
+    materialize_external_import,
     materialize_published_document,
     read_source_artifact,
     verify_facade_artifacts,
     verify_source_artifact,
+)
+from jobos_api.editable_documents import (
+    LABELS,
+    ApplyOperationsRequest,
+    CreateEditableDocumentRequest,
+    CreateExternalImportRequest,
+    CreateRegisteredImportRequest,
+    CreateSnapshotRequest,
+    DocumentDraftOutline,
+    DocumentSettings,
+    EditableDocument,
+    EditableDocumentList,
+    EditableDocumentSnapshot,
+    EditableDocumentSnapshotList,
+    OperationReceipt,
+    PublishEditableDocumentRequest,
+    ReplaceFromDocxRequest,
+    RestoreSnapshotRequest,
+    SaveEditableDocumentRequest,
+    as_document,
+    as_summary,
+    blank_content,
+    default_settings,
+    validate_content,
 )
 from jobos_api.hermes_adapter import HermesWebSocketGateway
 from jobos_api.jobs import (
@@ -77,6 +109,7 @@ from jobos_api.responses import DeviceSessionResponse, HealthResponse, VersionRe
 from jobos_api.settings import Settings
 from jobos_api.state_store import (
     ConversationBusy,
+    EditableDocumentConflict,
     IdempotencyConflict,
     JobOsStateStore,
     WorkspaceRevisionConflict,
@@ -94,8 +127,9 @@ def create_app(
     job_facade: JobFacade | None = None,
     agent_gateway: AgentGateway | None = None,
     capability_broker: CapabilityBroker | None = None,
+    state_store: JobOsStateStore | None = None,
 ) -> FastAPI:
-    state_store = JobOsStateStore(settings.state_db_path)
+    state_store = state_store or JobOsStateStore(settings.state_db_path)
     jobs = job_facade or create_job_hunter_adapter(
         settings.job_hunter_db_path,
         settings.hermes_job_hunter_cwd,
@@ -324,6 +358,45 @@ def create_app(
             )
         return event_id
 
+    def atomic_editable_mutation(
+        *,
+        identity: DeviceIdentity,
+        target: str,
+        command_name: str,
+        origin: str,
+        idempotency_key: str,
+        request_hash: str,
+        mutation: Callable[[sqlite3.Connection], dict[str, object]],
+        label: str,
+        job_id: str | None = None,
+        detail: dict[str, object] | None = None,
+    ) -> dict[str, object]:
+        result, _ = state_store.execute_editable_mutation(
+            event_type="agent_action" if origin == "mcp" else "user_action",
+            origin=origin,
+            actor_id=identity.device_id,
+            target_resource=target,
+            command_name=command_name,
+            idempotency_key=idempotency_key,
+            request_hash=request_hash,
+            mutation=mutation,
+            detail={
+                "label": label,
+                "state": "completed",
+                "origin": origin,
+                "outcome": "completed",
+                **(detail or {}),
+            },
+            job_id=job_id,
+        )
+        state_store.ensure_mutation_activity(
+            actor_id=identity.device_id,
+            target_resource=target,
+            command_name=command_name,
+            idempotency_key=idempotency_key,
+        )
+        return result
+
     def record_agent_read(
         *,
         identity: DeviceIdentity,
@@ -456,9 +529,7 @@ def create_app(
                     response = BrowserCommandResponse.model_validate(replay)
                     ensure_activity(response)
                     return response
-            result = await browser_capabilities.execute(
-                command, device_id=target_device_id
-            )
+            result = await browser_capabilities.execute(command, device_id=target_device_id)
             result_dict = result.model_dump(mode="json")
             if durable_command:
                 state_store.record_mutation_result(
@@ -484,9 +555,7 @@ def create_app(
 
         try:
             if durable_command:
-                async with serialize_browser_command(
-                    (target_device_id, command.idempotency_key)
-                ):
+                async with serialize_browser_command((target_device_id, command.idempotency_key)):
                     return await execute_or_replay()
             return await execute_or_replay()
         except IdempotencyConflict as error:
@@ -1140,9 +1209,716 @@ def create_app(
         except KeyError as error:
             raise HTTPException(status_code=404, detail="Job not found") from error
 
+    def editable_conflict(error: EditableDocumentConflict) -> HTTPException:
+        return HTTPException(
+            status_code=409, detail={"message": str(error), "current": error.current}
+        )
+
+    def resolve_import_source(
+        job_id: str,
+        document_id: str,
+        source: CreateRegisteredImportRequest | CreateExternalImportRequest,
+    ) -> tuple[str, str | None, str]:
+        if source.mode == "import_registered_artifact":
+            artifact = state_store.editable_import_source(job_id, source.source_artifact_id)
+            return (
+                source.source_artifact_id,
+                str(artifact["filename"]) if artifact.get("filename") else None,
+                str(artifact["sha256"]),
+            )
+        if settings.hermes_job_hunter_cwd is None:
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "External DOCX import requires the configured Job Hunter publication workspace"
+                ),
+            )
+        source_bytes = source.source_bytes()
+        manifest_path, artifact_path = materialize_external_import(
+            job_id=job_id,
+            document_id=document_id,
+            document_key=source.document_key,
+            source_filename=source.source_filename,
+            source_sha256=source.source_sha256,
+            source_bytes=source_bytes,
+            workspace_root=settings.hermes_job_hunter_cwd,
+        )
+        raw = jobs.publish_document_artifact(
+            job_id,
+            source.document_key,
+            LABELS[source.document_key],
+            str(manifest_path),
+            str(artifact_path),
+        )
+        verified = verify_source_artifact(raw, settings.artifact_roots)
+        if (
+            verified.job_id != job_id
+            or verified.document_key != source.document_key
+            or verified.document_label != LABELS[source.document_key]
+            or verified.media_type
+            != "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            or verified.render_status != "succeeded"
+            or verified.sha256 != source.source_sha256
+        ):
+            raise ArtifactTrustError("Published external DOCX metadata does not match the import")
+        artifact_id, _ = state_store.register_document_artifacts(job_id, [verified])
+        if artifact_id is None:
+            raise ArtifactTrustError("Published external DOCX was not registered")
+        return artifact_id, source.source_filename, source.source_sha256
+
+    @app.get("/v1/jobs/{job_id}/editable-documents", tags=["editable-documents"])
+    def editable_documents_list(
+        job_id: str, _: Annotated[DeviceIdentity, Depends(authenticated_device)]
+    ) -> EditableDocumentList:
+        ensure_job(job_id)
+        return EditableDocumentList(
+            documents=[as_summary(row) for row in state_store.list_editable_documents(job_id)]
+        )
+
+    @app.get(
+        "/v1/jobs/{job_id}/editable-document-outlines/{document_key}",
+        tags=["editable-documents"],
+    )
+    def editable_document_outline(
+        job_id: str,
+        document_key: Literal["resume", "cover_letter", "references"],
+        identity: Annotated[DeviceIdentity, Depends(authenticated_device)],
+        origin: Literal["mcp"] | None = None,
+        idempotency_key: str | None = None,
+        mcp_token: Annotated[str | None, Header(alias="X-JobOS-MCP-Token")] = None,
+    ) -> DocumentDraftOutline:
+        ensure_job(job_id)
+        require_trusted_mcp(identity, origin, mcp_token)
+        row = state_store.get_job_editable_document(job_id, document_key)
+        if row is None:
+            raise HTTPException(status_code=404, detail="Editable document not found")
+        content = cast(dict[str, object], row["content"])
+        result = DocumentDraftOutline.model_validate(
+            {
+                "document_id": str(row["document_id"]),
+                "document_key": document_key,
+                "document_label": str(row["document_label"]),
+                "revision": row["revision"],
+                "settings": row["settings"],
+                "outline": semantic_outline(row),
+                "unresolved_suggestion_count": unresolved_suggestion_count(content),
+                "comment_count": len(cast(list[object], row["comments"])),
+            }
+        )
+        record_agent_read(
+            identity=identity,
+            origin=origin,
+            idempotency_key=idempotency_key,
+            command_name="document.draft.read",
+            label="Inspected editable document outline",
+            detail={"job_id": job_id, "document_key": document_key},
+        )
+        return result
+
+    @app.get("/v1/jobs/{job_id}/editable-documents/{document_key}", tags=["editable-documents"])
+    def editable_document_for_job(
+        job_id: str,
+        document_key: Literal["resume", "cover_letter", "references"],
+        _: Annotated[DeviceIdentity, Depends(authenticated_device)],
+    ) -> EditableDocument:
+        ensure_job(job_id)
+        row = state_store.get_job_editable_document(job_id, document_key)
+        if row is None:
+            raise HTTPException(status_code=404, detail="Editable document not found")
+        return as_document(row)
+
+    @app.post("/v1/jobs/{job_id}/editable-documents", tags=["editable-documents"], status_code=201)
+    @serialized_mutation_route
+    def editable_document_create(
+        job_id: str,
+        command: CreateEditableDocumentRequest,
+        identity: Annotated[DeviceIdentity, Depends(authenticated_device)],
+    ) -> EditableDocument:
+        ensure_job(job_id)
+        payload = command.model_dump(mode="json", exclude={"idempotency_key"})
+        request_hash = mutation_hash("document.editor.create", {"job_id": job_id, **payload})
+        try:
+            replay = mutation_replay(
+                identity=identity,
+                target=f"jobs/{job_id}/editable-documents",
+                command_name="document.editor.create",
+                idempotency_key=command.idempotency_key,
+                request_hash=request_hash,
+            )
+        except IdempotencyConflict as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
+        if replay is not None:
+            return EditableDocument.model_validate(replay)
+        if command.mode == "blank":
+            content = blank_content(command.document_key)
+            settings_value = default_settings()
+            import_report = {"source_filename": None, "imported_at": None, "issues": []}
+            source_artifact_id = source_filename = source_sha256 = None
+            imported = False
+            document_id = None
+            validate_content(content, DocumentSettings.model_validate(settings_value), [])
+        else:
+            if state_store.get_job_editable_document(job_id, command.document_key) is not None:
+                raise HTTPException(
+                    status_code=409,
+                    detail="An editable document already exists for this job and type",
+                )
+            document_id = state_store.new_editable_document_id()
+            try:
+                source_artifact_id, source_filename, source_sha256 = resolve_import_source(
+                    job_id, document_id, command
+                )
+            except (ArtifactTrustError, OSError, ValueError) as error:
+                raise HTTPException(status_code=422, detail=str(error)) from error
+            content = command.content
+            settings_value = command.settings.model_dump(mode="json")
+            import_report = command.import_report.model_dump(mode="json")
+            imported = True
+        label = (
+            f"Created {LABELS[command.document_key]} draft"
+            if command.mode == "blank"
+            else f"Imported {LABELS[command.document_key]} draft"
+        )
+
+        def create_document(connection: sqlite3.Connection) -> dict[str, object]:
+            row = state_store.create_editable_document(
+                job_id=job_id,
+                document_key=command.document_key,
+                document_label=LABELS[command.document_key],
+                content=content,
+                settings=settings_value,
+                comments=[],
+                import_report=import_report,
+                source_artifact_id=source_artifact_id,
+                source_filename=source_filename,
+                source_sha256=source_sha256,
+                imported=imported,
+                document_id=document_id,
+                connection=connection,
+            )
+            return as_document(row).model_dump(mode="json")
+
+        try:
+            result = atomic_editable_mutation(
+                identity=identity,
+                target=f"jobs/{job_id}/editable-documents",
+                command_name="document.editor.create",
+                origin="user",
+                idempotency_key=command.idempotency_key,
+                request_hash=request_hash,
+                mutation=create_document,
+                label=label,
+                job_id=job_id,
+            )
+        except ValueError as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
+        except IdempotencyConflict as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
+        return EditableDocument.model_validate(result)
+
+    @app.get("/v1/editable-documents/{document_id}", tags=["editable-documents"])
+    def editable_document_get(
+        document_id: str, _: Annotated[DeviceIdentity, Depends(authenticated_device)]
+    ) -> EditableDocument:
+        row = state_store.get_editable_document(document_id)
+        if row is None:
+            raise HTTPException(status_code=404, detail="Editable document not found")
+        return as_document(row)
+
+    @app.put("/v1/editable-documents/{document_id}", tags=["editable-documents"])
+    @serialized_mutation_route
+    def editable_document_save(
+        document_id: str,
+        command: SaveEditableDocumentRequest,
+        identity: Annotated[DeviceIdentity, Depends(authenticated_device)],
+    ) -> EditableDocument:
+        request_hash = mutation_hash(
+            "document.editor.save",
+            {
+                "document_id": document_id,
+                **command.model_dump(mode="json", exclude={"idempotency_key"}),
+            },
+        )
+        def save_document(connection: sqlite3.Connection) -> dict[str, object]:
+            row = state_store.save_editable_document(
+                document_id,
+                expected_revision=command.base_revision,
+                content=command.content,
+                settings=command.settings.model_dump(mode="json"),
+                comments=[comment.model_dump(mode="json") for comment in command.comments],
+                connection=connection,
+            )
+            return as_document(row).model_dump(mode="json")
+
+        try:
+            result = atomic_editable_mutation(
+                identity=identity,
+                target=f"editable-documents/{document_id}",
+                command_name="document.editor.save",
+                origin="user",
+                idempotency_key=command.idempotency_key,
+                request_hash=request_hash,
+                mutation=save_document,
+                label="Saved editable document",
+            )
+        except EditableDocumentConflict as error:
+            raise editable_conflict(error) from error
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail="Editable document not found") from error
+        except IdempotencyConflict as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
+        return EditableDocument.model_validate(result)
+
+    @app.post("/v1/editable-documents/{document_id}/import", tags=["editable-documents"])
+    @serialized_mutation_route
+    def editable_document_import(
+        document_id: str,
+        command: ReplaceFromDocxRequest,
+        identity: Annotated[DeviceIdentity, Depends(authenticated_device)],
+    ) -> EditableDocument:
+        target = f"editable-documents/{document_id}"
+        command_name = "document.editor.replace_from_docx"
+        request_hash = mutation_hash(
+            command_name,
+            {
+                "document_id": document_id,
+                **command.model_dump(mode="json", exclude={"idempotency_key"}),
+            },
+        )
+        try:
+            replay = mutation_replay(
+                identity=identity,
+                target=target,
+                command_name=command_name,
+                idempotency_key=command.idempotency_key,
+                request_hash=request_hash,
+            )
+        except IdempotencyConflict as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
+        if replay is not None:
+            return EditableDocument.model_validate(replay)
+        current = state_store.get_editable_document(document_id)
+        if current is None:
+            raise HTTPException(status_code=404, detail="Editable document not found")
+        if current["revision"] != command.base_revision:
+            raise editable_conflict(EditableDocumentConflict(current))
+        if current["document_key"] != command.source.document_key:
+            raise HTTPException(
+                status_code=422,
+                detail="Imported document type must match the existing editable document",
+            )
+        try:
+            source_artifact_id, source_filename, source_sha256 = resolve_import_source(
+                str(current["job_id"]), document_id, command.source
+            )
+
+            def replace_document(connection: sqlite3.Connection) -> dict[str, object]:
+                row = state_store.replace_editable_document_from_import(
+                    document_id,
+                    expected_revision=command.base_revision,
+                    content=command.source.content,
+                    settings=command.source.settings.model_dump(mode="json"),
+                    import_report=command.source.import_report.model_dump(mode="json"),
+                    source_artifact_id=source_artifact_id,
+                    source_filename=source_filename,
+                    source_sha256=source_sha256,
+                    connection=connection,
+                )
+                return as_document(row).model_dump(mode="json")
+
+            result = atomic_editable_mutation(
+                identity=identity,
+                target=target,
+                command_name=command_name,
+                origin="user",
+                idempotency_key=command.idempotency_key,
+                request_hash=request_hash,
+                mutation=replace_document,
+                label=f"Replaced {current['document_label']} from DOCX",
+                job_id=str(current["job_id"]),
+                detail={"source_artifact_id": source_artifact_id},
+            )
+        except EditableDocumentConflict as error:
+            raise editable_conflict(error) from error
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail="Editable document not found") from error
+        except (ArtifactTrustError, OSError, ValueError) as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
+        except IdempotencyConflict as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
+        return EditableDocument.model_validate(result)
+
+    @app.get("/v1/editable-documents/{document_id}/snapshots", tags=["editable-documents"])
+    def editable_snapshot_list(
+        document_id: str, _: Annotated[DeviceIdentity, Depends(authenticated_device)]
+    ) -> EditableDocumentSnapshotList:
+        if state_store.get_editable_document(document_id) is None:
+            raise HTTPException(status_code=404, detail="Editable document not found")
+        return EditableDocumentSnapshotList(
+            snapshots=[
+                EditableDocumentSnapshot.model_validate(row)
+                for row in state_store.list_editable_snapshots(document_id)
+            ]
+        )
+
+    @app.post(
+        "/v1/editable-documents/{document_id}/snapshots",
+        tags=["editable-documents"],
+        status_code=201,
+    )
+    @serialized_mutation_route
+    def editable_snapshot_create(
+        document_id: str,
+        command: CreateSnapshotRequest,
+        identity: Annotated[DeviceIdentity, Depends(authenticated_device)],
+        mcp_token: Annotated[str | None, Header(alias="X-JobOS-MCP-Token")] = None,
+    ) -> EditableDocumentSnapshot:
+        require_trusted_mcp(identity, command.origin, mcp_token)
+        command_name = (
+            "document.draft.snapshot" if command.origin == "mcp" else "document.editor.snapshot"
+        )
+        request_hash = mutation_hash(
+            command_name,
+            {
+                "document_id": document_id,
+                **command.model_dump(mode="json", exclude={"idempotency_key"}),
+            },
+        )
+        document = state_store.get_editable_document(document_id)
+        if document is None:
+            raise HTTPException(status_code=404, detail="Editable document not found")
+
+        def create_snapshot(connection: sqlite3.Connection) -> dict[str, object]:
+            row = state_store.create_editable_snapshot(
+                document_id,
+                expected_revision=command.base_revision,
+                reason="manual",
+                actor="jobhunter" if command.origin == "mcp" else "user",
+                label=command.label,
+                connection=connection,
+            )
+            return EditableDocumentSnapshot.model_validate(row).model_dump(mode="json")
+
+        try:
+            result = atomic_editable_mutation(
+                identity=identity,
+                target=f"editable-documents/{document_id}",
+                command_name=command_name,
+                origin=command.origin,
+                idempotency_key=command.idempotency_key,
+                request_hash=request_hash,
+                mutation=create_snapshot,
+                label="Saved document checkpoint",
+                job_id=str(document["job_id"]),
+            )
+        except EditableDocumentConflict as error:
+            raise editable_conflict(error) from error
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail="Editable document not found") from error
+        except IdempotencyConflict as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
+        return EditableDocumentSnapshot.model_validate(result)
+
+    @app.post(
+        "/v1/editable-documents/{document_id}/snapshots/{snapshot_id}/restore",
+        tags=["editable-documents"],
+    )
+    @serialized_mutation_route
+    def editable_snapshot_restore(
+        document_id: str,
+        snapshot_id: str,
+        command: RestoreSnapshotRequest,
+        identity: Annotated[DeviceIdentity, Depends(authenticated_device)],
+    ) -> EditableDocument:
+        request_hash = mutation_hash(
+            "document.editor.restore",
+            {
+                "document_id": document_id,
+                "snapshot_id": snapshot_id,
+                "base_revision": command.base_revision,
+            },
+        )
+        def restore_snapshot(connection: sqlite3.Connection) -> dict[str, object]:
+            row = state_store.restore_editable_snapshot(
+                document_id,
+                snapshot_id,
+                expected_revision=command.base_revision,
+                connection=connection,
+            )
+            return as_document(row).model_dump(mode="json")
+
+        try:
+            result = atomic_editable_mutation(
+                identity=identity,
+                target=f"editable-documents/{document_id}",
+                command_name="document.editor.restore",
+                origin="user",
+                idempotency_key=command.idempotency_key,
+                request_hash=request_hash,
+                mutation=restore_snapshot,
+                label="Restored document checkpoint",
+            )
+        except EditableDocumentConflict as error:
+            raise editable_conflict(error) from error
+        except KeyError as error:
+            raise HTTPException(
+                status_code=404, detail="Editable document or snapshot not found"
+            ) from error
+        except IdempotencyConflict as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
+        return EditableDocument.model_validate(result)
+
+    @app.post("/v1/editable-documents/{document_id}/operations", tags=["editable-documents"])
+    @serialized_mutation_route
+    def editable_operations(
+        document_id: str,
+        command: ApplyOperationsRequest,
+        identity: Annotated[DeviceIdentity, Depends(authenticated_device)],
+        mcp_token: Annotated[str | None, Header(alias="X-JobOS-MCP-Token")] = None,
+    ) -> OperationReceipt:
+        require_trusted_mcp(identity, command.origin, mcp_token)
+        request_hash = mutation_hash(
+            "document.draft.apply",
+            {
+                "document_id": document_id,
+                **command.model_dump(mode="json", exclude={"idempotency_key"}),
+            },
+        )
+        def apply_document_operations(connection: sqlite3.Connection) -> dict[str, object]:
+            current = state_store.get_editable_document(document_id, connection=connection)
+            if current is None:
+                raise KeyError(document_id)
+            if current["revision"] != command.base_revision:
+                raise EditableDocumentConflict(current)
+            content, changed_ids, changes = apply_operations(current, command)
+            saved, snapshot_id = state_store.save_agent_document_operation(
+                document_id,
+                expected_revision=command.base_revision,
+                content=content,
+                connection=connection,
+            )
+            return OperationReceipt.model_validate(
+                {
+                    "document": as_document(saved),
+                    "changed_block_ids": changed_ids,
+                    "changes": changes,
+                    "snapshot_id": snapshot_id,
+                }
+            ).model_dump(mode="json")
+
+        try:
+            result = atomic_editable_mutation(
+                identity=identity,
+                target=f"editable-documents/{document_id}",
+                command_name="document.draft.apply",
+                origin=command.origin,
+                idempotency_key=command.idempotency_key,
+                request_hash=request_hash,
+                mutation=apply_document_operations,
+                label="Applied JobHunter document edits",
+            )
+        except EditableDocumentConflict as error:
+            raise editable_conflict(error) from error
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail="Editable document not found") from error
+        except ValueError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
+        except IdempotencyConflict as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
+        return OperationReceipt.model_validate(result)
+
+    @app.post("/v1/editable-documents/{document_id}/publish", tags=["editable-documents"])
+    @serialized_mutation_route
+    def editable_document_publish(
+        document_id: str,
+        command: PublishEditableDocumentRequest,
+        identity: Annotated[DeviceIdentity, Depends(authenticated_device)],
+    ) -> EditableDocument:
+        request_hash = mutation_hash(
+            "document.editor.publish",
+            {
+                "document_id": document_id,
+                **command.model_dump(mode="json", exclude={"idempotency_key"}),
+            },
+        )
+        try:
+            replay = mutation_replay(
+                identity=identity,
+                target=f"editable-documents/{document_id}",
+                command_name="document.editor.publish",
+                idempotency_key=command.idempotency_key,
+                request_hash=request_hash,
+            )
+        except IdempotencyConflict as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
+        if replay is not None:
+            return EditableDocument.model_validate(replay)
+
+        current = state_store.get_editable_document(document_id)
+        if current is None:
+            raise HTTPException(status_code=404, detail="Editable document not found")
+        if current["revision"] != command.expected_revision:
+            raise editable_conflict(EditableDocumentConflict(current))
+        content = cast(dict[str, object], current["content"])
+        if unresolved_suggestion_count(content):
+            raise HTTPException(
+                status_code=409,
+                detail="Resolve all document suggestions before publication",
+            )
+        if settings.hermes_job_hunter_cwd is None:
+            raise HTTPException(status_code=503, detail="Job Hunter workspace is unavailable")
+
+        canonical_bytes = json.dumps(
+            {
+                "schema_version": current["schema_version"],
+                "document_id": document_id,
+                "document_revision": current["revision"],
+                "content": current["content"],
+                "settings": current["settings"],
+                "comments": current["comments"],
+                "import_report": current["import_report"],
+            },
+            separators=(",", ":"),
+            sort_keys=True,
+        ).encode()
+        canonical_sha256 = hashlib.sha256(canonical_bytes).hexdigest()
+        publication_source_bytes = json.dumps(
+            {
+                "schema_version": current["schema_version"],
+                "document_id": document_id,
+                "document_revision": current["revision"],
+                "canonical_sha256": canonical_sha256,
+                "original_source_sha256": current["source_sha256"],
+            },
+            separators=(",", ":"),
+            sort_keys=True,
+        ).encode()
+        publication_source_base64 = base64.b64encode(publication_source_bytes).decode("ascii")
+        publication_source_sha256 = hashlib.sha256(publication_source_bytes).hexdigest()
+        try:
+            state_store.ensure_editable_publication_snapshot(
+                document_id,
+                expected_revision=command.expected_revision,
+                actor="user",
+            )
+        except EditableDocumentConflict as error:
+            raise editable_conflict(error) from error
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail="Editable document not found") from error
+
+        publications = (
+            (command.docx_filename, command.docx_base64, "docx"),
+            (command.pdf_filename, command.pdf_base64, "pdf"),
+        )
+        try:
+            for artifact_filename, artifact_base64, extension in publications:
+                publish_command = ArtifactPublishRequest(
+                    document_key=cast(
+                        Literal["resume", "cover_letter", "references"],
+                        current["document_key"],
+                    ),
+                    document_label=str(current["document_label"]),
+                    source_filename="publication-source.json",
+                    source_base64=publication_source_base64,
+                    artifact_filename=artifact_filename,
+                    artifact_base64=artifact_base64,
+                    origin="user",
+                    idempotency_key=(
+                        f"editable-{hashlib.sha256(f'{document_id}:{command.expected_revision}:{extension}'.encode()).hexdigest()[:32]}"
+                    ),
+                )
+                artifact_request_hash = mutation_hash(
+                    "document.publish",
+                    {
+                        "job_id": current["job_id"],
+                        "document_key": current["document_key"],
+                        "document_label": current["document_label"],
+                        "source_filename": "publication-source.json",
+                        "source_sha256": publication_source_sha256,
+                        "artifact_filename": artifact_filename,
+                        "artifact_sha256": (
+                            command.docx_sha256 if extension == "docx" else command.pdf_sha256
+                        ),
+                        "origin": "user",
+                    },
+                )
+                artifact_replay = mutation_replay(
+                    identity=identity,
+                    target=f"jobs/{current['job_id']}/artifacts",
+                    command_name="document.publish",
+                    idempotency_key=publish_command.idempotency_key,
+                    request_hash=artifact_request_hash,
+                )
+                if artifact_replay is not None:
+                    continue
+                source_path, artifact_path = materialize_published_document(
+                    publish_command,
+                    job_id=str(current["job_id"]),
+                    workspace_root=settings.hermes_job_hunter_cwd,
+                )
+                raw = jobs.publish_document_artifact(
+                    str(current["job_id"]),
+                    str(current["document_key"]),
+                    str(current["document_label"]),
+                    str(source_path),
+                    str(artifact_path),
+                )
+                verified = verify_source_artifact(raw, settings.artifact_roots)
+                state_store.register_document_artifacts(
+                    str(current["job_id"]),
+                    [verified],
+                    editable_document_id=document_id,
+                    editable_document_revision=command.expected_revision,
+                )
+                publication_state = artifact_list(str(current["job_id"]))
+                record_mutation(
+                    identity=identity,
+                    target=f"jobs/{current['job_id']}/artifacts",
+                    command_name="document.publish",
+                    origin="user",
+                    idempotency_key=publish_command.idempotency_key,
+                    request_hash=artifact_request_hash,
+                    result=publication_state.model_dump(mode="json"),
+                    label=f"Published {current['document_label']} {extension.upper()}",
+                    job_id=str(current["job_id"]),
+                    detail={
+                        "artifact_id": publication_state.current_artifact_id,
+                        "document_key": current["document_key"],
+                    },
+                )
+        except (ArtifactTrustError, OSError, ValueError) as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
+        def mark_published(connection: sqlite3.Connection) -> dict[str, object]:
+            row = state_store.mark_editable_document_published(
+                document_id,
+                expected_revision=command.expected_revision,
+                connection=connection,
+            )
+            return as_document(row).model_dump(mode="json")
+
+        try:
+            result = atomic_editable_mutation(
+                identity=identity,
+                target=f"editable-documents/{document_id}",
+                command_name="document.editor.publish",
+                origin="user",
+                idempotency_key=command.idempotency_key,
+                request_hash=request_hash,
+                mutation=mark_published,
+                label=f"Published {current['document_label']} revision {command.expected_revision}",
+                job_id=str(current["job_id"]),
+            )
+        except EditableDocumentConflict as error:
+            raise editable_conflict(error) from error
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail="Editable document not found") from error
+        except IdempotencyConflict as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
+        return EditableDocument.model_validate(result)
+
     def artifact_list(job_id: str) -> JobArtifactsResponse:
-        rows, current_id, last_successful_id, approved_id = (
-            state_store.list_document_artifacts(job_id)
+        rows, current_id, last_successful_id, approved_id = state_store.list_document_artifacts(
+            job_id
         )
         return JobArtifactsResponse(
             job_id=job_id,

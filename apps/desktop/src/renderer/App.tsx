@@ -5,11 +5,13 @@ import { SettingsPanel } from './components/SettingsPanel'
 import { StatusBar } from './components/StatusBar'
 import { WorkbenchLayout } from './components/WorkbenchLayout'
 import { WorkspaceBar } from './components/WorkspaceBar'
+import { DocumentEditorShell } from './document-editor/DocumentEditorShell'
 import { useConnectivity } from './hooks/useConnectivity'
 import { useJobs } from './hooks/useJobs'
 import { useWorkspace } from './hooks/useWorkspace'
 import { useTheme } from './theme/useTheme'
 import { useCallback, useRef, useState } from 'react'
+import type { EditableDocument } from '../shared/editableDocuments'
 
 export function App() {
   const connectivity = useConnectivity()
@@ -21,6 +23,7 @@ export function App() {
   const [agentModalOpen, setAgentModalOpen] = useState(false)
   const [jobListingRequest, setJobListingRequest] = useState<JobListingRequest | null>(null)
   const [documentMutationGeneration, setDocumentMutationGeneration] = useState(0)
+  const [editingDocument, setEditingDocument] = useState<EditableDocument | null>(null)
   const nextJobListingRequestId = useRef(0)
   const latestNavigatorSelection = useRef(0)
   const navigatorSelectionQueue = useRef(Promise.resolve())
@@ -84,6 +87,20 @@ export function App() {
         onToggleMode={theme.toggleMode}
         themeMode={theme.mode}
       />
+      {editingDocument ? (
+        <DocumentEditorShell
+          document={editingDocument}
+          externalGeneration={documentMutationGeneration}
+          jobLabel={jobState.selectedJob
+            ? `${jobState.selectedJob.company} · ${jobState.selectedJob.title}`
+            : 'Selected job'}
+          onDocumentChange={setEditingDocument}
+          onExit={() => {
+            setEditingDocument(null)
+            setDocumentMutationGeneration(generation => generation + 1)
+          }}
+        />
+      ) : (
       <WorkbenchLayout
         agent={<AgentPanel
           apiState={connectivity.state}
@@ -112,7 +129,9 @@ export function App() {
           onDocumentPersist={layoutState.updateDocumentState}
           onJobSaved={async jobId => {
             await jobState.selectJob(jobId)
+            setDocumentMutationGeneration(generation => generation + 1)
           }}
+          onOpenEditor={setEditingDocument}
           workspaceHydrated={layoutState.hydrated}
         />}
         jobs={<JobNavigator
@@ -138,6 +157,7 @@ export function App() {
         onResize={layoutState.resize}
         workspace={layoutState.workspace}
       />
+      )}
       <p aria-live="polite" className="layout-announcement">{layoutState.announcement}</p>
       <StatusBar apiVersion={connectivity.apiVersion} message={connectivity.message} onOpenSettings={() => { void openSettings() }} state={connectivity.state} />
       {settingsOpen ? (

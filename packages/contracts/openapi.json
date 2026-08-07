@@ -55,6 +55,73 @@
         "title": "ActivityReportResponse",
         "type": "object"
       },
+      "ApplyOperationsRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "base_revision": {
+            "minimum": 1.0,
+            "title": "Base Revision",
+            "type": "integer"
+          },
+          "idempotency_key": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Idempotency Key",
+            "type": "string"
+          },
+          "operations": {
+            "items": {
+              "discriminator": {
+                "mapping": {
+                  "delete_block": "#/components/schemas/DeleteBlock",
+                  "insert_block_after": "#/components/schemas/InsertBlockAfter",
+                  "move_block_after": "#/components/schemas/MoveBlockAfter",
+                  "replace_block_text": "#/components/schemas/ReplaceBlockText",
+                  "set_block_role": "#/components/schemas/SetBlockRole"
+                },
+                "propertyName": "type"
+              },
+              "oneOf": [
+                {
+                  "$ref": "#/components/schemas/ReplaceBlockText"
+                },
+                {
+                  "$ref": "#/components/schemas/InsertBlockAfter"
+                },
+                {
+                  "$ref": "#/components/schemas/DeleteBlock"
+                },
+                {
+                  "$ref": "#/components/schemas/MoveBlockAfter"
+                },
+                {
+                  "$ref": "#/components/schemas/SetBlockRole"
+                }
+              ]
+            },
+            "maxItems": 50,
+            "minItems": 1,
+            "title": "Operations",
+            "type": "array"
+          },
+          "origin": {
+            "default": "user",
+            "enum": [
+              "user",
+              "mcp"
+            ],
+            "title": "Origin",
+            "type": "string"
+          }
+        },
+        "required": [
+          "base_revision",
+          "operations",
+          "idempotency_key"
+        ],
+        "title": "ApplyOperationsRequest",
+        "type": "object"
+      },
       "ArtifactApprovalRequest": {
         "additionalProperties": false,
         "properties": {
@@ -95,7 +162,8 @@
           "document_key": {
             "enum": [
               "resume",
-              "cover_letter"
+              "cover_letter",
+              "references"
             ],
             "title": "Document Key",
             "type": "string"
@@ -113,13 +181,16 @@
             "type": "string"
           },
           "origin": {
-            "const": "mcp",
             "default": "mcp",
+            "enum": [
+              "user",
+              "mcp"
+            ],
             "title": "Origin",
             "type": "string"
           },
           "source_base64": {
-            "maxLength": 2800000,
+            "maxLength": 28000000,
             "minLength": 1,
             "title": "Source Base64",
             "type": "string"
@@ -161,7 +232,8 @@
           "document_key": {
             "enum": [
               "resume",
-              "cover_letter"
+              "cover_letter",
+              "references"
             ],
             "title": "Document Key",
             "type": "string"
@@ -657,6 +729,227 @@
         "title": "ConversationResponse",
         "type": "object"
       },
+      "CreateBlankRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "document_key": {
+            "enum": [
+              "resume",
+              "cover_letter",
+              "references"
+            ],
+            "title": "Document Key",
+            "type": "string"
+          },
+          "idempotency_key": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Idempotency Key",
+            "type": "string"
+          },
+          "mode": {
+            "const": "blank",
+            "title": "Mode",
+            "type": "string"
+          }
+        },
+        "required": [
+          "mode",
+          "document_key",
+          "idempotency_key"
+        ],
+        "title": "CreateBlankRequest",
+        "type": "object"
+      },
+      "CreateExternalImportRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "content": {
+            "additionalProperties": true,
+            "title": "Content",
+            "type": "object"
+          },
+          "document_key": {
+            "enum": [
+              "resume",
+              "cover_letter",
+              "references"
+            ],
+            "title": "Document Key",
+            "type": "string"
+          },
+          "idempotency_key": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Idempotency Key",
+            "type": "string"
+          },
+          "import_report": {
+            "$ref": "#/components/schemas/DocumentImportReport"
+          },
+          "mode": {
+            "const": "import_external_docx",
+            "title": "Mode",
+            "type": "string"
+          },
+          "settings": {
+            "$ref": "#/components/schemas/DocumentSettings"
+          },
+          "source_base64": {
+            "maxLength": 28000000,
+            "minLength": 1,
+            "title": "Source Base64",
+            "type": "string"
+          },
+          "source_filename": {
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Source Filename",
+            "type": "string"
+          },
+          "source_sha256": {
+            "pattern": "^[a-f0-9]{64}$",
+            "title": "Source Sha256",
+            "type": "string"
+          }
+        },
+        "required": [
+          "mode",
+          "document_key",
+          "source_filename",
+          "source_base64",
+          "source_sha256",
+          "content",
+          "settings",
+          "import_report",
+          "idempotency_key"
+        ],
+        "title": "CreateExternalImportRequest",
+        "type": "object"
+      },
+      "CreateRegisteredImportRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "content": {
+            "additionalProperties": true,
+            "title": "Content",
+            "type": "object"
+          },
+          "document_key": {
+            "enum": [
+              "resume",
+              "cover_letter",
+              "references"
+            ],
+            "title": "Document Key",
+            "type": "string"
+          },
+          "idempotency_key": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Idempotency Key",
+            "type": "string"
+          },
+          "import_report": {
+            "$ref": "#/components/schemas/DocumentImportReport"
+          },
+          "mode": {
+            "const": "import_registered_artifact",
+            "title": "Mode",
+            "type": "string"
+          },
+          "settings": {
+            "$ref": "#/components/schemas/DocumentSettings"
+          },
+          "source_artifact_id": {
+            "pattern": "^art_[A-Za-z0-9_-]{16,80}$",
+            "title": "Source Artifact Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "mode",
+          "document_key",
+          "source_artifact_id",
+          "content",
+          "settings",
+          "import_report",
+          "idempotency_key"
+        ],
+        "title": "CreateRegisteredImportRequest",
+        "type": "object"
+      },
+      "CreateSnapshotRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "base_revision": {
+            "minimum": 1.0,
+            "title": "Base Revision",
+            "type": "integer"
+          },
+          "idempotency_key": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Idempotency Key",
+            "type": "string"
+          },
+          "label": {
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Label",
+            "type": "string"
+          },
+          "origin": {
+            "default": "user",
+            "enum": [
+              "user",
+              "mcp"
+            ],
+            "title": "Origin",
+            "type": "string"
+          },
+          "reason": {
+            "const": "manual",
+            "default": "manual",
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "base_revision",
+          "label",
+          "idempotency_key"
+        ],
+        "title": "CreateSnapshotRequest",
+        "type": "object"
+      },
+      "DeleteBlock": {
+        "additionalProperties": false,
+        "properties": {
+          "block_id": {
+            "pattern": "^node_[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "title": "Block Id",
+            "type": "string"
+          },
+          "expected_text": {
+            "maxLength": 20000,
+            "title": "Expected Text",
+            "type": "string"
+          },
+          "type": {
+            "const": "delete_block",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "block_id",
+          "expected_text"
+        ],
+        "title": "DeleteBlock",
+        "type": "object"
+      },
       "DesktopCapabilityPresence": {
         "additionalProperties": false,
         "properties": {
@@ -710,6 +1003,551 @@
         "title": "DeviceSessionResponse",
         "type": "object"
       },
+      "DocumentComment": {
+        "additionalProperties": false,
+        "properties": {
+          "author": {
+            "enum": [
+              "user",
+              "jobhunter"
+            ],
+            "title": "Author",
+            "type": "string"
+          },
+          "block_id": {
+            "pattern": "^node_[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "title": "Block Id",
+            "type": "string"
+          },
+          "body": {
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Body",
+            "type": "string"
+          },
+          "comment_id": {
+            "pattern": "^comment_[A-Za-z0-9_-]{1,80}$",
+            "title": "Comment Id",
+            "type": "string"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "resolved_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resolved At"
+          }
+        },
+        "required": [
+          "comment_id",
+          "block_id",
+          "author",
+          "body",
+          "created_at"
+        ],
+        "title": "DocumentComment",
+        "type": "object"
+      },
+      "DocumentDraftOutline": {
+        "additionalProperties": false,
+        "properties": {
+          "comment_count": {
+            "title": "Comment Count",
+            "type": "integer"
+          },
+          "document_id": {
+            "title": "Document Id",
+            "type": "string"
+          },
+          "document_key": {
+            "enum": [
+              "resume",
+              "cover_letter",
+              "references"
+            ],
+            "title": "Document Key",
+            "type": "string"
+          },
+          "document_label": {
+            "title": "Document Label",
+            "type": "string"
+          },
+          "outline": {
+            "items": {
+              "$ref": "#/components/schemas/SemanticOutlineBlock"
+            },
+            "title": "Outline",
+            "type": "array"
+          },
+          "revision": {
+            "title": "Revision",
+            "type": "integer"
+          },
+          "settings": {
+            "$ref": "#/components/schemas/DocumentSettings"
+          },
+          "unresolved_suggestion_count": {
+            "title": "Unresolved Suggestion Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "document_id",
+          "document_key",
+          "document_label",
+          "revision",
+          "settings",
+          "outline",
+          "unresolved_suggestion_count",
+          "comment_count"
+        ],
+        "title": "DocumentDraftOutline",
+        "type": "object"
+      },
+      "DocumentImportIssue": {
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Code",
+            "type": "string"
+          },
+          "count": {
+            "maximum": 5000.0,
+            "minimum": 1.0,
+            "title": "Count",
+            "type": "integer"
+          },
+          "message": {
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Message",
+            "type": "string"
+          },
+          "severity": {
+            "enum": [
+              "normalized",
+              "dropped"
+            ],
+            "title": "Severity",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "severity",
+          "message",
+          "count"
+        ],
+        "title": "DocumentImportIssue",
+        "type": "object"
+      },
+      "DocumentImportReport": {
+        "additionalProperties": false,
+        "properties": {
+          "imported_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Imported At"
+          },
+          "issues": {
+            "items": {
+              "$ref": "#/components/schemas/DocumentImportIssue"
+            },
+            "maxItems": 200,
+            "title": "Issues",
+            "type": "array"
+          },
+          "source_filename": {
+            "anyOf": [
+              {
+                "maxLength": 255,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Filename"
+          }
+        },
+        "title": "DocumentImportReport",
+        "type": "object"
+      },
+      "DocumentSettings": {
+        "additionalProperties": false,
+        "properties": {
+          "default_font_family": {
+            "default": "Calibri",
+            "enum": [
+              "Arial",
+              "Calibri",
+              "Times New Roman",
+              "Georgia",
+              "Garamond"
+            ],
+            "title": "Default Font Family",
+            "type": "string"
+          },
+          "default_font_size_pt": {
+            "default": 11,
+            "maximum": 72.0,
+            "minimum": 8.0,
+            "title": "Default Font Size Pt",
+            "type": "number"
+          },
+          "footer": {
+            "$ref": "#/components/schemas/HeaderFooter"
+          },
+          "header": {
+            "$ref": "#/components/schemas/HeaderFooter"
+          },
+          "margins_inches": {
+            "$ref": "#/components/schemas/Margins"
+          },
+          "orientation": {
+            "const": "portrait",
+            "default": "portrait",
+            "title": "Orientation",
+            "type": "string"
+          },
+          "page_size": {
+            "default": "letter",
+            "enum": [
+              "letter",
+              "a4"
+            ],
+            "title": "Page Size",
+            "type": "string"
+          },
+          "show_page_numbers": {
+            "default": false,
+            "title": "Show Page Numbers",
+            "type": "boolean"
+          }
+        },
+        "title": "DocumentSettings",
+        "type": "object"
+      },
+      "EditableDocument": {
+        "additionalProperties": false,
+        "properties": {
+          "comments": {
+            "items": {
+              "$ref": "#/components/schemas/DocumentComment"
+            },
+            "title": "Comments",
+            "type": "array"
+          },
+          "content": {
+            "additionalProperties": true,
+            "title": "Content",
+            "type": "object"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "document_id": {
+            "pattern": "^edoc_[A-Za-z0-9_-]{24}$",
+            "title": "Document Id",
+            "type": "string"
+          },
+          "document_key": {
+            "enum": [
+              "resume",
+              "cover_letter",
+              "references"
+            ],
+            "title": "Document Key",
+            "type": "string"
+          },
+          "document_label": {
+            "enum": [
+              "Resume",
+              "Cover Letter",
+              "References"
+            ],
+            "title": "Document Label",
+            "type": "string"
+          },
+          "import_report": {
+            "$ref": "#/components/schemas/DocumentImportReport"
+          },
+          "job_id": {
+            "title": "Job Id",
+            "type": "string"
+          },
+          "published_revision": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Published Revision"
+          },
+          "revision": {
+            "minimum": 1.0,
+            "title": "Revision",
+            "type": "integer"
+          },
+          "schema_version": {
+            "const": 1,
+            "title": "Schema Version",
+            "type": "integer"
+          },
+          "settings": {
+            "$ref": "#/components/schemas/DocumentSettings"
+          },
+          "source_artifact_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Artifact Id"
+          },
+          "source_filename": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Filename"
+          },
+          "source_sha256": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Sha256"
+          },
+          "updated_at": {
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "schema_version",
+          "document_id",
+          "job_id",
+          "document_key",
+          "document_label",
+          "revision",
+          "content",
+          "settings",
+          "comments",
+          "source_artifact_id",
+          "source_filename",
+          "source_sha256",
+          "published_revision",
+          "import_report",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "EditableDocument",
+        "type": "object"
+      },
+      "EditableDocumentList": {
+        "additionalProperties": false,
+        "properties": {
+          "documents": {
+            "items": {
+              "$ref": "#/components/schemas/EditableDocumentSummary"
+            },
+            "title": "Documents",
+            "type": "array"
+          }
+        },
+        "required": [
+          "documents"
+        ],
+        "title": "EditableDocumentList",
+        "type": "object"
+      },
+      "EditableDocumentSnapshot": {
+        "additionalProperties": false,
+        "properties": {
+          "actor": {
+            "enum": [
+              "user",
+              "jobhunter",
+              "import",
+              "system"
+            ],
+            "title": "Actor",
+            "type": "string"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "document_id": {
+            "title": "Document Id",
+            "type": "string"
+          },
+          "document_revision": {
+            "title": "Document Revision",
+            "type": "integer"
+          },
+          "label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Label"
+          },
+          "reason": {
+            "enum": [
+              "import",
+              "before_agent_edit",
+              "manual",
+              "before_publish",
+              "before_restore"
+            ],
+            "title": "Reason",
+            "type": "string"
+          },
+          "snapshot_id": {
+            "pattern": "^dsnap_[A-Za-z0-9_-]{24}$",
+            "title": "Snapshot Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "snapshot_id",
+          "document_id",
+          "document_revision",
+          "reason",
+          "actor",
+          "label",
+          "created_at"
+        ],
+        "title": "EditableDocumentSnapshot",
+        "type": "object"
+      },
+      "EditableDocumentSnapshotList": {
+        "additionalProperties": false,
+        "properties": {
+          "snapshots": {
+            "items": {
+              "$ref": "#/components/schemas/EditableDocumentSnapshot"
+            },
+            "title": "Snapshots",
+            "type": "array"
+          }
+        },
+        "required": [
+          "snapshots"
+        ],
+        "title": "EditableDocumentSnapshotList",
+        "type": "object"
+      },
+      "EditableDocumentSummary": {
+        "additionalProperties": false,
+        "properties": {
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "document_id": {
+            "title": "Document Id",
+            "type": "string"
+          },
+          "document_key": {
+            "enum": [
+              "resume",
+              "cover_letter",
+              "references"
+            ],
+            "title": "Document Key",
+            "type": "string"
+          },
+          "document_label": {
+            "title": "Document Label",
+            "type": "string"
+          },
+          "job_id": {
+            "title": "Job Id",
+            "type": "string"
+          },
+          "published_revision": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Published Revision"
+          },
+          "revision": {
+            "title": "Revision",
+            "type": "integer"
+          },
+          "source_artifact_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Artifact Id"
+          },
+          "updated_at": {
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "document_id",
+          "job_id",
+          "document_key",
+          "document_label",
+          "revision",
+          "source_artifact_id",
+          "published_revision",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "EditableDocumentSummary",
+        "type": "object"
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -721,6 +1559,36 @@
           }
         },
         "title": "HTTPValidationError",
+        "type": "object"
+      },
+      "HeaderFooter": {
+        "additionalProperties": false,
+        "properties": {
+          "center": {
+            "default": "",
+            "maxLength": 500,
+            "title": "Center",
+            "type": "string"
+          },
+          "first_page_different": {
+            "default": false,
+            "title": "First Page Different",
+            "type": "boolean"
+          },
+          "left": {
+            "default": "",
+            "maxLength": 500,
+            "title": "Left",
+            "type": "string"
+          },
+          "right": {
+            "default": "",
+            "maxLength": 500,
+            "title": "Right",
+            "type": "string"
+          }
+        },
+        "title": "HeaderFooter",
         "type": "object"
       },
       "HealthResponse": {
@@ -764,6 +1632,59 @@
           "agent_connection"
         ],
         "title": "HealthResponse",
+        "type": "object"
+      },
+      "InsertBlockAfter": {
+        "additionalProperties": false,
+        "properties": {
+          "after_block_id": {
+            "pattern": "^node_[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "title": "After Block Id",
+            "type": "string"
+          },
+          "node_type": {
+            "enum": [
+              "paragraph",
+              "listItem"
+            ],
+            "title": "Node Type",
+            "type": "string"
+          },
+          "semantic_role": {
+            "enum": [
+              "contact",
+              "summary",
+              "experience",
+              "experience_achievement",
+              "education",
+              "skills",
+              "reference",
+              "cover_letter_body",
+              "closing",
+              "custom"
+            ],
+            "title": "Semantic Role",
+            "type": "string"
+          },
+          "text": {
+            "maxLength": 20000,
+            "title": "Text",
+            "type": "string"
+          },
+          "type": {
+            "const": "insert_block_after",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "after_block_id",
+          "node_type",
+          "semantic_role",
+          "text"
+        ],
+        "title": "InsertBlockAfter",
         "type": "object"
       },
       "JobArtifactsResponse": {
@@ -1410,6 +2331,118 @@
         "title": "ManualOrderRequest",
         "type": "object"
       },
+      "Margins": {
+        "additionalProperties": false,
+        "properties": {
+          "bottom": {
+            "default": 1,
+            "title": "Bottom",
+            "type": "number"
+          },
+          "left": {
+            "default": 1,
+            "title": "Left",
+            "type": "number"
+          },
+          "right": {
+            "default": 1,
+            "title": "Right",
+            "type": "number"
+          },
+          "top": {
+            "default": 1,
+            "title": "Top",
+            "type": "number"
+          }
+        },
+        "title": "Margins",
+        "type": "object"
+      },
+      "MoveBlockAfter": {
+        "additionalProperties": false,
+        "properties": {
+          "after_block_id": {
+            "pattern": "^node_[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "title": "After Block Id",
+            "type": "string"
+          },
+          "block_id": {
+            "pattern": "^node_[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "title": "Block Id",
+            "type": "string"
+          },
+          "type": {
+            "const": "move_block_after",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "block_id",
+          "after_block_id"
+        ],
+        "title": "MoveBlockAfter",
+        "type": "object"
+      },
+      "OperationChange": {
+        "additionalProperties": false,
+        "properties": {
+          "after": {
+            "title": "After",
+            "type": "string"
+          },
+          "before": {
+            "title": "Before",
+            "type": "string"
+          },
+          "block_id": {
+            "title": "Block Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "block_id",
+          "before",
+          "after"
+        ],
+        "title": "OperationChange",
+        "type": "object"
+      },
+      "OperationReceipt": {
+        "additionalProperties": false,
+        "properties": {
+          "changed_block_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Changed Block Ids",
+            "type": "array"
+          },
+          "changes": {
+            "items": {
+              "$ref": "#/components/schemas/OperationChange"
+            },
+            "title": "Changes",
+            "type": "array"
+          },
+          "document": {
+            "$ref": "#/components/schemas/EditableDocument"
+          },
+          "snapshot_id": {
+            "title": "Snapshot Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "document",
+          "changed_block_ids",
+          "changes",
+          "snapshot_id"
+        ],
+        "title": "OperationReceipt",
+        "type": "object"
+      },
       "PanelLayout": {
         "additionalProperties": false,
         "properties": {
@@ -1458,6 +2491,164 @@
           "collapsed"
         ],
         "title": "PanelLayout",
+        "type": "object"
+      },
+      "PublishEditableDocumentRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "docx_base64": {
+            "maxLength": 28000000,
+            "minLength": 1,
+            "title": "Docx Base64",
+            "type": "string"
+          },
+          "docx_filename": {
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Docx Filename",
+            "type": "string"
+          },
+          "docx_sha256": {
+            "pattern": "^[a-f0-9]{64}$",
+            "title": "Docx Sha256",
+            "type": "string"
+          },
+          "expected_revision": {
+            "minimum": 1.0,
+            "title": "Expected Revision",
+            "type": "integer"
+          },
+          "idempotency_key": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Idempotency Key",
+            "type": "string"
+          },
+          "pdf_base64": {
+            "maxLength": 28000000,
+            "minLength": 1,
+            "title": "Pdf Base64",
+            "type": "string"
+          },
+          "pdf_filename": {
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Pdf Filename",
+            "type": "string"
+          },
+          "pdf_sha256": {
+            "pattern": "^[a-f0-9]{64}$",
+            "title": "Pdf Sha256",
+            "type": "string"
+          }
+        },
+        "required": [
+          "expected_revision",
+          "docx_filename",
+          "docx_base64",
+          "docx_sha256",
+          "pdf_filename",
+          "pdf_base64",
+          "pdf_sha256",
+          "idempotency_key"
+        ],
+        "title": "PublishEditableDocumentRequest",
+        "type": "object"
+      },
+      "ReplaceBlockText": {
+        "additionalProperties": false,
+        "properties": {
+          "block_id": {
+            "pattern": "^node_[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "title": "Block Id",
+            "type": "string"
+          },
+          "expected_text": {
+            "maxLength": 20000,
+            "title": "Expected Text",
+            "type": "string"
+          },
+          "replacement_text": {
+            "maxLength": 20000,
+            "title": "Replacement Text",
+            "type": "string"
+          },
+          "type": {
+            "const": "replace_block_text",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "block_id",
+          "expected_text",
+          "replacement_text"
+        ],
+        "title": "ReplaceBlockText",
+        "type": "object"
+      },
+      "ReplaceFromDocxRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "base_revision": {
+            "minimum": 1.0,
+            "title": "Base Revision",
+            "type": "integer"
+          },
+          "idempotency_key": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Idempotency Key",
+            "type": "string"
+          },
+          "source": {
+            "discriminator": {
+              "mapping": {
+                "import_external_docx": "#/components/schemas/CreateExternalImportRequest",
+                "import_registered_artifact": "#/components/schemas/CreateRegisteredImportRequest"
+              },
+              "propertyName": "mode"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/CreateRegisteredImportRequest"
+              },
+              {
+                "$ref": "#/components/schemas/CreateExternalImportRequest"
+              }
+            ],
+            "title": "Source"
+          }
+        },
+        "required": [
+          "base_revision",
+          "source",
+          "idempotency_key"
+        ],
+        "title": "ReplaceFromDocxRequest",
+        "type": "object"
+      },
+      "RestoreSnapshotRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "base_revision": {
+            "minimum": 1.0,
+            "title": "Base Revision",
+            "type": "integer"
+          },
+          "idempotency_key": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Idempotency Key",
+            "type": "string"
+          }
+        },
+        "required": [
+          "base_revision",
+          "idempotency_key"
+        ],
+        "title": "RestoreSnapshotRequest",
         "type": "object"
       },
       "ResumeRenderRequest": {
@@ -1513,6 +2704,112 @@
         "title": "RetryTurnRequest",
         "type": "object"
       },
+      "SaveEditableDocumentRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "base_revision": {
+            "minimum": 1.0,
+            "title": "Base Revision",
+            "type": "integer"
+          },
+          "comments": {
+            "items": {
+              "$ref": "#/components/schemas/DocumentComment"
+            },
+            "maxItems": 200,
+            "title": "Comments",
+            "type": "array"
+          },
+          "content": {
+            "additionalProperties": true,
+            "title": "Content",
+            "type": "object"
+          },
+          "idempotency_key": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Idempotency Key",
+            "type": "string"
+          },
+          "settings": {
+            "$ref": "#/components/schemas/DocumentSettings"
+          }
+        },
+        "required": [
+          "base_revision",
+          "content",
+          "settings",
+          "comments",
+          "idempotency_key"
+        ],
+        "title": "SaveEditableDocumentRequest",
+        "type": "object"
+      },
+      "SemanticOutlineBlock": {
+        "additionalProperties": false,
+        "properties": {
+          "block_id": {
+            "title": "Block Id",
+            "type": "string"
+          },
+          "locked": {
+            "title": "Locked",
+            "type": "boolean"
+          },
+          "node_type": {
+            "title": "Node Type",
+            "type": "string"
+          },
+          "parent_section_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Section Id"
+          },
+          "semantic_role": {
+            "anyOf": [
+              {
+                "enum": [
+                  "contact",
+                  "summary",
+                  "experience",
+                  "experience_achievement",
+                  "education",
+                  "skills",
+                  "reference",
+                  "cover_letter_body",
+                  "closing",
+                  "custom"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Semantic Role"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "block_id",
+          "parent_section_id",
+          "node_type",
+          "semantic_role",
+          "locked",
+          "text"
+        ],
+        "title": "SemanticOutlineBlock",
+        "type": "object"
+      },
       "SendMessageRequest": {
         "additionalProperties": false,
         "properties": {
@@ -1534,6 +2831,44 @@
           "idempotency_key"
         ],
         "title": "SendMessageRequest",
+        "type": "object"
+      },
+      "SetBlockRole": {
+        "additionalProperties": false,
+        "properties": {
+          "block_id": {
+            "pattern": "^node_[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "title": "Block Id",
+            "type": "string"
+          },
+          "semantic_role": {
+            "enum": [
+              "contact",
+              "summary",
+              "experience",
+              "experience_achievement",
+              "education",
+              "skills",
+              "reference",
+              "cover_letter_body",
+              "closing",
+              "custom"
+            ],
+            "title": "Semantic Role",
+            "type": "string"
+          },
+          "type": {
+            "const": "set_block_role",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "block_id",
+          "semantic_role"
+        ],
+        "title": "SetBlockRole",
         "type": "object"
       },
       "StatusChangeRequest": {
@@ -2552,6 +3887,479 @@
         ]
       }
     },
+    "/v1/editable-documents/{document_id}": {
+      "get": {
+        "operationId": "editable_document_get_v1_editable_documents__document_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "document_id",
+            "required": true,
+            "schema": {
+              "title": "Document Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EditableDocument"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Editable Document Get",
+        "tags": [
+          "editable-documents"
+        ]
+      },
+      "put": {
+        "operationId": "editable_document_save_v1_editable_documents__document_id__put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "document_id",
+            "required": true,
+            "schema": {
+              "title": "Document Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveEditableDocumentRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EditableDocument"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Editable Document Save",
+        "tags": [
+          "editable-documents"
+        ]
+      }
+    },
+    "/v1/editable-documents/{document_id}/import": {
+      "post": {
+        "operationId": "editable_document_import_v1_editable_documents__document_id__import_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "document_id",
+            "required": true,
+            "schema": {
+              "title": "Document Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReplaceFromDocxRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EditableDocument"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Editable Document Import",
+        "tags": [
+          "editable-documents"
+        ]
+      }
+    },
+    "/v1/editable-documents/{document_id}/operations": {
+      "post": {
+        "operationId": "editable_operations_v1_editable_documents__document_id__operations_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "document_id",
+            "required": true,
+            "schema": {
+              "title": "Document Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-JobOS-MCP-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Jobos-Mcp-Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApplyOperationsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperationReceipt"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Editable Operations",
+        "tags": [
+          "editable-documents"
+        ]
+      }
+    },
+    "/v1/editable-documents/{document_id}/publish": {
+      "post": {
+        "operationId": "editable_document_publish_v1_editable_documents__document_id__publish_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "document_id",
+            "required": true,
+            "schema": {
+              "title": "Document Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PublishEditableDocumentRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EditableDocument"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Editable Document Publish",
+        "tags": [
+          "editable-documents"
+        ]
+      }
+    },
+    "/v1/editable-documents/{document_id}/snapshots": {
+      "get": {
+        "operationId": "editable_snapshot_list_v1_editable_documents__document_id__snapshots_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "document_id",
+            "required": true,
+            "schema": {
+              "title": "Document Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EditableDocumentSnapshotList"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Editable Snapshot List",
+        "tags": [
+          "editable-documents"
+        ]
+      },
+      "post": {
+        "operationId": "editable_snapshot_create_v1_editable_documents__document_id__snapshots_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "document_id",
+            "required": true,
+            "schema": {
+              "title": "Document Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-JobOS-MCP-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Jobos-Mcp-Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateSnapshotRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EditableDocumentSnapshot"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Editable Snapshot Create",
+        "tags": [
+          "editable-documents"
+        ]
+      }
+    },
+    "/v1/editable-documents/{document_id}/snapshots/{snapshot_id}/restore": {
+      "post": {
+        "operationId": "editable_snapshot_restore_v1_editable_documents__document_id__snapshots__snapshot_id__restore_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "document_id",
+            "required": true,
+            "schema": {
+              "title": "Document Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "snapshot_id",
+            "required": true,
+            "schema": {
+              "title": "Snapshot Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RestoreSnapshotRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EditableDocument"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Editable Snapshot Restore",
+        "tags": [
+          "editable-documents"
+        ]
+      }
+    },
     "/v1/events": {
       "get": {
         "operationId": "events_list_v1_events_get",
@@ -3491,6 +5299,298 @@
         "summary": "Job Update Description",
         "tags": [
           "jobs"
+        ]
+      }
+    },
+    "/v1/jobs/{job_id}/editable-document-outlines/{document_key}": {
+      "get": {
+        "operationId": "editable_document_outline_v1_jobs__job_id__editable_document_outlines__document_key__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "title": "Job Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "document_key",
+            "required": true,
+            "schema": {
+              "enum": [
+                "resume",
+                "cover_letter",
+                "references"
+              ],
+              "title": "Document Key",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "origin",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "const": "mcp",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Origin"
+            }
+          },
+          {
+            "in": "query",
+            "name": "idempotency_key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency Key"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-JobOS-MCP-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Jobos-Mcp-Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocumentDraftOutline"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Editable Document Outline",
+        "tags": [
+          "editable-documents"
+        ]
+      }
+    },
+    "/v1/jobs/{job_id}/editable-documents": {
+      "get": {
+        "operationId": "editable_documents_list_v1_jobs__job_id__editable_documents_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "title": "Job Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EditableDocumentList"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Editable Documents List",
+        "tags": [
+          "editable-documents"
+        ]
+      },
+      "post": {
+        "operationId": "editable_document_create_v1_jobs__job_id__editable_documents_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "title": "Job Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "discriminator": {
+                  "mapping": {
+                    "blank": "#/components/schemas/CreateBlankRequest",
+                    "import_external_docx": "#/components/schemas/CreateExternalImportRequest",
+                    "import_registered_artifact": "#/components/schemas/CreateRegisteredImportRequest"
+                  },
+                  "propertyName": "mode"
+                },
+                "oneOf": [
+                  {
+                    "$ref": "#/components/schemas/CreateBlankRequest"
+                  },
+                  {
+                    "$ref": "#/components/schemas/CreateRegisteredImportRequest"
+                  },
+                  {
+                    "$ref": "#/components/schemas/CreateExternalImportRequest"
+                  }
+                ],
+                "title": "Command"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EditableDocument"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Editable Document Create",
+        "tags": [
+          "editable-documents"
+        ]
+      }
+    },
+    "/v1/jobs/{job_id}/editable-documents/{document_key}": {
+      "get": {
+        "operationId": "editable_document_for_job_v1_jobs__job_id__editable_documents__document_key__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "title": "Job Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "document_key",
+            "required": true,
+            "schema": {
+              "enum": [
+                "resume",
+                "cover_letter",
+                "references"
+              ],
+              "title": "Document Key",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EditableDocument"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Editable Document For Job",
+        "tags": [
+          "editable-documents"
         ]
       }
     },

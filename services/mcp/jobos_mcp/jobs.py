@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import base64
+import re
 from typing import Any
+from urllib.parse import quote
 from uuid import uuid4
 
 import httpx
@@ -50,7 +52,7 @@ class JobOsMcpClient:
     ) -> dict[str, Any]:
         return await self._request(
             "GET",
-            f"/v1/jobs/{job_id}",
+            f"/v1/jobs/{self._segment(job_id, 'job ID')}",
             params={"origin": "mcp", "idempotency_key": self._key(idempotency_key)},
         )
 
@@ -83,6 +85,20 @@ class JobOsMcpClient:
     @staticmethod
     def _key(value: str | None) -> str:
         return value or str(uuid4())
+
+    @staticmethod
+    def _segment(value: str, label: str) -> str:
+        if not isinstance(value, str) or not re.fullmatch(
+            r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}", value
+        ):
+            raise ValueError(f"Invalid {label}")
+        return quote(value, safe="")
+
+    @staticmethod
+    def _document_key(value: str) -> str:
+        if value not in {"resume", "cover_letter", "references"}:
+            raise ValueError("Invalid document key")
+        return quote(value, safe="")
 
     async def select_job(
         self, job_id: str, *, idempotency_key: str | None = None
@@ -121,7 +137,9 @@ class JobOsMcpClient:
         }
         if reason is not None:
             payload["reason"] = reason
-        return await self._request("PUT", f"/v1/jobs/{job_id}/status", json=payload)
+        return await self._request(
+            "PUT", f"/v1/jobs/{self._segment(job_id, 'job ID')}/status", json=payload
+        )
 
     async def update_description(
         self,
@@ -133,7 +151,7 @@ class JobOsMcpClient:
     ) -> dict[str, Any]:
         return await self._request(
             "PUT",
-            f"/v1/jobs/{job_id}/description",
+            f"/v1/jobs/{self._segment(job_id, 'job ID')}/description",
             json={
                 "description_text": description_text,
                 "source": "jobhunter_agent",
@@ -164,8 +182,89 @@ class JobOsMcpClient:
     ) -> dict[str, Any]:
         return await self._request(
             "GET",
-            f"/v1/jobs/{job_id}/artifacts",
+            f"/v1/jobs/{self._segment(job_id, 'job ID')}/artifacts",
             params={"origin": "mcp", "idempotency_key": self._key(idempotency_key)},
+        )
+
+    async def get_document_draft(
+        self,
+        job_id: str,
+        document_key: str,
+        *,
+        idempotency_key: str | None = None,
+    ) -> dict[str, Any]:
+        job_segment = self._segment(job_id, "job ID")
+        key_segment = self._document_key(document_key)
+        return await self._request(
+            "GET",
+            f"/v1/jobs/{job_segment}/editable-document-outlines/{key_segment}",
+            params={"origin": "mcp", "idempotency_key": self._key(idempotency_key)},
+        )
+
+    async def _owned_editable_document(
+        self, job_id: str, document_id: str
+    ) -> dict[str, Any]:
+        listing = await self._request(
+            "GET", f"/v1/jobs/{self._segment(job_id, 'job ID')}/editable-documents"
+        )
+        documents = listing.get("documents")
+        if not isinstance(documents, list):
+            raise ValueError("JobOS returned an invalid editable-document list")
+        document = next(
+            (
+                item
+                for item in documents
+                if isinstance(item, dict) and item.get("document_id") == document_id
+            ),
+            None,
+        )
+        if document is None:
+            raise ValueError("Editable document is not owned by the supplied job")
+        return document
+
+    async def apply_document_draft(
+        self,
+        job_id: str,
+        document_id: str,
+        base_revision: int,
+        operations: list[dict[str, Any]],
+        *,
+        idempotency_key: str | None = None,
+    ) -> dict[str, Any]:
+        await self._owned_editable_document(job_id, document_id)
+        return await self._request(
+            "POST",
+            f"/v1/editable-documents/{self._segment(document_id, 'document ID')}/operations",
+            json={
+                "base_revision": base_revision,
+                "operations": operations,
+                "origin": "mcp",
+                "idempotency_key": self._key(idempotency_key),
+            },
+        )
+
+    async def snapshot_document_draft(
+        self,
+        job_id: str,
+        document_id: str,
+        label: str,
+        *,
+        idempotency_key: str | None = None,
+    ) -> dict[str, Any]:
+        document = await self._owned_editable_document(job_id, document_id)
+        revision = document.get("revision")
+        if not isinstance(revision, int) or isinstance(revision, bool) or revision < 1:
+            raise ValueError("JobOS returned an invalid editable-document revision")
+        return await self._request(
+            "POST",
+            f"/v1/editable-documents/{self._segment(document_id, 'document ID')}/snapshots",
+            json={
+                "base_revision": revision,
+                "reason": "manual",
+                "label": label,
+                "origin": "mcp",
+                "idempotency_key": self._key(idempotency_key),
+            },
         )
 
     async def refresh_documents(
@@ -173,7 +272,7 @@ class JobOsMcpClient:
     ) -> dict[str, Any]:
         return await self._request(
             "POST",
-            f"/v1/jobs/{job_id}/artifacts/refresh",
+            f"/v1/jobs/{self._segment(job_id, 'job ID')}/artifacts/refresh",
             json={"origin": "mcp", "idempotency_key": self._key(idempotency_key)},
         )
 
@@ -182,7 +281,7 @@ class JobOsMcpClient:
     ) -> dict[str, Any]:
         return await self._request(
             "POST",
-            f"/v1/jobs/{job_id}/artifacts/render",
+            f"/v1/jobs/{self._segment(job_id, 'job ID')}/artifacts/render",
             json={
                 "source_id": source_id,
                 "output_format": "pdf",
@@ -196,7 +295,7 @@ class JobOsMcpClient:
     ) -> dict[str, Any]:
         return await self._request(
             "POST",
-            f"/v1/jobs/{job_id}/artifacts/register",
+            f"/v1/jobs/{self._segment(job_id, 'job ID')}/artifacts/register",
             json={
                 "artifact_reference": artifact_reference,
                 "origin": "mcp",
@@ -218,7 +317,7 @@ class JobOsMcpClient:
     ) -> dict[str, Any]:
         return await self._request(
             "POST",
-            f"/v1/jobs/{job_id}/artifacts/publish",
+            f"/v1/jobs/{self._segment(job_id, 'job ID')}/artifacts/publish",
             json={
                 "document_key": document_key,
                 "document_label": document_label,
@@ -234,9 +333,11 @@ class JobOsMcpClient:
     async def approve_document(
         self, job_id: str, artifact_id: str, *, idempotency_key: str | None = None
     ) -> dict[str, Any]:
+        job_segment = self._segment(job_id, "job ID")
+        artifact_segment = self._segment(artifact_id, "artifact ID")
         return await self._request(
             "POST",
-            f"/v1/jobs/{job_id}/artifacts/{artifact_id}/approve",
+            f"/v1/jobs/{job_segment}/artifacts/{artifact_segment}/approve",
             json={"origin": "mcp", "idempotency_key": self._key(idempotency_key)},
         )
 
@@ -249,7 +350,9 @@ class JobOsMcpClient:
         selected_job_id = workspace.get("selected_job_id")
         if not isinstance(selected_job_id, str) or not selected_job_id:
             raise ValueError("Select a job before selecting one of its documents")
-        documents = await self._request("GET", f"/v1/jobs/{selected_job_id}/artifacts")
+        documents = await self._request(
+            "GET", f"/v1/jobs/{self._segment(selected_job_id, 'job ID')}/artifacts"
+        )
         artifacts = documents.get("artifacts")
         if not isinstance(artifacts, list) or not any(
             isinstance(artifact, dict)

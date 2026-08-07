@@ -2,6 +2,13 @@ import { contextBridge, ipcRenderer } from 'electron'
 import type { IpcRendererEvent } from 'electron'
 
 import type { AgentStreamUpdate, BrowserBounds, BrowserJobExtraction, BrowserRestoreState, BrowserState, JobEvent, JobOsRendererBridge, JobSortMode, JobStatus, WorkspaceSnapshot } from '../shared/contracts.js'
+import type {
+  ApplyEditableDocumentOperationsRequest,
+  CreateEditableDocumentSnapshotRequest,
+  DocumentKey,
+  RestoreEditableDocumentSnapshotRequest,
+  SaveEditableDocumentRequest
+} from '../shared/editableDocuments.js'
 
 const bridge: JobOsRendererBridge = Object.freeze({
   shell: Object.freeze({
@@ -73,9 +80,50 @@ const bridge: JobOsRendererBridge = Object.freeze({
       ipcRenderer.invoke('jobos:documents:approve', jobId, artifactId)
     ),
     loadPdf: (artifactId: string) => ipcRenderer.invoke('jobos:documents:load-pdf', artifactId),
+    loadOriginalDocx: (artifactId: string) => (
+      ipcRenderer.invoke('jobos:documents:load-original-docx', artifactId)
+    ),
     export: (artifactId: string) => ipcRenderer.invoke('jobos:documents:export', artifactId),
     reveal: (artifactId: string) => ipcRenderer.invoke('jobos:documents:reveal', artifactId),
     open: (artifactId: string) => ipcRenderer.invoke('jobos:documents:open', artifactId)
+  }),
+  editableDocuments: Object.freeze({
+    list: (jobId: string) => ipcRenderer.invoke('jobos:editable-documents:list', jobId),
+    getForJob: (jobId: string, documentKey: DocumentKey) => (
+      ipcRenderer.invoke('jobos:editable-documents:get-for-job', jobId, documentKey)
+    ),
+    get: (documentId: string) => ipcRenderer.invoke('jobos:editable-documents:get', documentId),
+    createBlank: (jobId: string, documentKey: DocumentKey, idempotencyKey: string) => (
+      ipcRenderer.invoke('jobos:editable-documents:create-blank', jobId, documentKey, idempotencyKey)
+    ),
+    save: (documentId: string, request: SaveEditableDocumentRequest) => (
+      ipcRenderer.invoke('jobos:editable-documents:save', documentId, request)
+    ),
+    listSnapshots: (documentId: string) => (
+      ipcRenderer.invoke('jobos:editable-documents:list-snapshots', documentId)
+    ),
+    createSnapshot: (documentId: string, request: CreateEditableDocumentSnapshotRequest) => (
+      ipcRenderer.invoke('jobos:editable-documents:create-snapshot', documentId, request)
+    ),
+    restoreSnapshot: (
+      documentId: string,
+      snapshotId: string,
+      request: RestoreEditableDocumentSnapshotRequest
+    ) => ipcRenderer.invoke('jobos:editable-documents:restore-snapshot', documentId, snapshotId, request),
+    applyOperations: (documentId: string, request: ApplyEditableDocumentOperationsRequest) => (
+      ipcRenderer.invoke('jobos:editable-documents:apply-operations', documentId, request)
+    ),
+    importRegisteredArtifact: (jobId: string, documentKey: DocumentKey, artifactId: string) => (
+      ipcRenderer.invoke('jobos:editable-documents:import-registered', jobId, documentKey, artifactId)
+    ),
+    importFile: (jobId: string, documentKey: DocumentKey) => (
+      ipcRenderer.invoke('jobos:editable-documents:import-file', jobId, documentKey)
+    ),
+    preview: (documentId: string) => ipcRenderer.invoke('jobos:editable-documents:preview', documentId),
+    export: (documentId: string, format: 'docx' | 'pdf') => (
+      ipcRenderer.invoke('jobos:editable-documents:export', documentId, format)
+    ),
+    publish: (documentId: string) => ipcRenderer.invoke('jobos:editable-documents:publish', documentId)
   })
 })
 

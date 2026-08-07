@@ -1,3 +1,17 @@
+import type {
+  ApplyEditableDocumentOperationsRequest,
+  CreateEditableDocumentSnapshotRequest,
+  DocumentKey as EditableDocumentKey,
+  EditableDocument,
+  EditableDocumentExportResult,
+  EditableDocumentPreview,
+  EditableDocumentSnapshot,
+  EditableDocumentSummary,
+  OperationReceipt,
+  RestoreEditableDocumentSnapshotRequest,
+  SaveEditableDocumentRequest
+} from './editableDocuments.js'
+
 export type ConnectivityState = 'connecting' | 'connected' | 'degraded' | 'disconnected'
 export type JobSortMode = 'manual' | 'recent' | 'alphabetical' | 'status'
 export type JobStatus = 'discovered' | 'scored' | 'reviewed' | 'shortlisted' | 'apply_now' | 'maybe' | 'stretch' | 'skipped' | 'applied' | 'interviewing' | 'closed' | 'archived'
@@ -150,7 +164,7 @@ export interface WorkspaceSnapshot {
 
 export type ArtifactMediaType = 'application/pdf' | 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
 export type ArtifactRenderStatus = 'succeeded' | 'failed' | 'rendering'
-export type DocumentKey = 'resume' | 'cover_letter'
+export type DocumentKey = EditableDocumentKey
 
 export interface DocumentArtifact {
   artifactId: string
@@ -184,6 +198,13 @@ export interface PdfArtifactPayload {
   artifactId: string
   artifactRevision: string
   sourceRevision: string
+  sha256: string
+  bytes: ArrayBuffer
+}
+
+export interface OriginalDocxPayload {
+  artifactId: string
+  filename: string
   sha256: string
   bytes: ArrayBuffer
 }
@@ -298,8 +319,33 @@ export interface JobOsRendererBridge {
     refresh: (jobId: string) => Promise<JobArtifactsState>
     approve: (jobId: string, artifactId: string) => Promise<JobArtifactsState>
     loadPdf: (artifactId: string) => Promise<PdfArtifactPayload>
+    loadOriginalDocx: (artifactId: string) => Promise<OriginalDocxPayload>
     export: (artifactId: string) => Promise<string>
     reveal: (artifactId: string) => Promise<string>
     open: (artifactId: string) => Promise<string>
+  }
+  editableDocuments: {
+    list: (jobId: string) => Promise<EditableDocumentSummary[]>
+    getForJob: (jobId: string, documentKey: EditableDocumentKey) => Promise<EditableDocument>
+    get: (documentId: string) => Promise<EditableDocument>
+    createBlank: (jobId: string, documentKey: EditableDocumentKey, idempotencyKey: string) => Promise<EditableDocument>
+    save: (documentId: string, request: SaveEditableDocumentRequest) => Promise<EditableDocument>
+    listSnapshots: (documentId: string) => Promise<EditableDocumentSnapshot[]>
+    createSnapshot: (documentId: string, request: CreateEditableDocumentSnapshotRequest) => Promise<EditableDocumentSnapshot>
+    restoreSnapshot: (
+      documentId: string,
+      snapshotId: string,
+      request: RestoreEditableDocumentSnapshotRequest
+    ) => Promise<EditableDocument>
+    applyOperations: (documentId: string, request: ApplyEditableDocumentOperationsRequest) => Promise<OperationReceipt>
+    importRegisteredArtifact: (
+      jobId: string,
+      documentKey: EditableDocumentKey,
+      artifactId: string
+    ) => Promise<EditableDocument>
+    importFile: (jobId: string, documentKey: EditableDocumentKey) => Promise<EditableDocument | null>
+    preview: (documentId: string) => Promise<EditableDocumentPreview>
+    export: (documentId: string, format: 'docx' | 'pdf') => Promise<EditableDocumentExportResult>
+    publish: (documentId: string) => Promise<EditableDocument>
   }
 }

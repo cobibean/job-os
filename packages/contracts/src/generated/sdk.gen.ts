@@ -2,7 +2,7 @@
 
 import { client } from './client.gen.js';
 import type { Client, ClientMeta, Options as Options2, RequestResult, TDataShape } from './client/index.js';
-import type { ApproveJobArtifactV1JobsJobIdArtifactsArtifactIdApprovePostData, ApproveJobArtifactV1JobsJobIdArtifactsArtifactIdApprovePostErrors, ApproveJobArtifactV1JobsJobIdArtifactsArtifactIdApprovePostResponses, ArtifactContentV1ArtifactsArtifactIdContentGetData, ArtifactContentV1ArtifactsArtifactIdContentGetErrors, ArtifactContentV1ArtifactsArtifactIdContentGetResponses, ArtifactDownloadV1ArtifactsArtifactIdDownloadGetData, ArtifactDownloadV1ArtifactsArtifactIdDownloadGetErrors, ArtifactDownloadV1ArtifactsArtifactIdDownloadGetResponses, BrowserCommandV1BrowserCommandsPostData, BrowserCommandV1BrowserCommandsPostErrors, BrowserCommandV1BrowserCommandsPostResponses, ConversationCancelV1ConversationsCurrentTurnsTurnIdCancelPostData, ConversationCancelV1ConversationsCurrentTurnsTurnIdCancelPostErrors, ConversationCancelV1ConversationsCurrentTurnsTurnIdCancelPostResponses, ConversationCurrentV1ConversationsCurrentGetData, ConversationCurrentV1ConversationsCurrentGetResponses, ConversationResetV1ConversationsCurrentResetPostData, ConversationResetV1ConversationsCurrentResetPostResponses, ConversationRetryV1ConversationsCurrentTurnsTurnIdRetryPostData, ConversationRetryV1ConversationsCurrentTurnsTurnIdRetryPostErrors, ConversationRetryV1ConversationsCurrentTurnsTurnIdRetryPostResponses, ConversationSendV1ConversationsCurrentMessagesPostData, ConversationSendV1ConversationsCurrentMessagesPostErrors, ConversationSendV1ConversationsCurrentMessagesPostResponses, ConversationStreamV1ConversationsCurrentEventsStreamGetData, ConversationStreamV1ConversationsCurrentEventsStreamGetErrors, ConversationStreamV1ConversationsCurrentEventsStreamGetResponses, DesktopCapabilityPresenceV1DesktopCapabilitiesGetData, DesktopCapabilityPresenceV1DesktopCapabilitiesGetResponses, DeviceSessionV1DeviceSessionGetData, DeviceSessionV1DeviceSessionGetResponses, EventsListV1EventsGetData, EventsListV1EventsGetErrors, EventsListV1EventsGetResponses, EventsStreamV1EventsStreamGetData, EventsStreamV1EventsStreamGetErrors, EventsStreamV1EventsStreamGetResponses, HealthV1HealthGetData, HealthV1HealthGetResponses, JobArtifactsV1JobsJobIdArtifactsGetData, JobArtifactsV1JobsJobIdArtifactsGetErrors, JobArtifactsV1JobsJobIdArtifactsGetResponses, JobCreateFromBrowserV1JobsPostData, JobCreateFromBrowserV1JobsPostErrors, JobCreateFromBrowserV1JobsPostResponses, JobHistoryV1JobsJobIdHistoryGetData, JobHistoryV1JobsJobIdHistoryGetErrors, JobHistoryV1JobsJobIdHistoryGetResponses, JobInspectV1JobsJobIdGetData, JobInspectV1JobsJobIdGetErrors, JobInspectV1JobsJobIdGetResponses, JobsListV1JobsGetData, JobsListV1JobsGetErrors, JobsListV1JobsGetResponses, JobsReorderV1JobsOrderPutData, JobsReorderV1JobsOrderPutErrors, JobsReorderV1JobsOrderPutResponses, JobUpdateDescriptionV1JobsJobIdDescriptionPutData, JobUpdateDescriptionV1JobsJobIdDescriptionPutErrors, JobUpdateDescriptionV1JobsJobIdDescriptionPutResponses, JobUpdateStatusV1JobsJobIdStatusPutData, JobUpdateStatusV1JobsJobIdStatusPutErrors, JobUpdateStatusV1JobsJobIdStatusPutResponses, PublishJobArtifactV1JobsJobIdArtifactsPublishPostData, PublishJobArtifactV1JobsJobIdArtifactsPublishPostErrors, PublishJobArtifactV1JobsJobIdArtifactsPublishPostResponses, RefreshJobArtifactsV1JobsJobIdArtifactsRefreshPostData, RefreshJobArtifactsV1JobsJobIdArtifactsRefreshPostErrors, RefreshJobArtifactsV1JobsJobIdArtifactsRefreshPostResponses, RegisterJobArtifactV1JobsJobIdArtifactsRegisterPostData, RegisterJobArtifactV1JobsJobIdArtifactsRegisterPostErrors, RegisterJobArtifactV1JobsJobIdArtifactsRegisterPostResponses, RenderJobArtifactV1JobsJobIdArtifactsRenderPostData, RenderJobArtifactV1JobsJobIdArtifactsRenderPostErrors, RenderJobArtifactV1JobsJobIdArtifactsRenderPostResponses, ReportActivityV1ActivityPostData, ReportActivityV1ActivityPostErrors, ReportActivityV1ActivityPostResponses, VersionV1VersionGetData, VersionV1VersionGetResponses, WorkspaceGetV1WorkspaceGetData, WorkspaceGetV1WorkspaceGetErrors, WorkspaceGetV1WorkspaceGetResponses, WorkspaceJobsV1WorkspaceJobsGetData, WorkspaceJobsV1WorkspaceJobsGetResponses, WorkspacePutV1WorkspacePutData, WorkspacePutV1WorkspacePutErrors, WorkspacePutV1WorkspacePutResponses, WorkspaceSelectJobV1WorkspaceJobsSelectionPutData, WorkspaceSelectJobV1WorkspaceJobsSelectionPutErrors, WorkspaceSelectJobV1WorkspaceJobsSelectionPutResponses, WorkspaceSortJobsV1WorkspaceJobsSortPutData, WorkspaceSortJobsV1WorkspaceJobsSortPutErrors, WorkspaceSortJobsV1WorkspaceJobsSortPutResponses } from './types.gen.js';
+import type { ApproveJobArtifactV1JobsJobIdArtifactsArtifactIdApprovePostData, ApproveJobArtifactV1JobsJobIdArtifactsArtifactIdApprovePostErrors, ApproveJobArtifactV1JobsJobIdArtifactsArtifactIdApprovePostResponses, ArtifactContentV1ArtifactsArtifactIdContentGetData, ArtifactContentV1ArtifactsArtifactIdContentGetErrors, ArtifactContentV1ArtifactsArtifactIdContentGetResponses, ArtifactDownloadV1ArtifactsArtifactIdDownloadGetData, ArtifactDownloadV1ArtifactsArtifactIdDownloadGetErrors, ArtifactDownloadV1ArtifactsArtifactIdDownloadGetResponses, BrowserCommandV1BrowserCommandsPostData, BrowserCommandV1BrowserCommandsPostErrors, BrowserCommandV1BrowserCommandsPostResponses, ConversationCancelV1ConversationsCurrentTurnsTurnIdCancelPostData, ConversationCancelV1ConversationsCurrentTurnsTurnIdCancelPostErrors, ConversationCancelV1ConversationsCurrentTurnsTurnIdCancelPostResponses, ConversationCurrentV1ConversationsCurrentGetData, ConversationCurrentV1ConversationsCurrentGetResponses, ConversationResetV1ConversationsCurrentResetPostData, ConversationResetV1ConversationsCurrentResetPostResponses, ConversationRetryV1ConversationsCurrentTurnsTurnIdRetryPostData, ConversationRetryV1ConversationsCurrentTurnsTurnIdRetryPostErrors, ConversationRetryV1ConversationsCurrentTurnsTurnIdRetryPostResponses, ConversationSendV1ConversationsCurrentMessagesPostData, ConversationSendV1ConversationsCurrentMessagesPostErrors, ConversationSendV1ConversationsCurrentMessagesPostResponses, ConversationStreamV1ConversationsCurrentEventsStreamGetData, ConversationStreamV1ConversationsCurrentEventsStreamGetErrors, ConversationStreamV1ConversationsCurrentEventsStreamGetResponses, DesktopCapabilityPresenceV1DesktopCapabilitiesGetData, DesktopCapabilityPresenceV1DesktopCapabilitiesGetResponses, DeviceSessionV1DeviceSessionGetData, DeviceSessionV1DeviceSessionGetResponses, EditableDocumentCreateV1JobsJobIdEditableDocumentsPostData, EditableDocumentCreateV1JobsJobIdEditableDocumentsPostErrors, EditableDocumentCreateV1JobsJobIdEditableDocumentsPostResponses, EditableDocumentForJobV1JobsJobIdEditableDocumentsDocumentKeyGetData, EditableDocumentForJobV1JobsJobIdEditableDocumentsDocumentKeyGetErrors, EditableDocumentForJobV1JobsJobIdEditableDocumentsDocumentKeyGetResponses, EditableDocumentGetV1EditableDocumentsDocumentIdGetData, EditableDocumentGetV1EditableDocumentsDocumentIdGetErrors, EditableDocumentGetV1EditableDocumentsDocumentIdGetResponses, EditableDocumentImportV1EditableDocumentsDocumentIdImportPostData, EditableDocumentImportV1EditableDocumentsDocumentIdImportPostErrors, EditableDocumentImportV1EditableDocumentsDocumentIdImportPostResponses, EditableDocumentOutlineV1JobsJobIdEditableDocumentOutlinesDocumentKeyGetData, EditableDocumentOutlineV1JobsJobIdEditableDocumentOutlinesDocumentKeyGetErrors, EditableDocumentOutlineV1JobsJobIdEditableDocumentOutlinesDocumentKeyGetResponses, EditableDocumentPublishV1EditableDocumentsDocumentIdPublishPostData, EditableDocumentPublishV1EditableDocumentsDocumentIdPublishPostErrors, EditableDocumentPublishV1EditableDocumentsDocumentIdPublishPostResponses, EditableDocumentSaveV1EditableDocumentsDocumentIdPutData, EditableDocumentSaveV1EditableDocumentsDocumentIdPutErrors, EditableDocumentSaveV1EditableDocumentsDocumentIdPutResponses, EditableDocumentsListV1JobsJobIdEditableDocumentsGetData, EditableDocumentsListV1JobsJobIdEditableDocumentsGetErrors, EditableDocumentsListV1JobsJobIdEditableDocumentsGetResponses, EditableOperationsV1EditableDocumentsDocumentIdOperationsPostData, EditableOperationsV1EditableDocumentsDocumentIdOperationsPostErrors, EditableOperationsV1EditableDocumentsDocumentIdOperationsPostResponses, EditableSnapshotCreateV1EditableDocumentsDocumentIdSnapshotsPostData, EditableSnapshotCreateV1EditableDocumentsDocumentIdSnapshotsPostErrors, EditableSnapshotCreateV1EditableDocumentsDocumentIdSnapshotsPostResponses, EditableSnapshotListV1EditableDocumentsDocumentIdSnapshotsGetData, EditableSnapshotListV1EditableDocumentsDocumentIdSnapshotsGetErrors, EditableSnapshotListV1EditableDocumentsDocumentIdSnapshotsGetResponses, EditableSnapshotRestoreV1EditableDocumentsDocumentIdSnapshotsSnapshotIdRestorePostData, EditableSnapshotRestoreV1EditableDocumentsDocumentIdSnapshotsSnapshotIdRestorePostErrors, EditableSnapshotRestoreV1EditableDocumentsDocumentIdSnapshotsSnapshotIdRestorePostResponses, EventsListV1EventsGetData, EventsListV1EventsGetErrors, EventsListV1EventsGetResponses, EventsStreamV1EventsStreamGetData, EventsStreamV1EventsStreamGetErrors, EventsStreamV1EventsStreamGetResponses, HealthV1HealthGetData, HealthV1HealthGetResponses, JobArtifactsV1JobsJobIdArtifactsGetData, JobArtifactsV1JobsJobIdArtifactsGetErrors, JobArtifactsV1JobsJobIdArtifactsGetResponses, JobCreateFromBrowserV1JobsPostData, JobCreateFromBrowserV1JobsPostErrors, JobCreateFromBrowserV1JobsPostResponses, JobHistoryV1JobsJobIdHistoryGetData, JobHistoryV1JobsJobIdHistoryGetErrors, JobHistoryV1JobsJobIdHistoryGetResponses, JobInspectV1JobsJobIdGetData, JobInspectV1JobsJobIdGetErrors, JobInspectV1JobsJobIdGetResponses, JobsListV1JobsGetData, JobsListV1JobsGetErrors, JobsListV1JobsGetResponses, JobsReorderV1JobsOrderPutData, JobsReorderV1JobsOrderPutErrors, JobsReorderV1JobsOrderPutResponses, JobUpdateDescriptionV1JobsJobIdDescriptionPutData, JobUpdateDescriptionV1JobsJobIdDescriptionPutErrors, JobUpdateDescriptionV1JobsJobIdDescriptionPutResponses, JobUpdateStatusV1JobsJobIdStatusPutData, JobUpdateStatusV1JobsJobIdStatusPutErrors, JobUpdateStatusV1JobsJobIdStatusPutResponses, PublishJobArtifactV1JobsJobIdArtifactsPublishPostData, PublishJobArtifactV1JobsJobIdArtifactsPublishPostErrors, PublishJobArtifactV1JobsJobIdArtifactsPublishPostResponses, RefreshJobArtifactsV1JobsJobIdArtifactsRefreshPostData, RefreshJobArtifactsV1JobsJobIdArtifactsRefreshPostErrors, RefreshJobArtifactsV1JobsJobIdArtifactsRefreshPostResponses, RegisterJobArtifactV1JobsJobIdArtifactsRegisterPostData, RegisterJobArtifactV1JobsJobIdArtifactsRegisterPostErrors, RegisterJobArtifactV1JobsJobIdArtifactsRegisterPostResponses, RenderJobArtifactV1JobsJobIdArtifactsRenderPostData, RenderJobArtifactV1JobsJobIdArtifactsRenderPostErrors, RenderJobArtifactV1JobsJobIdArtifactsRenderPostResponses, ReportActivityV1ActivityPostData, ReportActivityV1ActivityPostErrors, ReportActivityV1ActivityPostResponses, VersionV1VersionGetData, VersionV1VersionGetResponses, WorkspaceGetV1WorkspaceGetData, WorkspaceGetV1WorkspaceGetErrors, WorkspaceGetV1WorkspaceGetResponses, WorkspaceJobsV1WorkspaceJobsGetData, WorkspaceJobsV1WorkspaceJobsGetResponses, WorkspacePutV1WorkspacePutData, WorkspacePutV1WorkspacePutErrors, WorkspacePutV1WorkspacePutResponses, WorkspaceSelectJobV1WorkspaceJobsSelectionPutData, WorkspaceSelectJobV1WorkspaceJobsSelectionPutErrors, WorkspaceSelectJobV1WorkspaceJobsSelectionPutResponses, WorkspaceSortJobsV1WorkspaceJobsSortPutData, WorkspaceSortJobsV1WorkspaceJobsSortPutErrors, WorkspaceSortJobsV1WorkspaceJobsSortPutResponses } from './types.gen.js';
 
 export type Options<TData extends TDataShape = TDataShape, ThrowOnError extends boolean = boolean, TResponse = unknown> = Options2<TData, ThrowOnError, TResponse> & {
     /**
@@ -140,6 +140,102 @@ export const deviceSessionV1DeviceSessionGet = <ThrowOnError extends boolean = f
     security: [{ scheme: 'bearer', type: 'http' }],
     url: '/v1/device-session',
     ...options
+});
+
+/**
+ * Editable Document Get
+ */
+export const editableDocumentGetV1EditableDocumentsDocumentIdGet = <ThrowOnError extends boolean = false>(options: Options<EditableDocumentGetV1EditableDocumentsDocumentIdGetData, ThrowOnError>): RequestResult<EditableDocumentGetV1EditableDocumentsDocumentIdGetResponses, EditableDocumentGetV1EditableDocumentsDocumentIdGetErrors, ThrowOnError> => (options.client ?? client).get<EditableDocumentGetV1EditableDocumentsDocumentIdGetResponses, EditableDocumentGetV1EditableDocumentsDocumentIdGetErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/v1/editable-documents/{document_id}',
+    ...options
+});
+
+/**
+ * Editable Document Save
+ */
+export const editableDocumentSaveV1EditableDocumentsDocumentIdPut = <ThrowOnError extends boolean = false>(options: Options<EditableDocumentSaveV1EditableDocumentsDocumentIdPutData, ThrowOnError>): RequestResult<EditableDocumentSaveV1EditableDocumentsDocumentIdPutResponses, EditableDocumentSaveV1EditableDocumentsDocumentIdPutErrors, ThrowOnError> => (options.client ?? client).put<EditableDocumentSaveV1EditableDocumentsDocumentIdPutResponses, EditableDocumentSaveV1EditableDocumentsDocumentIdPutErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/v1/editable-documents/{document_id}',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * Editable Document Import
+ */
+export const editableDocumentImportV1EditableDocumentsDocumentIdImportPost = <ThrowOnError extends boolean = false>(options: Options<EditableDocumentImportV1EditableDocumentsDocumentIdImportPostData, ThrowOnError>): RequestResult<EditableDocumentImportV1EditableDocumentsDocumentIdImportPostResponses, EditableDocumentImportV1EditableDocumentsDocumentIdImportPostErrors, ThrowOnError> => (options.client ?? client).post<EditableDocumentImportV1EditableDocumentsDocumentIdImportPostResponses, EditableDocumentImportV1EditableDocumentsDocumentIdImportPostErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/v1/editable-documents/{document_id}/import',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * Editable Operations
+ */
+export const editableOperationsV1EditableDocumentsDocumentIdOperationsPost = <ThrowOnError extends boolean = false>(options: Options<EditableOperationsV1EditableDocumentsDocumentIdOperationsPostData, ThrowOnError>): RequestResult<EditableOperationsV1EditableDocumentsDocumentIdOperationsPostResponses, EditableOperationsV1EditableDocumentsDocumentIdOperationsPostErrors, ThrowOnError> => (options.client ?? client).post<EditableOperationsV1EditableDocumentsDocumentIdOperationsPostResponses, EditableOperationsV1EditableDocumentsDocumentIdOperationsPostErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/v1/editable-documents/{document_id}/operations',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * Editable Document Publish
+ */
+export const editableDocumentPublishV1EditableDocumentsDocumentIdPublishPost = <ThrowOnError extends boolean = false>(options: Options<EditableDocumentPublishV1EditableDocumentsDocumentIdPublishPostData, ThrowOnError>): RequestResult<EditableDocumentPublishV1EditableDocumentsDocumentIdPublishPostResponses, EditableDocumentPublishV1EditableDocumentsDocumentIdPublishPostErrors, ThrowOnError> => (options.client ?? client).post<EditableDocumentPublishV1EditableDocumentsDocumentIdPublishPostResponses, EditableDocumentPublishV1EditableDocumentsDocumentIdPublishPostErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/v1/editable-documents/{document_id}/publish',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * Editable Snapshot List
+ */
+export const editableSnapshotListV1EditableDocumentsDocumentIdSnapshotsGet = <ThrowOnError extends boolean = false>(options: Options<EditableSnapshotListV1EditableDocumentsDocumentIdSnapshotsGetData, ThrowOnError>): RequestResult<EditableSnapshotListV1EditableDocumentsDocumentIdSnapshotsGetResponses, EditableSnapshotListV1EditableDocumentsDocumentIdSnapshotsGetErrors, ThrowOnError> => (options.client ?? client).get<EditableSnapshotListV1EditableDocumentsDocumentIdSnapshotsGetResponses, EditableSnapshotListV1EditableDocumentsDocumentIdSnapshotsGetErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/v1/editable-documents/{document_id}/snapshots',
+    ...options
+});
+
+/**
+ * Editable Snapshot Create
+ */
+export const editableSnapshotCreateV1EditableDocumentsDocumentIdSnapshotsPost = <ThrowOnError extends boolean = false>(options: Options<EditableSnapshotCreateV1EditableDocumentsDocumentIdSnapshotsPostData, ThrowOnError>): RequestResult<EditableSnapshotCreateV1EditableDocumentsDocumentIdSnapshotsPostResponses, EditableSnapshotCreateV1EditableDocumentsDocumentIdSnapshotsPostErrors, ThrowOnError> => (options.client ?? client).post<EditableSnapshotCreateV1EditableDocumentsDocumentIdSnapshotsPostResponses, EditableSnapshotCreateV1EditableDocumentsDocumentIdSnapshotsPostErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/v1/editable-documents/{document_id}/snapshots',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * Editable Snapshot Restore
+ */
+export const editableSnapshotRestoreV1EditableDocumentsDocumentIdSnapshotsSnapshotIdRestorePost = <ThrowOnError extends boolean = false>(options: Options<EditableSnapshotRestoreV1EditableDocumentsDocumentIdSnapshotsSnapshotIdRestorePostData, ThrowOnError>): RequestResult<EditableSnapshotRestoreV1EditableDocumentsDocumentIdSnapshotsSnapshotIdRestorePostResponses, EditableSnapshotRestoreV1EditableDocumentsDocumentIdSnapshotsSnapshotIdRestorePostErrors, ThrowOnError> => (options.client ?? client).post<EditableSnapshotRestoreV1EditableDocumentsDocumentIdSnapshotsSnapshotIdRestorePostResponses, EditableSnapshotRestoreV1EditableDocumentsDocumentIdSnapshotsSnapshotIdRestorePostErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/v1/editable-documents/{document_id}/snapshots/{snapshot_id}/restore',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
 });
 
 /**
@@ -294,6 +390,46 @@ export const jobUpdateDescriptionV1JobsJobIdDescriptionPut = <ThrowOnError exten
         'Content-Type': 'application/json',
         ...options.headers
     }
+});
+
+/**
+ * Editable Document Outline
+ */
+export const editableDocumentOutlineV1JobsJobIdEditableDocumentOutlinesDocumentKeyGet = <ThrowOnError extends boolean = false>(options: Options<EditableDocumentOutlineV1JobsJobIdEditableDocumentOutlinesDocumentKeyGetData, ThrowOnError>): RequestResult<EditableDocumentOutlineV1JobsJobIdEditableDocumentOutlinesDocumentKeyGetResponses, EditableDocumentOutlineV1JobsJobIdEditableDocumentOutlinesDocumentKeyGetErrors, ThrowOnError> => (options.client ?? client).get<EditableDocumentOutlineV1JobsJobIdEditableDocumentOutlinesDocumentKeyGetResponses, EditableDocumentOutlineV1JobsJobIdEditableDocumentOutlinesDocumentKeyGetErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/v1/jobs/{job_id}/editable-document-outlines/{document_key}',
+    ...options
+});
+
+/**
+ * Editable Documents List
+ */
+export const editableDocumentsListV1JobsJobIdEditableDocumentsGet = <ThrowOnError extends boolean = false>(options: Options<EditableDocumentsListV1JobsJobIdEditableDocumentsGetData, ThrowOnError>): RequestResult<EditableDocumentsListV1JobsJobIdEditableDocumentsGetResponses, EditableDocumentsListV1JobsJobIdEditableDocumentsGetErrors, ThrowOnError> => (options.client ?? client).get<EditableDocumentsListV1JobsJobIdEditableDocumentsGetResponses, EditableDocumentsListV1JobsJobIdEditableDocumentsGetErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/v1/jobs/{job_id}/editable-documents',
+    ...options
+});
+
+/**
+ * Editable Document Create
+ */
+export const editableDocumentCreateV1JobsJobIdEditableDocumentsPost = <ThrowOnError extends boolean = false>(options: Options<EditableDocumentCreateV1JobsJobIdEditableDocumentsPostData, ThrowOnError>): RequestResult<EditableDocumentCreateV1JobsJobIdEditableDocumentsPostResponses, EditableDocumentCreateV1JobsJobIdEditableDocumentsPostErrors, ThrowOnError> => (options.client ?? client).post<EditableDocumentCreateV1JobsJobIdEditableDocumentsPostResponses, EditableDocumentCreateV1JobsJobIdEditableDocumentsPostErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/v1/jobs/{job_id}/editable-documents',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * Editable Document For Job
+ */
+export const editableDocumentForJobV1JobsJobIdEditableDocumentsDocumentKeyGet = <ThrowOnError extends boolean = false>(options: Options<EditableDocumentForJobV1JobsJobIdEditableDocumentsDocumentKeyGetData, ThrowOnError>): RequestResult<EditableDocumentForJobV1JobsJobIdEditableDocumentsDocumentKeyGetResponses, EditableDocumentForJobV1JobsJobIdEditableDocumentsDocumentKeyGetErrors, ThrowOnError> => (options.client ?? client).get<EditableDocumentForJobV1JobsJobIdEditableDocumentsDocumentKeyGetResponses, EditableDocumentForJobV1JobsJobIdEditableDocumentsDocumentKeyGetErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/v1/jobs/{job_id}/editable-documents/{document_key}',
+    ...options
 });
 
 /**
