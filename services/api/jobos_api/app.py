@@ -37,6 +37,7 @@ from jobos_api.documents import (
     ARTIFACT_ID_PATTERN,
     PDF_MEDIA_TYPE,
     ArtifactApprovalRequest,
+    ArtifactPublishRequest,
     ArtifactRefreshRequest,
     ArtifactRegistrationRequest,
     ArtifactTrustError,
@@ -44,6 +45,7 @@ from jobos_api.documents import (
     ResumeRenderRequest,
     artifact_record,
     content_headers,
+    materialize_published_document,
     read_source_artifact,
     verify_facade_artifacts,
     verify_source_artifact,
@@ -1417,6 +1419,85 @@ def create_app(
                 detail={"artifact_id": result.current_artifact_id},
             )
             return result
+
+    @app.post("/v1/jobs/{job_id}/artifacts/publish", tags=["documents"])
+    @serialized_mutation_route
+    def publish_job_artifact(
+        job_id: str,
+        command: ArtifactPublishRequest,
+        identity: Annotated[DeviceIdentity, Depends(authenticated_device)],
+        mcp_token: Annotated[str | None, Header(alias="X-JobOS-MCP-Token")] = None,
+    ) -> JobArtifactsResponse:
+        require_trusted_mcp(identity, command.origin, mcp_token)
+        ensure_job(job_id)
+        if settings.hermes_job_hunter_cwd is None:
+            raise HTTPException(status_code=503, detail="Job Hunter workspace is unavailable")
+        source_bytes = command.source_bytes()
+        artifact_bytes = command.artifact_bytes()
+        request_hash = mutation_hash(
+            "document.publish",
+            {
+                "job_id": job_id,
+                "document_key": command.document_key,
+                "document_label": command.document_label,
+                "source_filename": command.source_filename,
+                "source_sha256": hashlib.sha256(source_bytes).hexdigest(),
+                "artifact_filename": command.artifact_filename,
+                "artifact_sha256": hashlib.sha256(artifact_bytes).hexdigest(),
+                "origin": command.origin,
+            },
+        )
+        try:
+            replay = mutation_replay(
+                identity=identity,
+                target=f"jobs/{job_id}/artifacts",
+                command_name="document.publish",
+                idempotency_key=command.idempotency_key,
+                request_hash=request_hash,
+            )
+        except IdempotencyConflict as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
+        if replay is not None:
+            return JobArtifactsResponse.model_validate(replay)
+        try:
+            source_path, artifact_path = materialize_published_document(
+                command,
+                job_id=job_id,
+                workspace_root=settings.hermes_job_hunter_cwd,
+            )
+            raw = jobs.publish_document_artifact(
+                job_id,
+                command.document_key,
+                command.document_label,
+                str(source_path),
+                str(artifact_path),
+            )
+            verified = verify_source_artifact(raw, settings.artifact_roots)
+            state_store.register_document_artifacts(job_id, [verified])
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail="Job not found") from error
+        except (ArtifactTrustError, OSError, ValueError) as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
+        result = artifact_list(job_id)
+        published = next(
+            artifact
+            for artifact in result.artifacts
+            if artifact.artifact_revision == verified.artifact_revision
+            and artifact.media_type == verified.media_type
+        )
+        record_mutation(
+            identity=identity,
+            target=f"jobs/{job_id}/artifacts",
+            command_name="document.publish",
+            origin=command.origin,
+            idempotency_key=command.idempotency_key,
+            request_hash=request_hash,
+            result=result.model_dump(mode="json"),
+            label=f"Published {command.document_label} {artifact_path.suffix[1:].upper()}",
+            job_id=job_id,
+            detail={"artifact_id": published.artifact_id, "document_key": command.document_key},
+        )
+        return result
 
     @app.post("/v1/activity", tags=["activity"])
     @serialized_mutation_route

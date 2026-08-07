@@ -495,6 +495,27 @@ test('focuses the document surface when a live resume render completes', async (
   await waitFor(() => expect(onArtifactRendered).toHaveBeenCalledOnce())
 })
 
+test.each(['document.publish', 'document.refresh', 'document.register'])(
+  'focuses the document surface when %s completes',
+  async command => {
+    let stream!: (update: unknown) => void
+    installAgent(
+      { conversationId: 'conv-current', connection: 'online', activeTurn: null, latestEventId: 0, entries: [] },
+      { subscribe: vi.fn((listener: (update: unknown) => void) => { stream = listener; return () => undefined }) }
+    )
+    const onArtifactRendered = vi.fn()
+    render(<AgentPanel apiState="connected" contextLabel="Northstar" onArtifactRendered={onArtifactRendered} />)
+    await screen.findByRole('textbox', { name: 'Message the agent' })
+
+    act(() => stream({
+      kind: 'event',
+      event: event(1, { detail: { command, outcome: 'completed' } })
+    }))
+
+    await waitFor(() => expect(onArtifactRendered).toHaveBeenCalledOnce())
+  }
+)
+
 test('focuses a live resume render that arrives before hydration resolves', async () => {
   let stream!: (update: unknown) => void
   let resolveSnapshot!: (snapshot: AgentConversationSnapshot) => void

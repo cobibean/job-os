@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any, Literal, Protocol
 from uuid import uuid4
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 ARTIFACT_ID_PATTERN = re.compile(r"^art_[A-Za-z0-9_-]{16,80}$")
 PDF_MEDIA_TYPE = "application/pdf"
@@ -101,6 +101,42 @@ class ArtifactRegistrationRequest(BaseModel):
     idempotency_key: str = Field(default_factory=lambda: str(uuid4()), min_length=1, max_length=128)
 
 
+class ArtifactPublishRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    document_key: Literal["resume", "cover_letter"]
+    document_label: str = Field(min_length=1, max_length=80)
+    source_filename: str = Field(min_length=1, max_length=255)
+    source_base64: str = Field(min_length=1, max_length=2_800_000)
+    artifact_filename: str = Field(min_length=1, max_length=255)
+    artifact_base64: str = Field(min_length=1, max_length=28_000_000)
+    origin: Literal["mcp"] = "mcp"
+    idempotency_key: str = Field(min_length=1, max_length=128)
+
+    @field_validator("document_label")
+    @classmethod
+    def strip_document_label(cls, value: str) -> str:
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("document label must not be blank")
+        return stripped
+
+    @field_validator("source_filename", "artifact_filename")
+    @classmethod
+    def require_plain_filename(cls, value: str) -> str:
+        if value in {".", ".."} or Path(value).name != value or "\0" in value:
+            raise ValueError("document filenames must not contain a path")
+        return value
+
+    def source_bytes(self) -> bytes:
+        return _decode_published_bytes(self.source_base64, maximum=2_000_000, label="source")
+
+    def artifact_bytes(self) -> bytes:
+        return _decode_published_bytes(
+            self.artifact_base64, maximum=20_000_000, label="artifact"
+        )
+
+
 class ArtifactRefreshRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -134,6 +170,52 @@ class ArtifactContentHeaders(BaseModel):
     artifact_revision: str
     filename: str
     digest: str
+
+
+def _decode_published_bytes(value: str, *, maximum: int, label: str) -> bytes:
+    try:
+        content = base64.b64decode(value, validate=True)
+    except ValueError as error:
+        raise ArtifactTrustError(f"Published {label} is not valid base64") from error
+    if not content or len(content) > maximum:
+        raise ArtifactTrustError(f"Published {label} size is invalid")
+    return content
+
+
+def materialize_published_document(
+    command: ArtifactPublishRequest, *, job_id: str, workspace_root: Path
+) -> tuple[Path, Path]:
+    if not re.fullmatch(r"[A-Za-z0-9._-]{1,256}", job_id):
+        raise ArtifactTrustError("Job ID is not safe for document publication")
+    root = workspace_root.expanduser().resolve(strict=True)
+    publication_root = (root / "resume" / "exports" / "jobos" / job_id / "imports").resolve()
+    if root not in publication_root.parents:
+        raise ArtifactTrustError("Document publication root escapes the Job Hunter workspace")
+    publication_root.mkdir(parents=True, exist_ok=True)
+    source = _materialize_content_addressed(
+        publication_root, command.source_filename, command.source_bytes()
+    )
+    artifact = _materialize_content_addressed(
+        publication_root, command.artifact_filename, command.artifact_bytes()
+    )
+    return source, artifact
+
+
+def _materialize_content_addressed(root: Path, filename: str, content: bytes) -> Path:
+    digest = sha256(content).hexdigest()
+    safe_name = re.sub(r"[^A-Za-z0-9._-]+", "-", filename).strip(".-") or "document"
+    destination = root / f"{digest[:20]}-{safe_name}"
+    try:
+        with destination.open("xb") as output:
+            output.write(content)
+    except FileExistsError:
+        if (
+            destination.is_symlink()
+            or not destination.is_file()
+            or destination.read_bytes() != content
+        ):
+            raise ArtifactTrustError("Published document destination is not trustworthy") from None
+    return destination.resolve(strict=True)
 
 
 def read_source_artifact(

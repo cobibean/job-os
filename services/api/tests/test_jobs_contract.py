@@ -1,3 +1,4 @@
+import base64
 import json
 import sqlite3
 import threading
@@ -146,6 +147,33 @@ class FakeJobHunterFacade:
             if artifact.get("artifact_reference") == artifact_reference
         )
 
+    def publish_document_artifact(
+        self, job_id, document_key, document_label, source_path, artifact_path
+    ):
+        self.inspect_job(job_id)
+        source = Path(source_path)
+        artifact = Path(artifact_path)
+        content = artifact.read_bytes()
+        rows = self.artifacts.setdefault(job_id, [])
+        published = {
+            "job_id": job_id,
+            "document_key": document_key,
+            "document_label": document_label,
+            "source_revision": sha256(source.read_bytes()).hexdigest(),
+            "artifact_revision": sha256(content).hexdigest(),
+            "media_type": (
+                "application/pdf"
+                if artifact.suffix.casefold() == ".pdf"
+                else "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            ),
+            "sha256": sha256(content).hexdigest(),
+            "render_status": "succeeded",
+            "render_sequence": len(rows) + 1,
+            "path": str(artifact),
+        }
+        rows.append(published)
+        return published
+
 
 def make_client(tmp_path, facade=None):
     app = create_app(
@@ -154,6 +182,7 @@ def make_client(tmp_path, facade=None):
             mcp_token="test-mcp-trusted-token",
             state_db_path=tmp_path / "jobos.db",
             artifact_roots=(tmp_path,),
+            hermes_job_hunter_cwd=tmp_path,
         ),
         job_facade=facade or FakeJobHunterFacade(),
     )
@@ -1174,6 +1203,65 @@ def test_registered_pdf_is_discoverable_and_streamed_with_trust_metadata(tmp_pat
     assert streamed.headers["x-source-revision"] == "source-1"
     assert streamed.headers["x-content-sha256"] == sha256(pdf.read_bytes()).hexdigest()
     assert streamed.headers["content-disposition"].startswith("inline;")
+
+
+def test_trusted_mcp_can_publish_paired_pdf_and_docx_into_one_logical_revision(tmp_path):
+    facade = FakeJobHunterFacade()
+    facade.jobs = facade.jobs[:1]
+    source = b"# Tailored cover letter\n\nDear hiring team"
+
+    def payload(filename, content, key):
+        return {
+            "document_key": "cover_letter",
+            "document_label": "Cover Letter",
+            "source_filename": "cover-letter.md",
+            "source_base64": base64.b64encode(source).decode("ascii"),
+            "artifact_filename": filename,
+            "artifact_base64": base64.b64encode(content).decode("ascii"),
+            "origin": "mcp",
+            "idempotency_key": key,
+        }
+
+    with make_client(tmp_path, facade) as client:
+        pdf = client.post(
+            "/v1/jobs/job-0/artifacts/publish",
+            headers=auth_headers(),
+            json=payload("cover-letter.pdf", b"%PDF-1.7\nletter\n%%EOF\n", "publish-pdf"),
+        )
+        docx_payload = payload("cover-letter.docx", b"PK\x03\x04docx-fixture", "publish-docx")
+        docx = client.post(
+            "/v1/jobs/job-0/artifacts/publish",
+            headers=auth_headers(),
+            json=docx_payload,
+        )
+        replay = client.post(
+            "/v1/jobs/job-0/artifacts/publish",
+            headers=auth_headers(),
+            json=docx_payload,
+        )
+        untrusted = client.post(
+            "/v1/jobs/job-0/artifacts/publish",
+            headers={"Authorization": "Bearer test-device-token"},
+            json=payload("blocked.docx", b"PK\x03\x04blocked", "publish-blocked"),
+        )
+
+    assert pdf.status_code == 200
+    assert docx.status_code == 200
+    assert replay.status_code == 200
+    assert untrusted.status_code == 403
+    artifacts = docx.json()["artifacts"]
+    assert len(artifacts) == 2
+    assert {artifact["media_type"] for artifact in artifacts} == {
+        "application/pdf",
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    }
+    assert {artifact["source_revision"] for artifact in artifacts} == {sha256(source).hexdigest()}
+    assert replay.json() == docx.json()
+    assert len(facade.artifacts["job-0"]) == 2
+    assert all(
+        Path(artifact["path"]).is_relative_to(tmp_path)
+        for artifact in facade.artifacts["job-0"]
+    )
 
 
 def test_newer_success_and_failed_render_preserve_last_successful_preview(tmp_path):
