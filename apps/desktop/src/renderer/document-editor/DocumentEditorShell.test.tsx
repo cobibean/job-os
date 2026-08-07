@@ -127,7 +127,9 @@ describe('immersive document editor', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Preview' }))
 
     await waitFor(() => expect(preview).toHaveBeenCalledWith('edoc_ABCDEFGHIJKLMNOPQRSTUVWX'))
-    expect((await screen.findByTitle('Generated PDF preview')).getAttribute('src')).toBe('blob:jobos-preview')
+    const previewFrame = await screen.findByTitle('Generated PDF preview')
+    expect(previewFrame.getAttribute('src')).toBe('blob:jobos-preview')
+    expect(previewFrame.closest('.document-editor-workarea')?.classList.contains('document-editor-preview-mode')).toBe(true)
   })
 
   it('records page breaks inserted in suggesting mode as structural suggestions', async () => {

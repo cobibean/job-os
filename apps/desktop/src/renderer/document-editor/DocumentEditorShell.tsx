@@ -252,7 +252,7 @@ export function DocumentEditorShell(props: DocumentEditorShellProps) {
         {publicationMessage ? <span className="document-publication-message" role="status">{publicationMessage}</span> : null}
       </div>
       <div className="document-editor-main">
-        <section className="document-editor-workarea" style={{ '--editor-zoom': zoom / 100 } as React.CSSProperties}>
+        <section className={`document-editor-workarea${view === 'edit' ? '' : ' document-editor-preview-mode'}`} style={{ '--editor-zoom': zoom / 100 } as React.CSSProperties}>
           {view === 'edit' ? (
             <DocumentEditor content={content} documentRevision={props.document.revision} onChange={updateContent} onSelectedBlockChange={setSelectedBlockId} settings={settings} />
           ) : view === 'original' && props.document.sourceArtifactId ? (
