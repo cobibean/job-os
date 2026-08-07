@@ -34,6 +34,7 @@
     "docx": "9.7.1",
     "docx-preview": "0.4.0",
     "fast-xml-parser": "5.10.1",
+    "happy-dom": "20.11.2",
     "jszip": "3.10.1",
     "lucide-react": "1.25.0",
     "mammoth": "1.12.0",

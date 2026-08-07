@@ -55,6 +55,9 @@ importers:
       fast-xml-parser:
         specifier: 5.10.1
         version: 5.10.1
+      happy-dom:
+        specifier: 20.11.2
+        version: 20.11.2
       jszip:
         specifier: 3.10.1
         version: 3.10.1
