@@ -2,6 +2,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import type { DocumentArtifact, JobArtifactsState, JobListItem, JobOsRendererBridge } from '../../shared/contracts'
+import type { DocxExternalChangeEvent, DocxOpenResult } from '../../shared/docxDocuments'
 import { DocumentWorkspace } from './DocumentWorkspace'
 
 vi.mock('./PdfPreview', async () => {
@@ -13,6 +14,18 @@ vi.mock('./PdfPreview', async () => {
     }
   }
 })
+
+vi.mock('../document-editor/DocxBytesPreview', () => ({
+  DocxBytesPreview: ({ filename, label, sha256 }: { filename: string, label: string, sha256: string }) => (
+    <div>{label} · {filename} · {sha256}</div>
+  )
+}))
+
+vi.mock('../document-editor/OriginalDocxPreview', () => ({
+  OriginalDocxPreview: ({ artifactId, sourceFilename }: { artifactId: string, sourceFilename: string | null }) => (
+    <div>Packet DOCX · {sourceFilename} · {artifactId}</div>
+  )
+}))
 
 const job: JobListItem = {
   jobId: 'job-1',
@@ -107,6 +120,53 @@ function installDocuments(overrides: Partial<JobOsRendererBridge['documents']> =
   return documents
 }
 
+function installDocxDocuments(overrides: Partial<JobOsRendererBridge['docxDocuments']> = {}) {
+  let listener: ((event: DocxExternalChangeEvent) => void) | null = null
+  const opened: DocxOpenResult = {
+    binding: {
+      schemaVersion: 1,
+      bindingId: 'docx_northstar_resume_fake',
+      jobId: job.jobId,
+      documentKey: 'resume',
+      documentLabel: 'Resume',
+      canonicalPath: '/tmp/(FAKE)-Northstar-AI-Labs-Resume.docx',
+      filename: '(FAKE)-Northstar-AI-Labs-Resume.docx',
+      sha256: 'b'.repeat(64),
+      byteLength: 2,
+      modifiedAtMs: 1,
+      revision: 1,
+      capabilities: { mode: 'editable', protectedBlockCount: 0, editableBlockCount: 1, reasons: [] },
+      createdAt: '2026-08-08T00:00:00Z',
+      updatedAt: '2026-08-08T00:00:00Z'
+    },
+    bytes: Uint8Array.of(0x50, 0x4b).buffer
+  }
+  const docxDocuments = {
+    listBindings: vi.fn(async () => []),
+    openBound: vi.fn(async () => null),
+    openArtifact: vi.fn(async () => opened),
+    chooseFile: vi.fn(async () => null),
+    createBlank: vi.fn(async () => null),
+    reload: vi.fn(async () => opened),
+    save: vi.fn(),
+    saveAs: vi.fn(),
+    createRecovery: vi.fn(),
+    listRecoveries: vi.fn(async () => []),
+    restoreRecovery: vi.fn(),
+    unbind: vi.fn(),
+    subscribe: vi.fn((next: (event: DocxExternalChangeEvent) => void) => {
+      listener = next
+      return () => { listener = null }
+    }),
+    ...overrides
+  } as unknown as JobOsRendererBridge['docxDocuments']
+  Object.defineProperty(window, 'jobos', {
+    configurable: true,
+    value: { ...window.jobos, docxDocuments } as JobOsRendererBridge
+  })
+  return { docxDocuments, emit: (event: DocxExternalChangeEvent) => listener?.(event), opened }
+}
+
 afterEach(() => {
   cleanup()
   Object.defineProperty(window, 'jobos', { configurable: true, value: undefined })
@@ -126,6 +186,46 @@ describe('trusted document workspace', () => {
     expect(screen.getByText('Cover Letter Editor')).not.toBeNull()
     expect(screen.getByText('References Editor')).not.toBeNull()
     expect(screen.queryByRole('button', { name: /^(Create|Edit) (Resume|Cover Letter|References)$/ })).toBeNull()
+  })
+
+  it('opens the viewed packet DOCX directly instead of showing the file picker', async () => {
+    const pdf = artifact()
+    const docx = artifact({
+      artifactId: 'art_DOCXABCDEFGHIJKLMNOPQRST',
+      mediaType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      filename: '(FAKE)-Northstar-AI-Labs-Resume.docx',
+      previewAvailable: false,
+      isCurrent: false,
+      isLastSuccessful: false
+    })
+    const packet = state([pdf, docx])
+    installDocuments({ list: vi.fn(async () => packet), refresh: vi.fn(async () => packet) })
+    const { docxDocuments, opened } = installDocxDocuments()
+    const onOpenEditor = vi.fn()
+
+    render(
+      <DocumentWorkspace
+        hydrated
+        job={job}
+        onOpenEditor={onOpenEditor}
+        onViewChange={vi.fn()}
+        restoredArtifactId={null}
+        restoredPage={1}
+        restoredZoom={1}
+      />
+    )
+
+    await screen.findByText('Newest successful revision · render-2 · source source-2')
+    fireEvent.click(screen.getByRole('button', { name: 'Open Resume in Editor' }))
+
+    await waitFor(() => expect(docxDocuments.openArtifact).toHaveBeenCalledWith(
+      job.jobId,
+      'resume',
+      docx.artifactId
+    ))
+    expect(docxDocuments.openBound).not.toHaveBeenCalled()
+    expect(docxDocuments.chooseFile).not.toHaveBeenCalled()
+    expect(onOpenEditor).toHaveBeenCalledWith(opened)
   })
 
   it('discovers the selected job artifact and persists page and zoom', async () => {
@@ -220,7 +320,7 @@ describe('trusted document workspace', () => {
     expect(await screen.findByText('PDF bytes 2 · page 1 at 100%')).not.toBeNull()
   })
 
-  it('presents DOCX as external-only while keeping native actions available', async () => {
+  it('previews a DOCX-only revision while keeping native actions available', async () => {
     const docx = artifact({
       mediaType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
       filename: 'northstar-resume.docx',
@@ -231,7 +331,7 @@ describe('trusted document workspace', () => {
 
     render(<DocumentWorkspace hydrated job={job} onViewChange={vi.fn()} restoredArtifactId={null} restoredPage={1} restoredZoom={1} />)
 
-    expect(await screen.findByText('DOCX stays external')).not.toBeNull()
+    expect(await screen.findByText(`Packet DOCX · ${docx.filename} · ${docx.artifactId}`)).not.toBeNull()
     fireEvent.click(screen.getByRole('button', { name: /^Open$/ }))
     fireEvent.click(screen.getByRole('button', { name: /^Reveal$/ }))
     fireEvent.click(screen.getByRole('button', { name: /^Export$/ }))
@@ -562,8 +662,8 @@ describe('trusted document workspace', () => {
     const documents = installDocuments({ list: vi.fn(async () => failedState), refresh: vi.fn(async () => failedState) })
     render(<DocumentWorkspace hydrated job={job} onViewChange={vi.fn()} restoredArtifactId={null} restoredPage={1} restoredZoom={1} />)
 
-    expect(await screen.findByText('DOCX stays external')).not.toBeNull()
-    expect(screen.getByText(/Viewing northstar-resume.docx · revision render-2/)).not.toBeNull()
+    expect(await screen.findByText(`Packet DOCX · ${lastGoodDocx.filename} · ${lastGoodDocx.artifactId}`)).not.toBeNull()
+    expect(screen.getByText(/Viewing packet DOCX · revision render-2/)).not.toBeNull()
     expect(screen.queryByText(/PDF bytes/)).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: /^Export$/ }))
     fireEvent.click(screen.getByRole('menuitem', { name: 'Export DOCX' }))
@@ -685,5 +785,210 @@ describe('trusted document workspace', () => {
     expect(documents.export).toHaveBeenNthCalledWith(2, latestDocx.artifactId)
     expect(documents.export).not.toHaveBeenCalledWith(failedPdf.artifactId)
     expect(documents.export).not.toHaveBeenCalledWith(olderDocx.artifactId)
+  })
+
+  it('switches a paired revision between publication PDF and packet DOCX preview', async () => {
+    const pdf = artifact()
+    const docx = artifact({
+      artifactId: 'art_PREVIEWDOCXABCDEFGHIJKLM',
+      mediaType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      filename: '(FAKE)-Northstar-Resume.docx',
+      previewAvailable: false
+    })
+    const paired = state([pdf, docx])
+    installDocuments({ list: vi.fn(async () => paired), refresh: vi.fn(async () => paired) })
+    installDocxDocuments()
+    const onPreviewModeChange = vi.fn()
+    const view = render(
+      <DocumentWorkspace
+        hydrated
+        job={job}
+        onPreviewModeChange={onPreviewModeChange}
+        onViewChange={vi.fn()}
+        previewMode="pdf"
+        restoredArtifactId={null}
+        restoredPage={1}
+        restoredZoom={1}
+      />
+    )
+
+    await screen.findByText(/PDF bytes 2/)
+    fireEvent.click(screen.getByRole('button', { name: 'DOCX' }))
+    expect(onPreviewModeChange).toHaveBeenCalledWith('docx')
+
+    view.rerender(
+      <DocumentWorkspace
+        hydrated
+        job={job}
+        onPreviewModeChange={onPreviewModeChange}
+        onViewChange={vi.fn()}
+        previewMode="docx"
+        restoredArtifactId={null}
+        restoredPage={1}
+        restoredZoom={1}
+      />
+    )
+    expect(await screen.findByText(`Packet DOCX · ${docx.filename} · ${docx.artifactId}`)).not.toBeNull()
+    expect(screen.getByRole('button', { name: 'DOCX' }).getAttribute('aria-pressed')).toBe('true')
+    expect(screen.queryByRole('button', { name: 'Next page' })).toBeNull()
+  })
+
+  it('reloads current editable DOCX bytes when the editor mutation generation changes', async () => {
+    const pdf = artifact()
+    const docx = artifact({
+      artifactId: 'art_CURRENTDOCXABCDEFGHIJKLM',
+      mediaType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      filename: '(FAKE)-Northstar-Resume.docx',
+      previewAvailable: false
+    })
+    const paired = state([pdf, docx])
+    installDocuments({ list: vi.fn(async () => paired), refresh: vi.fn(async () => paired) })
+    const { docxDocuments, opened } = installDocxDocuments()
+    vi.mocked(docxDocuments.listBindings).mockResolvedValue([opened.binding])
+    vi.mocked(docxDocuments.openBound).mockResolvedValue(opened)
+    const view = render(
+      <DocumentWorkspace
+        hydrated
+        job={job}
+        onViewChange={vi.fn()}
+        previewMode="docx"
+        refreshGeneration={0}
+        restoredArtifactId={null}
+        restoredPage={1}
+        restoredZoom={1}
+      />
+    )
+
+    expect(await screen.findByText(`Current editable DOCX · ${opened.binding.filename} · ${opened.binding.sha256}`)).not.toBeNull()
+
+    const updated: DocxOpenResult = {
+      binding: { ...opened.binding, revision: 2, sha256: 'c'.repeat(64) },
+      bytes: Uint8Array.of(0x50, 0x4b, 0x03, 0x04).buffer
+    }
+    vi.mocked(docxDocuments.listBindings).mockResolvedValue([updated.binding])
+    vi.mocked(docxDocuments.openBound).mockResolvedValue(updated)
+    view.rerender(
+      <DocumentWorkspace
+        hydrated
+        job={job}
+        onViewChange={vi.fn()}
+        previewMode="docx"
+        refreshGeneration={1}
+        restoredArtifactId={null}
+        restoredPage={1}
+        restoredZoom={1}
+      />
+    )
+
+    expect(await screen.findByText(`Current editable DOCX · ${updated.binding.filename} · ${updated.binding.sha256}`)).not.toBeNull()
+    expect(docxDocuments.openBound).toHaveBeenLastCalledWith(job.jobId, 'resume')
+  })
+
+  it('refreshes the visible editable DOCX when an agent operation publishes new canonical bytes', async () => {
+    const pdf = artifact()
+    const docx = artifact({
+      artifactId: 'art_AGENTDOCXABCDEFGHIJKLMNOP',
+      mediaType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      filename: '(FAKE)-Northstar-Resume.docx',
+      previewAvailable: false
+    })
+    const paired = state([pdf, docx])
+    installDocuments({ list: vi.fn(async () => paired), refresh: vi.fn(async () => paired) })
+    const { docxDocuments, emit, opened } = installDocxDocuments()
+    vi.mocked(docxDocuments.listBindings).mockResolvedValue([opened.binding])
+    vi.mocked(docxDocuments.openBound).mockResolvedValue(opened)
+    render(
+      <DocumentWorkspace
+        hydrated
+        job={job}
+        onViewChange={vi.fn()}
+        previewMode="docx"
+        restoredArtifactId={null}
+        restoredPage={1}
+        restoredZoom={1}
+      />
+    )
+    expect(await screen.findByText(`Current editable DOCX · ${opened.binding.filename} · ${opened.binding.sha256}`)).not.toBeNull()
+
+    const updated: DocxOpenResult = {
+      binding: { ...opened.binding, revision: 2, sha256: 'd'.repeat(64), modifiedAtMs: 2 },
+      bytes: Uint8Array.of(0x50, 0x4b, 0x05).buffer
+    }
+    vi.mocked(docxDocuments.openBound).mockResolvedValue(updated)
+    emit({
+      bindingId: updated.binding.bindingId,
+      jobId: updated.binding.jobId,
+      documentKey: updated.binding.documentKey,
+      kind: 'changed',
+      sha256: updated.binding.sha256,
+      modifiedAtMs: updated.binding.modifiedAtMs
+    })
+
+    expect(await screen.findByText(`Current editable DOCX · ${updated.binding.filename} · ${updated.binding.sha256}`)).not.toBeNull()
+    expect(screen.getByText('Current editable DOCX refreshed')).not.toBeNull()
+  })
+
+  it('keeps the newest DOCX mutation when older reloads resolve later', async () => {
+    const pdf = artifact()
+    const docx = artifact({
+      artifactId: 'art_RACEDOCXABCDEFGHIJKLMNOPQ',
+      mediaType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      filename: '(FAKE)-Northstar-Resume.docx',
+      previewAvailable: false
+    })
+    const paired = state([pdf, docx])
+    installDocuments({ list: vi.fn(async () => paired), refresh: vi.fn(async () => paired) })
+    const { docxDocuments, emit, opened } = installDocxDocuments()
+    vi.mocked(docxDocuments.listBindings).mockResolvedValue([opened.binding])
+    vi.mocked(docxDocuments.openBound).mockResolvedValue(opened)
+    render(
+      <DocumentWorkspace
+        hydrated
+        job={job}
+        onViewChange={vi.fn()}
+        previewMode="docx"
+        restoredArtifactId={null}
+        restoredPage={1}
+        restoredZoom={1}
+      />
+    )
+    expect(await screen.findByText(`Current editable DOCX · ${opened.binding.filename} · ${opened.binding.sha256}`)).not.toBeNull()
+
+    const older: DocxOpenResult = {
+      binding: { ...opened.binding, revision: 2, sha256: 'c'.repeat(64), modifiedAtMs: 2 },
+      bytes: Uint8Array.of(0x50, 0x4b, 0x05).buffer
+    }
+    const newer: DocxOpenResult = {
+      binding: { ...opened.binding, revision: 3, sha256: 'd'.repeat(64), modifiedAtMs: 3 },
+      bytes: Uint8Array.of(0x50, 0x4b, 0x06).buffer
+    }
+    let resolveOlder!: (value: DocxOpenResult) => void
+    vi.mocked(docxDocuments.openBound)
+      .mockImplementationOnce(() => new Promise(resolve => { resolveOlder = resolve }))
+      .mockResolvedValue(newer)
+
+    emit({
+      bindingId: older.binding.bindingId,
+      jobId: older.binding.jobId,
+      documentKey: older.binding.documentKey,
+      kind: 'changed',
+      sha256: older.binding.sha256,
+      modifiedAtMs: older.binding.modifiedAtMs
+    })
+    emit({
+      bindingId: newer.binding.bindingId,
+      jobId: newer.binding.jobId,
+      documentKey: newer.binding.documentKey,
+      kind: 'changed',
+      sha256: newer.binding.sha256,
+      modifiedAtMs: newer.binding.modifiedAtMs
+    })
+
+    expect(await screen.findByText(`Current editable DOCX · ${newer.binding.filename} · ${newer.binding.sha256}`)).not.toBeNull()
+    resolveOlder(older)
+    await waitFor(() => {
+      expect(screen.queryByText(`Current editable DOCX · ${older.binding.filename} · ${older.binding.sha256}`)).toBeNull()
+      expect(screen.getByText(`Current editable DOCX · ${newer.binding.filename} · ${newer.binding.sha256}`)).not.toBeNull()
+    })
   })
 })

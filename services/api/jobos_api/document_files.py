@@ -38,6 +38,7 @@ class DocumentFileRecord(StrictModel):
     filename: str = Field(min_length=1, max_length=255)
     sha256: str = Field(pattern=SHA256.pattern)
     observed_revision: int = Field(ge=1)
+    observed_device_id: str = Field(min_length=1, max_length=128)
     capabilities: DocumentFileCapabilities
     observed_at: str
 
@@ -52,7 +53,7 @@ def document_file_id(job_id: str, document_key: DocumentKey) -> str:
 
 
 def observed_document_file(
-    job_id: str, data: dict[str, Any], *, observed_at: str
+    job_id: str, data: dict[str, Any], *, observed_at: str, observed_device_id: str
 ) -> DocumentFileRecord:
     document_key = data.get("document_key")
     if document_key not in {"resume", "cover_letter", "references"}:
@@ -68,6 +69,7 @@ def observed_document_file(
         "filename": data.get("filename"),
         "sha256": data.get("sha256"),
         "observed_revision": data.get("revision"),
+        "observed_device_id": observed_device_id,
         "capabilities": {
             "mode": capabilities.get("mode"),
             "protected_block_count": capabilities.get("protectedBlockCount"),

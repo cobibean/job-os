@@ -1,3 +1,4 @@
+import { mkdir } from 'node:fs/promises'
 import path from 'node:path'
 
 import type { DocumentContext, StructuredDocumentOperation } from '@jobos/docx-editor-core'
@@ -16,7 +17,7 @@ import {
 } from '../shared/docxDocuments.js'
 import type { DocumentKey } from '../shared/editableDocuments.js'
 import { DocxWorkerManager } from './DocxWorkerManager.js'
-import { DocxFileStore } from './docxFileStore.js'
+import { DocxFileStore, sha256 } from './docxFileStore.js'
 import { DocxFileWatcher } from './docxFileWatcher.js'
 import { docxBindingId, LocalDocxBindingStore } from './localDocxBindingStore.js'
 
@@ -24,6 +25,7 @@ interface DocxDocumentsServiceOptions {
   dialog: Pick<Dialog, 'showOpenDialog' | 'showSaveDialog'>
   bindings: LocalDocxBindingStore
   files: DocxFileStore
+  artifactRoot: string
   emit: (event: DocxExternalChangeEvent) => void
   worker?: DocxWorkerManager
 }
@@ -46,6 +48,18 @@ function validJobId(value: string): string {
 function validDocumentKey(value: DocumentKey): DocumentKey {
   if (!Object.hasOwn(DOCX_DOCUMENT_LABELS, value)) throw new Error('Invalid document type')
   return value
+}
+
+interface DocxArtifactSource {
+  filename: string
+  sha256: string
+  bytes: ArrayBuffer
+}
+
+function canonicalArtifactFilename(value: string): string {
+  const basename = path.basename(value).replace(/[^A-Za-z0-9._ ()-]/g, '_').slice(0, 96)
+  const filename = basename || 'JobOS-document.docx'
+  return filename.toLowerCase().endsWith('.docx') ? filename : `${filename}.docx`
 }
 
 async function capabilities(bytes: Uint8Array): Promise<DocxCapabilities> {
@@ -71,13 +85,16 @@ export class DocxDocumentsService {
   readonly #dialog: DocxDocumentsServiceOptions['dialog']
   readonly #bindings: LocalDocxBindingStore
   readonly #files: DocxFileStore
+  readonly #artifactRoot: string
   readonly #watcher: DocxFileWatcher
   readonly #worker?: DocxWorkerManager
+  readonly #bindingQueues = new Map<string, Promise<void>>()
 
   constructor(options: DocxDocumentsServiceOptions) {
     this.#dialog = options.dialog
     this.#bindings = options.bindings
     this.#files = options.files
+    this.#artifactRoot = path.resolve(options.artifactRoot)
     this.#worker = options.worker
     this.#watcher = new DocxFileWatcher(options.files, options.emit)
   }
@@ -97,20 +114,67 @@ export class DocxDocumentsService {
     return binding ? this.reload(binding.bindingId) : null
   }
 
-  async chooseFile(jobId: string, documentKey: DocumentKey): Promise<DocxOpenResult | null> {
-    const selection = await this.#dialog.showOpenDialog({
-      title: `Choose the canonical ${DOCX_DOCUMENT_LABELS[validDocumentKey(documentKey)]} DOCX`,
-      properties: ['openFile'],
-      filters: [{ name: 'Word document', extensions: ['docx'] }]
+  async openArtifact(
+    jobId: string,
+    documentKey: DocumentKey,
+    artifact: DocxArtifactSource
+  ): Promise<DocxOpenResult> {
+    const owner = validJobId(jobId)
+    const key = validDocumentKey(documentKey)
+    const bytes = new Uint8Array(artifact.bytes)
+    if (!/^[a-f0-9]{64}$/.test(artifact.sha256) || sha256(bytes) !== artifact.sha256) {
+      throw new Error('Artifact DOCX hash mismatch')
+    }
+
+    await mkdir(this.#artifactRoot, { recursive: true, mode: 0o700 })
+    const bindingId = docxBindingId(owner, key)
+    const filename = canonicalArtifactFilename(artifact.filename)
+    const candidates = [
+      path.join(this.#artifactRoot, `${bindingId}-${filename}`),
+      path.join(this.#artifactRoot, `${bindingId}-${artifact.sha256.slice(0, 12)}-${filename}`)
+    ]
+
+    return this.#serializeBinding(bindingId, async () => {
+      const bound = await this.#bindings.getForJob(owner, key)
+      if (bound) return this.#reloadBinding(bound.bindingId)
+      for (const candidate of candidates) {
+        try {
+          const existing = await this.#files.read(candidate)
+          if (existing.sha256 === artifact.sha256) return this.#bind(owner, key, candidate)
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+          try {
+            await this.#files.writeNew(candidate, bytes)
+            return this.#bind(owner, key, candidate)
+          } catch (writeError) {
+            if ((writeError as NodeJS.ErrnoException).code !== 'EEXIST') throw writeError
+            const raced = await this.#files.read(candidate)
+            if (raced.sha256 === artifact.sha256) return this.#bind(owner, key, candidate)
+          }
+        }
+      }
+      throw new Error('A different editable DOCX already occupies the artifact destination')
     })
-    const selected = selection.filePaths[0]
-    return selection.canceled || !selected ? null : this.#bind(validJobId(jobId), documentKey, selected)
+  }
+
+  async chooseFile(jobId: string, documentKey: DocumentKey): Promise<DocxOpenResult | null> {
+    const owner = validJobId(jobId)
+    const key = validDocumentKey(documentKey)
+    return this.#serializeBinding(docxBindingId(owner, key), async () => {
+      const selection = await this.#dialog.showOpenDialog({
+        title: `Choose the canonical ${DOCX_DOCUMENT_LABELS[key]} DOCX`,
+        properties: ['openFile'],
+        filters: [{ name: 'Word document', extensions: ['docx'] }]
+      })
+      const selected = selection.filePaths[0]
+      return selection.canceled || !selected ? null : this.#bind(owner, key, selected)
+    })
   }
 
   async createBlank(jobId: string, documentKey: DocumentKey): Promise<DocxOpenResult | null> {
-    validJobId(jobId)
-    validDocumentKey(documentKey)
-    const label = DOCX_DOCUMENT_LABELS[documentKey]
+    const owner = validJobId(jobId)
+    const key = validDocumentKey(documentKey)
+    const label = DOCX_DOCUMENT_LABELS[key]
     const selection = await this.#dialog.showSaveDialog({
       title: `Create ${label} DOCX`,
       defaultPath: `${label.replaceAll(' ', '-')}.docx`,
@@ -118,18 +182,24 @@ export class DocxDocumentsService {
     })
     if (selection.canceled || !selection.filePath) return null
     const bytes = await buildBlankDocx()
-    const bindingId = docxBindingId(jobId, documentKey)
-    try {
-      const current = await this.#files.read(selection.filePath)
-      await this.#files.replace(bindingId, selection.filePath, current.sha256, bytes, 'manual')
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
-      await this.#files.writeNew(selection.filePath, bytes)
-    }
-    return this.#bind(jobId, documentKey, selection.filePath)
+    const bindingId = docxBindingId(owner, key)
+    return this.#serializeBinding(bindingId, async () => {
+      try {
+        const current = await this.#files.read(selection.filePath)
+        await this.#files.replace(bindingId, selection.filePath, current.sha256, bytes, 'manual')
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+        await this.#files.writeNew(selection.filePath, bytes)
+      }
+      return this.#bind(owner, key, selection.filePath)
+    })
   }
 
   async reload(bindingId: string): Promise<DocxOpenResult> {
+    return this.#serializeBinding(bindingId, () => this.#reloadBinding(bindingId))
+  }
+
+  async #reloadBinding(bindingId: string): Promise<DocxOpenResult> {
     const binding = await this.#requireBinding(bindingId)
     const file = await this.#files.read(binding.canonicalPath)
     const updated = await this.#updatedBinding(binding, file)
@@ -141,38 +211,50 @@ export class DocxDocumentsService {
   async save(request: SaveDocxRequest): Promise<SaveDocxResult> {
     if (!Number.isInteger(request.generation) || request.generation < 1) throw new Error('Invalid editor generation')
     if (!/^[a-f0-9]{64}$/.test(request.expectedSha256)) throw new Error('Invalid expected DOCX hash')
-    const binding = await this.#requireBinding(request.bindingId)
-    const bytes = new Uint8Array(request.bytes)
-    const saved = await this.#files.replace(binding.bindingId, binding.canonicalPath, request.expectedSha256, bytes)
-    const updated = await this.#updatedBinding(binding, saved.file)
-    await this.#bindings.put(updated)
-    this.#watcher.update(updated)
-    return { binding: updated, persistedGeneration: request.generation, recoveryId: saved.recovery.recoveryId }
+    return this.#serializeBinding(request.bindingId, async () => {
+      const binding = await this.#requireBinding(request.bindingId)
+      const bytes = new Uint8Array(request.bytes)
+      const expectedSavedSha256 = sha256(bytes)
+      this.#watcher.expectSave(binding.bindingId, expectedSavedSha256)
+      try {
+        const saved = await this.#files.replace(binding.bindingId, binding.canonicalPath, request.expectedSha256, bytes)
+        const updated = await this.#updatedBinding(binding, saved.file)
+        await this.#bindings.put(updated)
+        this.#watcher.update(updated)
+        return { binding: updated, persistedGeneration: request.generation, recoveryId: saved.recovery.recoveryId }
+      } finally {
+        this.#watcher.clearExpectedSave(binding.bindingId, expectedSavedSha256)
+      }
+    })
   }
 
   async saveAs(bindingId: string, bytesBuffer: ArrayBuffer): Promise<DocxOpenResult | null> {
-    const binding = await this.#requireBinding(bindingId)
-    const selection = await this.#dialog.showSaveDialog({
-      title: 'Save DOCX as a copy',
-      defaultPath: binding.filename,
-      filters: [{ name: 'Word document', extensions: ['docx'] }]
+    return this.#serializeBinding(bindingId, async () => {
+      const binding = await this.#requireBinding(bindingId)
+      const selection = await this.#dialog.showSaveDialog({
+        title: 'Save DOCX as a copy',
+        defaultPath: binding.filename,
+        filters: [{ name: 'Word document', extensions: ['docx'] }]
+      })
+      if (selection.canceled || !selection.filePath) return null
+      const bytes = new Uint8Array(bytesBuffer)
+      try {
+        const current = await this.#files.read(selection.filePath)
+        await this.#files.replace(binding.bindingId, selection.filePath, current.sha256, bytes, 'manual')
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+        await this.#files.writeNew(selection.filePath, bytes)
+      }
+      return this.#bind(binding.jobId, binding.documentKey, selection.filePath)
     })
-    if (selection.canceled || !selection.filePath) return null
-    const bytes = new Uint8Array(bytesBuffer)
-    try {
-      const current = await this.#files.read(selection.filePath)
-      await this.#files.replace(binding.bindingId, selection.filePath, current.sha256, bytes, 'manual')
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
-      await this.#files.writeNew(selection.filePath, bytes)
-    }
-    return this.#bind(binding.jobId, binding.documentKey, selection.filePath)
   }
 
   async createRecovery(bindingId: string, reason: DocxRecoveryEntry['reason']): Promise<DocxRecoveryEntry> {
-    const binding = await this.#requireBinding(bindingId)
-    const file = await this.#files.read(binding.canonicalPath)
-    return this.#files.createRecovery(binding.bindingId, binding.canonicalPath, file.bytes, reason)
+    return this.#serializeBinding(bindingId, async () => {
+      const binding = await this.#requireBinding(bindingId)
+      const file = await this.#files.read(binding.canonicalPath)
+      return this.#files.createRecovery(binding.bindingId, binding.canonicalPath, file.bytes, reason)
+    })
   }
 
   listRecoveries(bindingId: string): Promise<DocxRecoveryEntry[]> {
@@ -180,11 +262,19 @@ export class DocxDocumentsService {
   }
 
   async restoreRecovery(bindingId: string, recoveryId: string): Promise<DocxOpenResult> {
-    const binding = await this.#requireBinding(bindingId)
-    const recovery = await this.#files.recoveryBytes(bindingId, recoveryId)
-    const current = await this.#files.read(binding.canonicalPath)
-    await this.#files.replace(bindingId, binding.canonicalPath, current.sha256, recovery, 'conflict')
-    return this.reload(bindingId)
+    return this.#serializeBinding(bindingId, async () => {
+      const binding = await this.#requireBinding(bindingId)
+      const recovery = await this.#files.recoveryBytes(bindingId, recoveryId)
+      const current = await this.#files.read(binding.canonicalPath)
+      const expectedSavedSha256 = sha256(recovery)
+      this.#watcher.expectSave(binding.bindingId, expectedSavedSha256)
+      try {
+        await this.#files.replace(bindingId, binding.canonicalPath, current.sha256, recovery, 'conflict')
+        return await this.#reloadBinding(bindingId)
+      } finally {
+        this.#watcher.clearExpectedSave(binding.bindingId, expectedSavedSha256)
+      }
+    })
   }
 
   async inspect(jobId: string, documentKey: DocumentKey): Promise<{
@@ -195,17 +285,20 @@ export class DocxDocumentsService {
     if (!worker) throw new Error('DOCX worker unavailable')
     const binding = await this.#bindings.getForJob(validJobId(jobId), validDocumentKey(documentKey))
     if (!binding) throw new Error('DOCX is not bound on this device')
-    const current = await this.#files.read(binding.canonicalPath)
-    const observedBinding = current.sha256 === binding.sha256
-      ? binding
-      : await this.#updatedBinding(binding, current)
-    if (observedBinding !== binding) {
-      await this.#bindings.put(observedBinding)
-      this.#watcher.update(observedBinding)
-    }
-    const result = await worker.run({ kind: 'inspect', bytes: arrayBuffer(current.bytes) })
-    if (result.kind !== 'inspect') throw new Error('Unexpected DOCX worker result')
-    return { binding: observedBinding, context: result.context }
+    return this.#serializeBinding(binding.bindingId, async () => {
+      const currentBinding = await this.#requireBinding(binding.bindingId)
+      const current = await this.#files.read(currentBinding.canonicalPath)
+      const observedBinding = current.sha256 === currentBinding.sha256
+        ? currentBinding
+        : await this.#updatedBinding(currentBinding, current)
+      if (observedBinding !== currentBinding) {
+        await this.#bindings.put(observedBinding)
+        this.#watcher.update(observedBinding)
+      }
+      const result = await worker.run({ kind: 'inspect', bytes: arrayBuffer(current.bytes) })
+      if (result.kind !== 'inspect') throw new Error('Unexpected DOCX worker result')
+      return { binding: observedBinding, context: result.context }
+    })
   }
 
   async applyOperations(
@@ -219,26 +312,39 @@ export class DocxDocumentsService {
     if (!/^[a-f0-9]{64}$/.test(expectedSha256)) throw new Error('Invalid expected DOCX hash')
     const binding = await this.#bindings.getForJob(validJobId(jobId), validDocumentKey(documentKey))
     if (!binding) throw new Error('DOCX is not bound on this device')
-    const current = await this.#files.read(binding.canonicalPath)
-    if (current.sha256 !== expectedSha256) throw new Error('DOCX changed outside JobOS')
-    const result = await worker.run({ kind: 'apply', bytes: arrayBuffer(current.bytes), operations })
-    if (result.kind !== 'apply') throw new Error('Unexpected DOCX worker result')
-    const saved = await this.#files.replace(
-      binding.bindingId,
-      binding.canonicalPath,
-      expectedSha256,
-      new Uint8Array(result.bytes),
-      'agent'
-    )
-    const updated = await this.#updatedBinding(binding, saved.file)
-    await this.#bindings.put(updated)
-    this.#watcher.update(updated)
-    return { binding: updated, context: result.context, recoveryId: saved.recovery.recoveryId }
+    return this.#serializeBinding(binding.bindingId, async () => {
+      const currentBinding = await this.#requireBinding(binding.bindingId)
+      const current = await this.#files.read(currentBinding.canonicalPath)
+      if (current.sha256 !== expectedSha256) throw new Error('DOCX changed outside JobOS')
+      const result = await worker.run({ kind: 'apply', bytes: arrayBuffer(current.bytes), operations })
+      if (result.kind !== 'apply') throw new Error('Unexpected DOCX worker result')
+      const savedBytes = new Uint8Array(result.bytes)
+      const expectedSavedSha256 = sha256(savedBytes)
+      this.#watcher.expectSave(currentBinding.bindingId, expectedSavedSha256)
+      try {
+        const saved = await this.#files.replace(
+          currentBinding.bindingId,
+          currentBinding.canonicalPath,
+          expectedSha256,
+          savedBytes,
+          'agent'
+        )
+        const updated = await this.#updatedBinding(currentBinding, saved.file)
+        await this.#bindings.put(updated)
+        this.#watcher.update(updated)
+        this.#watcher.notifyChanged(updated)
+        return { binding: updated, context: result.context, recoveryId: saved.recovery.recoveryId }
+      } finally {
+        this.#watcher.clearExpectedSave(currentBinding.bindingId, expectedSavedSha256)
+      }
+    })
   }
 
   async unbind(bindingId: string): Promise<void> {
-    this.#watcher.unwatch(bindingId)
-    await this.#bindings.remove(bindingId)
+    await this.#serializeBinding(bindingId, async () => {
+      this.#watcher.unwatch(bindingId)
+      await this.#bindings.remove(bindingId)
+    })
   }
 
   async #bind(jobId: string, documentKey: DocumentKey, canonicalPath: string): Promise<DocxOpenResult> {
@@ -286,5 +392,20 @@ export class DocxDocumentsService {
     const binding = await this.#bindings.get(bindingId)
     if (!binding) throw new Error('DOCX binding not found')
     return binding
+  }
+
+  async #serializeBinding<T>(bindingId: string, operation: () => Promise<T>): Promise<T> {
+    const previous = this.#bindingQueues.get(bindingId) ?? Promise.resolve()
+    let release!: () => void
+    const gate = new Promise<void>(resolve => { release = resolve })
+    const tail = previous.catch(() => undefined).then(() => gate)
+    this.#bindingQueues.set(bindingId, tail)
+    await previous.catch(() => undefined)
+    try {
+      return await operation()
+    } finally {
+      release()
+      if (this.#bindingQueues.get(bindingId) === tail) this.#bindingQueues.delete(bindingId)
+    }
   }
 }

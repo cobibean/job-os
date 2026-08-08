@@ -35,17 +35,18 @@ export function OriginalDocxPreview({ artifactId, sourceFilename }: OriginalDocx
     bridge.loadOriginalDocx(artifactId)
       .then(async payload => {
         if (!active) return
-        container.replaceChildren()
-        await renderAsync(payload.bytes, container, container, {
+        const staging = document.createElement('div')
+        await renderAsync(payload.bytes, staging, staging, {
           breakPages: true,
           ignoreLastRenderedPageBreak: false,
           useBase64URL: true
         })
         if (!active) return
-        for (const link of container.querySelectorAll('a, area')) {
+        for (const link of staging.querySelectorAll('a, area')) {
           link.removeAttribute('href')
           link.setAttribute('aria-disabled', 'true')
         }
+        container.replaceChildren(...staging.childNodes)
         setState('ready')
         setMessage(`Original ${payload.filename} · SHA-256 verified`)
       })

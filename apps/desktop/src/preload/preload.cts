@@ -103,6 +103,7 @@ const bridge: JobOsRendererBridge = Object.freeze({
   docxDocuments: Object.freeze({
     listBindings: (jobId: string) => ipcRenderer.invoke('jobos:docx:list-bindings', jobId),
     openBound: (jobId: string, documentKey: DocumentKey) => ipcRenderer.invoke('jobos:docx:open-bound', jobId, documentKey),
+    openArtifact: (jobId: string, documentKey: DocumentKey, artifactId: string) => ipcRenderer.invoke('jobos:docx:open-artifact', jobId, documentKey, artifactId),
     chooseFile: (jobId: string, documentKey: DocumentKey) => ipcRenderer.invoke('jobos:docx:choose-file', jobId, documentKey),
     createBlank: (jobId: string, documentKey: DocumentKey) => ipcRenderer.invoke('jobos:docx:create-blank', jobId, documentKey),
     reload: (bindingId: string) => ipcRenderer.invoke('jobos:docx:reload', bindingId),

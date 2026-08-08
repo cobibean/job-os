@@ -6,7 +6,7 @@ import type { BrowserRestoreState, JobListItem } from '../../shared/contracts'
 import type { DocxOpenResult } from '../../shared/docxDocuments'
 import { useBrowser } from '../hooks/useBrowser'
 import { browserRepairMessage, type BrowserRepairReason } from '../workspaceLayout'
-import { DocumentWorkspace } from './DocumentWorkspace'
+import { DocumentWorkspace, type DocumentPreviewMode } from './DocumentWorkspace'
 
 function agentJobSavePrompt(tabId: string): string {
   return [
@@ -76,6 +76,7 @@ interface CenterWorkspaceProps {
   browserRepairReasons: BrowserRepairReason[]
   browserVisible: boolean
   documentMutationGeneration?: number
+  documentPreviewMode: DocumentPreviewMode
   jobs: JobListItem[]
   layoutSignal: string
   workspaceHydrated: boolean
@@ -85,6 +86,7 @@ interface CenterWorkspaceProps {
   activeArtifactPage: number
   activeArtifactZoom: number
   onDocumentPersist: (artifactId: string | null, page: number, zoom: number) => void
+  onDocumentPreviewModeChange: (mode: DocumentPreviewMode) => void
   onJobSaved: (jobId: string) => Promise<void>
   jobListingRequest: JobListingRequest | null
   onOpenEditor: (document: DocxOpenResult) => void
@@ -286,6 +288,8 @@ export function CenterWorkspace(props: CenterWorkspaceProps) {
       hydrated={props.workspaceHydrated}
       onViewChange={props.onDocumentPersist}
       onOpenEditor={props.onOpenEditor}
+      onPreviewModeChange={props.onDocumentPreviewModeChange}
+      previewMode={props.documentPreviewMode}
       refreshGeneration={props.documentMutationGeneration ?? 0}
       restoredArtifactId={props.activeArtifactId}
       restoredPage={props.activeArtifactPage}

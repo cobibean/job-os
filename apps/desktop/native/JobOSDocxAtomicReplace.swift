@@ -25,6 +25,29 @@ private func swap(_ first: String, _ second: String) throws {
     }
 }
 
+private func syncParent(of file: URL) throws {
+    let directory = file.deletingLastPathComponent().path
+    let descriptor = Darwin.open(directory, O_RDONLY)
+    guard descriptor >= 0 else {
+        let code = POSIXErrorCode(rawValue: errno) ?? .EIO
+        throw POSIXError(code)
+    }
+    defer { Darwin.close(descriptor) }
+    guard fsync(descriptor) == 0 else {
+        let code = POSIXErrorCode(rawValue: errno) ?? .EIO
+        throw POSIXError(code)
+    }
+}
+
+if CommandLine.arguments.count == 2 {
+    do {
+        try syncParent(of: URL(fileURLWithPath: CommandLine.arguments[1]).standardizedFileURL)
+        exit(EXIT_SUCCESS)
+    } catch {
+        fail("directory sync failed: \(error.localizedDescription)", code: .failure)
+    }
+}
+
 guard CommandLine.arguments.count == 4 else {
     fail("usage: jobos-docx-atomic-replace <canonical> <sibling-temp> <expected-sha256>", code: .usage)
 }
@@ -54,14 +77,17 @@ coordinator.coordinate(writingItemAt: canonical, options: .forReplacing, error: 
         exchanged = true
         guard try sha256(temporary) == expected else {
             try swap(temporary.path, coordinated.path)
+            try syncParent(of: coordinated)
             exchanged = false
             conflict = true
             return
         }
+        try syncParent(of: coordinated)
     } catch {
         if exchanged {
             do {
                 try swap(temporary.path, coordinated.path)
+                try syncParent(of: coordinated)
                 exchanged = false
             } catch {
                 operationError = error

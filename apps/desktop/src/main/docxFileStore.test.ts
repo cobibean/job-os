@@ -1,6 +1,6 @@
 // @vitest-environment node
 
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { resolve } from 'node:path'
@@ -62,6 +62,7 @@ describe('DocxFileStore', () => {
       source
     )).rejects.toBeInstanceOf(DocxExternalChangeError)
     expect(new Uint8Array(await readFile(target))).toEqual(external)
+    expect((await readdir(root)).filter(name => name.includes('.jobos-'))).toEqual([])
   })
 
   it('serializes concurrent writes so only the first expected revision wins', async () => {

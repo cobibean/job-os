@@ -21,7 +21,12 @@ import type {
   PdfArtifactPayload
 } from '../../shared/contracts'
 import type { DocxBinding, DocxOpenResult } from '../../shared/docxDocuments'
+import { DocxBytesPreview } from '../document-editor/DocxBytesPreview'
+import { displayDocxFilename } from '../document-editor/docxDisplay'
+import { OriginalDocxPreview } from '../document-editor/OriginalDocxPreview'
 import { PdfPreview } from './PdfPreview'
+
+export type DocumentPreviewMode = 'pdf' | 'docx'
 
 interface DocumentWorkspaceProps {
   job: JobListItem | null
@@ -30,8 +35,10 @@ interface DocumentWorkspaceProps {
   restoredZoom: number
   hydrated: boolean
   refreshGeneration?: number
+  previewMode?: DocumentPreviewMode
   onViewChange: (artifactId: string | null, page: number, zoom: number) => void
   onOpenEditor?: (document: DocxOpenResult) => void
+  onPreviewModeChange?: (mode: DocumentPreviewMode) => void
 }
 
 const PDF: ArtifactMediaType = 'application/pdf'
@@ -142,6 +149,9 @@ export function DocumentWorkspace(props: DocumentWorkspaceProps) {
   const [exportOpen, setExportOpen] = useState(false)
   const [exportBusy, setExportBusy] = useState(false)
   const [bindings, setBindings] = useState<DocxBinding[]>([])
+  const [docxPreview, setDocxPreview] = useState<DocxOpenResult | null>(null)
+  const bindingListEpoch = useRef(0)
+  const docxMutationEpoch = useRef(new Map<string, number>())
   const [editorBusyKey, setEditorBusyKey] = useState<DocumentKey | null>(null)
   const [importKey, setImportKey] = useState<DocumentKey>('resume')
   const [blankChoiceKey, setBlankChoiceKey] = useState<DocumentKey | null>(null)
@@ -180,6 +190,7 @@ export function DocumentWorkspace(props: DocumentWorkspaceProps) {
   const activeDocument = activeSelection?.document ?? null
   const activeRevision = activeSelection?.revision ?? null
   const activeArtifact = activeRevision?.representative ?? null
+  const requestedPreviewMode = props.previewMode ?? 'pdf'
   const activeDocumentIndex = activeDocument
     ? documents.findIndex(document => document.documentKey === activeDocument.documentKey)
     : -1
@@ -191,6 +202,19 @@ export function DocumentWorkspace(props: DocumentWorkspaceProps) {
   const exportArtifacts = activeRevision?.artifacts.filter(artifact => artifact.renderStatus === 'succeeded') ?? []
   const exportPdf = latestByFormat(exportArtifacts, PDF)
   const exportDocx = latestByFormat(exportArtifacts, DOCX)
+  const activeBinding = activeDocument
+    ? bindings.find(binding => binding.documentKey === activeDocument.documentKey) ?? null
+    : null
+  const previewMode: DocumentPreviewMode = requestedPreviewMode === 'pdf' && !exportPdf && (activeBinding || exportDocx)
+    ? 'docx'
+    : requestedPreviewMode
+  const currentDocxPreview = docxPreview
+    && docxPreview.binding.jobId === jobId
+    && docxPreview.binding.documentKey === activeDocument?.documentKey
+    ? docxPreview
+    : null
+  const previewBinding = currentDocxPreview?.binding ?? activeBinding
+  const previewFilename = previewBinding ? displayDocxFilename(previewBinding) : null
 
   const choosePreview = useCallback((next: JobArtifactsState, preferredId: string | null) => {
     const chosen = chooseLogicalPreview(next, preferredId)
@@ -261,17 +285,78 @@ export function DocumentWorkspace(props: DocumentWorkspaceProps) {
       return
     }
     let active = true
-    docxBridge.listBindings(jobId).then(value => {
-      if (active) setBindings(value)
+    const refreshBindings = async () => {
+      const epoch = bindingListEpoch.current
+      try {
+        const value = await docxBridge.listBindings(jobId)
+        if (active && bindingListEpoch.current === epoch) setBindings(value)
+      } catch (error) {
+        if (active) setMessage(error instanceof Error ? error.message : 'DOCX bindings unavailable')
+      }
+    }
+    void refreshBindings()
+    const unsubscribe = docxBridge.subscribe(event => {
+      if (!active || event.jobId !== jobId) return
+      bindingListEpoch.current += 1
+      const epoch = (docxMutationEpoch.current.get(event.bindingId) ?? 0) + 1
+      docxMutationEpoch.current.set(event.bindingId, epoch)
+      if (event.kind === 'missing') {
+        setBindings(current => current.filter(binding => binding.bindingId !== event.bindingId))
+        setDocxPreview(current => current?.binding.bindingId === event.bindingId ? null : current)
+        setMessage('The current editable DOCX is no longer available on this device')
+        return
+      }
+      void docxBridge.openBound(jobId, event.documentKey).then(opened => {
+        if (!active || docxMutationEpoch.current.get(event.bindingId) !== epoch || !opened || opened.binding.sha256 !== event.sha256) return
+        setBindings(current => [
+          ...current.filter(binding => binding.bindingId !== opened.binding.bindingId),
+          opened.binding
+        ])
+        if (previewMode === 'docx' && activeDocument?.documentKey === event.documentKey) {
+          setDocxPreview(opened)
+          setMessage('Current editable DOCX refreshed')
+        }
+      }).catch(error => {
+        if (active && docxMutationEpoch.current.get(event.bindingId) === epoch) {
+          setMessage(error instanceof Error ? error.message : 'Current DOCX refresh failed')
+        }
+      })
+    })
+    return () => {
+      active = false
+      unsubscribe()
+    }
+  }, [activeDocument?.documentKey, docxBridge, jobId, previewMode, refreshGeneration])
+
+  useEffect(() => {
+    setDocxPreview(null)
+    if (previewMode !== 'docx' || !jobId || !docxBridge || !activeBinding) return
+    let active = true
+    const epoch = docxMutationEpoch.current.get(activeBinding.bindingId) ?? 0
+    docxBridge.openBound(jobId, activeBinding.documentKey).then(opened => {
+      if (!active || (docxMutationEpoch.current.get(activeBinding.bindingId) ?? 0) !== epoch) return
+      if (opened) setDocxPreview(opened)
+      else setMessage('The current editable DOCX is no longer bound on this device')
     }).catch(error => {
-      if (active) setMessage(error instanceof Error ? error.message : 'DOCX bindings unavailable')
+      if (active && (docxMutationEpoch.current.get(activeBinding.bindingId) ?? 0) === epoch) {
+        setMessage(error instanceof Error ? error.message : 'Current DOCX preview failed')
+      }
     })
     return () => { active = false }
-  }, [docxBridge, jobId, refreshGeneration])
+  }, [
+    activeBinding?.bindingId,
+    activeBinding?.documentKey,
+    activeBinding?.revision,
+    activeBinding?.sha256,
+    docxBridge,
+    jobId,
+    previewMode,
+    refreshGeneration
+  ])
 
   useEffect(() => {
     setPayload(null)
-    if (!activeArtifact?.previewAvailable || !bridge) return
+    if (previewMode !== 'pdf' || !activeArtifact?.previewAvailable || !bridge) return
     let active = true
     setLoading(true)
     bridge.loadPdf(activeArtifact.artifactId).then(value => {
@@ -287,7 +372,7 @@ export function DocumentWorkspace(props: DocumentWorkspaceProps) {
       if (active) setLoading(false)
     })
     return () => { active = false }
-  }, [activeArtifact?.artifactId, activeArtifact?.previewAvailable, bridge])
+  }, [activeArtifact?.artifactId, activeArtifact?.previewAvailable, bridge, previewMode])
 
   useEffect(() => {
     const key = `${activeId ?? ''}:${page}:${zoom}`
@@ -401,15 +486,31 @@ export function DocumentWorkspace(props: DocumentWorkspaceProps) {
 
   const openEditor = async (documentKey: DocumentKey) => {
     if (!jobId || !docxBridge || editorBusyKey) return
+    const successfulDocx = stateMatchesJob
+      ? state.artifacts.filter(artifact => (
+          artifact.documentKey === documentKey
+          && artifact.mediaType === DOCX
+          && artifact.renderStatus === 'succeeded'
+        ))
+      : []
+    const viewedDocx = latestByFormat(
+      activeRevision
+        ? successfulDocx.filter(artifact => artifact.sourceRevision === activeRevision.sourceRevision)
+        : successfulDocx,
+      DOCX
+    ) ?? latestByFormat(successfulDocx, DOCX) ?? null
+
     setEditorBusyKey(documentKey)
-    setMessage('Opening the original DOCX…')
+    setMessage(viewedDocx ? 'Opening this packet DOCX…' : 'Opening the original DOCX…')
     try {
       const bound = bindings.some(binding => binding.documentKey === documentKey)
       const document = bound
         ? await docxBridge.openBound(jobId, documentKey)
-        : await docxBridge.chooseFile(jobId, documentKey)
+        : viewedDocx
+          ? await docxBridge.openArtifact(jobId, documentKey, viewedDocx.artifactId)
+          : await docxBridge.chooseFile(jobId, documentKey)
       if (document) props.onOpenEditor?.(document)
-      else setMessage('Choose the original DOCX to edit it in place')
+      else setMessage('No packet DOCX is available. Choose the original DOCX to edit it in place')
     } catch (error) {
       setMessage(error instanceof Error ? error.message : 'Could not open the DOCX editor')
     } finally {
@@ -465,7 +566,23 @@ export function DocumentWorkspace(props: DocumentWorkspaceProps) {
       <div className="document-heading">
         <div>
           <span className="document-job">Documents for {props.job.company} · {props.job.title}</span>
-          <strong>{activeArtifact?.filename ?? 'Document artifacts'}</strong>
+          <strong>{previewMode === 'docx' && previewFilename
+            ? previewFilename
+            : activeArtifact?.filename ?? 'Document artifacts'}</strong>
+        </div>
+        <div aria-label="Preview format" className="document-preview-switch" role="group">
+          <button
+            aria-pressed={previewMode === 'pdf'}
+            disabled={!exportPdf}
+            onClick={() => props.onPreviewModeChange?.('pdf')}
+            type="button"
+          >PDF</button>
+          <button
+            aria-pressed={previewMode === 'docx'}
+            disabled={!activeBinding && !exportDocx}
+            onClick={() => props.onPreviewModeChange?.('docx')}
+            type="button"
+          >DOCX</button>
         </div>
         <nav aria-label="Job documents" className="document-navigation">
           <button aria-label="Previous document" disabled={activeDocumentIndex <= 0} onClick={() => selectDocument(activeDocumentIndex - 1)} type="button"><ChevronLeft aria-hidden="true" size={14} /></button>
@@ -538,7 +655,7 @@ export function DocumentWorkspace(props: DocumentWorkspaceProps) {
             </div>
           ) : null}
         </div>
-        {activeArtifact?.documentKey === 'resume' && activeArtifact.mediaType === PDF ? (
+        {previewMode === 'pdf' && activeArtifact?.documentKey === 'resume' && activeArtifact.mediaType === PDF ? (
           <button
             className="approve-revision"
             disabled={activeArtifact.renderStatus !== 'succeeded' || activeArtifact.isApproved || !bridge || loading}
@@ -550,12 +667,14 @@ export function DocumentWorkspace(props: DocumentWorkspaceProps) {
           </button>
         ) : null}
         <span className="document-toolbar-spacer" />
-        <button aria-label="Previous page" disabled={page <= 1 || !payload} onClick={() => setPage(value => Math.max(1, value - 1))} type="button"><ChevronLeft aria-hidden="true" size={14} /></button>
-        <span className="page-count">Page {page} of {pageCount || '—'}</span>
-        <button aria-label="Next page" disabled={page >= pageCount || !payload} onClick={() => setPage(value => Math.min(pageCount, value + 1))} type="button"><ChevronRight aria-hidden="true" size={14} /></button>
-        <button aria-label="Zoom out" disabled={zoom <= 0.5} onClick={() => setZoom(value => Math.max(0.5, Number((value - 0.1).toFixed(1))))} type="button"><Minus aria-hidden="true" size={14} /></button>
-        <span className="zoom-value">{Math.round(zoom * 100)}%</span>
-        <button aria-label="Zoom in" disabled={zoom >= 3} onClick={() => setZoom(value => Math.min(3, Number((value + 0.1).toFixed(1))))} type="button"><Plus aria-hidden="true" size={14} /></button>
+        {previewMode === 'pdf' ? <>
+          <button aria-label="Previous page" disabled={page <= 1 || !payload} onClick={() => setPage(value => Math.max(1, value - 1))} type="button"><ChevronLeft aria-hidden="true" size={14} /></button>
+          <span className="page-count">Page {page} of {pageCount || '—'}</span>
+          <button aria-label="Next page" disabled={page >= pageCount || !payload} onClick={() => setPage(value => Math.min(pageCount, value + 1))} type="button"><ChevronRight aria-hidden="true" size={14} /></button>
+          <button aria-label="Zoom out" disabled={zoom <= 0.5} onClick={() => setZoom(value => Math.max(0.5, Number((value - 0.1).toFixed(1))))} type="button"><Minus aria-hidden="true" size={14} /></button>
+          <span className="zoom-value">{Math.round(zoom * 100)}%</span>
+          <button aria-label="Zoom in" disabled={zoom >= 3} onClick={() => setZoom(value => Math.min(3, Number((value + 0.1).toFixed(1))))} type="button"><Plus aria-hidden="true" size={14} /></button>
+        </> : null}
       </div>
 
       {currentArtifact?.renderStatus === 'failed' ? (
@@ -571,21 +690,38 @@ export function DocumentWorkspace(props: DocumentWorkspaceProps) {
         <div className="render-progress" role="status">No registered render is available for this document.</div>
       )}
 
-      {activeArtifact ? (
+      {previewMode === 'docx' && previewBinding ? (
+        <div className="viewed-artifact" role="status">
+          Viewing current editable DOCX · local revision {previewBinding.revision} · SHA-256 {previewBinding.sha256}
+        </div>
+      ) : previewMode === 'docx' && exportDocx ? (
+        <div className="viewed-artifact" role="status">
+          Viewing packet DOCX · revision {exportDocx.artifactRevision} · source {exportDocx.sourceRevision} · {exportDocx.renderStatus}
+        </div>
+      ) : activeArtifact ? (
         <div className="viewed-artifact" role="status">
           Viewing {activeArtifact.filename ?? 'unnamed artifact'} · revision {activeArtifact.artifactRevision} · source {activeArtifact.sourceRevision} · {activeArtifact.mediaType} · {activeArtifact.renderStatus}
         </div>
       ) : null}
 
       <section className="document-canvas">
-        {payload && activeArtifact && payload.artifactId === activeArtifact.artifactId && activeArtifact.previewAvailable ? (
-          <PdfPreview key={payload.artifactId} bytes={payload.bytes} onPageCount={setPageCount} page={page} zoom={zoom} />
-        ) : activeArtifact?.mediaType === DOCX ? (
-          <div className="document-external-only">
+        {previewMode === 'docx' && currentDocxPreview ? (
+          <DocxBytesPreview
+            bytes={currentDocxPreview.bytes}
+            filename={displayDocxFilename(currentDocxPreview.binding)}
+            label="Current editable DOCX"
+            sha256={currentDocxPreview.binding.sha256}
+          />
+        ) : previewMode === 'docx' && activeBinding ? (
+          <div className="document-external-only" role="status">
             <FileText aria-hidden="true" size={28} />
-            <h1>DOCX stays external</h1>
-            <p>This authoritative file is available to export or open in its default app. JobOS does not substitute a lower-fidelity preview.</p>
+            <h1>Loading current DOCX…</h1>
+            <p>Reading the latest saved version from this device.</p>
           </div>
+        ) : previewMode === 'docx' && exportDocx ? (
+          <OriginalDocxPreview artifactId={exportDocx.artifactId} sourceFilename={exportDocx.filename} />
+        ) : payload && activeArtifact && payload.artifactId === activeArtifact.artifactId && activeArtifact.previewAvailable ? (
+          <PdfPreview key={payload.artifactId} bytes={payload.bytes} onPageCount={setPageCount} page={page} zoom={zoom} />
         ) : (
           <div className="document-external-only">
             <FileText aria-hidden="true" size={28} />

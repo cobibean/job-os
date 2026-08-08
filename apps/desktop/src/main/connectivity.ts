@@ -10,6 +10,21 @@ export interface ConnectivityConfig {
   baseUrl: string
   deviceToken: string
   fetch?: typeof fetch
+  requestTimeoutMs?: number
+}
+
+const DEFAULT_REQUEST_TIMEOUT_MS = 5_000
+
+function fetchWithTimeout(config: ConnectivityConfig): typeof fetch {
+  const sourceFetch = config.fetch ?? globalThis.fetch
+  const timeoutMs = config.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS
+  return (input, init) => {
+    const timeoutSignal = AbortSignal.timeout(timeoutMs)
+    const signal = init?.signal
+      ? AbortSignal.any([init.signal, timeoutSignal])
+      : timeoutSignal
+    return sourceFetch(input, { ...init, signal })
+  }
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -46,7 +61,7 @@ function isDeviceSessionResponse(value: unknown): value is {
 export async function probeConnectivity(config: ConnectivityConfig): Promise<ConnectivitySnapshot> {
   const checkedAt = new Date().toISOString()
   const client = createJobOsApiClient(config.baseUrl, config.deviceToken)
-  if (config.fetch) client.setConfig({ fetch: config.fetch })
+  client.setConfig({ fetch: fetchWithTimeout(config) })
 
   try {
     const health = await healthV1HealthGet({ client })

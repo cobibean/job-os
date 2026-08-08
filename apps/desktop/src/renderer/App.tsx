@@ -23,6 +23,7 @@ export function App() {
   const [agentModalOpen, setAgentModalOpen] = useState(false)
   const [jobListingRequest, setJobListingRequest] = useState<JobListingRequest | null>(null)
   const [documentMutationGeneration, setDocumentMutationGeneration] = useState(0)
+  const [documentPreviewMode, setDocumentPreviewMode] = useState<'pdf' | 'docx'>('pdf')
   const [editingDocument, setEditingDocument] = useState<DocxOpenResult | null>(null)
   const nextJobListingRequestId = useRef(0)
   const latestNavigatorSelection = useRef(0)
@@ -34,6 +35,8 @@ export function App() {
   useEffect(() => window.jobos?.lifecycle?.subscribePrepareClose(
     () => prepareClose.current()
   ), [])
+
+  useEffect(() => setDocumentPreviewMode('pdf'), [jobState.selectedJobId])
 
   const showPublishedDocument = useCallback(() => {
     setDocumentMutationGeneration(generation => generation + 1)
@@ -100,6 +103,7 @@ export function App() {
             : 'Selected job'}
           onPrepareClose={handler => { prepareClose.current = handler }}
           onExit={() => {
+            setDocumentPreviewMode('docx')
             setEditingDocument(null)
             setDocumentMutationGeneration(generation => generation + 1)
           }}
@@ -126,11 +130,13 @@ export function App() {
           browserRepairReasons={layoutState.workspace.browserRepairReasons ?? []}
           browserVisible={!activeLayout.collapsed.includes('center') && !agentModalOpen && !settingsOpen && !settingsPreparing}
           documentMutationGeneration={documentMutationGeneration}
+          documentPreviewMode={documentPreviewMode}
           jobListingRequest={jobListingRequest}
           jobs={jobState.jobs}
           layoutSignal={`${activePreset}:${activeLayout.order.join(',')}:${activeLayout.collapsed.join(',')}`}
           onBrowserPersist={layoutState.updateBrowserState}
           onDocumentPersist={layoutState.updateDocumentState}
+          onDocumentPreviewModeChange={setDocumentPreviewMode}
           onJobSaved={async jobId => {
             await jobState.selectJob(jobId)
             setDocumentMutationGeneration(generation => generation + 1)

@@ -1212,6 +1212,12 @@
             "title": "Observed At",
             "type": "string"
           },
+          "observed_device_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Observed Device Id",
+            "type": "string"
+          },
           "observed_revision": {
             "minimum": 1.0,
             "title": "Observed Revision",
@@ -1231,6 +1237,7 @@
           "filename",
           "sha256",
           "observed_revision",
+          "observed_device_id",
           "capabilities",
           "observed_at"
         ],

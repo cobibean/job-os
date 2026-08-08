@@ -20,7 +20,7 @@ def test_health_reports_ready_phase_six_api_with_agent_connectivity_separate(tmp
         "status": "ready",
         "service": "jobos-api",
         "version": "0.1.0",
-        "state_schema": 13,
+        "state_schema": 14,
         "agent_connection": "offline",
     }
 

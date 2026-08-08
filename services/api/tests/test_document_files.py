@@ -102,6 +102,7 @@ def test_document_inspect_persists_portable_metadata_without_a_local_path(tmp_pa
     assert document["filename"] == "(FAKE)-resume.docx"
     assert document["sha256"] == "a" * 64
     assert document["observed_revision"] == 7
+    assert document["observed_device_id"]
     assert document["capabilities"]["protected_block_count"] == 2
     assert "path" not in str(document).lower()
     with sqlite3.connect(tmp_path / "jobos.db") as connection:
@@ -178,6 +179,7 @@ def test_equal_document_revision_is_idempotent_or_a_visible_conflict(tmp_path):
         filename="(FAKE)-resume.docx",
         sha256="a" * 64,
         observed_revision=7,
+        observed_device_id="(FAKE)-desktop-a",
         capabilities=capabilities,
         observed_at="2026-08-08T01:00:00Z",
     )
@@ -192,6 +194,60 @@ def test_equal_document_revision_is_idempotent_or_a_visible_conflict(tmp_path):
     assert current["sha256"] == "a" * 64
     with sqlite3.connect(database) as connection:
         history = connection.execute(
-            "SELECT observed_revision, sha256 FROM document_file_observations"
+            "SELECT observed_device_id, observed_revision, sha256 FROM document_file_observations"
         ).fetchall()
-    assert history == [(7, "a" * 64)]
+    assert history == [("(FAKE)-desktop-a", 7, "a" * 64)]
+
+
+def test_document_revisions_are_ordered_per_device_without_cross_device_conflicts(tmp_path):
+    database = tmp_path / "jobos.db"
+    store = JobOsStateStore(database)
+    store.initialize()
+    capabilities = DocumentFileCapabilities(
+        mode="editable",
+        protected_block_count=0,
+        editable_block_count=3,
+        reasons=[],
+    )
+    desktop_a = DocumentFileRecord(
+        document_id=document_file_id("(FAKE)-job-7", "resume"),
+        job_id="(FAKE)-job-7",
+        document_key="resume",
+        document_label="Resume",
+        filename="(FAKE)-resume-a.docx",
+        sha256="a" * 64,
+        observed_revision=7,
+        observed_device_id="(FAKE)-desktop-a",
+        capabilities=capabilities,
+        observed_at="2026-08-08T01:00:00Z",
+    )
+    desktop_b = desktop_a.model_copy(
+        update={
+            "filename": "(FAKE)-resume-b.docx",
+            "sha256": "b" * 64,
+            "observed_revision": 1,
+            "observed_device_id": "(FAKE)-desktop-b",
+            "observed_at": "2026-08-08T01:01:00Z",
+        }
+    )
+
+    store.observe_document_file(desktop_a)
+    store.observe_document_file(desktop_b)
+
+    current = store.get_document_file(desktop_a.document_id)
+    assert current is not None
+    assert current["observed_device_id"] == "(FAKE)-desktop-b"
+    assert current["observed_revision"] == 1
+    assert current["sha256"] == "b" * 64
+    with sqlite3.connect(database) as connection:
+        history = connection.execute(
+            """
+            SELECT observed_device_id, observed_revision, sha256
+            FROM document_file_observations
+            ORDER BY observation_id
+            """
+        ).fetchall()
+    assert history == [
+        ("(FAKE)-desktop-a", 7, "a" * 64),
+        ("(FAKE)-desktop-b", 1, "b" * 64),
+    ]
