@@ -1,0 +1,31 @@
+{
+  "name": "@jobos/docx-editor-core",
+  "version": "0.1.0",
+  "license": "Apache-2.0",
+  "private": true,
+  "type": "module",
+  "description": "JobOS-owned OOXML-aware Tiptap editor core derived from pinned GenOffice sources",
+  "exports": {
+    ".": "./src/index.ts",
+    "./editor.css": "./src/editor.css"
+  },
+  "scripts": {
+    "boundary": "node scripts/assert-source-boundary.mjs",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@jobos/docx-engine": "workspace:*",
+    "@tiptap/core": "3.29.2",
+    "@tiptap/extensions": "3.29.2",
+    "@tiptap/pm": "3.29.2"
+  },
+  "devDependencies": {
+    "@types/node": "26.1.1",
+    "@types/opentype.js": "1.3.9",
+    "jsdom": "28.0.0",
+    "opentype.js": "2.0.0",
+    "typescript": "7.0.2",
+    "vitest": "4.1.10"
+  }
+}
