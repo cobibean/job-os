@@ -1,5 +1,17 @@
 # JobOS Agent Guidance
 
+## Product scope and security posture
+
+JobOS is a personal, private, single-user application for Cobi. It is not a public SaaS product, a multi-tenant platform, or enterprise software.
+
+- Optimize first for core workflows that work reliably in the exact installed app.
+- Do not add enterprise-grade security architecture, speculative threat-model defenses, policy layers, approval systems, or validation gates unless they address a concrete risk in JobOS's real single-user environment.
+- Security work must be proportional and evidence-based. Prefer the smallest maintainable safeguard that prevents a demonstrated problem.
+- The primary security boundary is preventing Cobi's private data, files, credentials, conversations, and application state from being exposed to the public Internet or unauthorized external parties.
+- Continue using normal baseline protections for secrets, untrusted network content, path traversal, and destructive actions, but do not let speculative hardening block ordinary local files or basic product functionality.
+- A feature is not complete because its backend, schema, or tests are sophisticated. Its primary user workflow must work end to end through the exact installed application using representative real data.
+- For document-editor work specifically, opening and editing Cobi's real DOCX files is a required acceptance gate. Synthetic fixtures, direct importer calls, blank documents, and direct IPC/API tests are diagnostics only.
+
 ## Product feature ideas
 
 Before planning new JobOS features, read the lightweight wishlist:
@@ -7,6 +19,14 @@ Before planning new JobOS features, read the lightweight wishlist:
 - `docs/notebooks/jobos-feature-wishlist-notebook-2026-07-21.md`
 
 Treat wishlist entries as ideas for discussion, not approved implementation work.
+
+## Resume and cover-letter artifact pairing
+
+- Every final resume or cover letter must be created, published, and delivered as a matched PDF/DOCX pair generated from the same document revision.
+- A PDF without its corresponding DOCX, or a DOCX without its corresponding PDF, is incomplete and must not be described as finished, published, submission-ready, or delivered.
+- Before reporting completion or delivery, verify that both files exist and report the exact path for each file.
+- If cross-device delivery was requested, transfer and verify both files individually.
+- If either format cannot be produced or delivered, report the blocker plainly and treat the document as incomplete.
 
 ## Installed desktop acceptance
 
