@@ -114,6 +114,20 @@ afterEach(() => {
 })
 
 describe('trusted document workspace', () => {
+  it('labels each document action as an editor entry point', async () => {
+    installDocuments()
+    render(<DocumentWorkspace hydrated job={job} onViewChange={vi.fn()} restoredArtifactId={null} restoredPage={1} restoredZoom={1} />)
+
+    await screen.findByText('Newest successful revision · render-2 · source source-2')
+    expect(screen.getByRole('button', { name: 'Open Resume in Editor' })).not.toBeNull()
+    expect(screen.getByRole('button', { name: 'Open Cover Letter in Editor' })).not.toBeNull()
+    expect(screen.getByRole('button', { name: 'Open References in Editor' })).not.toBeNull()
+    expect(screen.getByText('Resume Editor')).not.toBeNull()
+    expect(screen.getByText('Cover Letter Editor')).not.toBeNull()
+    expect(screen.getByText('References Editor')).not.toBeNull()
+    expect(screen.queryByRole('button', { name: /^(Create|Edit) (Resume|Cover Letter|References)$/ })).toBeNull()
+  })
+
   it('discovers the selected job artifact and persists page and zoom', async () => {
     const documents = installDocuments()
     const onViewChange = vi.fn()
