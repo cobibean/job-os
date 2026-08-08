@@ -1,4 +1,4 @@
-import type { ParsedDoc, SectionInfo, SectionSettings, DocGrid } from './types'
+import type { ParsedDoc, SectionInfo, SectionSettings, DocGrid } from './types.js'
 
 /** US Letter, portrait, 1-inch margins */
 export const DEFAULT_SECTION: SectionSettings = {

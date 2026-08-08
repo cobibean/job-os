@@ -1,4 +1,4 @@
-import { escapeXmlAttr } from './xml-utils'
+import { escapeXmlAttr } from './xml-utils.js'
 
 /**
  * Text watermark support. Word implements watermarks as a VML shape with a

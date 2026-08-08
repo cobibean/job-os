@@ -6,11 +6,16 @@
   "type": "module",
   "description": "JobOS-owned OOXML-aware Tiptap editor core derived from pinned GenOffice sources",
   "exports": {
-    ".": "./src/index.ts",
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
     "./editor.css": "./src/editor.css"
   },
+  "types": "./dist/index.d.ts",
   "scripts": {
     "boundary": "node scripts/assert-source-boundary.mjs",
+    "build": "tsc -p tsconfig.build.json",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },

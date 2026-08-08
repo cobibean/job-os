@@ -1,6 +1,6 @@
-import { patchParagraphTexts } from './text-patch'
-import type { NoteInfo, NoteRun } from './types'
-import { escapeXmlAttr, escapeXmlText } from './xml-utils'
+import { patchParagraphTexts } from './text-patch.js'
+import type { NoteInfo, NoteRun } from './types.js'
+import { escapeXmlAttr, escapeXmlText } from './xml-utils.js'
 
 /**
  * Footnotes / endnotes part handling (word/footnotes.xml, word/endnotes.xml).

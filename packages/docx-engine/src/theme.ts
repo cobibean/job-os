@@ -1,5 +1,5 @@
-import type { ThemeColors, ThemeFonts } from './types'
-import { escapeXmlAttr } from './xml-utils'
+import type { ThemeColors, ThemeFonts } from './types.js'
+import { escapeXmlAttr } from './xml-utils.js'
 
 /**
  * Theme part support (word/theme/theme1.xml). Theme fonts rewrite the

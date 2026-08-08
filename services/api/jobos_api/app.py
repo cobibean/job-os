@@ -6,6 +6,7 @@ import json
 import sqlite3
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager, contextmanager
+from datetime import UTC, datetime
 from functools import wraps
 from threading import Lock
 from typing import Annotated, Literal, ParamSpec, TypeVar, cast
@@ -35,6 +36,12 @@ from jobos_api.conversations import (
     conversation_event_source,
 )
 from jobos_api.device_auth import DeviceAuthenticator, DeviceIdentity
+from jobos_api.document_files import (
+    DOCUMENT_FILE_ID,
+    DocumentFileList,
+    DocumentFileRecord,
+    observed_document_file,
+)
 from jobos_api.document_operations import (
     apply_operations,
     semantic_outline,
@@ -479,6 +486,8 @@ def create_app(
                     status_code=422,
                     detail="Cannot associate a browser tab with an unknown job",
                 ) from error
+        if command.command.startswith("document."):
+            ensure_job(arguments["job_id"])
         request_hash = hashlib.sha256(
             json.dumps(
                 {"command": command.command, "arguments": arguments, "origin": command.origin},
@@ -486,13 +495,34 @@ def create_app(
                 sort_keys=True,
             ).encode()
         ).hexdigest()
-        durable_command = command.command not in {"tabs.inspect", "page.snapshot"}
+        durable_command = command.command not in {
+            "tabs.inspect", "page.snapshot", "document.inspect"
+        }
         target_device_id = (
             state_store.active_turn_origin_device_id() or identity.device_id
             if command.origin == "mcp"
             else identity.device_id
         )
-        target = f"browser/{target_device_id}/{arguments.get('tab_id', 'desktop')}"
+        target = (
+            f"document/{arguments['job_id']}/{arguments['document_key']}"
+            if command.command.startswith("document.")
+            else f"browser/{target_device_id}/{arguments.get('tab_id', 'desktop')}"
+        )
+
+        def observe_document_result(result: BrowserCommandResponse) -> None:
+            if not command.command.startswith("document.") or result.state != "completed":
+                return
+            state_store.observe_document_file(
+                observed_document_file(
+                    arguments["job_id"],
+                    result.data,
+                    observed_at=(
+                        datetime.now(UTC)
+                        .isoformat(timespec="milliseconds")
+                        .replace("+00:00", "Z")
+                    ),
+                )
+            )
 
         def ensure_activity(result: BrowserCommandResponse) -> None:
             if command.origin != "mcp":
@@ -501,7 +531,11 @@ def create_app(
                 turn_id=None,
                 event_type="activity",
                 state="completed" if result.state == "completed" else "failed",
-                summary=f"Browser: {command.command.replace('.', ' ')}",
+                summary=(
+                    f"Document: {command.command.removeprefix('document.').replace('_', ' ')}"
+                    if command.command.startswith("document.")
+                    else f"Browser: {command.command.replace('.', ' ')}"
+                ),
                 detail={
                     "origin": "mcp",
                     "command": command.command,
@@ -511,7 +545,7 @@ def create_app(
                 source_event_id=mutation_activity_source_id(
                     actor_id=identity.device_id,
                     target_resource=target,
-                    command_name=f"browser.{command.command}",
+                    command_name=command.command,
                     idempotency_key=command.idempotency_key,
                 ),
             )
@@ -527,13 +561,19 @@ def create_app(
                 )
                 if replay is not None:
                     response = BrowserCommandResponse.model_validate(replay)
+                    observe_document_result(response)
                     ensure_activity(response)
                     return response
             result = await browser_capabilities.execute(command, device_id=target_device_id)
+            observe_document_result(result)
             result_dict = result.model_dump(mode="json")
             if durable_command:
                 state_store.record_mutation_result(
-                    event_type="browser_action",
+                    event_type=(
+                        "document_action"
+                        if command.command.startswith("document.")
+                        else "browser_action"
+                    ),
                     origin=command.origin,
                     actor_id=identity.device_id,
                     target_resource=target,
@@ -574,6 +614,29 @@ def create_app(
         identity: Annotated[DeviceIdentity, Depends(authenticated_device)],
     ) -> DesktopCapabilityPresence:
         return await browser_capabilities.presence(identity.device_id)
+
+    @app.get("/v1/jobs/{job_id}/document-files", tags=["document-files"])
+    def document_files_list(
+        job_id: str, _: Annotated[DeviceIdentity, Depends(authenticated_device)]
+    ) -> DocumentFileList:
+        ensure_job(job_id)
+        return DocumentFileList(
+            documents=[
+                DocumentFileRecord.model_validate(value)
+                for value in state_store.list_document_files(job_id)
+            ]
+        )
+
+    @app.get("/v1/document-files/{document_id}", tags=["document-files"])
+    def document_file_get(
+        document_id: str, _: Annotated[DeviceIdentity, Depends(authenticated_device)]
+    ) -> DocumentFileRecord:
+        if not DOCUMENT_FILE_ID.fullmatch(document_id):
+            raise HTTPException(status_code=422, detail="Invalid document file ID")
+        value = state_store.get_document_file(document_id)
+        if value is None:
+            raise HTTPException(status_code=404, detail="Document file not found")
+        return DocumentFileRecord.model_validate(value)
 
     @app.get("/v1/device-session", tags=["system"])
     def device_session(

@@ -1,5 +1,5 @@
-import { isPillPreset, presetPath, presetPolygon } from './preset-geometry'
-export { WORDART_PRESETS, wordArtStrokePx, wordArtSolidColor } from './wordart-presets'
+import { isPillPreset, presetPath, presetPolygon } from './preset-geometry.js'
+export { WORDART_PRESETS, wordArtStrokePx, wordArtSolidColor } from './wordart-presets.js'
 
 const round = (value: number) => Math.round(value * 100) / 100
 

@@ -6,10 +6,10 @@ import {
   type TableCell,
   type TableModel,
 } from '@jobos/docx-engine'
-import { pmTableToModel, tableModelToPmNode, type PmMark, type PmNode } from '../editor/convert'
-import { equationBlockJson, inlineEquationNodeJson } from '../editor/equation'
-import { TRACK_IGNORE } from '../editor/revisions'
-import { countWords } from '../word-count'
+import { pmTableToModel, tableModelToPmNode, type PmMark, type PmNode } from '../editor/convert.js'
+import { equationBlockJson, inlineEquationNodeJson } from '../editor/equation.js'
+import { TRACK_IGNORE } from '../editor/revisions.js'
+import { countWords } from '../word-count.js'
 
 /**
  * Agent protocol: the model runs a multi-turn tool-use loop — it reads the document skeleton

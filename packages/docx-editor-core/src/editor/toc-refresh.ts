@@ -1,7 +1,7 @@
 import type { Node as PmNode } from '@tiptap/pm/model'
 import type { Transaction } from '@tiptap/pm/state'
 
-import type { HeadingRef } from './headings'
+import type { HeadingRef } from './headings.js'
 
 /**
  * Backfill tocLine fieldDisplay pages from freshly measured heading pages.

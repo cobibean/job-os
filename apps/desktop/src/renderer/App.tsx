@@ -5,13 +5,13 @@ import { SettingsPanel } from './components/SettingsPanel'
 import { StatusBar } from './components/StatusBar'
 import { WorkbenchLayout } from './components/WorkbenchLayout'
 import { WorkspaceBar } from './components/WorkspaceBar'
-import { DocumentEditorShell } from './document-editor/DocumentEditorShell'
+import { DocxDocumentEditorShell } from './document-editor/DocxDocumentEditorShell'
 import { useConnectivity } from './hooks/useConnectivity'
 import { useJobs } from './hooks/useJobs'
 import { useWorkspace } from './hooks/useWorkspace'
 import { useTheme } from './theme/useTheme'
-import { useCallback, useRef, useState } from 'react'
-import type { EditableDocument } from '../shared/editableDocuments'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import type { DocxOpenResult } from '../shared/docxDocuments'
 
 export function App() {
   const connectivity = useConnectivity()
@@ -23,12 +23,17 @@ export function App() {
   const [agentModalOpen, setAgentModalOpen] = useState(false)
   const [jobListingRequest, setJobListingRequest] = useState<JobListingRequest | null>(null)
   const [documentMutationGeneration, setDocumentMutationGeneration] = useState(0)
-  const [editingDocument, setEditingDocument] = useState<EditableDocument | null>(null)
+  const [editingDocument, setEditingDocument] = useState<DocxOpenResult | null>(null)
   const nextJobListingRequestId = useRef(0)
   const latestNavigatorSelection = useRef(0)
   const navigatorSelectionQueue = useRef(Promise.resolve())
+  const prepareClose = useRef<() => Promise<boolean>>(async () => true)
   const activePreset = layoutState.workspace.selectedPreset
   const activeLayout = layoutState.workspace.layouts[activePreset]
+
+  useEffect(() => window.jobos?.lifecycle?.subscribePrepareClose(
+    () => prepareClose.current()
+  ), [])
 
   const showPublishedDocument = useCallback(() => {
     setDocumentMutationGeneration(generation => generation + 1)
@@ -88,13 +93,12 @@ export function App() {
         themeMode={theme.mode}
       />
       {editingDocument ? (
-        <DocumentEditorShell
-          document={editingDocument}
-          externalGeneration={documentMutationGeneration}
+        <DocxDocumentEditorShell
+          opened={editingDocument}
           jobLabel={jobState.selectedJob
             ? `${jobState.selectedJob.company} · ${jobState.selectedJob.title}`
             : 'Selected job'}
-          onDocumentChange={setEditingDocument}
+          onPrepareClose={handler => { prepareClose.current = handler }}
           onExit={() => {
             setEditingDocument(null)
             setDocumentMutationGeneration(generation => generation + 1)

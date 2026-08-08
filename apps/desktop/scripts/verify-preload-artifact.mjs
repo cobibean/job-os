@@ -6,15 +6,22 @@ import { fileURLToPath } from 'node:url'
 
 const desktopRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const entrypoint = path.join(desktopRoot, 'dist/preload/preload.cjs')
+const workerEntrypoint = path.join(desktopRoot, 'dist/preload/docxWorker.cjs')
 const source = await readFile(entrypoint, 'utf8')
+const workerSource = await readFile(workerEntrypoint, 'utf8')
 const localRequirePattern = /\brequire\s*\(\s*(['"])(?:\.\.?\/)[^'"]*\1\s*\)/g
-const localRequires = [...source.matchAll(localRequirePattern)].map(match => match[0])
 
-assert.deepEqual(
-  localRequires,
-  [],
-  `Sandboxed production preload must be self-contained; found local runtime requires: ${localRequires.join(', ')}`
-)
+for (const [name, preloadSource] of [
+  ['renderer', source],
+  ['DOCX worker', workerSource]
+]) {
+  const localRequires = [...preloadSource.matchAll(localRequirePattern)].map(match => match[0])
+  assert.deepEqual(
+    localRequires,
+    [],
+    `${name} sandboxed production preload must be self-contained; found local runtime requires: ${localRequires.join(', ')}`
+  )
+}
 
 const invokeCalls = []
 const listeners = new Map()
@@ -86,3 +93,36 @@ streamListener({}, update)
 assert.deepEqual(received, [update])
 unsubscribe()
 assert.deepEqual(removedListeners, [['jobos:agent:event', streamListener]])
+
+const workerExposures = []
+const workerIpc = {
+  on() { return workerIpc },
+  removeListener() { return workerIpc },
+  send() {}
+}
+const workerRequire = specifier => {
+  assert.equal(specifier, 'electron', `DOCX worker preload attempted unsupported runtime require: ${specifier}`)
+  return {
+    contextBridge: {
+      exposeInMainWorld(name, bridgeValue) {
+        workerExposures.push([name, bridgeValue])
+      }
+    },
+    ipcRenderer: workerIpc
+  }
+}
+vm.runInNewContext(workerSource, {
+  exports: {},
+  module: { exports: {} },
+  require: workerRequire
+}, { filename: workerEntrypoint })
+
+assert.equal(workerExposures.length, 1, 'DOCX worker preload must expose exactly one bridge')
+const [workerWorldName, workerBridge] = workerExposures[0]
+assert.equal(workerWorldName, 'jobosDocxWorker')
+assert.equal(Object.isFrozen(workerBridge), true, 'DOCX worker bridge must be frozen')
+assert.deepEqual(
+  Object.keys(workerBridge).sort(),
+  ['respond', 'subscribe'],
+  'DOCX worker bridge must expose only request and response methods'
+)

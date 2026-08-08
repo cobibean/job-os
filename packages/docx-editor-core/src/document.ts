@@ -10,10 +10,10 @@ import {
   type ParsedDocFull,
 } from '@jobos/docx-engine'
 
-import { docStyleCss } from './doc-style-css'
-import { blocksToPmDoc, pmDocToSavePlan, type PmNode } from './editor/convert'
-import { editorExtensions } from './editor/extensions'
-import { setModuleLang, type Lang } from './locale'
+import { docStyleCss } from './doc-style-css.js'
+import { blocksToPmDoc, pmDocToSavePlan, type PmNode } from './editor/convert.js'
+import { editorExtensions } from './editor/extensions.js'
+import { setModuleLang, type Lang } from './locale.js'
 
 export interface DocumentCapabilities {
   mode: 'editable' | 'protected'

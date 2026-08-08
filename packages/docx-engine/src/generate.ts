@@ -6,8 +6,8 @@ import type {
   TabStop,
   TableCell,
   TableModel,
-} from './types'
-import { escapeXmlAttr, escapeXmlText } from './xml-utils'
+} from './types.js'
+import { escapeXmlAttr, escapeXmlText } from './xml-utils.js'
 
 export interface GenerateContext {
   /** heading level -> styleId existing in the original styles.xml */

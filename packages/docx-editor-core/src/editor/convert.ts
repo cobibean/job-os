@@ -36,9 +36,9 @@ import {
   type TextboxDisplay,
   type TextboxParaPatch,
 } from '@jobos/docx-engine'
-import { t } from '../locale'
-import { inlineMathML } from './equation'
-import { isStraightLineKind } from './shape-svg'
+import { t } from '../locale.js'
+import { inlineMathML } from './equation.js'
+import { isStraightLineKind } from './shape-svg.js'
 
 /** minimal ProseMirror JSON shapes */
 export interface PmMark {

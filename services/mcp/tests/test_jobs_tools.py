@@ -202,6 +202,8 @@ async def test_mcp_server_exposes_phase_seven_parity_tools_while_retaining_job_t
         "document_publish",
         "document_approve",
         "document_select",
+        "document_file_inspect",
+        "document_file_apply",
         "browser_tabs_inspect",
         "browser_tab_create",
         "browser_tab_select",

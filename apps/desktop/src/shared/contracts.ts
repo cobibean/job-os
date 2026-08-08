@@ -1,3 +1,4 @@
+import type { DocxDocumentsBridge } from './docxDocuments.js'
 import type {
   ApplyEditableDocumentOperationsRequest,
   CreateEditableDocumentSnapshotRequest,
@@ -261,6 +262,9 @@ export type AgentStreamUpdate =
   | { kind: 'connection'; state: AgentConnectionState }
 
 export interface JobOsRendererBridge {
+  lifecycle: {
+    subscribePrepareClose: (handler: () => Promise<boolean>) => () => void
+  }
   shell: {
     openExternal: (url: string) => Promise<void>
   }
@@ -324,6 +328,7 @@ export interface JobOsRendererBridge {
     reveal: (artifactId: string) => Promise<string>
     open: (artifactId: string) => Promise<string>
   }
+  docxDocuments: DocxDocumentsBridge
   editableDocuments: {
     list: (jobId: string) => Promise<EditableDocumentSummary[]>
     getForJob: (jobId: string, documentKey: EditableDocumentKey) => Promise<EditableDocument>

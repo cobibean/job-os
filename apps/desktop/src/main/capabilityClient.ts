@@ -1,9 +1,11 @@
+import type { StructuredDocumentOperation } from '@jobos/docx-editor-core'
 import type { BrowserSemanticSnapshot, BrowserState } from '../shared/contracts.js'
 
 const COMMANDS = new Set([
   'tabs.inspect', 'tab.create', 'tab.select', 'tab.associate', 'tab.close', 'tabs.reorder',
   'tab.navigate', 'tab.back', 'tab.forward', 'tab.reload', 'tab.stop',
-  'page.snapshot', 'element.click', 'element.type', 'page.scroll'
+  'page.snapshot', 'element.click', 'element.type', 'page.scroll',
+  'document.inspect', 'document.apply_operations'
 ])
 const TAB_ID = /^[A-Za-z0-9_-]{1,128}$/
 const TARGET_ID = /^t_[A-Za-z0-9_-]{1,64}$/
@@ -35,6 +37,23 @@ interface BrowserCapabilities {
   scroll?: (tabId: string, direction: 'up' | 'down', amount?: number) => Promise<BrowserState>
 }
 
+interface DocumentCapabilities {
+  inspect: (jobId: string, documentKey: 'resume' | 'cover_letter' | 'references') => Promise<{
+    binding: { documentKey: string; documentLabel: string; filename: string; sha256: string; revision: number; capabilities: unknown }
+    context: unknown
+  }>
+  applyOperations: (
+    jobId: string,
+    documentKey: 'resume' | 'cover_letter' | 'references',
+    expectedSha256: string,
+    operations: StructuredDocumentOperation[]
+  ) => Promise<{
+    binding: { documentKey: string; documentLabel: string; filename: string; sha256: string; revision: number; capabilities: unknown }
+    context: unknown
+    recoveryId: string
+  }>
+}
+
 interface CapabilityCommand {
   type: string
   command_id: string
@@ -51,7 +70,7 @@ interface CapabilityResult {
   state: 'completed' | 'failed'
   outcome: string
   data?: Record<string, unknown>
-  error?: { code: 'tab_not_found' | 'timeout' | 'validation' | 'execution'; message: string }
+  error?: { code: 'tab_not_found' | 'document_not_found' | 'conflict' | 'timeout' | 'validation' | 'execution'; message: string }
 }
 
 function safeState(state: BrowserState): Record<string, unknown> {
@@ -67,6 +86,18 @@ function safeState(state: BrowserState): Record<string, unknown> {
       can_go_forward: tab.canGoForward,
       crashed: tab.crashed
     }))
+  }
+}
+
+function safeDocument(value: Awaited<ReturnType<DocumentCapabilities['inspect']>>): Record<string, unknown> {
+  return {
+    document_key: value.binding.documentKey,
+    document_label: value.binding.documentLabel,
+    filename: value.binding.filename,
+    sha256: value.binding.sha256,
+    revision: value.binding.revision,
+    capabilities: value.binding.capabilities,
+    context: value.context
   }
 }
 
@@ -90,7 +121,8 @@ function requiredMethod<T extends keyof BrowserCapabilities>(
 
 export async function dispatchCapabilityCommand(
   manager: BrowserCapabilities,
-  payload: CapabilityCommand
+  payload: CapabilityCommand,
+  documents?: DocumentCapabilities
 ): Promise<CapabilityResult> {
   const commandId = typeof payload.command_id === 'string' ? payload.command_id : 'invalid'
   try {
@@ -100,7 +132,7 @@ export async function dispatchCapabilityCommand(
       || (payload.origin !== 'user' && payload.origin !== 'mcp')
       || !COMMANDS.has(payload.command) || !payload.arguments
       || typeof payload.arguments !== 'object') {
-      return failed(commandId, 'validation', 'Unsupported or invalid browser command.')
+      return failed(commandId, 'validation', 'Unsupported or invalid desktop command.')
     }
     const deadline = Date.parse(payload.deadline_at)
     if (!Number.isFinite(deadline) || deadline <= Date.now()
@@ -109,12 +141,37 @@ export async function dispatchCapabilityCommand(
     }
     const args = payload.arguments
     const tabId = args.tab_id
-    if (!['tabs.inspect', 'tab.create', 'tabs.reorder'].includes(payload.command)
+    const isDocumentCommand = payload.command.startsWith('document.')
+    if (!isDocumentCommand && !['tabs.inspect', 'tab.create', 'tabs.reorder'].includes(payload.command)
       && (typeof tabId !== 'string' || !TAB_ID.test(tabId))) {
       return failed(commandId, 'validation', 'Invalid browser tab identifier.')
     }
     let data: Record<string, unknown>
     switch (payload.command) {
+      case 'document.inspect': {
+        if (!documents || typeof args.job_id !== 'string' || !args.job_id
+          || !['resume', 'cover_letter', 'references'].includes(String(args.document_key))) throw new TypeError()
+        data = safeDocument(await documents.inspect(
+          args.job_id,
+          args.document_key as 'resume' | 'cover_letter' | 'references'
+        ))
+        break
+      }
+      case 'document.apply_operations': {
+        if (!documents || typeof args.job_id !== 'string' || !args.job_id
+          || !['resume', 'cover_letter', 'references'].includes(String(args.document_key))
+          || typeof args.expected_sha256 !== 'string' || !/^[a-f0-9]{64}$/.test(args.expected_sha256)
+          || !Array.isArray(args.operations) || args.operations.length < 1 || args.operations.length > 100
+          || JSON.stringify(args.operations).length > 100_000) throw new TypeError()
+        const result = await documents.applyOperations(
+          args.job_id,
+          args.document_key as 'resume' | 'cover_letter' | 'references',
+          args.expected_sha256,
+          args.operations as StructuredDocumentOperation[]
+        )
+        data = { ...safeDocument(result), recovery_id: result.recoveryId }
+        break
+      }
       case 'tabs.inspect': data = safeState(manager.inspect()); break
       case 'tab.create': {
         if ((args.url !== undefined && !ordinaryUrl(args.url))
@@ -184,6 +241,12 @@ export async function dispatchCapabilityCommand(
     if (error instanceof TypeError) {
       return failed(commandId, 'validation', 'Invalid browser command arguments.')
     }
+    if (error instanceof Error && /not bound|binding not found/i.test(error.message)) {
+      return failed(commandId, 'document_not_found', 'The DOCX is not bound on this device; choose it in JobOS first.')
+    }
+    if (error instanceof Error && /changed outside|expected.*hash|conflict/i.test(error.message)) {
+      return failed(commandId, 'conflict', 'The DOCX changed; inspect the latest revision and retry.')
+    }
     if (error instanceof Error && error.message.toLowerCase().includes('tab not found')) {
       return failed(commandId, 'tab_not_found', 'The browser tab no longer exists; inspect tabs and retry.')
     }
@@ -209,7 +272,8 @@ interface CapabilityDependencies {
 export function startDesktopCapabilityClient(
   manager: BrowserCapabilities,
   config: CapabilityConfig,
-  dependencies: CapabilityDependencies = {}
+  dependencies: CapabilityDependencies = {},
+  documents?: DocumentCapabilities
 ): () => void {
   const socketFactory = dependencies.socketFactory
     ?? ((url: string) => new WebSocket(url) as unknown as SocketLike)
@@ -252,7 +316,7 @@ export function startDesktopCapabilityClient(
             if (heartbeatTimer) clearTimer(heartbeatTimer)
             scheduleHeartbeat(currentSocket)
           } else if (payload.type === 'command') {
-            const result = await dispatchCapabilityCommand(manager, payload as unknown as CapabilityCommand)
+            const result = await dispatchCapabilityCommand(manager, payload as unknown as CapabilityCommand, documents)
             if (!stopped && socket === currentSocket && currentSocket.readyState === 1) currentSocket.send(JSON.stringify(result))
           }
         } catch { /* malformed frames never cross the desktop boundary */ }

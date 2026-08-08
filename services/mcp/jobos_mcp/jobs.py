@@ -95,6 +95,12 @@ class JobOsMcpClient:
         return quote(value, safe="")
 
     @staticmethod
+    def _job_id(value: str) -> str:
+        if not isinstance(value, str) or not re.fullmatch(r"[^/\s]{1,128}", value):
+            raise ValueError("Invalid job ID")
+        return value
+
+    @staticmethod
     def _document_key(value: str) -> str:
         if value not in {"resume", "cover_letter", "references"}:
             raise ValueError("Invalid document key")
@@ -369,6 +375,52 @@ class JobOsMcpClient:
         command = {key: workspace[key] for key in request_fields if key in workspace}
         command.update({"active_artifact_id": artifact_id, "active_center_surface": "document"})
         return await self.update_workspace(command, idempotency_key=idempotency_key)
+
+    async def inspect_document_file(
+        self,
+        job_id: str,
+        document_key: str,
+        *,
+        idempotency_key: str | None = None,
+        timeout_ms: int = 10_000,
+    ) -> dict[str, Any]:
+        return await self.browser_command(
+            "document.inspect",
+            {
+                "job_id": self._job_id(job_id),
+                "document_key": self._document_key(document_key),
+            },
+            idempotency_key=idempotency_key,
+            timeout_ms=timeout_ms,
+        )
+
+    async def apply_document_file_operations(
+        self,
+        job_id: str,
+        document_key: str,
+        expected_sha256: str,
+        operations: list[dict[str, Any]],
+        *,
+        idempotency_key: str | None = None,
+        timeout_ms: int = 10_000,
+    ) -> dict[str, Any]:
+        if not re.fullmatch(r"[a-f0-9]{64}", expected_sha256):
+            raise ValueError("Invalid expected DOCX SHA-256")
+        if not 1 <= len(operations) <= 100 or any(
+            not isinstance(operation, dict) for operation in operations
+        ):
+            raise ValueError("Invalid DOCX operation list")
+        return await self.browser_command(
+            "document.apply_operations",
+            {
+                "job_id": self._job_id(job_id),
+                "document_key": self._document_key(document_key),
+                "expected_sha256": expected_sha256,
+                "operations": operations,
+            },
+            idempotency_key=idempotency_key,
+            timeout_ms=timeout_ms,
+        )
 
     async def browser_command(
         self,

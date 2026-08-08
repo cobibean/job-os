@@ -1,5 +1,5 @@
-import { decodeSymbolText, isSymbolFont } from './symbol-fonts'
-import type { NumberingDef } from './types'
+import { decodeSymbolText, isSymbolFont } from './symbol-fonts.js'
+import type { NumberingDef } from './types.js'
 
 /** Word represents bullets with Symbol/Wingdings private-use characters; map them to common glyphs */
 const BULLET_GLYPHS: Record<string, string> = {

@@ -1,5 +1,5 @@
-import type { NewInkImage } from './types'
-import { escapeXmlAttr } from './xml-utils'
+import type { NewInkImage } from './types.js'
+import { escapeXmlAttr } from './xml-utils.js'
 
 /**
  * Ink annotations (freehand strokes). Each saved annotation is a floating picture —

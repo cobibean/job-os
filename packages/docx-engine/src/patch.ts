@@ -1,12 +1,12 @@
 import JSZip from 'jszip'
-import { applyImageWrap, generateParagraphXml, inlineRunsXml, splitXmlChildren } from './generate'
+import { applyImageWrap, generateParagraphXml, inlineRunsXml, splitXmlChildren } from './generate.js'
 import {
   NOTE_CONTENT_TYPE,
   NOTE_PART_PATH,
   NOTE_REL_TYPE,
   buildNotesXml,
   type NoteKind,
-} from './notes'
+} from './notes.js'
 import {
   INK_MEDIA_PATH_RE,
   INK_MEDIA_PREFIX,
@@ -14,16 +14,16 @@ import {
   anchoredInkRunXml,
   injectInkRunsIntoParagraph,
   stripInkRuns,
-} from './ink'
-import { assertZipWithinLimits, type ParseExtras } from './parse'
-import { BLANK_NUMBERING_XML, abstractNumXml, type CustomNumberingLevel } from './blank'
-import { applyPageNumType, applySectionSettings, applySectionStartType } from './section'
+} from './ink.js'
+import { assertZipWithinLimits, type ParseExtras } from './parse.js'
+import { BLANK_NUMBERING_XML, abstractNumXml, type CustomNumberingLevel } from './blank.js'
+import { applyPageNumType, applySectionSettings, applySectionStartType } from './section.js'
 import {
   CUSTOM_XML_REL_TYPE,
   buildSourcesItemPropsXml,
   buildSourcesXml,
   findSourcesPart,
-} from './sources'
+} from './sources.js'
 import {
   THEME_CONTENT_TYPE,
   THEME_PART_PATH,
@@ -31,8 +31,8 @@ import {
   applyThemeColors,
   applyThemeFonts,
   buildThemeXml,
-} from './theme'
-import { buildChartPartXml, buildChartWorkbookXlsxBase64, CHART_WORKBOOK_REL_TYPE } from './chart'
+} from './theme.js'
+import { buildChartPartXml, buildChartWorkbookXlsxBase64, CHART_WORKBOOK_REL_TYPE } from './chart.js'
 import type {
   CommentInfo,
   DocProtection,
@@ -47,11 +47,11 @@ import type {
   SourceInfo,
   ThemeColors,
   ThemeFonts,
-} from './types'
-import { TOTAL_PAGES_MARK } from './types'
-import { patchParagraphTexts } from './text-patch'
-import { WATERMARK_NS, watermarkParagraphXml } from './watermark'
-import { escapeXmlAttr, escapeXmlText } from './xml-utils'
+} from './types.js'
+import { TOTAL_PAGES_MARK } from './types.js'
+import { patchParagraphTexts } from './text-patch.js'
+import { WATERMARK_NS, watermarkParagraphXml } from './watermark.js'
+import { escapeXmlAttr, escapeXmlText } from './xml-utils.js'
 
 export type ParsedDocFull = ParsedDoc & { extras: ParseExtras }
 

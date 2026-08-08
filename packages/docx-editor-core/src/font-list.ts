@@ -1,4 +1,4 @@
-import type { Lang } from './locale'
+import type { Lang } from './locale.js'
 
 /**
  * Font dropdown candidates grouped by script, ordered per UI language so the

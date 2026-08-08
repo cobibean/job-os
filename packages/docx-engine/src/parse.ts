@@ -1,15 +1,15 @@
 import JSZip from 'jszip'
-import { parseChartPartXml } from './chart'
-import { findInkRuns, stripInkRuns } from './ink'
-import { computeListMarkers, type ListItemRef } from './list-markers'
-import { ommlFragmentsOf, ommlToLatex, ommlToMathML } from './math'
-import { splitXmlChildren } from './generate'
-import { NOTE_PART_PATH, parseNotesXml } from './notes'
-import { scanBody, type BodyElement } from './scan'
-import { findSourcesPart, parseSourcesXml } from './sources'
-import { decodeSymbolChar, decodeSymbolText } from './symbol-fonts'
-import { THEME_PART_PATH, readThemeColors, readThemeFonts, resolveThemeColor } from './theme'
-import { TOTAL_PAGES_MARK } from './types'
+import { parseChartPartXml } from './chart.js'
+import { findInkRuns, stripInkRuns } from './ink.js'
+import { computeListMarkers, type ListItemRef } from './list-markers.js'
+import { ommlFragmentsOf, ommlToLatex, ommlToMathML } from './math.js'
+import { splitXmlChildren } from './generate.js'
+import { NOTE_PART_PATH, parseNotesXml } from './notes.js'
+import { scanBody, type BodyElement } from './scan.js'
+import { findSourcesPart, parseSourcesXml } from './sources.js'
+import { decodeSymbolChar, decodeSymbolText } from './symbol-fonts.js'
+import { THEME_PART_PATH, readThemeColors, readThemeFonts, resolveThemeColor } from './theme.js'
+import { TOTAL_PAGES_MARK } from './types.js'
 import type {
   Block,
   ChartDisplay,
@@ -42,8 +42,8 @@ import type {
   TextboxParaDisplay,
   ThemeColors,
   ThemeFonts,
-} from './types'
-import { readWatermarkText } from './watermark'
+} from './types.js'
+import { readWatermarkText } from './watermark.js'
 import {
   attrsOf,
   boolProp,
@@ -57,7 +57,7 @@ import {
   underlineProp,
   xmlParser,
   type XNode,
-} from './xml-utils'
+} from './xml-utils.js'
 
 const MAX_ZIP_PARTS = 10000
 const MAX_PART_UNCOMPRESSED_BYTES = 512 * 1024 * 1024
@@ -1393,7 +1393,7 @@ function extractParaFormat(pPr: XNode): ParaFormat | undefined {
   }
   const tabsEl = findChild(pPr, 'w:tabs')
   if (tabsEl) {
-    const stops: import('./types').TabStop[] = []
+    const stops: import('./types.js').TabStop[] = []
     for (const tab of findChildren(tabsEl, 'w:tab')) {
       const attrs = attrsOf(tab)
       const pos = parseInt(attrs['w:pos'] ?? '', 10)
@@ -1403,7 +1403,7 @@ function extractParaFormat(pPr: XNode): ParaFormat | undefined {
       const safeVal = validVals.includes(val as (typeof validVals)[number])
         ? (val as (typeof validVals)[number])
         : 'left'
-      const stop: import('./types').TabStop = { pos, val: safeVal }
+      const stop: import('./types.js').TabStop = { pos, val: safeVal }
       const leader = attrs['w:leader']
       if (leader && leader !== 'none') {
         const validLeaders = ['dot', 'hyphen', 'underscore', 'heavy', 'middleDot'] as const

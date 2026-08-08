@@ -6,11 +6,19 @@
   "type": "module",
   "description": "Pinned OOXML-retaining DOCX parser and patch engine for JobOS",
   "exports": {
-    ".": "./src/index.ts",
-    "./math": "./src/math.ts"
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./math": {
+      "types": "./dist/math.d.ts",
+      "import": "./dist/math.js"
+    }
   },
+  "types": "./dist/index.d.ts",
   "scripts": {
     "boundary": "node scripts/assert-source-boundary.mjs",
+    "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",

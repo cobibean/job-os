@@ -1,9 +1,10 @@
+import { randomUUID } from 'node:crypto'
 import { writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { app, BrowserWindow, clipboard, dialog, ipcMain, session, shell, WebContentsView } from 'electron'
-import type { IpcMainInvokeEvent } from 'electron'
+import type { IpcMainEvent, IpcMainInvokeEvent } from 'electron'
 
 import type { BrowserBounds, JobSortMode, JobStatus, WorkspaceSnapshot } from '../shared/contracts.js'
 import { createMainAgentClient, startAgentEventStream } from './agent.js'
@@ -16,6 +17,12 @@ import { startDesktopCapabilityClient } from './capabilityClient.js'
 import { initializeDesktopRuntime } from './desktopRuntime.js'
 import type { DesktopRuntimeState } from './desktopRuntime.js'
 import { runtimeConfigPath } from './runtimeConfig.js'
+import { DocxWorkerManager } from './DocxWorkerManager.js'
+import { registerDocxDocumentsIpc } from './docxDocumentsIpc.js'
+import { DocxDocumentsService } from './docxDocuments.js'
+import { DocxFileStore } from './docxFileStore.js'
+import { LocalDocxBindingStore } from './localDocxBindingStore.js'
+import { activateVisibleWindow } from './mainWindowLifecycle.js'
 import { createMainJobsClient, startJobEventStream } from './jobs.js'
 import type { JobsConfig } from './jobs.js'
 import { safeExternalUrl } from '../shared/externalLinks.js'
@@ -30,6 +37,10 @@ const rendererRoot = path.resolve(currentDirectory, '../renderer')
 const developmentUrl = process.env.VITE_DEV_SERVER_URL
 const developmentOrigin = developmentUrl ? new URL(developmentUrl).origin : undefined
 let browserManager: BrowserManager | null = null
+let mainWindow: BrowserWindow | null = null
+let docxDocumentsService: DocxDocumentsService | null = null
+let docxWorkerManager: DocxWorkerManager | null = null
+let appIsQuitting = false
 let markBrowserRestored: () => void = () => undefined
 const apiLifecycle = createApiLifecycle()
 let desktopRuntimeState: DesktopRuntimeState = {
@@ -275,6 +286,32 @@ function registerDocumentsInterface(): void {
   ipcMain.handle('jobos:documents:open', (event, id: string) => trusted(event).open(artifactId(id)))
 }
 
+async function registerDocxDocumentsInterface(): Promise<void> {
+  const userData = app.getPath('userData')
+  const recoveryRoot = path.join(userData, 'docx-recovery')
+  docxWorkerManager = new DocxWorkerManager(ipcMain)
+  docxDocumentsService = new DocxDocumentsService({
+    dialog,
+    bindings: new LocalDocxBindingStore(path.join(userData, 'docx-bindings.json')),
+    files: new DocxFileStore({
+      recoveryRoot,
+      denyRoots: [recoveryRoot, path.join(app.getPath('temp'), 'jobos-artifacts')]
+    }),
+    emit: value => {
+      for (const window of BrowserWindow.getAllWindows()) {
+        if (!window.isDestroyed()) window.webContents.send('jobos:docx:external-change', value)
+      }
+    },
+    worker: docxWorkerManager
+  })
+  await docxDocumentsService.initialize()
+  registerDocxDocumentsIpc(ipcMain, event => {
+    assertTrustedRenderer(event)
+    if (!docxDocumentsService) throw new Error('DOCX editor unavailable')
+    return docxDocumentsService
+  })
+}
+
 function registerEditableDocumentsInterface(): void {
   const config = jobsConfig()
   const editableDocuments = config
@@ -311,6 +348,42 @@ async function createWindow(): Promise<BrowserWindow> {
   window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
   window.webContents.on('will-navigate', event => event.preventDefault())
 
+  let allowClose = false
+  let pendingClose: { requestId: string; timer: NodeJS.Timeout } | null = null
+  const onPrepareCloseResult = (
+    event: IpcMainEvent,
+    requestId: unknown,
+    safe: unknown
+  ) => {
+    if (
+      event.sender !== window.webContents
+      || typeof requestId !== 'string'
+      || requestId !== pendingClose?.requestId
+    ) return
+    clearTimeout(pendingClose.timer)
+    pendingClose = null
+    if (safe !== true) {
+      appIsQuitting = false
+      return
+    }
+    allowClose = true
+    if (appIsQuitting) app.quit()
+    else window.close()
+  }
+  ipcMain.on('jobos:window:prepare-close-result', onPrepareCloseResult)
+  window.on('close', event => {
+    if (allowClose || window.webContents.isLoadingMainFrame()) return
+    event.preventDefault()
+    if (pendingClose) return
+    const requestId = `close_${randomUUID()}`
+    const timer = setTimeout(() => {
+      if (pendingClose?.requestId === requestId) pendingClose = null
+      appIsQuitting = false
+    }, 15_000)
+    pendingClose = { requestId, timer }
+    window.webContents.send('jobos:window:prepare-close', requestId)
+  })
+
   const browserSession = session.fromPartition(BROWSER_PARTITION, { cache: true })
   browserManager = new BrowserManager({
     window,
@@ -326,7 +399,7 @@ async function createWindow(): Promise<BrowserWindow> {
     ? startDesktopCapabilityClient(browserManager, {
         ...capabilityConfig,
         deviceId: desktopRuntimeState.runtime?.deviceId ?? 'primary-device'
-      }, { browserReady })
+      }, { browserReady }, docxDocumentsService ?? undefined)
     : () => undefined
 
   if (developmentUrl) {
@@ -361,6 +434,8 @@ async function createWindow(): Promise<BrowserWindow> {
     window.webContents.send('jobos:agent:event', { kind: 'connection', state: 'offline' })
   }
   window.once('closed', () => {
+    if (pendingClose) clearTimeout(pendingClose.timer)
+    ipcMain.removeListener('jobos:window:prepare-close-result', onPrepareCloseResult)
     stopJobEvents()
     stopAgentEvents()
     stopCapabilities()
@@ -381,6 +456,11 @@ async function createWindow(): Promise<BrowserWindow> {
     }, captureDelay)
   }
 
+  mainWindow = window
+  window.once('closed', () => {
+    if (mainWindow === window) mainWindow = null
+  })
+
   return window
 }
 
@@ -400,12 +480,24 @@ app.whenReady().then(async () => {
   registerWorkspaceInterface()
   registerBrowserInterface()
   registerDocumentsInterface()
+  await registerDocxDocumentsInterface()
   registerEditableDocumentsInterface()
   await createWindow()
 
   app.on('activate', async () => {
-    if (BrowserWindow.getAllWindows().length === 0) await createWindow()
+    mainWindow = await activateVisibleWindow(mainWindow, createWindow)
   })
+})
+
+app.on('before-quit', () => {
+  appIsQuitting = true
+})
+
+app.on('will-quit', () => {
+  docxDocumentsService?.dispose()
+  docxDocumentsService = null
+  docxWorkerManager?.dispose()
+  docxWorkerManager = null
 })
 
 app.on('window-all-closed', () => {

@@ -13,6 +13,12 @@ importers:
       '@jobos/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
+      '@jobos/docx-editor-core':
+        specifier: workspace:*
+        version: link:../../packages/docx-editor-core
+      '@jobos/docx-engine':
+        specifier: workspace:*
+        version: link:../../packages/docx-engine
       '@tiptap/core':
         specifier: 3.29.2
         version: 3.29.2(@tiptap/pm@3.29.2)

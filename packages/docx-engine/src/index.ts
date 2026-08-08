@@ -1,5 +1,5 @@
-export * from './types'
-export { parseDocx, type ParseExtras } from './parse'
+export * from './types.js'
+export { parseDocx, type ParseExtras } from './parse.js'
 export {
   saveDocx,
   findChartWorkbookPath,
@@ -8,7 +8,7 @@ export {
   type SaveOptions,
   type StyleUpsert,
   type ParsedDocFull,
-} from './patch'
+} from './patch.js'
 export {
   TABLE_HEADER_FILL,
   applyImageWrap,
@@ -44,7 +44,7 @@ export {
   type TextboxParaPatch,
   type TableGenOptions,
   type TocEntry,
-} from './generate'
+} from './generate.js'
 export {
   buildChartPartXml,
   buildChartWorkbookXlsxBase64,
@@ -54,7 +54,7 @@ export {
   CHART_WORKBOOK_REL_TYPE,
   type ChartPatch,
   type ChartSeriesPatch,
-} from './chart'
+} from './chart.js'
 export {
   latexToOmml,
   mathParagraphXml,
@@ -62,15 +62,15 @@ export {
   ommlFragmentsOf,
   ommlToLatex,
   ommlToMathML,
-} from './math'
-export { scanBody, type BodyElement, type BodyScan } from './scan'
+} from './math.js'
+export { scanBody, type BodyElement, type BodyScan } from './scan.js'
 export {
   BLANK_BULLET_NUM_ID,
   BLANK_ORDERED_NUM_ID,
   buildBlankDocx,
   type BlankDocxOptions,
   type CustomNumberingLevel,
-} from './blank'
+} from './blank.js'
 export {
   DEFAULT_SECTION,
   applySectionSettings,
@@ -80,18 +80,18 @@ export {
   readSections,
   readSectionSettings,
   sectionSettingsFromXml,
-} from './section'
-export { nextNoteId, parseNotesXml, type NoteKind } from './notes'
-export { readWatermarkText } from './watermark'
+} from './section.js'
+export { nextNoteId, parseNotesXml, type NoteKind } from './notes.js'
+export { readWatermarkText } from './watermark.js'
 export {
   INK_NAME_PREFIX,
   anchoredInkRunXml,
   findInkRuns,
   injectInkRunsIntoParagraph,
   stripInkRuns,
-} from './ink'
-export { bibliographyLine, citationText, parseSourcesXml } from './sources'
-export { readThemeColors, readThemeFonts } from './theme'
-export { hashProtectionPassword, verifyProtectionPassword } from './protection'
-export { decodeSymbolChar, decodeSymbolText, isSymbolFont } from './symbol-fonts'
-export { computeListMarkers, formatNumber, type ListItemRef } from './list-markers'
+} from './ink.js'
+export { bibliographyLine, citationText, parseSourcesXml } from './sources.js'
+export { readThemeColors, readThemeFonts } from './theme.js'
+export { hashProtectionPassword, verifyProtectionPassword } from './protection.js'
+export { decodeSymbolChar, decodeSymbolText, isSymbolFont } from './symbol-fonts.js'
+export { computeListMarkers, formatNumber, type ListItemRef } from './list-markers.js'

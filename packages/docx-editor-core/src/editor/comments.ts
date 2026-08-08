@@ -7,7 +7,7 @@
  */
 import type { Editor } from '@tiptap/core'
 import type { CommentInfo } from '@jobos/docx-engine'
-import { TRACK_IGNORE } from './revisions'
+import { TRACK_IGNORE } from './revisions.js'
 
 /** smallest unused numeric comment id */
 export function nextCommentId(comments: CommentInfo[]): string {

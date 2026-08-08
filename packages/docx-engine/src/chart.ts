@@ -1,5 +1,5 @@
 import JSZip from 'jszip'
-import type { ChartDisplay, ChartSeries, NewChart } from './types'
+import type { ChartDisplay, ChartSeries, NewChart } from './types.js'
 import {
   attrsOf,
   childrenOf,
@@ -10,7 +10,7 @@ import {
   textOf,
   xmlParser,
   type XNode,
-} from './xml-utils'
+} from './xml-utils.js'
 
 const CHART_KINDS: Record<string, ChartDisplay['kind']> = {
   'c:barChart': 'bar',

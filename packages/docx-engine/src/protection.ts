@@ -1,4 +1,4 @@
-import type { DocProtection } from './types'
+import type { DocProtection } from './types.js'
 
 /**
  * w:documentProtection password hash (Word 2013+ scheme, ECMA-376 iterated hash):

@@ -1,6 +1,8 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import type { IpcRendererEvent } from 'electron'
 
+import type { DocxExternalChangeEvent, SaveDocxRequest } from '../shared/docxDocuments.js'
+
 import type { AgentStreamUpdate, BrowserBounds, BrowserJobExtraction, BrowserRestoreState, BrowserState, JobEvent, JobOsRendererBridge, JobSortMode, JobStatus, WorkspaceSnapshot } from '../shared/contracts.js'
 import type {
   ApplyEditableDocumentOperationsRequest,
@@ -11,6 +13,17 @@ import type {
 } from '../shared/editableDocuments.js'
 
 const bridge: JobOsRendererBridge = Object.freeze({
+  lifecycle: Object.freeze({
+    subscribePrepareClose: (handler: () => Promise<boolean>) => {
+      const wrapped = (_event: IpcRendererEvent, requestId: string) => {
+        void handler()
+          .then(safe => ipcRenderer.send('jobos:window:prepare-close-result', requestId, safe))
+          .catch(() => ipcRenderer.send('jobos:window:prepare-close-result', requestId, false))
+      }
+      ipcRenderer.on('jobos:window:prepare-close', wrapped)
+      return () => ipcRenderer.removeListener('jobos:window:prepare-close', wrapped)
+    }
+  }),
   shell: Object.freeze({
     openExternal: (url: string) => ipcRenderer.invoke('jobos:shell:open-external', url)
   }),
@@ -86,6 +99,24 @@ const bridge: JobOsRendererBridge = Object.freeze({
     export: (artifactId: string) => ipcRenderer.invoke('jobos:documents:export', artifactId),
     reveal: (artifactId: string) => ipcRenderer.invoke('jobos:documents:reveal', artifactId),
     open: (artifactId: string) => ipcRenderer.invoke('jobos:documents:open', artifactId)
+  }),
+  docxDocuments: Object.freeze({
+    listBindings: (jobId: string) => ipcRenderer.invoke('jobos:docx:list-bindings', jobId),
+    openBound: (jobId: string, documentKey: DocumentKey) => ipcRenderer.invoke('jobos:docx:open-bound', jobId, documentKey),
+    chooseFile: (jobId: string, documentKey: DocumentKey) => ipcRenderer.invoke('jobos:docx:choose-file', jobId, documentKey),
+    createBlank: (jobId: string, documentKey: DocumentKey) => ipcRenderer.invoke('jobos:docx:create-blank', jobId, documentKey),
+    reload: (bindingId: string) => ipcRenderer.invoke('jobos:docx:reload', bindingId),
+    save: (request: SaveDocxRequest) => ipcRenderer.invoke('jobos:docx:save', request),
+    saveAs: (bindingId: string, bytes: ArrayBuffer) => ipcRenderer.invoke('jobos:docx:save-as', bindingId, bytes),
+    createRecovery: (bindingId: string, reason: 'baseline' | 'autosave' | 'manual' | 'conflict' | 'agent') => ipcRenderer.invoke('jobos:docx:create-recovery', bindingId, reason),
+    listRecoveries: (bindingId: string) => ipcRenderer.invoke('jobos:docx:list-recoveries', bindingId),
+    restoreRecovery: (bindingId: string, recoveryId: string) => ipcRenderer.invoke('jobos:docx:restore-recovery', bindingId, recoveryId),
+    unbind: (bindingId: string) => ipcRenderer.invoke('jobos:docx:unbind', bindingId),
+    subscribe: (listener: (event: DocxExternalChangeEvent) => void) => {
+      const wrapped = (_event: IpcRendererEvent, value: DocxExternalChangeEvent) => listener(value)
+      ipcRenderer.on('jobos:docx:external-change', wrapped)
+      return () => ipcRenderer.removeListener('jobos:docx:external-change', wrapped)
+    }
   }),
   editableDocuments: Object.freeze({
     list: (jobId: string) => ipcRenderer.invoke('jobos:editable-documents:list', jobId),

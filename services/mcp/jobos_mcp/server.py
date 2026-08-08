@@ -282,6 +282,40 @@ def create_server(
         """Select a registered artifact in the shared document workspace."""
         return await client.select_document(artifact_id, idempotency_key=idempotency_key)
 
+    @server.tool(name="document_file_inspect", structured_output=True)
+    async def document_file_inspect(
+        job_id: str,
+        document_key: str,
+        timeout_ms: int = 10_000,
+        idempotency_key: str | None = None,
+    ) -> dict[str, Any]:
+        """Inspect the current canonical DOCX hash, capabilities, and bounded block context."""
+        return await client.inspect_document_file(
+            job_id,
+            document_key,
+            timeout_ms=timeout_ms,
+            idempotency_key=idempotency_key,
+        )
+
+    @server.tool(name="document_file_apply", structured_output=True)
+    async def document_file_apply(
+        job_id: str,
+        document_key: str,
+        expected_sha256: str,
+        operations: list[dict[str, Any]],
+        timeout_ms: int = 10_000,
+        idempotency_key: str | None = None,
+    ) -> dict[str, Any]:
+        """Apply typed operations to the canonical DOCX with an expected-hash conflict check."""
+        return await client.apply_document_file_operations(
+            job_id,
+            document_key,
+            expected_sha256,
+            operations,
+            timeout_ms=timeout_ms,
+            idempotency_key=idempotency_key,
+        )
+
     def browser(name: str, arguments: dict[str, Any], key: str | None, timeout_ms: int = 5_000):
         return client.browser_command(name, arguments, idempotency_key=key, timeout_ms=timeout_ms)
 

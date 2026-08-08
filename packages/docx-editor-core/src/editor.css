@@ -55,6 +55,49 @@
   position: absolute;
 }
 
+.jobos-docx-page .page-gap {
+  cursor: default;
+  position: relative;
+  user-select: none;
+}
+
+.jobos-docx-page .page-gap::before {
+  background: color-mix(in srgb, var(--color-surface, #111827) 88%, #000);
+  bottom: var(--gap-mt, 96px);
+  box-shadow: inset 0 8px 8px -8px rgb(0 0 0 / 35%), inset 0 -3px 3px -3px rgb(0 0 0 / 18%);
+  content: '';
+  inset-inline: 0;
+  position: absolute;
+  top: var(--gap-mb, 96px);
+}
+
+.jobos-docx-page .page-gap-inline {
+  display: inline-block;
+  pointer-events: none;
+  text-indent: 0;
+  vertical-align: top;
+}
+
+.jobos-docx-page .page-gap-table { display: table-row; }
+.jobos-docx-page .page-gap-table::before { display: none; }
+.jobos-docx-page .page-gap-table > td {
+  background: #fff;
+  border: 0 !important;
+  height: auto;
+  padding: 0;
+  position: relative;
+}
+.jobos-docx-page .page-gap-table-fill {
+  background: linear-gradient(
+    to bottom,
+    #fff 0 var(--gap-mb, 96px),
+    color-mix(in srgb, var(--color-surface, #111827) 88%, #000) var(--gap-mb, 96px) calc(var(--gap-mb, 96px) + 28px),
+    #fff calc(var(--gap-mb, 96px) + 28px) 100%
+  );
+  inset: 0;
+  position: absolute;
+}
+
 .jobos-docx-page [data-page-gap] {
   background: #202938;
   box-shadow: inset 0 1px rgb(255 255 255 / 6%), inset 0 -1px rgb(0 0 0 / 32%);

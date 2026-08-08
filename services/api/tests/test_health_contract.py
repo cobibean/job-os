@@ -20,7 +20,7 @@ def test_health_reports_ready_phase_six_api_with_agent_connectivity_separate(tmp
         "status": "ready",
         "service": "jobos-api",
         "version": "0.1.0",
-        "state_schema": 12,
+        "state_schema": 13,
         "agent_connection": "offline",
     }
 
@@ -104,6 +104,8 @@ def test_version_and_openapi_describe_the_shared_workspace_contract(tmp_path):
         "/v1/jobs/{job_id}/editable-documents",
         "/v1/jobs/{job_id}/editable-documents/{document_key}",
         "/v1/jobs/{job_id}/editable-document-outlines/{document_key}",
+        "/v1/jobs/{job_id}/document-files",
+        "/v1/document-files/{document_id}",
         "/v1/editable-documents/{document_id}",
         "/v1/editable-documents/{document_id}/import",
         "/v1/editable-documents/{document_id}/snapshots",

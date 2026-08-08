@@ -1,6 +1,6 @@
 import type JSZip from 'jszip'
-import type { SourceInfo } from './types'
-import { escapeXmlText } from './xml-utils'
+import type { SourceInfo } from './types.js'
+import { escapeXmlText } from './xml-utils.js'
 
 /**
  * Bibliography sources live in a customXml part using the Word b:Sources

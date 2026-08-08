@@ -5,7 +5,7 @@ import {
   cssLineHeight,
   lineHeightFactor,
   textHasCjk,
-} from './line-metrics'
+} from './line-metrics.js'
 
 function cssEscape(value: string): string {
   if (globalThis.CSS?.escape) return globalThis.CSS.escape(value)
