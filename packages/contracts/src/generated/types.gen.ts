@@ -698,6 +698,10 @@ export type DocumentFileRecord = {
      */
     observed_at: string;
     /**
+     * Observed Device Id
+     */
+    observed_device_id: string;
+    /**
      * Observed Revision
      */
     observed_revision: number;

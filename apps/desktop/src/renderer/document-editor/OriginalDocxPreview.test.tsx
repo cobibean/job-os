@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const { renderDocx } = vi.hoisted(() => ({
@@ -51,5 +51,26 @@ describe('OriginalDocxPreview', () => {
     render(<OriginalDocxPreview artifactId="art_ABCDEFGHIJKLMNOPQRSTUVWX" sourceFilename={null} />)
     await waitFor(() => expect(screen.getByRole('status').textContent).toContain('could not be verified'))
     expect(renderDocx).not.toHaveBeenCalled()
+  })
+
+  it('never lets an older asynchronous render replace the current artifact', async () => {
+    let finishOldRender!: () => void
+    renderDocx
+      .mockImplementationOnce(async (_bytes, container) => {
+        await new Promise<void>(resolve => { finishOldRender = resolve })
+        container.textContent = 'stale artifact'
+      })
+      .mockImplementationOnce(async (_bytes, container) => {
+        container.textContent = 'current artifact'
+      })
+    const view = render(<OriginalDocxPreview artifactId="art_OLDABCDEFGHIJKLMNOPQRSTUV" sourceFilename="old.docx" />)
+    await waitFor(() => expect(renderDocx).toHaveBeenCalledTimes(1))
+
+    view.rerender(<OriginalDocxPreview artifactId="art_NEWABCDEFGHIJKLMNOPQRSTUV" sourceFilename="new.docx" />)
+    expect(await screen.findByText('current artifact')).not.toBeNull()
+
+    await act(async () => { finishOldRender(); await Promise.resolve() })
+    expect(screen.queryByText('stale artifact')).toBeNull()
+    expect(screen.getByText('current artifact')).not.toBeNull()
   })
 })

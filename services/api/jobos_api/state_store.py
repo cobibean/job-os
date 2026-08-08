@@ -351,6 +351,40 @@ MIGRATIONS = (
             """,
         ),
     ),
+    Migration(
+        version=14,
+        statements=(
+            """
+            ALTER TABLE document_files
+            ADD COLUMN observed_device_id TEXT NOT NULL DEFAULT 'legacy'
+            """,
+            "ALTER TABLE document_file_observations RENAME TO document_file_observations_v13",
+            """
+            CREATE TABLE document_file_observations (
+                observation_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                document_id TEXT NOT NULL,
+                observed_revision INTEGER NOT NULL CHECK (observed_revision >= 1),
+                observed_device_id TEXT NOT NULL,
+                sha256 TEXT NOT NULL,
+                filename TEXT NOT NULL,
+                capabilities_json TEXT NOT NULL,
+                observed_at TEXT NOT NULL,
+                UNIQUE(document_id, observed_device_id, observed_revision),
+                FOREIGN KEY(document_id) REFERENCES document_files(document_id) ON DELETE CASCADE
+            )
+            """,
+            """
+            INSERT INTO document_file_observations(
+                observation_id, document_id, observed_revision, observed_device_id,
+                sha256, filename, capabilities_json, observed_at
+            )
+            SELECT observation_id, document_id, observed_revision, 'legacy',
+                   sha256, filename, capabilities_json, observed_at
+            FROM document_file_observations_v13
+            """,
+            "DROP TABLE document_file_observations_v13",
+        ),
+    ),
 )
 SCHEMA_VERSION = MIGRATIONS[-1].version
 
@@ -1888,6 +1922,7 @@ class JobOsStateStore:
             document.filename,
             document.sha256,
             document.observed_revision,
+            document.observed_device_id,
             capabilities_json,
             document.observed_at,
         )
@@ -1895,55 +1930,65 @@ class JobOsStateStore:
             connection.execute("BEGIN IMMEDIATE")
             current = connection.execute(
                 """
-                SELECT document_id, job_id, document_key, document_label, filename, sha256,
-                       observed_revision, capabilities_json
+                SELECT document_id
                 FROM document_files
                 WHERE job_id = ? AND document_key = ?
                 """,
                 (document.job_id, document.document_key),
             ).fetchone()
-            if current is not None:
-                current_revision = int(current[6])
-                if str(current[0]) != document.document_id:
-                    raise ValueError(
-                        "Document file identity changed for the same job and document key"
-                    )
+            if current is not None and str(current[0]) != document.document_id:
+                raise ValueError(
+                    "Document file identity changed for the same job and document key"
+                )
+            latest_on_device = connection.execute(
+                """
+                SELECT observed_revision, sha256, filename, capabilities_json
+                FROM document_file_observations
+                WHERE document_id = ? AND observed_device_id = ?
+                ORDER BY observed_revision DESC
+                LIMIT 1
+                """,
+                (document.document_id, document.observed_device_id),
+            ).fetchone()
+            if latest_on_device is not None:
+                current_revision = int(latest_on_device[0])
                 if document.observed_revision < current_revision:
                     return
                 if document.observed_revision == current_revision:
-                    incoming_immutable = values[:6] + (values[7],)
-                    current_immutable = tuple(current[:6]) + (current[7],)
-                    if incoming_immutable != current_immutable:
+                    incoming = (document.sha256, document.filename, capabilities_json)
+                    if incoming != tuple(latest_on_device[1:]):
                         raise ValueError(
-                            "Conflicting document file observation for the same revision"
+                            "Conflicting document file observation for the same device revision"
                         )
                     return
             connection.execute(
                 """
                 INSERT INTO document_files(
                     document_id, job_id, document_key, document_label, filename, sha256,
-                    observed_revision, capabilities_json, observed_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    observed_revision, observed_device_id, capabilities_json, observed_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(job_id, document_key) DO UPDATE SET
                     document_label = excluded.document_label,
                     filename = excluded.filename,
                     sha256 = excluded.sha256,
                     observed_revision = excluded.observed_revision,
+                    observed_device_id = excluded.observed_device_id,
                     capabilities_json = excluded.capabilities_json,
                     observed_at = excluded.observed_at
-                WHERE excluded.observed_revision > document_files.observed_revision
                 """,
                 values,
             )
             connection.execute(
                 """
                 INSERT INTO document_file_observations(
-                    document_id, observed_revision, sha256, filename, capabilities_json, observed_at
-                ) VALUES (?, ?, ?, ?, ?, ?)
+                    document_id, observed_revision, observed_device_id,
+                    sha256, filename, capabilities_json, observed_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     document.document_id,
                     document.observed_revision,
+                    document.observed_device_id,
                     document.sha256,
                     document.filename,
                     capabilities_json,

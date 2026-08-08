@@ -521,6 +521,7 @@ def create_app(
                         .isoformat(timespec="milliseconds")
                         .replace("+00:00", "Z")
                     ),
+                    observed_device_id=target_device_id,
                 )
             )
 

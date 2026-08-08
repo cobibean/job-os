@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url'
 import { app, BrowserWindow, clipboard, dialog, ipcMain, session, shell, WebContentsView } from 'electron'
 import type { IpcMainEvent, IpcMainInvokeEvent } from 'electron'
 
-import type { BrowserBounds, JobSortMode, JobStatus, WorkspaceSnapshot } from '../shared/contracts.js'
+import type { BrowserBounds, DocumentKey, JobSortMode, JobStatus, WorkspaceSnapshot } from '../shared/contracts.js'
 import { createMainAgentClient, startAgentEventStream } from './agent.js'
 import { registerAgentIpc } from './agentIpc.js'
 import { createApiLifecycle } from './apiLifecycle.js'
@@ -40,6 +40,7 @@ let browserManager: BrowserManager | null = null
 let mainWindow: BrowserWindow | null = null
 let docxDocumentsService: DocxDocumentsService | null = null
 let docxWorkerManager: DocxWorkerManager | null = null
+let mainDocumentsClient: ReturnType<typeof createMainDocumentsClient> | null = null
 let appIsQuitting = false
 let markBrowserRestored: () => void = () => undefined
 const apiLifecycle = createApiLifecycle()
@@ -255,6 +256,7 @@ function registerDocumentsInterface(): void {
         cacheRoot: path.join(app.getPath('temp'), 'jobos-artifacts')
       })
     : null
+  mainDocumentsClient = documents
   const trusted = (event: IpcMainInvokeEvent) => {
     assertTrustedRenderer(event)
     if (!documents) throw new Error('Device credential unavailable')
@@ -289,6 +291,7 @@ function registerDocumentsInterface(): void {
 async function registerDocxDocumentsInterface(): Promise<void> {
   const userData = app.getPath('userData')
   const recoveryRoot = path.join(userData, 'docx-recovery')
+  const artifactRoot = path.join(userData, 'editable-docx-artifacts')
   docxWorkerManager = new DocxWorkerManager(ipcMain)
   docxDocumentsService = new DocxDocumentsService({
     dialog,
@@ -297,6 +300,7 @@ async function registerDocxDocumentsInterface(): Promise<void> {
       recoveryRoot,
       denyRoots: [recoveryRoot, path.join(app.getPath('temp'), 'jobos-artifacts')]
     }),
+    artifactRoot,
     emit: value => {
       for (const window of BrowserWindow.getAllWindows()) {
         if (!window.isDestroyed()) window.webContents.send('jobos:docx:external-change', value)
@@ -310,6 +314,16 @@ async function registerDocxDocumentsInterface(): Promise<void> {
     if (!docxDocumentsService) throw new Error('DOCX editor unavailable')
     return docxDocumentsService
   })
+  ipcMain.handle(
+    'jobos:docx:open-artifact',
+    async (event, owner: string, key: DocumentKey, id: string) => {
+      assertTrustedRenderer(event)
+      if (!docxDocumentsService || !mainDocumentsClient) throw new Error('DOCX artifact editor unavailable')
+      if (typeof id !== 'string' || !/^art_[A-Za-z0-9_-]{16,80}$/.test(id)) throw new Error('Invalid artifact')
+      const artifact = await mainDocumentsClient.loadOriginalDocx(id)
+      return docxDocumentsService.openArtifact(owner, key, artifact)
+    }
+  )
 }
 
 function registerEditableDocumentsInterface(): void {
@@ -487,6 +501,9 @@ app.whenReady().then(async () => {
   app.on('activate', async () => {
     mainWindow = await activateVisibleWindow(mainWindow, createWindow)
   })
+}).catch(error => {
+  console.error('[JobOS startup] Failed before the main window opened', error)
+  app.exit(1)
 })
 
 app.on('before-quit', () => {
@@ -494,6 +511,7 @@ app.on('before-quit', () => {
 })
 
 app.on('will-quit', () => {
+  mainDocumentsClient = null
   docxDocumentsService?.dispose()
   docxDocumentsService = null
   docxWorkerManager?.dispose()

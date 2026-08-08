@@ -105,6 +105,11 @@ export function useDocxAutosave({ binding, parsed, onBindingChange }: UseDocxAut
     setState('conflict'); setMessage('DOCX changed outside JobOS')
   }, [])
 
+  const rebind = useCallback((nextBinding: DocxBinding) => {
+    bindingRef.current = nextBinding
+    onBindingChange(nextBinding)
+  }, [onBindingChange])
+
   const reset = useCallback((nextBinding: DocxBinding, document: PmNode) => {
     if (timer.current) clearTimeout(timer.current)
     bindingRef.current = nextBinding
@@ -132,6 +137,7 @@ export function useDocxAutosave({ binding, parsed, onBindingChange }: UseDocxAut
     markExternalConflict,
     message,
     queueSave,
+    rebind,
     reset,
     resume,
     saveNow,

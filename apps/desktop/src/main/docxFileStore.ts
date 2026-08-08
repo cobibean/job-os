@@ -56,12 +56,22 @@ function nativeAtomicReplace(
   })
 }
 
+function nativeSyncParent(filePath: string, helperPath = defaultAtomicReplaceHelperPath()): Promise<void> {
+  return new Promise((resolve, reject) => {
+    execFile(helperPath, [filePath], { encoding: 'utf8', maxBuffer: 8_192, timeout: 10_000 }, error => {
+      if (error) reject(error)
+      else resolve()
+    })
+  })
+}
+
 interface DocxFileStoreOptions {
   recoveryRoot: string
   denyRoots?: string[]
   keepRecoveries?: number
   atomicReplace?: AtomicReplace
   atomicReplaceHelperPath?: string
+  syncCanonicalDirectory?: (filePath: string) => Promise<void>
   beforeAtomicReplace?: () => Promise<void>
 }
 
@@ -70,6 +80,8 @@ export class DocxFileStore {
   readonly #denyRoots: string[]
   readonly #keepRecoveries: number
   readonly #atomicReplace: AtomicReplace
+  readonly #atomicReplaceSynchronizesDirectory: boolean
+  readonly #syncCanonicalDirectory: NonNullable<DocxFileStoreOptions['syncCanonicalDirectory']>
   readonly #beforeAtomicReplace?: () => Promise<void>
   readonly #queues = new Map<string, Promise<unknown>>()
 
@@ -77,9 +89,12 @@ export class DocxFileStore {
     this.#recoveryRoot = path.resolve(options.recoveryRoot)
     this.#denyRoots = (options.denyRoots ?? []).map(root => path.resolve(root))
     this.#keepRecoveries = options.keepRecoveries ?? 20
+    const helperPath = options.atomicReplaceHelperPath ?? defaultAtomicReplaceHelperPath()
     this.#atomicReplace = options.atomicReplace ?? ((canonicalPath, temporaryPath, expectedSha256) => (
-      nativeAtomicReplace(canonicalPath, temporaryPath, expectedSha256, options.atomicReplaceHelperPath)
+      nativeAtomicReplace(canonicalPath, temporaryPath, expectedSha256, helperPath)
     ))
+    this.#atomicReplaceSynchronizesDirectory = !options.atomicReplace
+    this.#syncCanonicalDirectory = options.syncCanonicalDirectory ?? (filePath => nativeSyncParent(filePath, helperPath))
     this.#beforeAtomicReplace = options.beforeAtomicReplace
   }
 
@@ -122,7 +137,7 @@ export class DocxFileStore {
         await unlink(temporary).catch(() => undefined)
         throw error
       }
-      await this.#syncDirectory(path.dirname(filePath))
+      await this.#syncCanonicalDirectory(filePath)
       return this.read(filePath)
     })
   }
@@ -151,18 +166,16 @@ export class DocxFileStore {
       } finally {
         await handle.close()
       }
-      let helperCompleted = false
       try {
         await this.#beforeAtomicReplace?.()
         const replaced = await this.#atomicReplace(filePath, temporary, expectedSha256)
-        helperCompleted = true
         if (!replaced) throw new DocxExternalChangeError()
-        await this.#syncDirectory(path.dirname(filePath))
+        if (!this.#atomicReplaceSynchronizesDirectory) await this.#syncCanonicalDirectory(filePath)
         const saved = await this.read(filePath)
         if (saved.sha256 !== sha256(bytes)) throw new DocxExternalChangeError()
         return { file: saved, recovery }
       } finally {
-        if (helperCompleted) await unlink(temporary).catch(() => undefined)
+        await unlink(temporary).catch(() => undefined)
       }
     })
   }

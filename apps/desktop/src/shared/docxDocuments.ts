@@ -62,6 +62,7 @@ export type DocxExternalChangeEvent =
 export interface DocxDocumentsBridge {
   listBindings: (jobId: string) => Promise<DocxBinding[]>
   openBound: (jobId: string, documentKey: DocumentKey) => Promise<DocxOpenResult | null>
+  openArtifact: (jobId: string, documentKey: DocumentKey, artifactId: string) => Promise<DocxOpenResult>
   chooseFile: (jobId: string, documentKey: DocumentKey) => Promise<DocxOpenResult | null>
   createBlank: (jobId: string, documentKey: DocumentKey) => Promise<DocxOpenResult | null>
   reload: (bindingId: string) => Promise<DocxOpenResult>
