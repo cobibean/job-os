@@ -3,7 +3,7 @@ import { Plugin, PluginKey, type EditorState } from '@tiptap/pm/state'
 import { Decoration, DecorationSet, type EditorView } from '@tiptap/pm/view'
 import type { Node as ProseMirrorNode } from '@tiptap/pm/model'
 import {} from '@tiptap/pm/tables'
-import { t } from '../locale'
+import { t } from '../locale.js'
 import { type TabStop } from '@jobos/docx-engine'
 
 /**
@@ -12,8 +12,8 @@ import { type TabStop } from '@jobos/docx-engine'
  * `aiChanged` (diff highlighting for AI edits).
  */
 
-import { SearchHighlight } from './extensions'
-import { revisionDisplayState } from './marks'
+import { SearchHighlight } from './extensions.js'
+import { revisionDisplayState } from './marks.js'
 
 export const searchPluginKey = new PluginKey<DecorationSet>('docSearch')
 

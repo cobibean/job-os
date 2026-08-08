@@ -229,7 +229,7 @@ export type BrowserCommandError = {
     /**
      * Code
      */
-    code: 'desktop_unavailable' | 'tab_not_found' | 'timeout' | 'validation' | 'execution';
+    code: 'desktop_unavailable' | 'tab_not_found' | 'document_not_found' | 'conflict' | 'timeout' | 'validation' | 'execution';
     /**
      * Message
      */
@@ -249,7 +249,7 @@ export type BrowserCommandRequest = {
     /**
      * Command
      */
-    command: 'tabs.inspect' | 'tab.create' | 'tab.select' | 'tab.associate' | 'tab.close' | 'tabs.reorder' | 'tab.navigate' | 'tab.back' | 'tab.forward' | 'tab.reload' | 'tab.stop' | 'page.snapshot' | 'element.click' | 'element.type' | 'page.scroll';
+    command: 'tabs.inspect' | 'tab.create' | 'tab.select' | 'tab.associate' | 'tab.close' | 'tabs.reorder' | 'tab.navigate' | 'tab.back' | 'tab.forward' | 'tab.reload' | 'tab.stop' | 'page.snapshot' | 'element.click' | 'element.type' | 'page.scroll' | 'document.inspect' | 'document.apply_operations';
     /**
      * Idempotency Key
      */
@@ -634,6 +634,77 @@ export type DocumentDraftOutline = {
      * Unresolved Suggestion Count
      */
     unresolved_suggestion_count: number;
+};
+
+/**
+ * DocumentFileCapabilities
+ */
+export type DocumentFileCapabilities = {
+    /**
+     * Editable Block Count
+     */
+    editable_block_count: number;
+    /**
+     * Mode
+     */
+    mode: 'editable' | 'editable_with_protected_content' | 'read_only';
+    /**
+     * Protected Block Count
+     */
+    protected_block_count: number;
+    /**
+     * Reasons
+     */
+    reasons?: Array<string>;
+};
+
+/**
+ * DocumentFileList
+ */
+export type DocumentFileList = {
+    /**
+     * Documents
+     */
+    documents: Array<DocumentFileRecord>;
+};
+
+/**
+ * DocumentFileRecord
+ */
+export type DocumentFileRecord = {
+    capabilities: DocumentFileCapabilities;
+    /**
+     * Document Id
+     */
+    document_id: string;
+    /**
+     * Document Key
+     */
+    document_key: 'resume' | 'cover_letter' | 'references';
+    /**
+     * Document Label
+     */
+    document_label: string;
+    /**
+     * Filename
+     */
+    filename: string;
+    /**
+     * Job Id
+     */
+    job_id: string;
+    /**
+     * Observed At
+     */
+    observed_at: string;
+    /**
+     * Observed Revision
+     */
+    observed_revision: number;
+    /**
+     * Sha256
+     */
+    sha256: string;
 };
 
 /**
@@ -2132,6 +2203,36 @@ export type DeviceSessionV1DeviceSessionGetResponses = {
 
 export type DeviceSessionV1DeviceSessionGetResponse = DeviceSessionV1DeviceSessionGetResponses[keyof DeviceSessionV1DeviceSessionGetResponses];
 
+export type DocumentFileGetV1DocumentFilesDocumentIdGetData = {
+    body?: never;
+    path: {
+        /**
+         * Document Id
+         */
+        document_id: string;
+    };
+    query?: never;
+    url: '/v1/document-files/{document_id}';
+};
+
+export type DocumentFileGetV1DocumentFilesDocumentIdGetErrors = {
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type DocumentFileGetV1DocumentFilesDocumentIdGetError = DocumentFileGetV1DocumentFilesDocumentIdGetErrors[keyof DocumentFileGetV1DocumentFilesDocumentIdGetErrors];
+
+export type DocumentFileGetV1DocumentFilesDocumentIdGetResponses = {
+    /**
+     * Successful Response
+     */
+    200: DocumentFileRecord;
+};
+
+export type DocumentFileGetV1DocumentFilesDocumentIdGetResponse = DocumentFileGetV1DocumentFilesDocumentIdGetResponses[keyof DocumentFileGetV1DocumentFilesDocumentIdGetResponses];
+
 export type EditableDocumentGetV1EditableDocumentsDocumentIdGetData = {
     body?: never;
     path: {
@@ -2865,6 +2966,36 @@ export type JobUpdateDescriptionV1JobsJobIdDescriptionPutResponses = {
 };
 
 export type JobUpdateDescriptionV1JobsJobIdDescriptionPutResponse = JobUpdateDescriptionV1JobsJobIdDescriptionPutResponses[keyof JobUpdateDescriptionV1JobsJobIdDescriptionPutResponses];
+
+export type DocumentFilesListV1JobsJobIdDocumentFilesGetData = {
+    body?: never;
+    path: {
+        /**
+         * Job Id
+         */
+        job_id: string;
+    };
+    query?: never;
+    url: '/v1/jobs/{job_id}/document-files';
+};
+
+export type DocumentFilesListV1JobsJobIdDocumentFilesGetErrors = {
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type DocumentFilesListV1JobsJobIdDocumentFilesGetError = DocumentFilesListV1JobsJobIdDocumentFilesGetErrors[keyof DocumentFilesListV1JobsJobIdDocumentFilesGetErrors];
+
+export type DocumentFilesListV1JobsJobIdDocumentFilesGetResponses = {
+    /**
+     * Successful Response
+     */
+    200: DocumentFileList;
+};
+
+export type DocumentFilesListV1JobsJobIdDocumentFilesGetResponse = DocumentFilesListV1JobsJobIdDocumentFilesGetResponses[keyof DocumentFilesListV1JobsJobIdDocumentFilesGetResponses];
 
 export type EditableDocumentOutlineV1JobsJobIdEditableDocumentOutlinesDocumentKeyGetData = {
     body?: never;

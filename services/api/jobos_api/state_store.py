@@ -14,6 +14,7 @@ from .browser_policy import (
     safe_browser_url,
     sanitize_browser_title,
 )
+from .document_files import DocumentFileRecord
 from .documents import VerifiedArtifact
 from .redaction import redact_detail, sanitize_summary, sanitize_user_text
 
@@ -314,6 +315,40 @@ MIGRATIONS = (
             """,
             "ALTER TABLE document_artifacts ADD COLUMN editable_document_id TEXT",
             "ALTER TABLE document_artifacts ADD COLUMN editable_document_revision INTEGER",
+        ),
+    ),
+    Migration(
+        version=13,
+        statements=(
+            """
+            CREATE TABLE document_files (
+                document_id TEXT PRIMARY KEY,
+                job_id TEXT NOT NULL,
+                document_key TEXT NOT NULL,
+                document_label TEXT NOT NULL,
+                filename TEXT NOT NULL,
+                sha256 TEXT NOT NULL,
+                observed_revision INTEGER NOT NULL CHECK (observed_revision >= 1),
+                capabilities_json TEXT NOT NULL,
+                observed_at TEXT NOT NULL,
+                CHECK (document_key IN ('resume', 'cover_letter', 'references')),
+                UNIQUE(job_id, document_key)
+            )
+            """,
+            "CREATE INDEX document_files_job ON document_files(job_id, document_key)",
+            """
+            CREATE TABLE document_file_observations (
+                observation_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                document_id TEXT NOT NULL,
+                observed_revision INTEGER NOT NULL CHECK (observed_revision >= 1),
+                sha256 TEXT NOT NULL,
+                filename TEXT NOT NULL,
+                capabilities_json TEXT NOT NULL,
+                observed_at TEXT NOT NULL,
+                UNIQUE(document_id, observed_revision),
+                FOREIGN KEY(document_id) REFERENCES document_files(document_id) ON DELETE CASCADE
+            )
+            """,
         ),
     ),
 )
@@ -1834,6 +1869,103 @@ class JobOsStateStore:
                 "SELECT * FROM editable_documents WHERE job_id = ? ORDER BY document_key", (job_id,)
             ).fetchall()
         return [self._editable_document_row(row) for row in rows]
+
+    @staticmethod
+    def _document_file_row(row: sqlite3.Row) -> dict[str, object]:
+        value = dict(row)
+        value["capabilities"] = json.loads(str(value.pop("capabilities_json")))
+        return value
+
+    def observe_document_file(self, document: DocumentFileRecord) -> None:
+        capabilities_json = json.dumps(
+            document.capabilities.model_dump(mode="json"), separators=(",", ":"), sort_keys=True
+        )
+        values = (
+            document.document_id,
+            document.job_id,
+            document.document_key,
+            document.document_label,
+            document.filename,
+            document.sha256,
+            document.observed_revision,
+            capabilities_json,
+            document.observed_at,
+        )
+        with sqlite3.connect(self._path) as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            current = connection.execute(
+                """
+                SELECT document_id, job_id, document_key, document_label, filename, sha256,
+                       observed_revision, capabilities_json
+                FROM document_files
+                WHERE job_id = ? AND document_key = ?
+                """,
+                (document.job_id, document.document_key),
+            ).fetchone()
+            if current is not None:
+                current_revision = int(current[6])
+                if str(current[0]) != document.document_id:
+                    raise ValueError(
+                        "Document file identity changed for the same job and document key"
+                    )
+                if document.observed_revision < current_revision:
+                    return
+                if document.observed_revision == current_revision:
+                    incoming_immutable = values[:6] + (values[7],)
+                    current_immutable = tuple(current[:6]) + (current[7],)
+                    if incoming_immutable != current_immutable:
+                        raise ValueError(
+                            "Conflicting document file observation for the same revision"
+                        )
+                    return
+            connection.execute(
+                """
+                INSERT INTO document_files(
+                    document_id, job_id, document_key, document_label, filename, sha256,
+                    observed_revision, capabilities_json, observed_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(job_id, document_key) DO UPDATE SET
+                    document_label = excluded.document_label,
+                    filename = excluded.filename,
+                    sha256 = excluded.sha256,
+                    observed_revision = excluded.observed_revision,
+                    capabilities_json = excluded.capabilities_json,
+                    observed_at = excluded.observed_at
+                WHERE excluded.observed_revision > document_files.observed_revision
+                """,
+                values,
+            )
+            connection.execute(
+                """
+                INSERT INTO document_file_observations(
+                    document_id, observed_revision, sha256, filename, capabilities_json, observed_at
+                ) VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    document.document_id,
+                    document.observed_revision,
+                    document.sha256,
+                    document.filename,
+                    capabilities_json,
+                    document.observed_at,
+                ),
+            )
+
+    def list_document_files(self, job_id: str) -> list[dict[str, object]]:
+        with sqlite3.connect(f"file:{self._path}?mode=ro", uri=True) as connection:
+            connection.row_factory = sqlite3.Row
+            rows = connection.execute(
+                "SELECT * FROM document_files WHERE job_id = ? ORDER BY document_key", (job_id,)
+            ).fetchall()
+        return [self._document_file_row(row) for row in rows]
+
+    def get_document_file(self, document_id: str) -> dict[str, object] | None:
+        with sqlite3.connect(f"file:{self._path}?mode=ro", uri=True) as connection:
+            connection.row_factory = sqlite3.Row
+            row = connection.execute(
+                "SELECT * FROM document_files WHERE document_id = ?", (document_id,)
+            ).fetchone()
+        return self._document_file_row(row) if row else None
 
     def save_editable_document(
         self,

@@ -22,9 +22,9 @@ import {
   isInTable,
   tableEditing,
 } from '@tiptap/pm/tables'
-import { cssLineHeight, textHasCjk } from '../line-metrics'
-import { noteMarkText } from '../note-format'
-import { t } from '../locale'
+import { cssLineHeight, textHasCjk } from '../line-metrics.js'
+import { noteMarkText } from '../note-format.js'
+import { t } from '../locale.js'
 import {
   ommlToMathML,
   patchMathTokens,
@@ -37,12 +37,12 @@ import {
   type TableModel,
   type TextboxDisplay,
 } from '@jobos/docx-engine'
-import { computeListMarkers, type ListItemRef } from './numbering'
-import { dropActiveSubEditor, notifySubEditorState, setActiveSubEditor } from './active-editor'
-import { PaginationGapsExtension } from './pagination-gaps'
-import { TrackChangesExtension } from './revisions'
-import { inlineToRuns, runsToInline, textboxParaSignature, type PmNode as PmJson } from './convert'
-import { constrainTableWidthAtCell } from './table-sizing'
+import { computeListMarkers, type ListItemRef } from './numbering.js'
+import { dropActiveSubEditor, notifySubEditorState, setActiveSubEditor } from './active-editor.js'
+import { PaginationGapsExtension } from './pagination-gaps.js'
+import { TrackChangesExtension } from './revisions.js'
+import { inlineToRuns, runsToInline, textboxParaSignature, type PmNode as PmJson } from './convert.js'
+import { constrainTableWidthAtCell } from './table-sizing.js'
 
 /**
  * Custom schema mirroring the docx-engine Block model 1:1.
@@ -60,8 +60,8 @@ import {
   renderTextboxSpec,
   textboxBoxStyle,
   wireChartEditing,
-} from './protected-render'
-import { isStraightLineKind } from './shape-svg'
+} from './protected-render.js'
+import { isStraightLineKind } from './shape-svg.js'
 import {
   BoldMark,
   CommentMark,
@@ -76,7 +76,7 @@ import {
   StrikeMark,
   TextStyleMark,
   UnderlineMark,
-} from './marks'
+} from './marks.js'
 import {
   DropCapExtension,
   MoveRevisionExtension,
@@ -86,10 +86,10 @@ import {
   SdtExtension,
   SearchHighlightExtension,
   TabStopExtension,
-} from './decoration-extensions'
-import { AutoDirectionExtension } from './direction'
-export * from './marks'
-export * from './decoration-extensions'
+} from './decoration-extensions.js'
+import { AutoDirectionExtension } from './direction.js'
+export * from './marks.js'
+export * from './decoration-extensions.js'
 
 const anchorAttrs = {
   docxIndex: { default: null as number | null },

@@ -1,6 +1,6 @@
 import { latexToOmml, mathParagraphXml, mathTokensOf, ommlToMathML } from '@jobos/docx-engine'
-import { t } from '../locale'
-import type { PmNode } from './convert'
+import { t } from '../locale.js'
+import type { PmNode } from './convert.js'
 
 /**
  * Protected display-equation block built from LaTeX (throws on syntax outside

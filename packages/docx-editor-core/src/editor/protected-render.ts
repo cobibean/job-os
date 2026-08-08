@@ -2,10 +2,10 @@ import type { Node as PmNode } from '@tiptap/pm/model'
 import {} from '@tiptap/pm/state'
 import type { EditorView } from '@tiptap/pm/view'
 import {} from '@tiptap/pm/tables'
-import { WORDART_PRESETS, wordArtStrokePx } from '../ui-helpers'
-import { cssDualFontFamily, cssFontFamily } from '../line-metrics'
-import { shapeBackgroundCss } from './shape-svg'
-import { t } from '../locale'
+import { WORDART_PRESETS, wordArtStrokePx } from '../ui-helpers.js'
+import { cssDualFontFamily, cssFontFamily } from '../line-metrics.js'
+import { shapeBackgroundCss } from './shape-svg.js'
+import { t } from '../locale.js'
 import {
   type ChartDisplay,
   type FieldDisplay,
@@ -29,7 +29,7 @@ import {
   preventProtectedLineBreak,
   protectedText,
   tableBordersCss,
-} from './extensions'
+} from './extensions.js'
 
 // Word: links and TOC entries jump on modifier+click only
 const jumpHint = () =>

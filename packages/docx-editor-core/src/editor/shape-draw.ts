@@ -7,9 +7,9 @@
  * same floating-object posOffset attrs the move handle uses.
  */
 import type { Editor } from '@tiptap/core'
-import { shapeClipCss } from '../ui-helpers'
+import { shapeClipCss } from '../ui-helpers.js'
 import { LINE_KINDS } from '@jobos/docx-engine'
-import { isStraightLineKind, shapeBackgroundImage } from './shape-svg'
+import { isStraightLineKind, shapeBackgroundImage } from './shape-svg.js'
 
 const EMU_PER_PX = 9525
 /** Word's predefined single-click insert size: 1x1 inch. */

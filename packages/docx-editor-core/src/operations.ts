@@ -1,4 +1,4 @@
-import type { PmNode } from './editor/convert'
+import type { PmNode } from './editor/convert.js'
 
 export interface ContextBlock {
   id: string

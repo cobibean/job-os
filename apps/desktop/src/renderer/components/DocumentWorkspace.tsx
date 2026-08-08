@@ -20,7 +20,7 @@ import type {
   JobListItem,
   PdfArtifactPayload
 } from '../../shared/contracts'
-import type { EditableDocument, EditableDocumentSummary } from '../../shared/editableDocuments'
+import type { DocxBinding, DocxOpenResult } from '../../shared/docxDocuments'
 import { PdfPreview } from './PdfPreview'
 
 interface DocumentWorkspaceProps {
@@ -31,7 +31,7 @@ interface DocumentWorkspaceProps {
   hydrated: boolean
   refreshGeneration?: number
   onViewChange: (artifactId: string | null, page: number, zoom: number) => void
-  onOpenEditor?: (document: EditableDocument) => void
+  onOpenEditor?: (document: DocxOpenResult) => void
 }
 
 const PDF: ArtifactMediaType = 'application/pdf'
@@ -130,7 +130,7 @@ function chooseLogicalPreview(next: JobArtifactsState, preferredId: string | nul
 
 export function DocumentWorkspace(props: DocumentWorkspaceProps) {
   const bridge = useRef(window.jobos?.documents).current
-  const editableBridge = useRef(window.jobos?.editableDocuments).current
+  const docxBridge = useRef(window.jobos?.docxDocuments).current
   const [state, setState] = useState<JobArtifactsState>(emptyState(props.job?.jobId))
   const [activeId, setActiveId] = useState<string | null>(props.restoredArtifactId)
   const [page, setPage] = useState(Math.max(1, props.restoredPage))
@@ -141,7 +141,7 @@ export function DocumentWorkspace(props: DocumentWorkspaceProps) {
   const [message, setMessage] = useState('')
   const [exportOpen, setExportOpen] = useState(false)
   const [exportBusy, setExportBusy] = useState(false)
-  const [drafts, setDrafts] = useState<EditableDocumentSummary[]>([])
+  const [bindings, setBindings] = useState<DocxBinding[]>([])
   const [editorBusyKey, setEditorBusyKey] = useState<DocumentKey | null>(null)
   const [importKey, setImportKey] = useState<DocumentKey>('resume')
   const [blankChoiceKey, setBlankChoiceKey] = useState<DocumentKey | null>(null)
@@ -256,18 +256,18 @@ export function DocumentWorkspace(props: DocumentWorkspaceProps) {
   }, [bridge, choosePreview, jobId])
 
   useEffect(() => {
-    if (!jobId || !editableBridge) {
-      setDrafts([])
+    if (!jobId || !docxBridge) {
+      setBindings([])
       return
     }
     let active = true
-    editableBridge.list(jobId).then(value => {
-      if (active) setDrafts(value)
+    docxBridge.listBindings(jobId).then(value => {
+      if (active) setBindings(value)
     }).catch(error => {
-      if (active) setMessage(error instanceof Error ? error.message : 'Editable documents unavailable')
+      if (active) setMessage(error instanceof Error ? error.message : 'DOCX bindings unavailable')
     })
     return () => { active = false }
-  }, [editableBridge, jobId, refreshGeneration])
+  }, [docxBridge, jobId, refreshGeneration])
 
   useEffect(() => {
     setPayload(null)
@@ -400,71 +400,49 @@ export function DocumentWorkspace(props: DocumentWorkspaceProps) {
   }
 
   const openEditor = async (documentKey: DocumentKey) => {
-    if (!jobId || !editableBridge || editorBusyKey) return
+    if (!jobId || !docxBridge || editorBusyKey) return
     setEditorBusyKey(documentKey)
-    setMessage('Opening editable document…')
+    setMessage('Opening the original DOCX…')
     try {
-      const existing = drafts.some(draft => draft.documentKey === documentKey)
-      let document: EditableDocument
-      if (existing) {
-        document = await editableBridge.getForJob(jobId, documentKey)
-      } else {
-        const logicalDocument = documents.find(item => item.documentKey === documentKey)
-        const selectedRevision = activeDocument?.documentKey === documentKey
-          ? activeRevision
-          : logicalDocument?.revisions[0]
-        const selectedDocx = selectedRevision?.artifacts.find(artifact =>
-          artifact.mediaType === DOCX && artifact.renderStatus === 'succeeded')
-        if (selectedDocx) {
-          document = await editableBridge.importRegisteredArtifact(jobId, documentKey, selectedDocx.artifactId)
-        } else if (selectedRevision) {
-          setBlankChoiceKey(documentKey)
-          return
-        } else {
-          document = await editableBridge.createBlank(
-            jobId,
-            documentKey,
-            `create-${documentKey}-${globalThis.crypto.randomUUID()}`
-          )
-        }
-      }
-      props.onOpenEditor?.(document)
+      const bound = bindings.some(binding => binding.documentKey === documentKey)
+      const document = bound
+        ? await docxBridge.openBound(jobId, documentKey)
+        : await docxBridge.chooseFile(jobId, documentKey)
+      if (document) props.onOpenEditor?.(document)
+      else setMessage('Choose the original DOCX to edit it in place')
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : 'Could not open the document editor')
+      setMessage(error instanceof Error ? error.message : 'Could not open the DOCX editor')
     } finally {
       setEditorBusyKey(null)
     }
   }
 
   const startBlankFromChoice = async () => {
-    if (!blankChoiceKey || !jobId || !editableBridge) return
+    if (!blankChoiceKey || !jobId || !docxBridge) return
     const documentKey = blankChoiceKey
     setBlankChoiceKey(null)
     setEditorBusyKey(documentKey)
     try {
-      const document = await editableBridge.createBlank(
-        jobId,
-        documentKey,
-        `create-${documentKey}-${globalThis.crypto.randomUUID()}`
-      )
-      props.onOpenEditor?.(document)
+      const document = await docxBridge.createBlank(jobId, documentKey)
+      if (document) props.onOpenEditor?.(document)
+      else setMessage('Create blank DOCX cancelled')
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : 'Could not create a blank document')
+      setMessage(error instanceof Error ? error.message : 'Could not create a blank DOCX')
     } finally {
       setEditorBusyKey(null)
     }
   }
 
   const importDocx = async (requestedKey: DocumentKey = importKey) => {
-    if (!jobId || !editableBridge || editorBusyKey) return
+    if (!jobId || !docxBridge || editorBusyKey) return
     setEditorBusyKey(requestedKey)
-    setMessage(`Importing ${documentLabels[requestedKey]} DOCX…`)
+    setMessage(`Choosing canonical ${documentLabels[requestedKey]} DOCX…`)
     try {
-      const document = await editableBridge.importFile(jobId, requestedKey)
+      const document = await docxBridge.chooseFile(jobId, requestedKey)
       if (document) props.onOpenEditor?.(document)
-      else setMessage('Import cancelled')
+      else setMessage('Choose DOCX cancelled')
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : 'Could not import the DOCX')
+      setMessage(error instanceof Error ? error.message : 'Could not open the DOCX')
     } finally {
       setEditorBusyKey(null)
     }
@@ -527,7 +505,7 @@ export function DocumentWorkspace(props: DocumentWorkspaceProps) {
                 ? `Opening ${documentLabels[documentKey]} editor`
                 : `Open ${documentLabels[documentKey]} in Editor`}
               className="edit-document-button"
-              disabled={!editableBridge || !props.onOpenEditor || Boolean(editorBusyKey)}
+              disabled={!docxBridge || !props.onOpenEditor || Boolean(editorBusyKey)}
               key={documentKey}
               onClick={() => { void openEditor(documentKey) }}
               type="button"
@@ -540,14 +518,15 @@ export function DocumentWorkspace(props: DocumentWorkspaceProps) {
           )
         })}
         <select
-          aria-label="Document type to import"
-          disabled={!editableBridge || Boolean(editorBusyKey)}
+          aria-label="Document type to edit"
+          disabled={!docxBridge || Boolean(editorBusyKey)}
           onChange={event => setImportKey(event.target.value as DocumentKey)}
           value={importKey}
         >
           {documentOrder.map(documentKey => <option key={documentKey} value={documentKey}>{documentLabels[documentKey]}</option>)}
         </select>
-        <button disabled={!editableBridge || !props.onOpenEditor || Boolean(editorBusyKey)} onClick={() => { void importDocx() }} type="button"><FolderOpen aria-hidden="true" size={14} /> Import DOCX</button>
+        <button disabled={!docxBridge || !props.onOpenEditor || Boolean(editorBusyKey)} onClick={() => { void importDocx() }} type="button"><FolderOpen aria-hidden="true" size={14} /> Choose DOCX</button>
+                <button disabled={!docxBridge || !props.onOpenEditor || Boolean(editorBusyKey)} onClick={() => setBlankChoiceKey(importKey)} type="button"><Plus aria-hidden="true" size={14} /> New blank DOCX</button>
         <button disabled={!activeArtifact || !bridge} onClick={() => nativeAction('open')} type="button"><ExternalLink aria-hidden="true" size={14} /> Open</button>
         <button disabled={!activeArtifact || !bridge} onClick={() => nativeAction('reveal')} type="button"><FolderOpen aria-hidden="true" size={14} /> Reveal</button>
         <div className="document-export">
@@ -619,10 +598,10 @@ export function DocumentWorkspace(props: DocumentWorkspaceProps) {
         <div aria-labelledby="document-source-choice-title" aria-modal="true" className="document-exit-dialog" role="dialog">
           <div>
             <FileText aria-hidden="true" size={22} />
-            <h2 id="document-source-choice-title">This revision has PDF only</h2>
-            <p>Choose a Word file to import, or start a clean {documentLabels[blankChoiceKey]} draft.</p>
+            <h2 id="document-source-choice-title">Create or choose a DOCX</h2>
+            <p>Choose the original Word file to edit in place, or create a new {documentLabels[blankChoiceKey]} DOCX.</p>
             <div>
-              <button onClick={() => { const key = blankChoiceKey; setBlankChoiceKey(null); void importDocx(key) }} type="button">Import DOCX</button>
+              <button onClick={() => { const key = blankChoiceKey; setBlankChoiceKey(null); void importDocx(key) }} type="button">Choose existing DOCX</button>
               <button onClick={() => { void startBlankFromChoice() }} type="button">Start blank</button>
               <button onClick={() => setBlankChoiceKey(null)} type="button">Cancel</button>
             </div>

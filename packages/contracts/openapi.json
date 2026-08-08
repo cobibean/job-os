@@ -398,6 +398,8 @@
             "enum": [
               "desktop_unavailable",
               "tab_not_found",
+              "document_not_found",
+              "conflict",
               "timeout",
               "validation",
               "execution"
@@ -442,7 +444,9 @@
               "page.snapshot",
               "element.click",
               "element.type",
-              "page.scroll"
+              "page.scroll",
+              "document.inspect",
+              "document.apply_operations"
             ],
             "title": "Command",
             "type": "string"
@@ -1110,6 +1114,127 @@
           "comment_count"
         ],
         "title": "DocumentDraftOutline",
+        "type": "object"
+      },
+      "DocumentFileCapabilities": {
+        "additionalProperties": false,
+        "properties": {
+          "editable_block_count": {
+            "minimum": 0.0,
+            "title": "Editable Block Count",
+            "type": "integer"
+          },
+          "mode": {
+            "enum": [
+              "editable",
+              "editable_with_protected_content",
+              "read_only"
+            ],
+            "title": "Mode",
+            "type": "string"
+          },
+          "protected_block_count": {
+            "minimum": 0.0,
+            "title": "Protected Block Count",
+            "type": "integer"
+          },
+          "reasons": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 100,
+            "title": "Reasons",
+            "type": "array"
+          }
+        },
+        "required": [
+          "mode",
+          "protected_block_count",
+          "editable_block_count"
+        ],
+        "title": "DocumentFileCapabilities",
+        "type": "object"
+      },
+      "DocumentFileList": {
+        "additionalProperties": false,
+        "properties": {
+          "documents": {
+            "items": {
+              "$ref": "#/components/schemas/DocumentFileRecord"
+            },
+            "title": "Documents",
+            "type": "array"
+          }
+        },
+        "required": [
+          "documents"
+        ],
+        "title": "DocumentFileList",
+        "type": "object"
+      },
+      "DocumentFileRecord": {
+        "additionalProperties": false,
+        "properties": {
+          "capabilities": {
+            "$ref": "#/components/schemas/DocumentFileCapabilities"
+          },
+          "document_id": {
+            "pattern": "^dfile_[a-f0-9]{24}$",
+            "title": "Document Id",
+            "type": "string"
+          },
+          "document_key": {
+            "enum": [
+              "resume",
+              "cover_letter",
+              "references"
+            ],
+            "title": "Document Key",
+            "type": "string"
+          },
+          "document_label": {
+            "maxLength": 80,
+            "minLength": 1,
+            "title": "Document Label",
+            "type": "string"
+          },
+          "filename": {
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Filename",
+            "type": "string"
+          },
+          "job_id": {
+            "title": "Job Id",
+            "type": "string"
+          },
+          "observed_at": {
+            "title": "Observed At",
+            "type": "string"
+          },
+          "observed_revision": {
+            "minimum": 1.0,
+            "title": "Observed Revision",
+            "type": "integer"
+          },
+          "sha256": {
+            "pattern": "^[a-f0-9]{64}$",
+            "title": "Sha256",
+            "type": "string"
+          }
+        },
+        "required": [
+          "document_id",
+          "job_id",
+          "document_key",
+          "document_label",
+          "filename",
+          "sha256",
+          "observed_revision",
+          "capabilities",
+          "observed_at"
+        ],
+        "title": "DocumentFileRecord",
         "type": "object"
       },
       "DocumentImportIssue": {
@@ -3887,6 +4012,53 @@
         ]
       }
     },
+    "/v1/document-files/{document_id}": {
+      "get": {
+        "operationId": "document_file_get_v1_document_files__document_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "document_id",
+            "required": true,
+            "schema": {
+              "title": "Document Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocumentFileRecord"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Document File Get",
+        "tags": [
+          "document-files"
+        ]
+      }
+    },
     "/v1/editable-documents/{document_id}": {
       "get": {
         "operationId": "editable_document_get_v1_editable_documents__document_id__get",
@@ -5299,6 +5471,53 @@
         "summary": "Job Update Description",
         "tags": [
           "jobs"
+        ]
+      }
+    },
+    "/v1/jobs/{job_id}/document-files": {
+      "get": {
+        "operationId": "document_files_list_v1_jobs__job_id__document_files_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "title": "Job Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocumentFileList"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Document Files List",
+        "tags": [
+          "document-files"
         ]
       }
     },

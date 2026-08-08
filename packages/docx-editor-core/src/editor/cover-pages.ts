@@ -1,6 +1,6 @@
 import type { Editor } from '@tiptap/core'
-import { DATE_LOCALES, getLang, t, type StringKey } from '../locale'
-import type { PmNode } from './convert'
+import { DATE_LOCALES, getLang, t, type StringKey } from '../locale.js'
+import type { PmNode } from './convert.js'
 
 /**
  * Built-in cover page library (the preset gallery behind Insert → Cover

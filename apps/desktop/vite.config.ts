@@ -12,7 +12,8 @@ export default defineConfig({
     rollupOptions: {
       input: {
         index: fileURLToPath(new URL('./src/renderer/index.html', import.meta.url)),
-        print: fileURLToPath(new URL('./src/renderer/print.html', import.meta.url))
+        print: fileURLToPath(new URL('./src/renderer/print.html', import.meta.url)),
+        docxWorker: fileURLToPath(new URL('./src/renderer/docx-worker.html', import.meta.url))
       }
     }
   }

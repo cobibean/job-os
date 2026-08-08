@@ -2,9 +2,9 @@ import { Extension, Mark } from '@tiptap/core'
 import { Plugin, PluginKey } from '@tiptap/pm/state'
 import { Decoration, DecorationSet } from '@tiptap/pm/view'
 import {} from '@tiptap/pm/tables'
-import { cssDualFontFamily, cssFontFamily } from '../line-metrics'
-import { isEastAsianFontName } from '../font-list'
-import { t } from '../locale'
+import { cssDualFontFamily, cssFontFamily } from '../line-metrics.js'
+import { isEastAsianFontName } from '../font-list.js'
+import { t } from '../locale.js'
 import {} from '@jobos/docx-engine'
 
 /**

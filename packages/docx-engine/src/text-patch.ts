@@ -1,4 +1,4 @@
-import { escapeXmlText } from './xml-utils'
+import { escapeXmlText } from './xml-utils.js'
 
 /**
  * Paragraph-level surgical text patch (saving edits to rich-text entries such as

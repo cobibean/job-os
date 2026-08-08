@@ -5,7 +5,7 @@ import {
   type HfParagraph,
   type Run,
 } from '@jobos/docx-engine'
-import { cssDualFontFamily, cssFontFamily } from '../line-metrics'
+import { cssDualFontFamily, cssFontFamily } from '../line-metrics.js'
 
 /**
  * Plain-DOM header/footer rendering for the canvas page gaps (M4 always-on

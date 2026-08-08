@@ -8,7 +8,7 @@ import {
   isPillPreset,
   presetPath,
   presetPolygon,
-} from '../preset-geometry'
+} from '../preset-geometry.js'
 
 const R = (v: number) => Math.round(v * 100) / 100
 

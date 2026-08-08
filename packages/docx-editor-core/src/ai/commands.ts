@@ -2,9 +2,9 @@ import type { Editor } from '@tiptap/core'
 import type { Node as PmDocNode, Schema } from '@tiptap/pm/model'
 import type { Transaction } from '@tiptap/pm/state'
 import { generateTocFieldXml, type TocEntry } from '@jobos/docx-engine'
-import { isEastAsianFontName } from '../font-list'
-import { t } from '../locale'
-import { isTrackedDeleted, liveText } from './protocol'
+import { isEastAsianFontName } from '../font-list.js'
+import { t } from '../locale.js'
+import { isTrackedDeleted, liveText } from './protocol.js'
 
 /**
  * Structured edit commands: the model emits a

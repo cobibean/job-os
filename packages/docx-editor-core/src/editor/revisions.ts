@@ -19,7 +19,7 @@ import {
   ReplaceAroundStep,
   ReplaceStep,
 } from '@tiptap/pm/transform'
-import { t } from '../locale'
+import { t } from '../locale.js'
 
 export interface RevisionRange {
   from: number

@@ -9,7 +9,7 @@ import {
   textOf,
   xmlParser,
   type XNode,
-} from './xml-utils'
+} from './xml-utils.js'
 
 /**
  * OMML (Office Math Markup) <-> display / authoring support.

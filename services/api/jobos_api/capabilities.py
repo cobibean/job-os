@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import re
 import secrets
 from dataclasses import dataclass
@@ -29,6 +30,8 @@ BrowserCommandName = Literal[
     "element.click",
     "element.type",
     "page.scroll",
+    "document.inspect",
+    "document.apply_operations",
 ]
 
 COMMANDS = {
@@ -47,6 +50,8 @@ COMMANDS = {
     "element.click",
     "element.type",
     "page.scroll",
+    "document.inspect",
+    "document.apply_operations",
 }
 TAB_ID = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
 TARGET_ID = re.compile(r"^t_[A-Za-z0-9_-]{1,64}$")
@@ -96,10 +101,17 @@ class BrowserCommandRequest(BaseModel):
             "element.click": {"tab_id", "target_id"},
             "element.type": {"tab_id", "target_id", "text", "clear"},
             "page.scroll": {"tab_id", "direction", "amount"},
+            "document.inspect": {"job_id", "document_key"},
+            "document.apply_operations": {
+                "job_id", "document_key", "expected_sha256", "operations"
+            },
         }
         if set(args) - allowed[command]:
             raise ValueError("Invalid browser command arguments")
-        if command not in {"tabs.inspect", "tab.create", "tabs.reorder"} and (
+        if command not in {
+            "tabs.inspect", "tab.create", "tabs.reorder",
+            "document.inspect", "document.apply_operations",
+        } and (
             not isinstance(args.get("tab_id"), str) or not TAB_ID.fullmatch(args["tab_id"])
         ):
             raise ValueError("Invalid browser command arguments")
@@ -151,12 +163,37 @@ class BrowserCommandRequest(BaseModel):
             job_id = args.get("job_id")
             if not isinstance(job_id, str) or not job_id or len(job_id) > 512:
                 raise ValueError("Invalid browser command arguments")
+        if command.startswith("document."):
+            job_id = args.get("job_id")
+            document_key = args.get("document_key")
+            if (
+                not isinstance(job_id, str)
+                or not job_id
+                or len(job_id) > 512
+                or document_key not in {"resume", "cover_letter", "references"}
+            ):
+                raise ValueError("Invalid document command arguments")
+        if command == "document.apply_operations":
+            expected_hash = args.get("expected_sha256")
+            operations = args.get("operations")
+            if (
+                not isinstance(expected_hash, str)
+                or not re.fullmatch(r"[a-f0-9]{64}", expected_hash)
+                or not isinstance(operations, list)
+                or not 1 <= len(operations) <= 100
+                or len(json.dumps(operations, separators=(",", ":"))) > 100_000
+                or any(not isinstance(operation, dict) for operation in operations)
+            ):
+                raise ValueError("Invalid document command arguments")
         return dict(args)
 
 
 class BrowserCommandError(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
-    code: Literal["desktop_unavailable", "tab_not_found", "timeout", "validation", "execution"]
+    code: Literal[
+        "desktop_unavailable", "tab_not_found", "document_not_found", "conflict",
+        "timeout", "validation", "execution"
+    ]
     message: str = Field(max_length=300)
 
 
