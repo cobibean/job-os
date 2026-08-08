@@ -51,7 +51,7 @@ All are writable by the Mini user, but Phase 0 used them read-only. JobOS V1 mus
 - Live job-hunter profile: `~/.hermes/profiles/job-hunter`
 - Job-hunter gateway label: `ai.hermes.gateway-job-hunter`
 - Unified desktop backend label: `ai.hermes.dashboard-fleet`
-- Unified backend: `127.0.0.1:9119`
+- JobOS integration backend: `127.0.0.1:9120` (dedicated loopback port; ordinary Hermes dashboards retain their default `9119`)
 - Health/status: `GET /api/status`
 - Structured conversation transport: JSON-RPC over WebSocket at `/api/ws`
 
