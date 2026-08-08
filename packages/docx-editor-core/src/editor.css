@@ -1,0 +1,75 @@
+.jobos-docx-canvas {
+  --doc-page-width: 816px;
+  --doc-page-height: 1056px;
+  --doc-page-padding-x: 96px;
+  --doc-page-padding-y: 96px;
+  min-height: 100%;
+  padding: 36px 24px 80px;
+  overflow: auto;
+  background: color-mix(in srgb, var(--color-surface, #111827) 88%, #000);
+}
+
+.jobos-docx-page {
+  position: relative;
+  width: var(--doc-page-width);
+  min-height: var(--doc-page-height);
+  margin: 0 auto;
+  padding: var(--doc-page-padding-y) var(--doc-page-padding-x);
+  color: #111827;
+  background: #fff;
+  box-shadow: 0 18px 55px rgb(0 0 0 / 28%), 0 1px 0 rgb(255 255 255 / 8%);
+  transform-origin: top center;
+}
+
+.jobos-docx-page .tiptap {
+  min-height: calc(var(--doc-page-height) - (2 * var(--doc-page-padding-y)));
+  outline: none;
+  font-family: var(--doc-body-font, Calibri, Arial, sans-serif);
+  font-size: var(--doc-body-size, 11pt);
+  line-height: var(--doc-line-factor-latin, 1.2);
+}
+
+.jobos-docx-page .tiptap p,
+.jobos-docx-page .tiptap h1,
+.jobos-docx-page .tiptap h2,
+.jobos-docx-page .tiptap h3 {
+  margin-block: 0;
+}
+
+.jobos-docx-page .tiptap table {
+  border-collapse: collapse;
+  table-layout: fixed;
+}
+
+.jobos-docx-page .tiptap td,
+.jobos-docx-page .tiptap th {
+  min-width: 40px;
+  vertical-align: top;
+}
+
+.jobos-docx-page .tiptap .selectedCell::after {
+  background: rgb(59 130 246 / 14%);
+  content: '';
+  inset: 0;
+  pointer-events: none;
+  position: absolute;
+}
+
+.jobos-docx-page [data-page-gap] {
+  background: #202938;
+  box-shadow: inset 0 1px rgb(255 255 255 / 6%), inset 0 -1px rgb(0 0 0 / 32%);
+  margin-inline: calc(-1 * var(--doc-page-padding-x));
+  pointer-events: none;
+}
+
+.jobos-docx-page [data-block-type='passthrough'],
+.jobos-docx-page .doc-protected {
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  background: #f8fafc;
+}
+
+@media (max-width: 920px) {
+  .jobos-docx-canvas { padding-inline: 10px; }
+  .jobos-docx-page { transform: scale(.8); margin-bottom: calc(var(--doc-page-height) * -.2); }
+}
