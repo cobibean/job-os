@@ -521,9 +521,11 @@ export function DocumentWorkspace(props: DocumentWorkspaceProps) {
       <div className="document-toolbar" role="toolbar" aria-label="Document controls">
         <button disabled={!bridge || loading} onClick={refresh} type="button"><RefreshCw aria-hidden="true" size={14} /> Refresh</button>
         {documentOrder.map(documentKey => {
-          const draft = drafts.find(item => item.documentKey === documentKey)
           return (
             <button
+              aria-label={editorBusyKey === documentKey
+                ? `Opening ${documentLabels[documentKey]} editor`
+                : `Open ${documentLabels[documentKey]} in Editor`}
               className="edit-document-button"
               disabled={!editableBridge || !props.onOpenEditor || Boolean(editorBusyKey)}
               key={documentKey}
@@ -533,7 +535,7 @@ export function DocumentWorkspace(props: DocumentWorkspaceProps) {
               <FileText aria-hidden="true" size={14} />
               {editorBusyKey === documentKey
                 ? 'Opening…'
-                : `${draft ? 'Edit' : 'Create'} ${documentLabels[documentKey]}`}
+                : `${documentLabels[documentKey]} Editor`}
             </button>
           )
         })}
