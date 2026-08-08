@@ -2,15 +2,6 @@
 
 A lightweight running list of potential JobOS features. Ideas belong here before planning or implementation.
 
-## Add a job from the browser
-
-While viewing a job listing in the JobOS browser, click **Add to JobOS** to:
-
-- extract the company, role, location, URL, and job description;
-- add the job to the list on the left;
-- link the current browser tab to the new job;
-- avoid creating a duplicate if the job is already saved.
-
 ## Job workspace
 
 Give each job one shared workspace for its listing, research, notes, documents, and agent activity.
