@@ -49,7 +49,12 @@ _PRIVATE_EVENT_KEYS = {
 
 
 def _safe_value(
-    value: Any, *, key: str = "", depth: int = 0, max_string: int = MAX_STRING
+    value: Any,
+    *,
+    key: str = "",
+    depth: int = 0,
+    max_string: int = MAX_STRING,
+    protect_paths: bool = True,
 ) -> tuple[Any, bool]:
     if _SENSITIVE_KEY.search(key):
         return "[redacted]", True
@@ -58,19 +63,19 @@ def _safe_value(
     if value is None or isinstance(value, (bool, int, float)):
         return value, False
     if isinstance(value, str):
-        if _PATH_KEY.search(key) and value.startswith(("/", "~")):
+        if protect_paths and _PATH_KEY.search(key) and value.startswith(("/", "~")):
             return "[protected path]", True
         redacted = bool(
             _SENSITIVE_VALUE.search(value)
             or _STANDALONE_CREDENTIAL.search(value)
-            or _CREDENTIAL_PATH.search(value)
+            or (protect_paths and _CREDENTIAL_PATH.search(value))
             or _SIGNED_URL.search(value)
         )
         safe = _SENSITIVE_VALUE.sub("[redacted]", value)
         safe = _STANDALONE_CREDENTIAL.sub("[redacted]", safe)
         if _SIGNED_URL.search(safe):
             safe = "[protected signed URL]"
-        if _CREDENTIAL_PATH.search(safe):
+        if protect_paths and _CREDENTIAL_PATH.search(safe):
             safe = "[protected path]"
         if len(safe) > max_string:
             safe = safe[:max_string] + "…"
@@ -88,14 +93,21 @@ def _safe_value(
                 output[f"redacted_field_{len(output) + 1}"] = "[redacted]"
                 changed = True
                 continue
-            output[safe_key], item_changed = _safe_value(item, key=safe_key, depth=depth + 1)
+            output[safe_key], item_changed = _safe_value(
+                item,
+                key=safe_key,
+                depth=depth + 1,
+                protect_paths=protect_paths,
+            )
             changed = changed or item_changed
         return output, changed
     if isinstance(value, (list, tuple)):
         output = []
         changed = len(value) > MAX_ITEMS
         for item in list(value)[:MAX_ITEMS]:
-            safe, item_changed = _safe_value(item, depth=depth + 1)
+            safe, item_changed = _safe_value(
+                item, depth=depth + 1, protect_paths=protect_paths
+            )
             output.append(safe)
             changed = changed or item_changed
         return output, changed
