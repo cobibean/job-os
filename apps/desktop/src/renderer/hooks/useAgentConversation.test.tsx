@@ -159,7 +159,8 @@ test('assistant completion renders full transcript text instead of its bounded e
   }))
 })
 
-test.each(['[protected path]', '[protected signed URL]'])('%s cannot erase an already streamed assistant response', placeholder => {
+test('[protected path] cannot erase an already streamed assistant response', () => {
+  const placeholder = '[protected path]'
   const visible = 'Saved the cover letter to /Users/person/.hermes/workspaces/acme/cover-letter.pdf.'
   const [turn] = projectConversation([
     event(1, { type: 'assistant_message', summary: visible, detail: { type: 'message.delta', text: visible } }),
@@ -169,6 +170,19 @@ test.each(['[protected path]', '[protected signed URL]'])('%s cannot erase an al
   expect(turn).toEqual(expect.objectContaining({
     kind: 'agent-turn',
     assistant: expect.objectContaining({ text: visible, state: 'completed' })
+  }))
+})
+
+test('terminal signed URL redaction replaces streamed chunks that could reconstruct a credential', () => {
+  const [turn] = projectConversation([
+    event(1, { type: 'assistant_message', summary: 'https://example.test/file?x-amz-sign', detail: { type: 'message.delta', text: 'https://example.test/file?x-amz-sign' } }),
+    event(2, { type: 'assistant_message', summary: 'ature=SECRET', detail: { type: 'message.delta', text: 'ature=SECRET' } }),
+    event(3, { type: 'assistant_message', state: 'completed', summary: '[protected signed URL]', detail: { type: 'message.complete', text: '[protected signed URL]' } })
+  ])
+
+  expect(turn).toEqual(expect.objectContaining({
+    kind: 'agent-turn',
+    assistant: expect.objectContaining({ text: '[protected signed URL]', state: 'completed' })
   }))
 })
 
