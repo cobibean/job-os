@@ -209,8 +209,7 @@ function statusOrErrorItem(entry: ConversationEvent): StatusOrErrorItem {
 }
 
 const destructiveRedactionPlaceholders = new Set([
-  '[protected path]',
-  '[protected signed URL]'
+  '[protected path]'
 ])
 
 function terminalAssistantText(streamedText: string, terminalText: string): string {
