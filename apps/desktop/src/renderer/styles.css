@@ -603,7 +603,8 @@ button:focus-visible {
 .document-position { min-width: 82px; display: flex; flex-direction: column; align-items: center; gap: 1px; color: var(--muted); font-size: var(--text-xs); }
 .document-position strong { max-width: 110px; font-size: var(--text-xs); }
 
-.document-toolbar { min-width: 0; display: flex; align-items: center; gap: 3px; padding: 5px 9px; border-bottom: 1px solid var(--border); background: var(--surface); }
+.document-toolbar { min-width: 0; display: flex; align-items: center; gap: 3px; padding: 5px 9px; overflow-x: auto; overscroll-behavior-x: contain; border-bottom: 1px solid var(--border); background: var(--surface); }
+.document-toolbar > * { flex-shrink: 0; }
 .document-toolbar button { height: 30px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 0 9px; border: 0; border-radius: var(--radius-sm); color: var(--muted); background: transparent; cursor: pointer; font-size: var(--text-xs); white-space: nowrap; }
 .document-toolbar button:hover:not(:disabled) { color: var(--text); background: var(--surface-hover); }
 .document-toolbar button:disabled { opacity: var(--disabled-opacity); cursor: default; }
