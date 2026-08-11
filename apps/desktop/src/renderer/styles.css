@@ -612,9 +612,10 @@ button:focus-visible {
 .document-toolbar .approve-revision:disabled { opacity: 0.72; }
 .document-toolbar-spacer { min-width: 8px; flex: 1; }
 .document-export { position: relative; }
-.document-export-menu { position: absolute; z-index: 5; top: calc(100% + 3px); left: 0; min-width: 116px; padding: 4px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface-raised); box-shadow: 0 8px 24px var(--shadow-color); }
-.document-toolbar .document-export-menu button { width: 100%; justify-content: flex-start; color: var(--text-soft); }
-.document-toolbar .document-export-menu button:hover:not(:disabled) { color: var(--text); background: var(--surface-hover); }
+.document-export-menu { position: fixed; z-index: 20; min-width: 116px; padding: 4px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface-raised); box-shadow: 0 8px 24px var(--shadow-color); }
+.document-export-menu button { width: 100%; height: 30px; display: flex; align-items: center; justify-content: flex-start; padding: 0 9px; border: 0; border-radius: var(--radius-sm); color: var(--text-soft); background: transparent; cursor: pointer; font-size: var(--text-xs); white-space: nowrap; }
+.document-export-menu button:hover:not(:disabled) { color: var(--text); background: var(--surface-hover); }
+.document-export-menu button:disabled { opacity: var(--disabled-opacity); cursor: default; }
 .page-count, .zoom-value { color: var(--text-soft); font-size: var(--text-xs); white-space: nowrap; }
 .zoom-value { width: 38px; text-align: center; }
 

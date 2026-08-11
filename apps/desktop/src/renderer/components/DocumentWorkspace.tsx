@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import {
   CheckCircle2,
   ChevronLeft,
@@ -148,6 +149,7 @@ export function DocumentWorkspace(props: DocumentWorkspaceProps) {
   const [message, setMessage] = useState('')
   const [exportOpen, setExportOpen] = useState(false)
   const [exportBusy, setExportBusy] = useState(false)
+  const [exportMenuPosition, setExportMenuPosition] = useState({ left: 0, top: 0 })
   const [bindings, setBindings] = useState<DocxBinding[]>([])
   const [docxPreview, setDocxPreview] = useState<DocxOpenResult | null>(null)
   const bindingListEpoch = useRef(0)
@@ -396,6 +398,26 @@ export function DocumentWorkspace(props: DocumentWorkspaceProps) {
     document.addEventListener('pointerdown', closeOnPointerDown)
     return () => document.removeEventListener('pointerdown', closeOnPointerDown)
   }, [exportOpen])
+
+  const positionExportMenu = useCallback(() => {
+    const bounds = exportButton.current?.getBoundingClientRect()
+    if (!bounds) return
+    setExportMenuPosition({
+      left: Math.max(8, Math.min(bounds.left, window.innerWidth - 124)),
+      top: bounds.bottom + 3
+    })
+  }, [])
+
+  useEffect(() => {
+    if (!exportOpen) return
+    positionExportMenu()
+    window.addEventListener('resize', positionExportMenu)
+    document.addEventListener('scroll', positionExportMenu, true)
+    return () => {
+      window.removeEventListener('resize', positionExportMenu)
+      document.removeEventListener('scroll', positionExportMenu, true)
+    }
+  }, [exportOpen, positionExportMenu])
 
   const refresh = useCallback(async () => {
     if (!jobId || !bridge) return
@@ -647,14 +669,22 @@ export function DocumentWorkspace(props: DocumentWorkspaceProps) {
         <button disabled={!activeArtifact || !bridge} onClick={() => nativeAction('open')} type="button"><ExternalLink aria-hidden="true" size={14} /> Open</button>
         <button disabled={!activeArtifact || !bridge} onClick={() => nativeAction('reveal')} type="button"><FolderOpen aria-hidden="true" size={14} /> Reveal</button>
         <div className="document-export">
-          <button ref={exportButton} aria-expanded={exportOpen} aria-haspopup="menu" disabled={!bridge || exportBusy || (!exportPdf && !exportDocx)} onClick={() => setExportOpen(value => !value)} type="button"><Download aria-hidden="true" size={14} /> Export</button>
-          {exportOpen ? (
-            <div ref={exportMenu} aria-label="Export document" className="document-export-menu" onKeyDown={event => { if (event.key === 'Escape') { setExportOpen(false); exportButton.current?.focus() } }} role="menu">
-              {exportPdf ? <button disabled={exportBusy} onClick={() => exportArtifact(exportPdf)} role="menuitem" type="button">Export PDF</button> : null}
-              {exportDocx ? <button disabled={exportBusy} onClick={() => exportArtifact(exportDocx)} role="menuitem" type="button">Export DOCX</button> : null}
-            </div>
-          ) : null}
+          <button ref={exportButton} aria-expanded={exportOpen} aria-haspopup="menu" disabled={!bridge || exportBusy || (!exportPdf && !exportDocx)} onClick={() => { if (!exportOpen) positionExportMenu(); setExportOpen(value => !value) }} type="button"><Download aria-hidden="true" size={14} /> Export</button>
         </div>
+        {exportOpen ? createPortal(
+          <div
+            ref={exportMenu}
+            aria-label="Export document"
+            className="document-export-menu"
+            onKeyDown={event => { if (event.key === 'Escape') { setExportOpen(false); exportButton.current?.focus() } }}
+            role="menu"
+            style={exportMenuPosition}
+          >
+            {exportPdf ? <button disabled={exportBusy} onClick={() => exportArtifact(exportPdf)} role="menuitem" type="button">Export PDF</button> : null}
+            {exportDocx ? <button disabled={exportBusy} onClick={() => exportArtifact(exportDocx)} role="menuitem" type="button">Export DOCX</button> : null}
+          </div>,
+          document.body
+        ) : null}
         {previewMode === 'pdf' && activeArtifact?.documentKey === 'resume' && activeArtifact.mediaType === PDF ? (
           <button
             className="approve-revision"
