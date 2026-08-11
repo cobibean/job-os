@@ -45,33 +45,38 @@ export function WorkbenchLayout(props: WorkbenchLayoutProps) {
         {previous ? (
           <ResizeHandle before={previous} after={panelId} onResize={props.onResize} widths={layout.widths} />
         ) : null}
-        <div className="panel-layout-controls">
-          <span className="panel-layout-title">{panelNames[panelId]}</span>
-          <button
-            aria-label={`Move ${panelNames[panelId]} left`}
-            className="panel-control"
-            disabled={index === 0}
-            onClick={() => props.onMove(panelId, index - 1)}
-            type="button"
-          ><ArrowLeft aria-hidden="true" size={13} /></button>
-          <button
-            aria-label={`Reorder ${panelNames[panelId]}`}
-            className="panel-control drag-control"
-            draggable
-            onDragStart={event => {
-              event.dataTransfer.effectAllowed = 'move'
-              event.dataTransfer.setData('application/x-jobos-panel', panelId)
-            }}
-            title={`Drag to reorder ${panelNames[panelId]}`}
-            type="button"
-          ><GripVertical aria-hidden="true" size={14} /></button>
-          <button
-            aria-label={`Move ${panelNames[panelId]} right`}
-            className="panel-control"
-            disabled={index === layout.order.length - 1}
-            onClick={() => props.onMove(panelId, index + 1)}
-            type="button"
-          ><ArrowRight aria-hidden="true" size={13} /></button>
+        <div aria-label={`${panelNames[panelId]} layout controls`} className="panel-layout-controls">
+          <span className="sr-only">{panelNames[panelId]}</span>
+          <details className="panel-arrange-menu">
+            <summary aria-label={`Arrange ${panelNames[panelId]}`} className="panel-control" title={`Arrange ${panelNames[panelId]}`}><GripVertical aria-hidden="true" size={14} /></summary>
+            <span className="panel-arrange-actions" role="toolbar" aria-label={`Arrange ${panelNames[panelId]}`}>
+              <button
+                aria-label={`Move ${panelNames[panelId]} left`}
+                className="panel-control"
+                disabled={index === 0}
+                onClick={() => props.onMove(panelId, index - 1)}
+                type="button"
+              ><ArrowLeft aria-hidden="true" size={13} /></button>
+              <button
+                aria-label={`Reorder ${panelNames[panelId]}`}
+                className="panel-control drag-control"
+                draggable
+                onDragStart={event => {
+                  event.dataTransfer.effectAllowed = 'move'
+                  event.dataTransfer.setData('application/x-jobos-panel', panelId)
+                }}
+                title={`Drag to reorder ${panelNames[panelId]}`}
+                type="button"
+              ><GripVertical aria-hidden="true" size={14} /></button>
+              <button
+                aria-label={`Move ${panelNames[panelId]} right`}
+                className="panel-control"
+                disabled={index === layout.order.length - 1}
+                onClick={() => props.onMove(panelId, index + 1)}
+                type="button"
+              ><ArrowRight aria-hidden="true" size={13} /></button>
+            </span>
+          </details>
           <button
             aria-controls={`workbench-panel-${panelId}`}
             aria-expanded="true"

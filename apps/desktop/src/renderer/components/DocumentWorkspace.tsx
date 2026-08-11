@@ -585,14 +585,15 @@ export function DocumentWorkspace(props: DocumentWorkspaceProps) {
 
   return (
     <main className="document-workspace panel-region">
-      <div className="document-heading">
-        <div>
-          <span className="document-job">Documents for {props.job.company} · {props.job.title}</span>
-          <strong>{previewMode === 'docx' && previewFilename
-            ? previewFilename
-            : activeArtifact?.filename ?? 'Document artifacts'}</strong>
-        </div>
-        <div aria-label="Preview format" className="document-preview-switch" role="group">
+      <div className="document-toolbar" role="toolbar" aria-label="Document controls">
+        <div className="document-heading">
+          <div>
+            <span className="document-job">Documents for {props.job.company} · {props.job.title}</span>
+            <strong>{previewMode === 'docx' && previewFilename
+              ? previewFilename
+              : activeArtifact?.filename ?? 'Document artifacts'}</strong>
+          </div>
+          <div aria-label="Preview format" className="document-preview-switch" role="group">
           <button
             aria-pressed={previewMode === 'pdf'}
             disabled={!exportPdf}
@@ -605,16 +606,16 @@ export function DocumentWorkspace(props: DocumentWorkspaceProps) {
             onClick={() => props.onPreviewModeChange?.('docx')}
             type="button"
           >DOCX</button>
-        </div>
-        <nav aria-label="Job documents" className="document-navigation">
+          </div>
+          <nav aria-label="Job documents" className="document-navigation">
           <button aria-label="Previous document" disabled={activeDocumentIndex <= 0} onClick={() => selectDocument(activeDocumentIndex - 1)} type="button"><ChevronLeft aria-hidden="true" size={14} /></button>
           <span className="document-position">
             <strong>{activeDocument?.documentLabel ?? 'Document'}</strong>
             <span>{activeDocumentIndex >= 0 ? `${activeDocumentIndex + 1} of ${documents.length}` : `0 of ${documents.length}`}</span>
           </span>
           <button aria-label="Next document" disabled={activeDocumentIndex < 0 || activeDocumentIndex >= documents.length - 1} onClick={() => selectDocument(activeDocumentIndex + 1)} type="button"><ChevronRight aria-hidden="true" size={14} /></button>
-        </nav>
-        <select
+          </nav>
+          <select
           aria-label={`${activeDocument?.documentLabel ?? 'Document'} revision`}
           onChange={event => {
             const revision = activeDocument?.revisions.find(item => item.representative.artifactId === event.target.value)
@@ -632,10 +633,8 @@ export function DocumentWorkspace(props: DocumentWorkspaceProps) {
               </option>
             )
           })}
-        </select>
-      </div>
-
-      <div className="document-toolbar" role="toolbar" aria-label="Document controls">
+          </select>
+        </div>
         <button disabled={!bridge || loading} onClick={refresh} type="button"><RefreshCw aria-hidden="true" size={14} /> Refresh</button>
         {documentOrder.map(documentKey => {
           return (
@@ -707,32 +706,36 @@ export function DocumentWorkspace(props: DocumentWorkspaceProps) {
         </> : null}
       </div>
 
-      {currentArtifact?.renderStatus === 'failed' ? (
-        <div className="render-failure" role="alert">
-          <strong>Newest render failed.</strong> {currentArtifact.failureMessage ?? 'The latest artifact is unavailable.'}
-          {lastSuccessful ? ` Showing last successful revision ${lastSuccessful.artifactRevision}.` : ''}
-        </div>
-      ) : currentArtifact?.renderStatus === 'rendering' ? (
-        <div className="render-progress" role="status">A newer revision is rendering. The last successful document remains available.</div>
-      ) : currentArtifact ? (
-        <div className="render-current" role="status">Newest successful revision · {currentArtifact.artifactRevision} · source {currentArtifact.sourceRevision}</div>
-      ) : (
-        <div className="render-progress" role="status">No registered render is available for this document.</div>
-      )}
+      <div className="document-status-line">
+        {currentArtifact?.renderStatus === 'failed' ? (
+          <div className="render-failure" role="alert">
+            <strong>Newest render failed.</strong> {currentArtifact.failureMessage ?? 'The latest artifact is unavailable.'}
+            {lastSuccessful ? ` Showing last successful revision ${lastSuccessful.artifactRevision}.` : ''}
+          </div>
+        ) : currentArtifact?.renderStatus === 'rendering' ? (
+          <div className="render-progress" role="status">A newer revision is rendering. The last successful document remains available.</div>
+        ) : currentArtifact ? (
+          <div className="render-current" role="status"><CheckCircle2 aria-hidden="true" size={13} /> Current · {currentArtifact.artifactRevision}</div>
+        ) : (
+          <div className="render-progress" role="status">No registered render is available for this document.</div>
+        )}
 
-      {previewMode === 'docx' && previewBinding ? (
-        <div className="viewed-artifact" role="status">
-          Viewing current editable DOCX · local revision {previewBinding.revision} · SHA-256 {previewBinding.sha256}
-        </div>
-      ) : previewMode === 'docx' && exportDocx ? (
-        <div className="viewed-artifact" role="status">
-          Viewing packet DOCX · revision {exportDocx.artifactRevision} · source {exportDocx.sourceRevision} · {exportDocx.renderStatus}
-        </div>
-      ) : activeArtifact ? (
-        <div className="viewed-artifact" role="status">
-          Viewing {activeArtifact.filename ?? 'unnamed artifact'} · revision {activeArtifact.artifactRevision} · source {activeArtifact.sourceRevision} · {activeArtifact.mediaType} · {activeArtifact.renderStatus}
-        </div>
-      ) : null}
+        {currentArtifact || previewBinding || exportDocx || activeArtifact ? (
+          <details className="viewed-artifact">
+            <summary>Details</summary>
+            <div>
+              {lastSuccessful ? <span>Newest successful revision · {lastSuccessful.artifactRevision} · source {lastSuccessful.sourceRevision}</span> : null}
+              {previewMode === 'docx' && previewBinding ? (
+                <span>Viewing current editable DOCX · local revision {previewBinding.revision} · SHA-256 {previewBinding.sha256}</span>
+              ) : previewMode === 'docx' && exportDocx ? (
+                <span>Viewing packet DOCX · revision {exportDocx.artifactRevision} · source {exportDocx.sourceRevision} · {exportDocx.renderStatus}</span>
+              ) : activeArtifact ? (
+                <span>Viewing {activeArtifact.filename ?? 'unnamed artifact'} · revision {activeArtifact.artifactRevision} · source {activeArtifact.sourceRevision} · {activeArtifact.mediaType} · {activeArtifact.renderStatus}</span>
+              ) : null}
+            </div>
+          </details>
+        ) : null}
+      </div>
 
       <section className="document-canvas">
         {previewMode === 'docx' && currentDocxPreview ? (

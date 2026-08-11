@@ -456,7 +456,7 @@ export function CenterWorkspace(props: CenterWorkspaceProps) {
       </div>
 
       {saveState.message ? (
-        <div className={`browser-save-feedback ${saveState.status}`} role={saveState.status === 'error' ? 'alert' : 'status'}>
+        <div className={`browser-save-feedback ${saveState.status}${saveState.status === 'saved' || saveState.status === 'existing' ? ' compact-success' : ''}`} role={saveState.status === 'error' ? 'alert' : 'status'}>
           {saveState.status === 'saved' || saveState.status === 'existing' ? <Check aria-hidden="true" size={13} /> : null}
           <span>{saveState.message}</span>
         </div>
