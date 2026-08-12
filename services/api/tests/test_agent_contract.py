@@ -122,6 +122,19 @@ class ReconnectingGateway(FakeGateway):
             yield await self.events.get()
 
 
+class IdleReconnectingGateway(ReconnectingGateway):
+    def __init__(self) -> None:
+        super().__init__()
+        self.start_attempts = 0
+
+    async def start(self):
+        self.start_attempts += 1
+        self.started = True
+        if self.start_attempts == 1:
+            raise ConnectionError("initial dashboard connection failed")
+        self.online = True
+
+
 class InterruptFailureGateway(FakeGateway):
     async def interrupt_turn(self, turn_id):
         self.interruptions.append(turn_id)
@@ -699,6 +712,24 @@ def test_offline_start_keeps_consumer_alive_for_reconnect_and_completion(tmp_pat
     assert record["status"] == "completed"
     assert snapshot["active_turn"] is None
     assert any(entry["summary"] == "Recovered and completed" for entry in snapshot["entries"])
+
+
+def test_offline_start_reconnects_while_idle(tmp_path):
+    async def scenario():
+        store = JobOsStateStore(tmp_path / "jobos.db")
+        store.initialize()
+        gateway = IdleReconnectingGateway()
+        service = ConversationService(store, gateway)
+        await service.start()
+        for _ in range(60):
+            if gateway.connection_state == "online":
+                break
+            await asyncio.sleep(0.05)
+        assert gateway.connection_state == "online"
+        assert gateway.start_attempts >= 2
+        await service.close()
+
+    asyncio.run(scenario())
 
 
 def test_gateway_connectivity_and_mid_turn_transport_loss_are_durable_and_ordered(tmp_path):

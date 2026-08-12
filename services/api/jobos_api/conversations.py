@@ -62,6 +62,7 @@ class ConversationService:
         self.store = store
         self.gateway = gateway
         self._event_task: asyncio.Task[None] | None = None
+        self._connection_task: asyncio.Task[None] | None = None
         self._recovery_turn_id: str | None = None
         self._isolated_session_ids: set[str] = set()
         self._submission_lock = asyncio.Lock()
@@ -73,7 +74,26 @@ class ConversationService:
         with suppress(Exception):
             await self.gateway.start()
         self._event_task = asyncio.create_task(self._consume_gateway_events())
+        self._connection_task = asyncio.create_task(self._maintain_gateway_connection())
         await self._recover_persisted_active_turn()
+
+    async def _maintain_gateway_connection(self) -> None:
+        reconnect_delay = 1.0
+        while True:
+            if self.gateway.connection_state != "offline":
+                reconnect_delay = 1.0
+                await asyncio.sleep(1.0)
+                continue
+            try:
+                await self.gateway.start()
+                reconnect_delay = 1.0
+                if self.gateway.connection_state == "offline":
+                    await asyncio.sleep(reconnect_delay)
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                await asyncio.sleep(reconnect_delay)
+                reconnect_delay = min(reconnect_delay * 2, 10.0)
 
     async def _recover_persisted_active_turn(self) -> None:
         recovery_turn_id = self.store.recovery_turn_id()
@@ -164,9 +184,11 @@ class ConversationService:
             ) from error
 
     async def close(self) -> None:
-        if self._event_task:
-            self._event_task.cancel()
-            await asyncio.gather(self._event_task, return_exceptions=True)
+        tasks = [task for task in (self._event_task, self._connection_task) if task]
+        for task in tasks:
+            task.cancel()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
         await self.gateway.close()
 
     def snapshot(self) -> ConversationResponse:
