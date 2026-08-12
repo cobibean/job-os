@@ -1206,6 +1206,7 @@ def create_app(
                 "target_status": command.target_status,
                 "reason": command.reason,
                 "origin": command.origin,
+                "record_application": command.record_application,
             },
         )
         try:
@@ -1225,6 +1226,7 @@ def create_app(
             updated = jobs.update_lead_state(
                 job_id,
                 command.target_status,
+                record_application=command.record_application,
                 reason=command.reason,
             )
         except KeyError as error:

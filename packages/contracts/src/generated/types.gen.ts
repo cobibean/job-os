@@ -1696,6 +1696,10 @@ export type StatusChangeRequest = {
      */
     reason?: string | null;
     /**
+     * Record Application
+     */
+    record_application?: boolean;
+    /**
      * Target Status
      */
     target_status: 'discovered' | 'scored' | 'reviewed' | 'shortlisted' | 'apply_now' | 'maybe' | 'stretch' | 'skipped' | 'applied' | 'interviewing' | 'closed' | 'archived';

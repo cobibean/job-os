@@ -22,7 +22,6 @@ STATUS_GROUPS = {
 STATUS_GROUP_ORDER = ("Inbox", "Considering", "Applied", "Interviewing", "Closed", "Inactive")
 SortMode = Literal["manual", "recent", "alphabetical", "status"]
 
-
 class JobFacade(Protocol):
     def list_jobs(self) -> list[dict[str, Any]]: ...
 
@@ -47,6 +46,7 @@ class JobFacade(Protocol):
         target_state: str,
         *,
         reason: str | None = None,
+        record_application: bool = False,
     ) -> dict[str, Any]: ...
 
     def update_job_description(
@@ -97,6 +97,7 @@ class EmptyJobFacade:
         target_state: str,
         *,
         reason: str | None = None,
+        record_application: bool = False,
     ) -> dict[str, Any]:
         raise KeyError(job_id)
 
@@ -251,6 +252,7 @@ class StatusChangeRequest(BaseModel):
     ]
     origin: Literal["user", "mcp"]
     reason: str | None = Field(default=None, max_length=500)
+    record_application: bool = False
     idempotency_key: str = Field(default_factory=lambda: str(uuid4()), min_length=1, max_length=128)
 
 

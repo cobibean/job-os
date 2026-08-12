@@ -142,7 +142,11 @@ export function createMainJobsClient(config: JobsConfig) {
       const result = await jobUpdateStatusV1JobsJobIdStatusPut({
         client,
         path: { job_id: jobId },
-        body: { target_status: status, origin: 'user' }
+        body: {
+          target_status: status,
+          origin: 'user',
+          record_application: status === 'applied'
+        }
       })
       const mutation = unwrap<StatusChangeResponse>(result, 'Status change failed')
       return { eventId: mutation.event_id, job: toJob(mutation.job) }

@@ -55,8 +55,9 @@ test('status controls offer only transitions allowed from the current job state'
   const betaOptions = [...screen.getByRole('combobox', { name: 'Change Beta status' }).querySelectorAll('option')]
     .map(option => option.value)
 
-  expect(alphaOptions).toEqual(['discovered', 'scored', 'reviewed', 'skipped', 'archived'])
+  expect(alphaOptions).toEqual(['discovered', 'applied', 'scored', 'reviewed', 'skipped', 'archived'])
   expect(betaOptions).toEqual(['shortlisted', 'apply_now', 'maybe', 'stretch', 'applied'])
+  expect(screen.getAllByRole('option', { name: 'Mark applied' })).toHaveLength(2)
 })
 
 test('status sections are independently collapsible and start collapsed', () => {
