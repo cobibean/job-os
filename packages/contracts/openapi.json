@@ -3032,6 +3032,11 @@
             ],
             "title": "Reason"
           },
+          "record_application": {
+            "default": false,
+            "title": "Record Application",
+            "type": "boolean"
+          },
           "target_status": {
             "enum": [
               "discovered",

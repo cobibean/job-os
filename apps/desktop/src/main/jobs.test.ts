@@ -13,7 +13,7 @@ vi.mock('@jobos/contracts', () => ({
   workspaceSortJobsV1WorkspaceJobsSortPut: vi.fn()
 }))
 
-import { jobCreateFromBrowserV1JobsPost } from '@jobos/contracts'
+import { jobCreateFromBrowserV1JobsPost, jobUpdateStatusV1JobsJobIdStatusPut } from '@jobos/contracts'
 
 import { createMainJobsClient, JobEventDecoder } from './jobs.js'
 
@@ -60,6 +60,30 @@ test('browser extraction is persisted through the authenticated JobOS API', asyn
     created: false,
     job: expect.objectContaining({ jobId: 'job-existing' })
   }))
+})
+
+test('marking a job applied requests the application-recording shortcut', async () => {
+  vi.mocked(jobUpdateStatusV1JobsJobIdStatusPut).mockResolvedValue({
+    response: new Response(null, { status: 200 }),
+    data: {
+      event_id: 18,
+      job: {
+        job_id: 'job-existing', company: 'Northstar Labs', title: 'Senior Engineer',
+        status: 'applied', status_group: 'Applied', canonical_url: 'https://example.com/jobs/17',
+        discovered_at: '2026-07-22T00:00:00Z', last_seen_at: '2026-07-22T00:00:00Z',
+        description: 'Build useful things.', location: 'Remote'
+      }
+    }
+  } as never)
+  const client = createMainJobsClient({ baseUrl: 'http://127.0.0.1:8766', deviceToken: 'test-token' })
+
+  const result = await client.updateStatus('job-existing', 'applied')
+
+  expect(jobUpdateStatusV1JobsJobIdStatusPut).toHaveBeenCalledWith(expect.objectContaining({
+    path: { job_id: 'job-existing' },
+    body: { target_status: 'applied', origin: 'user', record_application: true }
+  }))
+  expect(result.job.status).toBe('applied')
 })
 
 test('the desktop event decoder preserves SSE events split across network chunks', () => {

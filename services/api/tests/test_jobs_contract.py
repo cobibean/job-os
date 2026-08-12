@@ -71,6 +71,7 @@ EXPECTED_GROUPS = {
 
 class FakeJobHunterFacade:
     def __init__(self):
+        self.status_update_calls = []
         self.jobs = [
             {
                 "job_id": f"job-{index}",
@@ -151,8 +152,13 @@ class FakeJobHunterFacade:
         self.inspect_job(job_id)
         return list(self.history)
 
-    def update_lead_state(self, job_id, target_state, *, reason=None):
+    def update_lead_state(
+        self, job_id, target_state, *, reason=None, record_application=False
+    ):
         job = self.inspect_job(job_id)
+        self.status_update_calls.append(
+            (job["status"], target_state, record_application)
+        )
         if job["status"] == "discovered" and target_state == "interviewing":
             raise ValueError("Invalid lead state transition: discovered -> interviewing")
         stored = next(job for job in self.jobs if job["job_id"] == job_id)
@@ -218,6 +224,28 @@ def make_client(tmp_path, facade=None):
         job_facade=facade or FakeJobHunterFacade(),
     )
     return TestClient(app)
+
+
+def test_record_application_advances_through_required_internal_states(tmp_path):
+    facade = FakeJobHunterFacade()
+    client = make_client(tmp_path, facade)
+
+    with client:
+        changed = client.put(
+            "/v1/jobs/job-0/status",
+            headers=auth_headers(),
+            json={
+                "target_status": "applied",
+                "origin": "user",
+                "record_application": True,
+            },
+        )
+
+    assert changed.status_code == 200
+    assert changed.json()["job"]["status"] == "applied"
+    assert facade.status_update_calls == [
+        ("discovered", "applied", True),
+    ]
 
 
 def auth_headers():

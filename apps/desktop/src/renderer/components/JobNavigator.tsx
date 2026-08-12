@@ -4,14 +4,14 @@ import { ArrowDown, ArrowUp, BriefcaseBusiness, ChevronRight, Search, UserRound 
 import type { JobDetail, JobListItem, JobSortMode, JobStatus } from '../../shared/contracts'
 
 const STATUS_TRANSITIONS: Record<JobStatus, JobStatus[]> = {
-  discovered: ['scored', 'reviewed', 'skipped', 'archived'],
-  scored: ['reviewed', 'shortlisted', 'apply_now', 'maybe', 'stretch', 'skipped', 'archived'],
-  reviewed: ['shortlisted', 'apply_now', 'maybe', 'stretch', 'skipped', 'archived'],
+  discovered: ['applied', 'scored', 'reviewed', 'skipped', 'archived'],
+  scored: ['applied', 'reviewed', 'shortlisted', 'apply_now', 'maybe', 'stretch', 'skipped', 'archived'],
+  reviewed: ['applied', 'shortlisted', 'apply_now', 'maybe', 'stretch', 'skipped', 'archived'],
   shortlisted: ['apply_now', 'maybe', 'stretch', 'applied'],
   apply_now: ['applied', 'interviewing', 'closed'],
-  maybe: ['reviewed', 'apply_now', 'skipped', 'archived'],
-  stretch: ['reviewed', 'apply_now', 'skipped', 'archived'],
-  skipped: ['reviewed', 'archived'],
+  maybe: ['applied', 'reviewed', 'apply_now', 'skipped', 'archived'],
+  stretch: ['applied', 'reviewed', 'apply_now', 'skipped', 'archived'],
+  skipped: ['applied', 'reviewed', 'archived'],
   applied: ['interviewing', 'closed', 'archived'],
   interviewing: ['closed', 'archived'],
   closed: ['archived'],
@@ -40,6 +40,11 @@ interface JobNavigatorProps {
 
 function statusLabel(status: string) {
   return status.replaceAll('_', ' ')
+}
+
+function statusOptionLabel(currentStatus: JobStatus, optionStatus: JobStatus) {
+  if (currentStatus !== 'applied' && optionStatus === 'applied') return 'Mark applied'
+  return statusLabel(optionStatus)
 }
 
 export function JobNavigator(props: JobNavigatorProps) {
@@ -100,7 +105,7 @@ export function JobNavigator(props: JobNavigatorProps) {
         ) : null}
       </div>
       <select aria-label={`Change ${job.company} status`} className="status-select" onChange={event => props.onStatusChange(job.jobId, event.target.value as JobStatus)} value={job.status}>
-        {[job.status, ...STATUS_TRANSITIONS[job.status]].map(status => <option key={status} value={status}>{statusLabel(status)}</option>)}
+        {[job.status, ...STATUS_TRANSITIONS[job.status]].map(status => <option key={status} value={status}>{statusOptionLabel(job.status, status)}</option>)}
       </select>
       {detail ? (
         <div className="job-description-card">
