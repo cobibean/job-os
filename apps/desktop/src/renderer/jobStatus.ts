@@ -5,7 +5,7 @@ export const CANONICAL_STATUS_GROUPS = [
 ] as const
 
 export const STATUS_TRANSITIONS: Record<JobStatus, JobStatus[]> = {
-  discovered: ['applied', 'scored', 'reviewed', 'skipped', 'archived'],
+  discovered: ['shortlisted', 'applied', 'scored', 'reviewed', 'skipped', 'archived'],
   scored: ['applied', 'reviewed', 'shortlisted', 'apply_now', 'maybe', 'stretch', 'skipped', 'archived'],
   reviewed: ['applied', 'shortlisted', 'apply_now', 'maybe', 'stretch', 'skipped', 'archived'],
   shortlisted: ['apply_now', 'maybe', 'stretch', 'applied'],
@@ -24,6 +24,7 @@ export function statusLabel(status: string) {
 }
 
 export function statusOptionLabel(currentStatus: JobStatus, optionStatus: JobStatus) {
+  if (optionStatus === 'shortlisted') return 'Considering'
   if (currentStatus !== 'applied' && optionStatus === 'applied') return 'Mark applied'
   return statusLabel(optionStatus)
 }

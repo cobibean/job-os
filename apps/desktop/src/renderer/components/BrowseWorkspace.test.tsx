@@ -200,6 +200,20 @@ test('status controls expose and execute legal canonical transitions only', asyn
   expect(bridge.updateStatus).toHaveBeenCalledWith('one', 'interviewing')
 })
 
+test('Inbox jobs can move to Considering and the rail exposes the canonical group', async () => {
+  const bridge = installJobsBridge()
+  render(<Harness initialFocus="three" />)
+  await screen.findByText('Description three')
+
+  expect(screen.getByRole('navigation', { name: 'Job groups' }).textContent).toContain('Considering')
+  const status = screen.getByRole('combobox', { name: 'Change Gamma status' }) as HTMLSelectElement
+  const considering = Array.from(status.options).find(option => option.textContent === 'Considering')
+  expect(considering?.value).toBe('shortlisted')
+
+  fireEvent.change(status, { target: { value: 'shortlisted' } })
+  expect(bridge.updateStatus).toHaveBeenCalledWith('three', 'shortlisted')
+})
+
 test('rejected list and detail requests are visible alerts', async () => {
   Object.defineProperty(window, 'jobos', { configurable: true, value: { jobs: {
     list: vi.fn().mockRejectedValue(new Error('list unavailable')),
