@@ -2,22 +2,7 @@ import { useState } from 'react'
 import { ArrowDown, ArrowUp, BriefcaseBusiness, ChevronRight, Search, UserRound } from 'lucide-react'
 
 import type { JobDetail, JobListItem, JobSortMode, JobStatus } from '../../shared/contracts'
-
-const STATUS_TRANSITIONS: Record<JobStatus, JobStatus[]> = {
-  discovered: ['applied', 'scored', 'reviewed', 'skipped', 'archived'],
-  scored: ['applied', 'reviewed', 'shortlisted', 'apply_now', 'maybe', 'stretch', 'skipped', 'archived'],
-  reviewed: ['applied', 'shortlisted', 'apply_now', 'maybe', 'stretch', 'skipped', 'archived'],
-  shortlisted: ['apply_now', 'maybe', 'stretch', 'applied'],
-  apply_now: ['applied', 'interviewing', 'closed'],
-  maybe: ['applied', 'reviewed', 'apply_now', 'skipped', 'archived'],
-  stretch: ['applied', 'reviewed', 'apply_now', 'skipped', 'archived'],
-  skipped: ['applied', 'reviewed', 'archived'],
-  applied: ['interviewing', 'closed', 'archived'],
-  interviewing: ['closed', 'archived'],
-  closed: ['archived'],
-  archived: []
-}
-const STATUS_GROUPS = ['Inbox', 'Considering', 'Applied', 'Interviewing', 'Closed', 'Inactive']
+import { CANONICAL_STATUS_GROUPS, STATUS_TRANSITIONS, statusOptionLabel } from '../jobStatus'
 
 interface JobNavigatorProps {
   jobs: JobListItem[]
@@ -36,15 +21,6 @@ interface JobNavigatorProps {
   onStatusChange: (jobId: string, status: JobStatus) => void
   onMove: (jobId: string, direction: -1 | 1) => void
   onReorder: (sourceJobId: string, targetJobId: string) => void
-}
-
-function statusLabel(status: string) {
-  return status.replaceAll('_', ' ')
-}
-
-function statusOptionLabel(currentStatus: JobStatus, optionStatus: JobStatus) {
-  if (currentStatus !== 'applied' && optionStatus === 'applied') return 'Mark applied'
-  return statusLabel(optionStatus)
 }
 
 export function JobNavigator(props: JobNavigatorProps) {
@@ -143,7 +119,7 @@ export function JobNavigator(props: JobNavigatorProps) {
         </label>
         <select aria-label="Filter by status group" className="group-filter" onChange={event => props.onStatusGroupChange(event.target.value)} value={props.statusGroup}>
           <option value="">All statuses</option>
-          {STATUS_GROUPS.map(group => <option key={group} value={group}>{group}</option>)}
+          {CANONICAL_STATUS_GROUPS.map(group => <option key={group} value={group}>{group}</option>)}
         </select>
       </div>
 

@@ -72,3 +72,45 @@ test('desktop does not retry a workspace save that received an HTTP response', a
 
   expect(workspacePut).toHaveBeenCalledTimes(1)
 })
+
+test('desktop repairs only a known cross-job active artifact conflict', async () => {
+  workspacePut
+    .mockResolvedValueOnce({
+      response: { status: 409 },
+      error: { detail: 'Active artifact does not belong to the selected job' }
+    })
+    .mockResolvedValueOnce({
+      response: { status: 200 },
+      data: {
+        revision: 1,
+        selected_preset: snapshot.selectedPreset,
+        layouts: snapshot.layouts,
+        selected_job_id: snapshot.selectedJobId,
+        active_center_surface: snapshot.activeCenterSurface,
+        active_artifact_id: null,
+        active_artifact_page: 1,
+        active_artifact_zoom: 1,
+        repaired_presets: []
+      }
+    })
+
+  const saved = await createMainWorkspaceClient({
+    baseUrl: 'http://127.0.0.1:8765',
+    deviceToken: 'test-token'
+  }).save({
+    ...snapshot,
+    activeArtifactId: 'art_abcdefghijklmnop',
+    activeArtifactPage: 4,
+    activeArtifactZoom: 1.5
+  })
+
+  expect(saved.activeArtifactId).toBeNull()
+  expect(workspacePut).toHaveBeenCalledTimes(2)
+  expect(workspacePut.mock.calls[1]?.[0].body).toMatchObject({
+    active_artifact_id: null,
+    active_artifact_page: 1,
+    active_artifact_zoom: 1
+  })
+  expect(workspacePut.mock.calls[1]?.[0].body.idempotency_key)
+    .not.toBe(workspacePut.mock.calls[0]?.[0].body.idempotency_key)
+})

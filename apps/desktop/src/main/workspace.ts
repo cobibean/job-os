@@ -49,7 +49,14 @@ function fromApi(value: WorkspaceSnapshotResponse): WorkspaceSnapshot {
     browserRepairReasons: value.browser_repair_reasons ?? [],
     activeArtifactId: value.active_artifact_id ?? null,
     activeArtifactPage: value.active_artifact_page ?? 1,
-    activeArtifactZoom: value.active_artifact_zoom ?? 1
+    activeArtifactZoom: value.active_artifact_zoom ?? 1,
+    activeTopLevelWorkspace: value.active_top_level_workspace ?? value.selected_preset,
+    browseMode: value.browse_mode ?? 'list',
+    browseFocusJobId: value.browse_focus_job_id ?? null,
+    browseQuery: value.browse_query ?? '',
+    browseStatusGroup: value.browse_status_group ?? '',
+    browseSortMode: value.browse_sort_mode ?? 'manual',
+    browseRailWidth: value.browse_rail_width ?? 292
   }
 }
 
@@ -72,7 +79,14 @@ function toApi(snapshot: WorkspaceSnapshot, idempotencyKey: string) {
     active_browser_tab_id: snapshot.activeBrowserTabId ?? null,
     active_artifact_id: snapshot.activeArtifactId ?? null,
     active_artifact_page: snapshot.activeArtifactPage ?? 1,
-    active_artifact_zoom: snapshot.activeArtifactZoom ?? 1
+    active_artifact_zoom: snapshot.activeArtifactZoom ?? 1,
+    active_top_level_workspace: snapshot.activeTopLevelWorkspace ?? snapshot.selectedPreset,
+    browse_mode: snapshot.browseMode ?? 'list',
+    browse_focus_job_id: snapshot.browseFocusJobId ?? null,
+    browse_query: snapshot.browseQuery ?? '',
+    browse_status_group: snapshot.browseStatusGroup ?? '',
+    browse_sort_mode: snapshot.browseSortMode ?? 'manual',
+    browse_rail_width: snapshot.browseRailWidth ?? 292
   }
 }
 
@@ -94,6 +108,25 @@ export function createMainWorkspaceClient(config: JobsConfig) {
       }
       if (!retried && result.response === undefined && result.error !== undefined) {
         result = await workspacePutV1WorkspacePut({ client, body })
+      }
+      if (
+        body.active_artifact_id !== null
+        && result.response?.status === 409
+        && typeof result.error === 'object'
+        && result.error !== null
+        && 'detail' in result.error
+        && result.error.detail === 'Active artifact does not belong to the selected job'
+      ) {
+        result = await workspacePutV1WorkspacePut({
+          client,
+          body: {
+            ...body,
+            idempotency_key: randomUUID(),
+            active_artifact_id: null,
+            active_artifact_page: 1,
+            active_artifact_zoom: 1
+          }
+        })
       }
       return fromApi(unwrap(result, 'Workspace save failed'))
     }

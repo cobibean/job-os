@@ -463,6 +463,13 @@ def canonical_workspace_snapshot(selected_job_id: str | None = None) -> dict[str
         "active_artifact_id": None,
         "active_artifact_page": 1,
         "active_artifact_zoom": 1.0,
+        "active_top_level_workspace": "review",
+        "browse_mode": "list",
+        "browse_focus_job_id": None,
+        "browse_query": "",
+        "browse_status_group": "",
+        "browse_sort_mode": "manual",
+        "browse_rail_width": 292,
     }
 
 
@@ -530,6 +537,47 @@ def normalize_workspace_snapshot(
         active_surface
         if isinstance(active_surface, str) and active_surface in ("browser", "document")
         else "document"
+    )
+    top_level_workspace = value.get("active_top_level_workspace")
+    canonical["active_top_level_workspace"] = (
+        top_level_workspace
+        if isinstance(top_level_workspace, str)
+        and top_level_workspace in ("research", "review", "agent-focus", "browse")
+        else canonical["selected_preset"]
+    )
+    browse_mode = value.get("browse_mode")
+    canonical["browse_mode"] = browse_mode if browse_mode in ("list", "swipe") else "list"
+    browse_focus_job_id = value.get("browse_focus_job_id")
+    canonical["browse_focus_job_id"] = (
+        browse_focus_job_id
+        if isinstance(browse_focus_job_id, str) and len(browse_focus_job_id) <= 512
+        else None
+    )
+    browse_query = value.get("browse_query")
+    canonical["browse_query"] = (
+        browse_query
+        if isinstance(browse_query, str) and len(browse_query) <= 500
+        else ""
+    )
+    browse_status_group = value.get("browse_status_group")
+    canonical["browse_status_group"] = (
+        browse_status_group
+        if isinstance(browse_status_group, str)
+        and browse_status_group
+        in ("", "Inbox", "Considering", "Applied", "Interviewing", "Closed", "Inactive")
+        else ""
+    )
+    browse_sort_mode = value.get("browse_sort_mode")
+    canonical["browse_sort_mode"] = (
+        browse_sort_mode
+        if browse_sort_mode in ("manual", "recent", "alphabetical", "status")
+        else "manual"
+    )
+    browse_rail_width = value.get("browse_rail_width")
+    canonical["browse_rail_width"] = (
+        browse_rail_width
+        if isinstance(browse_rail_width, int) and 260 <= browse_rail_width <= 360
+        else 292
     )
     layouts = value.get("layouts")
     repaired: list[str] = []

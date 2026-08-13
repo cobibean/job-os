@@ -1095,6 +1095,274 @@ test('drag reordering shows an insertion preview before changing presentation on
   expect(target.classList.contains('insertion-target')).toBe(false)
 })
 
+test('a delayed Browse action survives hydration and Reset Layout leaves Browse state intact', async () => {
+  let resolveWorkspace!: (workspace: ReturnType<typeof restoredWorkspace>) => void
+  const get = vi.fn().mockReturnValue(new Promise(resolve => { resolveWorkspace = resolve }))
+  const save = vi.fn().mockImplementation(snapshot => Promise.resolve({ ...snapshot, revision: snapshot.revision + 1 }))
+  Object.defineProperty(window, 'jobos', { configurable: true, value: {
+    connectivity: { get: vi.fn().mockRejectedValue(new Error('offline')) },
+    workspace: { get, save }
+  } })
+
+  render(<App />)
+  fireEvent.click(screen.getByRole('button', { name: 'Browse' }))
+  expect(await screen.findByRole('heading', { name: 'Browse' })).not.toBeNull()
+  fireEvent.change(screen.getByRole('textbox', { name: 'Search saved jobs' }), { target: { value: 'platform' } })
+  fireEvent.click(screen.getByRole('button', { name: 'Reset layout' }))
+  expect((screen.getByRole('textbox', { name: 'Search saved jobs' }) as HTMLInputElement).value).toBe('platform')
+
+  await act(async () => resolveWorkspace(restoredWorkspace(7)))
+  expect(screen.getByRole('button', { name: 'Browse' }).getAttribute('aria-pressed')).toBe('true')
+  expect((screen.getByRole('textbox', { name: 'Search saved jobs' }) as HTMLInputElement).value).toBe('platform')
+  await waitFor(() => expect(save).toHaveBeenCalled())
+  expect(save.mock.calls.at(-1)?.[0]).toMatchObject({
+    revision: 7, activeTopLevelWorkspace: 'browse', browseQuery: 'platform'
+  })
+})
+
+test('Browse waits for native browser detach, keeps it hidden, and restores the same workbench', async () => {
+  const tab = {
+    tabId: 'listing', url: 'https://jobs.example.com/7', title: 'Listing', faviconUrl: null, associatedJobId: null,
+    loading: false, canGoBack: false, canGoForward: false, error: null, crashed: false, blockedUrl: null
+  }
+  const browserState = { tabs: [tab], activeTabId: tab.tabId, download: null, notice: null }
+  let resolveDetach!: () => void
+  const detached = new Promise<void>(resolve => { resolveDetach = resolve })
+  const setBounds = vi.fn().mockImplementation(bounds => bounds.visible ? Promise.resolve() : detached)
+  vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue(
+    DOMRect.fromRect({ x: 100, y: 120, width: 800, height: 500 })
+  )
+  Object.defineProperty(window, 'jobos', { configurable: true, value: {
+    connectivity: { get: vi.fn().mockRejectedValue(new Error('offline')) },
+    workspace: {
+      get: vi.fn().mockResolvedValue({
+        ...restoredWorkspace(3), selectedPreset: 'research', activeTopLevelWorkspace: 'research', activeCenterSurface: 'browser',
+        browserTabs: [{ tabId: tab.tabId, url: tab.url, title: tab.title, faviconUrl: null, associatedJobId: null }],
+        activeBrowserTabId: tab.tabId
+      }),
+      save: vi.fn().mockImplementation(snapshot => Promise.resolve({ ...snapshot, revision: snapshot.revision + 1 }))
+    },
+    browser: {
+      restore: vi.fn().mockResolvedValue(browserState), subscribe: vi.fn(() => () => undefined), setBounds,
+      create: vi.fn(), select: vi.fn(), close: vi.fn(), reorder: vi.fn(), navigate: vi.fn(), back: vi.fn(), forward: vi.fn(),
+      reload: vi.fn(), stop: vi.fn(), associate: vi.fn(), copyBlockedUrl: vi.fn()
+    }
+  } })
+
+  render(<App />)
+  await screen.findByRole('tab', { name: 'Select Listing' })
+  await waitFor(() => expect(setBounds).toHaveBeenCalledWith(expect.objectContaining({ visible: true })))
+  const workbench = document.querySelector('.workbench')
+  const centerSurface = screen.getByRole('main')
+  const listingTab = screen.getByRole('tab', { name: 'Select Listing' })
+  const agent = screen.getByRole('complementary', { name: 'Agent chat' })
+  const composer = screen.getByRole('textbox', { name: 'Message the agent' }) as HTMLTextAreaElement
+  fireEvent.change(composer, { target: { value: 'Keep this Browse draft' } })
+  setBounds.mockClear()
+  fireEvent.click(screen.getByRole('button', { name: 'Browse' }))
+  await waitFor(() => expect(setBounds).toHaveBeenCalledWith(expect.objectContaining({ visible: false })))
+  expect(screen.queryByRole('heading', { name: 'Browse' })).toBeNull()
+  resolveDetach()
+  expect(await screen.findByRole('heading', { name: 'Browse' })).not.toBeNull()
+  setBounds.mockClear()
+  window.dispatchEvent(new Event('resize'))
+  expect(setBounds).not.toHaveBeenCalledWith(expect.objectContaining({ visible: true }))
+
+  fireEvent.click(screen.getByRole('button', { name: 'Research' }))
+  await waitFor(() => expect(setBounds).toHaveBeenCalledWith(expect.objectContaining({ visible: true })))
+  expect(document.querySelector('.workbench')).toBe(workbench)
+  expect(screen.getByRole('main')).toBe(centerSurface)
+  expect(screen.getByRole('tab', { name: 'Select Listing' })).toBe(listingTab)
+  expect(screen.getByRole('complementary', { name: 'Agent chat' })).toBe(agent)
+  expect((screen.getByRole('textbox', { name: 'Message the agent' }) as HTMLTextAreaElement).value).toBe('Keep this Browse draft')
+  vi.restoreAllMocks()
+})
+
+test.each(['Research', 'Review'] as const)('a stale Browse detach cannot replace %s or reattach during preparation', async chosenWorkspace => {
+  const tab = {
+    tabId: 'listing', url: 'https://jobs.example.com/7', title: 'Listing', faviconUrl: null, associatedJobId: null,
+    loading: false, canGoBack: false, canGoForward: false, error: null, crashed: false, blockedUrl: null
+  }
+  const browserState = { tabs: [tab], activeTabId: tab.tabId, download: null, notice: null }
+  let resolveDetach!: () => void
+  const detached = new Promise<void>(resolve => { resolveDetach = resolve })
+  const setBounds = vi.fn().mockImplementation(bounds => bounds.visible ? Promise.resolve() : detached)
+  vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue(
+    DOMRect.fromRect({ x: 100, y: 120, width: 800, height: 500 })
+  )
+  Object.defineProperty(window, 'jobos', { configurable: true, value: {
+    connectivity: { get: vi.fn().mockRejectedValue(new Error('offline')) },
+    workspace: {
+      get: vi.fn().mockResolvedValue({
+        ...restoredWorkspace(3), selectedPreset: 'research', activeTopLevelWorkspace: 'research', activeCenterSurface: 'browser',
+        browserTabs: [{ tabId: tab.tabId, url: tab.url, title: tab.title, faviconUrl: null, associatedJobId: null }],
+        activeBrowserTabId: tab.tabId
+      }),
+      save: vi.fn().mockImplementation(snapshot => Promise.resolve({ ...snapshot, revision: snapshot.revision + 1 }))
+    },
+    browser: {
+      restore: vi.fn().mockResolvedValue(browserState), subscribe: vi.fn(() => () => undefined), setBounds,
+      create: vi.fn(), select: vi.fn(), close: vi.fn(), reorder: vi.fn(), navigate: vi.fn(), back: vi.fn(), forward: vi.fn(),
+      reload: vi.fn(), stop: vi.fn(), associate: vi.fn(), copyBlockedUrl: vi.fn()
+    }
+  } })
+
+  render(<App />)
+  await screen.findByRole('tab', { name: 'Select Listing' })
+  await waitFor(() => expect(setBounds).toHaveBeenCalledWith(expect.objectContaining({ visible: true })))
+  setBounds.mockClear()
+
+  fireEvent.click(screen.getByRole('button', { name: 'Browse' }))
+  await waitFor(() => expect(setBounds).toHaveBeenCalledWith(expect.objectContaining({ visible: false })))
+  fireEvent.click(screen.getByRole('button', { name: chosenWorkspace }))
+  setBounds.mockClear()
+  window.dispatchEvent(new Event('resize'))
+  expect(setBounds).not.toHaveBeenCalledWith(expect.objectContaining({ visible: true }))
+
+  await act(async () => resolveDetach())
+  expect(screen.queryByRole('heading', { name: 'Browse' })).toBeNull()
+  expect(screen.getByRole('button', { name: chosenWorkspace }).getAttribute('aria-pressed')).toBe('true')
+  vi.restoreAllMocks()
+})
+
+test('Browse roundtrip preserves the selected document surface and chat DOM state', async () => {
+  Object.defineProperty(window, 'jobos', { configurable: true, value: undefined })
+  render(<App />)
+  const documentSurface = screen.getByRole('main')
+  const agent = screen.getByRole('complementary', { name: 'Agent chat' })
+  const composer = screen.getByRole('textbox', { name: 'Message the agent' }) as HTMLTextAreaElement
+  fireEvent.change(composer, { target: { value: 'Document review draft' } })
+
+  fireEvent.click(screen.getByRole('button', { name: 'Browse' }))
+  expect(await screen.findByRole('heading', { name: 'Browse' })).not.toBeNull()
+  fireEvent.click(screen.getByRole('button', { name: 'Review' }))
+
+  expect(screen.getByRole('main')).toBe(documentSurface)
+  expect(screen.getByRole('complementary', { name: 'Agent chat' })).toBe(agent)
+  expect((screen.getByRole('textbox', { name: 'Message the agent' }) as HTMLTextAreaElement).value).toBe('Document review draft')
+})
+
+test('restored Browse waits for hydration and a successful invisible native-browser bound', async () => {
+  let resolveWorkspace!: (workspace: ReturnType<typeof restoredWorkspace> & { activeTopLevelWorkspace: 'browse' }) => void
+  const invisibleResolvers: Array<() => void> = []
+  const setBounds = vi.fn(bounds => bounds.visible
+    ? Promise.resolve()
+    : new Promise<void>(resolve => invisibleResolvers.push(resolve)))
+  Object.defineProperty(window, 'jobos', { configurable: true, value: {
+    connectivity: { get: vi.fn().mockRejectedValue(new Error('offline')) },
+    workspace: {
+      get: vi.fn(() => new Promise(resolve => { resolveWorkspace = resolve })),
+      save: vi.fn().mockImplementation(snapshot => Promise.resolve({ ...snapshot, revision: snapshot.revision + 1 }))
+    },
+    browser: {
+      restore: vi.fn().mockResolvedValue({ tabs: [], activeTabId: null, download: null, notice: null }),
+      subscribe: vi.fn(() => () => undefined), setBounds, create: vi.fn(), select: vi.fn(), close: vi.fn(), reorder: vi.fn(),
+      navigate: vi.fn(), back: vi.fn(), forward: vi.fn(), reload: vi.fn(), stop: vi.fn(), associate: vi.fn(), copyBlockedUrl: vi.fn()
+    }
+  } })
+
+  render(<App />)
+  expect(screen.queryByRole('heading', { name: 'Browse' })).toBeNull()
+  await act(async () => resolveWorkspace({ ...restoredWorkspace(4), activeTopLevelWorkspace: 'browse' }))
+  await waitFor(() => expect(invisibleResolvers.length).toBeGreaterThanOrEqual(2))
+  expect(screen.queryByRole('heading', { name: 'Browse' })).toBeNull()
+  await act(async () => invisibleResolvers.at(-1)?.())
+  expect(await screen.findByRole('heading', { name: 'Browse' })).not.toBeNull()
+  expect(setBounds).not.toHaveBeenCalledWith(expect.objectContaining({ visible: true }))
+})
+
+test('restored Browse fails closed when native-browser detach rejects and can retry', async () => {
+  const setBounds = vi.fn().mockRejectedValue(new Error('detach failed'))
+  Object.defineProperty(window, 'jobos', { configurable: true, value: {
+    connectivity: { get: vi.fn().mockRejectedValue(new Error('offline')) },
+    workspace: {
+      get: vi.fn().mockResolvedValue({ ...restoredWorkspace(5), activeTopLevelWorkspace: 'browse' }),
+      save: vi.fn().mockImplementation(snapshot => Promise.resolve({ ...snapshot, revision: snapshot.revision + 1 }))
+    },
+    browser: {
+      restore: vi.fn().mockResolvedValue({ tabs: [], activeTabId: null, download: null, notice: null }),
+      subscribe: vi.fn(() => () => undefined), setBounds, create: vi.fn(), select: vi.fn(), close: vi.fn(), reorder: vi.fn(),
+      navigate: vi.fn(), back: vi.fn(), forward: vi.fn(), reload: vi.fn(), stop: vi.fn(), associate: vi.fn(), copyBlockedUrl: vi.fn()
+    }
+  } })
+
+  render(<App />)
+  expect(await screen.findByText('Browse could not open because the browser view could not be hidden.')).not.toBeNull()
+  expect(screen.queryByRole('heading', { name: 'Browse' })).toBeNull()
+  expect(document.querySelector('.workbench')).not.toBeNull()
+  setBounds.mockResolvedValue(undefined)
+  fireEvent.click(screen.getByRole('button', { name: 'Retry Browse' }))
+  expect(await screen.findByRole('heading', { name: 'Browse' })).not.toBeNull()
+})
+
+test('Browse focus stays local until Open job commits selection and listing navigation', async () => {
+  const jobs: JobListItem[] = [
+    { jobId: 'one', company: 'Alpha', title: 'Builder', status: 'discovered', statusGroup: 'Inbox', canonicalUrl: 'https://example.com/one', discoveredAt: '2026-01-01', lastSeenAt: '2026-01-01' },
+    { jobId: 'two', company: 'Beta', title: 'Designer', status: 'reviewed', statusGroup: 'Considering', canonicalUrl: 'https://example.com/two', discoveredAt: '2026-01-02', lastSeenAt: '2026-01-02' }
+  ]
+  const select = vi.fn().mockResolvedValue({ eventId: 1 })
+  const create = vi.fn().mockImplementation((url, jobId) => Promise.resolve({
+    tabs: [{ tabId: 'opened', url, title: 'Opened', faviconUrl: null, associatedJobId: jobId, loading: false, canGoBack: false, canGoForward: false, error: null, crashed: false, blockedUrl: null }],
+    activeTabId: 'opened', download: null, notice: null
+  }))
+  Object.defineProperty(window, 'jobos', { configurable: true, value: {
+    connectivity: { get: vi.fn().mockRejectedValue(new Error('offline')) },
+    jobs: {
+      getState: vi.fn().mockResolvedValue({ jobs, selectedJobId: null, sortMode: 'manual', manualOrder: ['one', 'two'] }),
+      list: vi.fn().mockResolvedValue(jobs),
+      inspect: vi.fn(async jobId => ({ ...jobs.find(job => job.jobId === jobId)!, description: `Detail ${jobId}`, location: null })),
+      select, reorder: vi.fn(), setSort: vi.fn(), updateStatus: vi.fn(), subscribe: vi.fn(() => () => undefined)
+    },
+    browser: {
+      restore: vi.fn().mockResolvedValue({ tabs: [], activeTabId: null, download: null, notice: null }),
+      subscribe: vi.fn(() => () => undefined), setBounds: vi.fn().mockResolvedValue(undefined), create,
+      select: vi.fn(), close: vi.fn(), reorder: vi.fn(), navigate: vi.fn(), back: vi.fn(), forward: vi.fn(), reload: vi.fn(), stop: vi.fn(), associate: vi.fn(), copyBlockedUrl: vi.fn()
+    }
+  } })
+
+  render(<App />)
+  await screen.findByRole('button', { name: 'Select Alpha Builder' })
+  fireEvent.click(screen.getByRole('button', { name: 'Browse' }))
+  await screen.findByText('Detail one')
+  fireEvent.click(screen.getByRole('button', { name: 'Beta Designer' }))
+  await screen.findByText('Detail two')
+  expect(select).not.toHaveBeenCalled()
+  expect(create).not.toHaveBeenCalled()
+
+  fireEvent.click(screen.getByRole('button', { name: 'Open job' }))
+  await waitFor(() => expect(select).toHaveBeenCalledWith('two'))
+  await waitFor(() => expect(create).toHaveBeenCalledWith('https://example.com/two', 'two'))
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Research' }).getAttribute('aria-pressed')).toBe('true'))
+})
+
+test('failed Open job navigation remains in Browse and is announced', async () => {
+  const jobs: JobListItem[] = [
+    { jobId: 'one', company: 'Alpha', title: 'Builder', status: 'discovered', statusGroup: 'Inbox', canonicalUrl: 'https://example.com/one', discoveredAt: '2026-01-01', lastSeenAt: '2026-01-01' }
+  ]
+  Object.defineProperty(window, 'jobos', { configurable: true, value: {
+    connectivity: { get: vi.fn().mockRejectedValue(new Error('offline')) },
+    jobs: {
+      getState: vi.fn().mockResolvedValue({ jobs, selectedJobId: null, sortMode: 'manual', manualOrder: ['one'] }),
+      list: vi.fn().mockResolvedValue(jobs), inspect: vi.fn(async () => ({ ...jobs[0]!, description: 'Detail', location: null })),
+      select: vi.fn().mockResolvedValue({ eventId: 1 }), reorder: vi.fn(), setSort: vi.fn(), updateStatus: vi.fn(), subscribe: vi.fn(() => () => undefined)
+    },
+    browser: {
+      restore: vi.fn().mockResolvedValue({ tabs: [], activeTabId: null, download: null, notice: null }),
+      subscribe: vi.fn(() => () => undefined), setBounds: vi.fn().mockResolvedValue(undefined), create: vi.fn().mockRejectedValue(new Error('create failed')),
+      select: vi.fn(), close: vi.fn(), reorder: vi.fn(), navigate: vi.fn(), back: vi.fn(), forward: vi.fn(), reload: vi.fn(), stop: vi.fn(), associate: vi.fn(), copyBlockedUrl: vi.fn()
+    }
+  } })
+
+  render(<App />)
+  await screen.findByRole('button', { name: 'Select Alpha Builder' })
+  fireEvent.click(screen.getByRole('button', { name: 'Browse' }))
+  await screen.findByText('Detail')
+  fireEvent.click(screen.getByRole('button', { name: 'Open job' }))
+  expect((await screen.findByRole('alert')).textContent).toContain('Could not open this job')
+  expect(screen.getByRole('button', { name: 'Browse' }).getAttribute('aria-pressed')).toBe('true')
+  expect(screen.getByRole('heading', { name: 'Browse' })).not.toBeNull()
+})
+
 function panelDomOrder() {
   return Array.from(document.querySelector('.workbench')?.children ?? []).map(panel =>
     panel.getAttribute('data-testid')?.replace('panel-', '')

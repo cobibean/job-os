@@ -14,6 +14,8 @@ from jobos_api.state_store import (
     IncompatibleSchemaError,
     JobOsStateStore,
     Migration,
+    canonical_workspace_snapshot,
+    normalize_workspace_snapshot,
 )
 
 BROWSER_URL_POLICY_FIXTURES = json.loads(
@@ -22,6 +24,58 @@ BROWSER_URL_POLICY_FIXTURES = json.loads(
 BROWSER_TITLE_POLICY_FIXTURES = json.loads(
     (Path(__file__).parents[3] / "tests/fixtures/browser-title-policy.json").read_text()
 )
+
+
+def test_browse_workspace_defaults_and_malformed_fields_repair_independently():
+    old_snapshot = canonical_workspace_snapshot("job-1")
+    for key in list(old_snapshot):
+        if key.startswith("browse_") or key == "active_top_level_workspace":
+            old_snapshot.pop(key)
+    old_snapshot["layouts"]["research"]["widths"]["jobs"] = 333
+    old_snapshot["browser_tabs"] = [
+        {
+            "tab_id": "listing",
+            "url": "https://example.com/job",
+            "title": "Listing",
+            "favicon_url": None,
+            "associated_job_id": "job-1",
+        }
+    ]
+    old_snapshot["active_browser_tab_id"] = "listing"
+    restored, repaired = normalize_workspace_snapshot(old_snapshot, "job-1")
+
+    assert repaired == ()
+    assert restored["active_top_level_workspace"] == "review"
+    assert restored["browse_mode"] == "list"
+    assert restored["browse_focus_job_id"] is None
+    assert restored["browse_query"] == ""
+    assert restored["browse_status_group"] == ""
+    assert restored["browse_sort_mode"] == "manual"
+    assert restored["browse_rail_width"] == 292
+    assert restored["layouts"]["research"]["widths"]["jobs"] == 333
+    assert restored["active_browser_tab_id"] == "listing"
+
+    malformed = {**restored}
+    malformed.update(
+        active_top_level_workspace="unknown",
+        browse_mode="cards",
+        browse_focus_job_id={"bad": True},
+        browse_query=["bad"],
+        browse_status_group="Imaginary",
+        browse_sort_mode="salary",
+        browse_rail_width=900,
+    )
+    repaired_browse, repaired_presets = normalize_workspace_snapshot(malformed, "job-1")
+    assert repaired_presets == ()
+    assert repaired_browse["active_top_level_workspace"] == "review"
+    assert repaired_browse["browse_mode"] == "list"
+    assert repaired_browse["browse_focus_job_id"] is None
+    assert repaired_browse["browse_query"] == ""
+    assert repaired_browse["browse_status_group"] == ""
+    assert repaired_browse["browse_sort_mode"] == "manual"
+    assert repaired_browse["browse_rail_width"] == 292
+    assert repaired_browse["layouts"] == restored["layouts"]
+    assert repaired_browse["browser_tabs"] == restored["browser_tabs"]
 
 
 def applied_versions(path):

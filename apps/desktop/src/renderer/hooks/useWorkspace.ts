@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 
-import type { LayoutPreset, PanelId, WorkspaceSnapshot } from '../workspaceLayout'
+import type { BrowseMode, LayoutPreset, PanelId, TopLevelWorkspace, WorkspaceSnapshot } from '../workspaceLayout'
+import type { JobSortMode } from '../../shared/contracts'
 import type { BrowserRestoreState } from '../../shared/contracts'
+import type { WorkspaceSnapshot as BridgeWorkspaceSnapshot } from '../../shared/contracts'
 import {
   canonicalWorkspace,
   browserRepairMessage,
@@ -13,7 +15,20 @@ import {
 
 type WorkspaceUpdate = (current: WorkspaceSnapshot) => WorkspaceSnapshot
 
-export function useWorkspace(selectedJobId: string | null) {
+function withBrowseDefaults(snapshot: BridgeWorkspaceSnapshot): WorkspaceSnapshot {
+  return {
+    ...snapshot,
+    activeTopLevelWorkspace: snapshot.activeTopLevelWorkspace ?? snapshot.selectedPreset,
+    browseMode: snapshot.browseMode ?? 'list',
+    browseFocusJobId: snapshot.browseFocusJobId ?? null,
+    browseQuery: snapshot.browseQuery ?? '',
+    browseStatusGroup: snapshot.browseStatusGroup ?? '',
+    browseSortMode: snapshot.browseSortMode ?? 'manual',
+    browseRailWidth: snapshot.browseRailWidth ?? 292
+  }
+}
+
+export function useWorkspace(selectedJobId: string | null, jobSelectionReady = true) {
   const [workspace, setWorkspace] = useState<WorkspaceSnapshot>(canonicalWorkspace)
   const [announcement, setAnnouncement] = useState('Layout controls ready')
   const [hydrated, setHydrated] = useState(!window.jobos?.workspace)
@@ -45,7 +60,7 @@ export function useWorkspace(selectedJobId: string | null) {
         }
       } catch (error) {
         if (!(error instanceof Error) || !error.message.includes('revision conflict')) throw error
-        const remote = await bridge.get()
+        const remote = withBrowseDefaults(await bridge.get())
         const reconciled = recoveringStartup.current
           ? startupRecoveryUpdates.current.reduce((current, update) => update(current), remote)
           : latest.current
@@ -74,8 +89,9 @@ export function useWorkspace(selectedJobId: string | null) {
     if (!bridge) return
     hydrating.current = true
     let active = true
-    bridge.get().then(restored => {
+    bridge.get().then(rawRestored => {
       if (!active) return
+      const restored = withBrowseDefaults(rawRestored)
       const pending = pendingHydrationUpdates.current
       pendingHydrationUpdates.current = []
       const reconciled = pending.reduce((current, update) => update(current), restored)
@@ -124,11 +140,45 @@ export function useWorkspace(selectedJobId: string | null) {
     return persistence
   }, [bridge, persist])
 
+  useEffect(() => {
+    if (!hydrated || !jobSelectionReady || latest.current.selectedJobId === selectedJobId) return
+    void commit(current => ({
+      ...current,
+      selectedJobId,
+      activeArtifactId: null,
+      activeArtifactPage: 1,
+      activeArtifactZoom: 1
+    }), selectedJobId ? 'Active job changed; document preview cleared' : 'Active job cleared')
+  }, [commit, hydrated, jobSelectionReady, selectedJobId])
+
   const selectPreset = (preset: LayoutPreset) => commit(current => ({
     ...current,
     selectedPreset: preset,
+    activeTopLevelWorkspace: preset,
     activeCenterSurface: preset === 'research' ? 'browser' : preset === 'review' ? 'document' : current.activeCenterSurface
   }), `${preset.replace('-', ' ')} layout selected`)
+
+  const selectTopLevelWorkspace = (workspaceId: TopLevelWorkspace) => {
+    if (workspaceId !== 'browse') return selectPreset(workspaceId)
+    return commit(current => ({ ...current, activeTopLevelWorkspace: 'browse' }), 'Browse workspace selected')
+  }
+
+  const updateBrowseState = useCallback((update: Partial<{
+    mode: BrowseMode
+    focusJobId: string | null
+    query: string
+    statusGroup: string
+    sortMode: JobSortMode
+    railWidth: number
+  }>, message = '') => commit(current => ({
+    ...current,
+    browseMode: update.mode ?? current.browseMode,
+    browseFocusJobId: update.focusJobId === undefined ? current.browseFocusJobId : update.focusJobId,
+    browseQuery: update.query ?? current.browseQuery,
+    browseStatusGroup: update.statusGroup ?? current.browseStatusGroup,
+    browseSortMode: update.sortMode ?? current.browseSortMode,
+    browseRailWidth: update.railWidth ?? current.browseRailWidth
+  }), message), [commit])
 
   const resize = (before: PanelId, after: PanelId, delta: number) => commit(
     current => {
@@ -176,7 +226,7 @@ export function useWorkspace(selectedJobId: string | null) {
     activeCenterSurface: 'browser'
   }), 'Job listing opened in browser'), [commit])
 
-  return { workspace, announcement, hydrated, selectPreset, resize, collapse, move, reset, updateBrowserState, updateDocumentState, showDocument, showBrowser }
+  return { workspace, announcement, hydrated, selectPreset, selectTopLevelWorkspace, updateBrowseState, resize, collapse, move, reset, updateBrowserState, updateDocumentState, showDocument, showBrowser }
 }
 
 function panelLabel(panel: PanelId) {

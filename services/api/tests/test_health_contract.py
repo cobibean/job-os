@@ -155,3 +155,14 @@ def test_version_and_openapi_describe_the_shared_workspace_contract(tmp_path):
     assert "active_artifact_id" in schemas["WorkspaceSnapshotResponse"]["properties"]
     assert "active_artifact_page" in schemas["WorkspaceSnapshotResponse"]["properties"]
     assert "active_artifact_zoom" in schemas["WorkspaceSnapshotResponse"]["properties"]
+    for field in (
+        "active_top_level_workspace",
+        "browse_mode",
+        "browse_focus_job_id",
+        "browse_query",
+        "browse_status_group",
+        "browse_sort_mode",
+        "browse_rail_width",
+    ):
+        assert field in schemas["WorkspaceSnapshotCommand"]["properties"]
+        assert field in schemas["WorkspaceSnapshotResponse"]["properties"]
