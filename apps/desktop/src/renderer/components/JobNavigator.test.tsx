@@ -55,8 +55,11 @@ test('status controls offer only transitions allowed from the current job state'
   const betaOptions = [...screen.getByRole('combobox', { name: 'Change Beta status' }).querySelectorAll('option')]
     .map(option => option.value)
 
-  expect(alphaOptions).toEqual(['discovered', 'applied', 'scored', 'reviewed', 'skipped', 'archived'])
+  expect(alphaOptions).toEqual(['discovered', 'shortlisted', 'applied', 'scored', 'reviewed', 'skipped', 'archived'])
   expect(betaOptions).toEqual(['shortlisted', 'apply_now', 'maybe', 'stretch', 'applied'])
+  expect(alphaOptions).toContain('shortlisted')
+  expect(screen.getByRole('combobox', { name: 'Change Alpha status' }).querySelector('option[value="shortlisted"]')?.textContent).toBe('Considering')
+  expect(screen.getByRole('combobox', { name: 'Change Beta status' }).querySelector('option[value="shortlisted"]')?.textContent).toBe('Considering')
   expect(screen.getAllByRole('option', { name: 'Mark applied' })).toHaveLength(2)
 })
 
