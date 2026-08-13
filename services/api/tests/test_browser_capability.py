@@ -1,4 +1,5 @@
 import asyncio
+import json
 import sqlite3
 from concurrent.futures import ThreadPoolExecutor
 
@@ -377,14 +378,7 @@ def test_authenticated_desktop_receives_correlated_command_and_replay_is_idempot
     assert "phase7-secret-value" not in (tmp_path / "jobos.db").read_bytes().decode(
         "utf-8", errors="ignore"
     )
-    browser_events = [entry for entry in chronology if entry["summary"] == "Browser: tab navigate"]
-    assert len(browser_events) == 1
-    assert browser_events[0]["detail"] == {
-        "command": "tab.navigate",
-        "error": None,
-        "origin": "mcp",
-        "outcome": "navigated",
-    }
+    assert chronology == []
 
 
 def test_concurrent_durable_browser_retries_execute_the_desktop_once(tmp_path):
@@ -421,7 +415,7 @@ def test_concurrent_durable_browser_retries_execute_the_desktop_once(tmp_path):
     assert broker.executions == 1
 
 
-def test_browser_replay_repairs_a_missing_deterministic_activity_row(tmp_path):
+def test_browser_replay_does_not_inject_activity_into_agent_chat(tmp_path):
     class Broker:
         async def execute(self, command, *, device_id=None):
             return BrowserCommandResponse(
@@ -444,10 +438,10 @@ def test_browser_replay_repairs_a_missing_deterministic_activity_row(tmp_path):
         entries = client.get("/v1/conversations/current", headers=auth()).json()["entries"]
 
     assert replay.json() == first.json()
-    assert [entry["summary"] for entry in entries].count("Browser: tab select") == 1
+    assert entries == []
 
 
-def test_distinct_browser_actions_may_reuse_a_key_without_collapsing_activity(tmp_path):
+def test_distinct_browser_actions_may_reuse_a_key_without_injecting_chat_activity(tmp_path):
     class Broker:
         def __init__(self):
             self.executions = 0
@@ -482,31 +476,37 @@ def test_distinct_browser_actions_may_reuse_a_key_without_collapsing_activity(tm
 
     assert inspect.status_code == 200
     assert select.status_code == 200
-    assert [entry["summary"] for entry in entries].count("Browser: tabs inspect") == 1
-    assert [entry["summary"] for entry in entries].count("Browser: tab select") == 1
+    assert entries == []
+    with sqlite3.connect(tmp_path / "jobos.db") as connection:
+        commands = {
+            row[0]
+            for row in connection.execute(
+                "SELECT command_name FROM job_events WHERE event_type = 'browser_action'"
+            )
+        }
+    assert commands == {"tabs.inspect", "tab.select"}
 
 
-def test_activity_report_recovers_when_activity_precedes_its_mutation_ledger(tmp_path):
-    database = tmp_path / "jobos.db"
+def test_activity_report_is_idempotent_without_injecting_agent_chat_activity(tmp_path):
     body = {
         "label": "Reviewed listing", "state": "completed", "detail": {},
         "origin": "mcp", "idempotency_key": "activity-repair-1",
     }
     with TestClient(make_app(tmp_path)) as client:
-        with sqlite3.connect(database) as connection:
-            cursor = connection.execute(
-                "INSERT INTO conversation_events("
-                "event_type, state, summary, detail_json, source_event_id) "
-                "VALUES ('activity', 'completed', 'Reviewed listing', '{}', ?)",
-                ("activity:primary-device:activity-repair-1",),
-            )
-            existing_event_id = cursor.lastrowid
-        repaired = client.post("/v1/activity", headers=auth(), json=body)
+        first = client.post("/v1/activity", headers=auth(), json=body)
         replay = client.post("/v1/activity", headers=auth(), json=body)
+        entries = client.get("/v1/conversations/current", headers=auth()).json()["entries"]
 
-    assert repaired.status_code == 200
-    assert repaired.json() == {"event_id": existing_event_id}
-    assert replay.json() == repaired.json()
+    assert first.status_code == 200
+    assert replay.json() == first.json()
+    assert entries == []
+    with sqlite3.connect(tmp_path / "jobos.db") as connection:
+        detail = json.loads(
+            connection.execute(
+                "SELECT payload_json FROM job_events WHERE command_name = 'activity.report'"
+            ).fetchone()[0]
+        )
+    assert detail["label"] == "Reviewed listing"
 
 
 @pytest.mark.parametrize(

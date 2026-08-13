@@ -205,7 +205,7 @@ test('shows stopping rather than completed activity state while cancellation is 
   expect(screen.getByLabelText('Agent turn status').textContent).toBe('Stopping agent…')
 })
 
-test('preserves ownerless activity and never marks an inactive unfinished group complete', async () => {
+test('drops ownerless activity and never marks an inactive unfinished group complete', async () => {
   installAgent({
     conversationId: 'conv-current', connection: 'online', latestEventId: 2, activeTurn: null,
     entries: [
@@ -215,8 +215,8 @@ test('preserves ownerless activity and never marks an inactive unfinished group 
   })
   render(<AgentPanel apiState="connected" contextLabel="Northstar" />)
 
-  expect(await screen.findByText('Saved browser job')).not.toBeNull()
-  const disclosure = screen.getByRole('button', { name: 'Show agent activity: 1 action · 0 completed' })
+  expect(screen.queryByText('Saved browser job')).toBeNull()
+  const disclosure = await screen.findByRole('button', { name: 'Show agent activity: 1 action · 0 completed' })
   const group = disclosure.closest('.agent-activity-group')!
   expect(group.classList.contains('paused')).toBe(true)
   expect(group.querySelector('.activity-group-state .lucide-pause')).not.toBeNull()
