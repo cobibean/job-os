@@ -12,6 +12,9 @@ from .browser_policy import (
 
 PanelId = Literal["jobs", "center", "agent"]
 LayoutPreset = Literal["research", "review", "agent-focus"]
+TopLevelWorkspace = Literal["research", "review", "agent-focus", "browse"]
+BrowseMode = Literal["list", "swipe"]
+JobSortMode = Literal["manual", "recent", "alphabetical", "status"]
 CenterSurface = Literal["browser", "document"]
 BrowserRepairReason = Literal[
     "protected_title",
@@ -89,6 +92,20 @@ class WorkspaceSnapshotBase(BaseModel):
     )
     active_artifact_page: int = Field(default=1, ge=1, le=5000)
     active_artifact_zoom: float = Field(default=1.0, ge=0.5, le=3.0)
+    active_top_level_workspace: TopLevelWorkspace = "review"
+    browse_mode: BrowseMode = "list"
+    browse_focus_job_id: str | None = Field(default=None, max_length=512)
+    browse_query: str = Field(default="", max_length=500)
+    browse_status_group: str = Field(default="", max_length=80)
+    browse_sort_mode: JobSortMode = "manual"
+    browse_rail_width: int = Field(default=292, ge=260, le=360)
+
+    @model_validator(mode="before")
+    @classmethod
+    def preserve_legacy_selected_preset(cls, value):
+        if isinstance(value, dict) and "active_top_level_workspace" not in value:
+            return {**value, "active_top_level_workspace": value.get("selected_preset", "review")}
+        return value
 
     @model_validator(mode="after")
     def validate_presets(self):

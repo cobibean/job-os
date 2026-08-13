@@ -371,6 +371,8 @@ class JobOsMcpClient:
             "revision", "selected_preset", "layouts", "selected_job_id",
             "active_center_surface", "browser_tabs", "active_browser_tab_id",
             "active_artifact_id", "active_artifact_page", "active_artifact_zoom",
+            "active_top_level_workspace", "browse_mode", "browse_focus_job_id",
+            "browse_query", "browse_status_group", "browse_sort_mode", "browse_rail_width",
         }
         command = {key: workspace[key] for key in request_fields if key in workspace}
         command.update({"active_artifact_id": artifact_id, "active_center_surface": "document"})

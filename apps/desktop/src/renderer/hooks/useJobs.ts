@@ -32,6 +32,7 @@ export function useJobs() {
   const bridge = useRef(window.jobos?.jobs).current
   const detailRequest = useRef(0)
   const selectionRevision = useRef(0)
+  const eventRefreshTimer = useRef<number | null>(null)
 
   const loadDetail = useCallback(async (jobId: string | null) => {
     const request = detailRequest.current + 1
@@ -72,7 +73,7 @@ export function useJobs() {
 
   useEffect(() => {
     if (!bridge) return
-    return bridge.subscribe(event => {
+    const unsubscribe = bridge.subscribe(event => {
       if (event.eventType === 'job_selected' && event.jobId) {
         selectionRevision.current += 1
         setSelectedJobId(event.jobId)
@@ -84,8 +85,17 @@ export function useJobs() {
         void loadDetail(event.jobId)
       }
       setFeedback(event.origin === 'mcp' ? 'Agent changes synced' : 'Job changes synced')
-      void refresh()
+      if (eventRefreshTimer.current !== null) window.clearTimeout(eventRefreshTimer.current)
+      eventRefreshTimer.current = window.setTimeout(() => {
+        eventRefreshTimer.current = null
+        void refresh()
+      }, 120)
     })
+    return () => {
+      if (eventRefreshTimer.current !== null) window.clearTimeout(eventRefreshTimer.current)
+      eventRefreshTimer.current = null
+      unsubscribe()
+    }
   }, [bridge, jobs, loadDetail, refresh, selectedJobId])
 
   useEffect(() => {
@@ -220,6 +230,7 @@ export function useJobs() {
     query,
     statusGroup,
     loading,
+    ready,
     error,
     feedback,
     setQuery,

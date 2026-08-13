@@ -1,5 +1,7 @@
 export type PanelId = 'jobs' | 'center' | 'agent'
 export type LayoutPreset = 'research' | 'review' | 'agent-focus'
+export type TopLevelWorkspace = LayoutPreset | 'browse'
+export type BrowseMode = 'list' | 'swipe'
 export type CenterSurface = 'browser' | 'document'
 export type BrowserRepairReason = import('../shared/contracts').BrowserRepairReason
 
@@ -23,6 +25,13 @@ export interface WorkspaceSnapshot {
   activeArtifactId?: string | null
   activeArtifactPage?: number
   activeArtifactZoom?: number
+  activeTopLevelWorkspace: TopLevelWorkspace
+  browseMode: BrowseMode
+  browseFocusJobId: string | null
+  browseQuery: string
+  browseStatusGroup: string
+  browseSortMode: import('../shared/contracts').JobSortMode
+  browseRailWidth: number
 }
 
 export const panelNames: Record<PanelId, string> = {
@@ -59,7 +68,14 @@ export function canonicalWorkspace(): WorkspaceSnapshot {
     browserRepairReasons: [],
     activeArtifactId: null,
     activeArtifactPage: 1,
-    activeArtifactZoom: 1
+    activeArtifactZoom: 1,
+    activeTopLevelWorkspace: 'review',
+    browseMode: 'list',
+    browseFocusJobId: null,
+    browseQuery: '',
+    browseStatusGroup: '',
+    browseSortMode: 'manual',
+    browseRailWidth: 292
   }
 }
 
@@ -119,6 +135,7 @@ export function setPanelCollapsed(workspace: WorkspaceSnapshot, panel: PanelId, 
 }
 
 export function resetActivePreset(workspace: WorkspaceSnapshot) {
+  if (workspace.activeTopLevelWorkspace === 'browse') return workspace
   return {
     ...workspace,
     layouts: { ...workspace.layouts, [workspace.selectedPreset]: cloneLayout(defaults[workspace.selectedPreset]) },

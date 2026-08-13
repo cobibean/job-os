@@ -119,19 +119,21 @@ export function useBrowser(
     }
   }, [activeTab?.error, bridge, layoutSignal, state.activeTabId, visible])
 
-  const run = useCallback(async (operation: () => Promise<BrowserState>) => {
+  const run = useCallback(async (operation: () => Promise<BrowserState>): Promise<boolean> => {
     try {
       await acceptState(await operation(), true)
       setMessage('Browser ready')
+      return true
     } catch (error) {
       setMessage(error instanceof Error ? error.message : 'Browser action failed')
+      return false
     }
   }, [acceptState])
 
-  const openJobListing = useCallback(async (jobId: string, canonicalUrl: string) => {
-    if (!bridge) return
+  const openJobListing = useCallback(async (jobId: string, canonicalUrl: string): Promise<boolean> => {
+    if (!bridge) return false
     const existing = findOpenJobListingTab(state.tabs, jobId, canonicalUrl)
-    await run(() => existing
+    return run(() => existing
       ? bridge.select(existing.tabId)
       : bridge.create(canonicalUrl, jobId))
   }, [bridge, run, state.tabs])

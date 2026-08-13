@@ -44,3 +44,21 @@ test('reorder and reset affect presentation for the active preset only', () => {
   expect(reset.layouts.review.order).toEqual(['jobs', 'center', 'agent'])
   expect(reset.layouts.research).toEqual(researchBefore)
 })
+
+test('reset while Browse is active preserves Browse and workbench continuity', () => {
+  const workspace = canonicalWorkspace()
+  workspace.activeTopLevelWorkspace = 'browse'
+  workspace.browseMode = 'swipe'
+  workspace.browseFocusJobId = 'job-7'
+  workspace.browseQuery = 'platform'
+  workspace.browseStatusGroup = 'Considering'
+  workspace.browseSortMode = 'recent'
+  workspace.layouts.review.widths.jobs = 340
+  workspace.layouts.research.order = ['agent', 'jobs', 'center']
+  const before = JSON.stringify(workspace)
+
+  const reset = resetActivePreset(workspace)
+
+  expect(JSON.stringify(reset)).toBe(before)
+  expect(reset).toBe(workspace)
+})

@@ -1823,6 +1823,34 @@ export type WorkspaceSnapshotCommand = {
      */
     active_center_surface: 'browser' | 'document';
     /**
+     * Active Top Level Workspace
+     */
+    active_top_level_workspace?: 'research' | 'review' | 'agent-focus' | 'browse';
+    /**
+     * Browse Focus Job Id
+     */
+    browse_focus_job_id?: string | null;
+    /**
+     * Browse Mode
+     */
+    browse_mode?: 'list' | 'swipe';
+    /**
+     * Browse Query
+     */
+    browse_query?: string;
+    /**
+     * Browse Rail Width
+     */
+    browse_rail_width?: number;
+    /**
+     * Browse Sort Mode
+     */
+    browse_sort_mode?: 'manual' | 'recent' | 'alphabetical' | 'status';
+    /**
+     * Browse Status Group
+     */
+    browse_status_group?: string;
+    /**
      * Browser Tabs
      */
     browser_tabs?: Array<BrowserTabMetadata>;
@@ -1878,6 +1906,34 @@ export type WorkspaceSnapshotResponse = {
      * Active Center Surface
      */
     active_center_surface: 'browser' | 'document';
+    /**
+     * Active Top Level Workspace
+     */
+    active_top_level_workspace?: 'research' | 'review' | 'agent-focus' | 'browse';
+    /**
+     * Browse Focus Job Id
+     */
+    browse_focus_job_id?: string | null;
+    /**
+     * Browse Mode
+     */
+    browse_mode?: 'list' | 'swipe';
+    /**
+     * Browse Query
+     */
+    browse_query?: string;
+    /**
+     * Browse Rail Width
+     */
+    browse_rail_width?: number;
+    /**
+     * Browse Sort Mode
+     */
+    browse_sort_mode?: 'manual' | 'recent' | 'alphabetical' | 'status';
+    /**
+     * Browse Status Group
+     */
+    browse_status_group?: string;
     /**
      * Browser Repair Reasons
      */

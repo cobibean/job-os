@@ -791,6 +791,15 @@ def test_workspace_snapshot_round_trip_and_revision_conflict(tmp_path):
         body.pop("browser_repair_reasons")
         body.update({"origin": "user", "idempotency_key": "workspace-round-trip-1"})
         body["selected_preset"] = "agent-focus"
+        body.update(
+            active_top_level_workspace="browse",
+            browse_mode="swipe",
+            browse_focus_job_id="job-0",
+            browse_query="builder",
+            browse_status_group="Considering",
+            browse_sort_mode="recent",
+            browse_rail_width=300,
+        )
         saved = client.put("/v1/workspace", headers=auth_headers(), json=body)
         body["idempotency_key"] = "workspace-stale-write-1"
         stale = client.put("/v1/workspace", headers=auth_headers(), json=body)
@@ -803,6 +812,13 @@ def test_workspace_snapshot_round_trip_and_revision_conflict(tmp_path):
     assert stale.json()["detail"] == "Workspace revision conflict; current revision is 1"
     assert restored.json()["selected_preset"] == "agent-focus"
     assert restored.json()["selected_job_id"] == "job-1"
+    assert restored.json()["active_top_level_workspace"] == "browse"
+    assert restored.json()["browse_mode"] == "swipe"
+    assert restored.json()["browse_focus_job_id"] == "job-0"
+    assert restored.json()["browse_query"] == "builder"
+    assert restored.json()["browse_status_group"] == "Considering"
+    assert restored.json()["browse_sort_mode"] == "recent"
+    assert restored.json()["browse_rail_width"] == 300
 
 
 def test_workspace_snapshot_idempotent_retry_returns_original_revision(tmp_path):
@@ -838,6 +854,33 @@ def test_workspace_snapshot_idempotent_retry_returns_original_revision(tmp_path)
         "Idempotency key was already used for a different workspace command"
     )
     assert restored.json()["revision"] == 1
+
+
+def test_workspace_old_client_preserves_selected_preset_as_top_level_workspace(tmp_path):
+    facade = FakeJobHunterFacade()
+
+    with make_client(tmp_path, facade) as client:
+        body = client.get("/v1/workspace", headers=auth_headers()).json()
+        for field in (
+            "repaired_presets",
+            "repaired_browser",
+            "browser_repair_reasons",
+            "active_top_level_workspace",
+        ):
+            body.pop(field)
+        body.update(
+            selected_preset="research",
+            active_center_surface="browser",
+            origin="user",
+            idempotency_key="workspace-old-client-research-1",
+        )
+        saved = client.put("/v1/workspace", headers=auth_headers(), json=body)
+        restored = client.get("/v1/workspace", headers=auth_headers())
+
+    assert saved.status_code == 200
+    assert saved.json()["selected_preset"] == "research"
+    assert saved.json()["active_top_level_workspace"] == "research"
+    assert restored.json()["active_top_level_workspace"] == "research"
 
 
 def test_workspace_rejects_credential_bearing_browser_metadata(tmp_path):

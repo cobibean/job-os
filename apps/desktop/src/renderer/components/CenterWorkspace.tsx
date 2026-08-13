@@ -96,6 +96,7 @@ export interface JobListingRequest {
   requestId: number
   jobId: string
   canonicalUrl: string
+  onComplete?: (success: boolean) => void
 }
 
 export function CenterWorkspace(props: CenterWorkspaceProps) {
@@ -127,7 +128,7 @@ export function CenterWorkspace(props: CenterWorkspaceProps) {
     const request = props.jobListingRequest
     if (!request || !browser.restorationReady || request.requestId === lastHandledRequestId.current) return
     lastHandledRequestId.current = request.requestId
-    void browser.openJobListing(request.jobId, request.canonicalUrl)
+    void browser.openJobListing(request.jobId, request.canonicalUrl).then(success => request.onComplete?.(success))
   }, [browser.openJobListing, browser.restorationReady, props.jobListingRequest])
 
   const clearSaveCorrelation = () => {

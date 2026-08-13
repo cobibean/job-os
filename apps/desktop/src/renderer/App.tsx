@@ -5,6 +5,7 @@ import { SettingsPanel } from './components/SettingsPanel'
 import { StatusBar } from './components/StatusBar'
 import { WorkbenchLayout } from './components/WorkbenchLayout'
 import { WorkspaceBar } from './components/WorkspaceBar'
+import { BrowseWorkspace } from './components/BrowseWorkspace'
 import { DocxDocumentEditorShell } from './document-editor/DocxDocumentEditorShell'
 import { useConnectivity } from './hooks/useConnectivity'
 import { useJobs } from './hooks/useJobs'
@@ -16,10 +17,11 @@ import type { DocxOpenResult } from '../shared/docxDocuments'
 export function App() {
   const connectivity = useConnectivity()
   const jobState = useJobs()
-  const layoutState = useWorkspace(jobState.selectedJobId)
+  const layoutState = useWorkspace(jobState.selectedJobId, jobState.ready)
   const theme = useTheme()
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [settingsPreparing, setSettingsPreparing] = useState(false)
+  const [browseDetachState, setBrowseDetachState] = useState<'idle' | 'preparing' | 'ready' | 'error'>('idle')
   const [agentModalOpen, setAgentModalOpen] = useState(false)
   const [jobListingRequest, setJobListingRequest] = useState<JobListingRequest | null>(null)
   const [documentMutationGeneration, setDocumentMutationGeneration] = useState(0)
@@ -27,10 +29,14 @@ export function App() {
   const [editingDocument, setEditingDocument] = useState<DocxOpenResult | null>(null)
   const nextJobListingRequestId = useRef(0)
   const latestNavigatorSelection = useRef(0)
-  const navigatorSelectionQueue = useRef(Promise.resolve())
+  const browseTransitionGeneration = useRef(0)
+  const navigatorSelectionQueue = useRef<Promise<unknown>>(Promise.resolve())
   const prepareClose = useRef<() => Promise<boolean>>(async () => true)
   const activePreset = layoutState.workspace.selectedPreset
+  const activeTopLevelWorkspace = layoutState.workspace.activeTopLevelWorkspace ?? activePreset
   const activeLayout = layoutState.workspace.layouts[activePreset]
+  const browseVisible = activeTopLevelWorkspace === 'browse' && browseDetachState === 'ready'
+  const browserTransitionPending = browseDetachState === 'preparing'
 
   useEffect(() => window.jobos?.lifecycle?.subscribePrepareClose(
     () => prepareClose.current()
@@ -61,40 +67,97 @@ export function App() {
     }
   }
 
-  const selectJobFromNavigator = (jobId: string): Promise<void> => {
+  const selectJobFromNavigator = (jobId: string, openInResearch = false, canonicalUrl?: string): Promise<boolean> => {
     const selectionRequest = latestNavigatorSelection.current + 1
     latestNavigatorSelection.current = selectionRequest
     const job = jobState.jobs.find(candidate => candidate.jobId === jobId)
-    if (!job) return Promise.resolve()
+    const listingUrl = canonicalUrl ?? job?.canonicalUrl
+    if (!listingUrl) return Promise.resolve(false)
     const operation = navigatorSelectionQueue.current.then(async () => {
-      if (selectionRequest !== latestNavigatorSelection.current) return
-      if (!await jobState.selectJob(jobId)) return
+      if (selectionRequest !== latestNavigatorSelection.current) return false
+      if (!await jobState.selectJob(jobId)) return false
       try {
         await layoutState.showBrowser()
       } catch {
         // The visible workspace update already succeeded; navigation should not depend on persistence.
       }
-      if (selectionRequest !== latestNavigatorSelection.current) return
-      nextJobListingRequestId.current += 1
-      setJobListingRequest({
-        requestId: nextJobListingRequestId.current,
-        jobId: job.jobId,
-        canonicalUrl: job.canonicalUrl
+      if (selectionRequest !== latestNavigatorSelection.current) return false
+      const opened = await new Promise<boolean>(resolve => {
+        nextJobListingRequestId.current += 1
+        setJobListingRequest({
+          requestId: nextJobListingRequestId.current,
+          jobId,
+          canonicalUrl: listingUrl,
+          onComplete: resolve
+        })
       })
+      if (!opened || selectionRequest !== latestNavigatorSelection.current) return false
+      if (openInResearch) {
+        try {
+          await layoutState.selectPreset('research')
+        } catch {
+          // The local workspace transition has already committed.
+        }
+        setBrowseDetachState('idle')
+      }
+      return true
     })
     navigatorSelectionQueue.current = operation.catch(() => undefined)
     return operation
   }
 
+  const detachBrowserForBrowse = useCallback(async (generation: number) => {
+    setBrowseDetachState('preparing')
+    try {
+      await window.jobos?.browser?.setBounds({ x: 0, y: 0, width: 0, height: 0, visible: false })
+      if (generation !== browseTransitionGeneration.current) {
+        setBrowseDetachState(current => current === 'preparing' ? 'idle' : current)
+        return false
+      }
+      setBrowseDetachState('ready')
+      return true
+    } catch {
+      if (generation !== browseTransitionGeneration.current) {
+        setBrowseDetachState(current => current === 'preparing' ? 'idle' : current)
+        return false
+      }
+      setBrowseDetachState('error')
+      return false
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!layoutState.hydrated || activeTopLevelWorkspace !== 'browse' || browseDetachState !== 'idle') return
+    const generation = browseTransitionGeneration.current + 1
+    browseTransitionGeneration.current = generation
+    void detachBrowserForBrowse(generation)
+  }, [activeTopLevelWorkspace, browseDetachState, detachBrowserForBrowse, layoutState.hydrated])
+
+  const changeTopLevelWorkspace = async (workspaceId: import('./workspaceLayout').TopLevelWorkspace) => {
+    if (workspaceId !== 'browse') {
+      browseTransitionGeneration.current += 1
+      setBrowseDetachState(current => current === 'preparing' ? current : 'idle')
+      await layoutState.selectTopLevelWorkspace(workspaceId)
+      return
+    }
+    if (browseDetachState === 'preparing' || browseVisible) return
+    const generation = browseTransitionGeneration.current + 1
+    browseTransitionGeneration.current = generation
+    if (!await detachBrowserForBrowse(generation) || generation !== browseTransitionGeneration.current) return
+    if (activeTopLevelWorkspace !== 'browse') await layoutState.selectTopLevelWorkspace('browse')
+  }
+
   return (
-    <div className="app-shell" data-layout={activePreset}>
+    <div className="app-shell" data-layout={activePreset} data-workspace={activeTopLevelWorkspace}>
       <WorkspaceBar
-        activePreset={activePreset}
-        onPresetChange={layoutState.selectPreset}
+        activeWorkspace={activeTopLevelWorkspace}
+        onWorkspaceChange={workspaceId => { void changeTopLevelWorkspace(workspaceId) }}
         onReset={layoutState.reset}
         onToggleMode={theme.toggleMode}
         themeMode={theme.mode}
       />
+      <div className="workspace-content">
+      <div className="workbench-layer" hidden={browseVisible}>
       {editingDocument ? (
         <DocxDocumentEditorShell
           opened={editingDocument}
@@ -128,7 +191,7 @@ export function App() {
           }}
           browserRepaired={Boolean(layoutState.workspace.repairedBrowser)}
           browserRepairReasons={layoutState.workspace.browserRepairReasons ?? []}
-          browserVisible={!activeLayout.collapsed.includes('center') && !agentModalOpen && !settingsOpen && !settingsPreparing}
+          browserVisible={layoutState.hydrated && activeTopLevelWorkspace !== 'browse' && !browserTransitionPending && !activeLayout.collapsed.includes('center') && !agentModalOpen && !settingsOpen && !settingsPreparing}
           documentMutationGeneration={documentMutationGeneration}
           documentPreviewMode={documentPreviewMode}
           jobListingRequest={jobListingRequest}
@@ -168,6 +231,31 @@ export function App() {
         workspace={layoutState.workspace}
       />
       )}
+      </div>
+      {browseVisible ? (
+        <BrowseWorkspace
+          activeJobId={jobState.selectedJobId}
+          focusJobId={layoutState.workspace.browseFocusJobId}
+          mode={layoutState.workspace.browseMode}
+          onOpenJob={(jobId, canonicalUrl) => selectJobFromNavigator(jobId, true, canonicalUrl)}
+          onUpdate={layoutState.updateBrowseState}
+          query={layoutState.workspace.browseQuery}
+          railWidth={layoutState.workspace.browseRailWidth}
+          sortMode={layoutState.workspace.browseSortMode}
+          statusGroup={layoutState.workspace.browseStatusGroup}
+        />
+      ) : null}
+      {activeTopLevelWorkspace === 'browse' && browseDetachState === 'error' ? (
+        <div className="browse-startup-error" role="alert">
+          <p>Browse could not open because the browser view could not be hidden.</p>
+          <button onClick={() => {
+            const generation = browseTransitionGeneration.current + 1
+            browseTransitionGeneration.current = generation
+            void detachBrowserForBrowse(generation)
+          }} type="button">Retry Browse</button>
+        </div>
+      ) : null}
+      </div>
       <p aria-live="polite" className="layout-announcement">{layoutState.announcement}</p>
       <StatusBar apiVersion={connectivity.apiVersion} message={connectivity.message} onOpenSettings={() => { void openSettings() }} state={connectivity.state} />
       {settingsOpen ? (

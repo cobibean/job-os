@@ -72,6 +72,8 @@ export interface JobEvent {
 
 export type PanelId = 'jobs' | 'center' | 'agent'
 export type LayoutPreset = 'research' | 'review' | 'agent-focus'
+export type TopLevelWorkspace = LayoutPreset | 'browse'
+export type BrowseMode = 'list' | 'swipe'
 export type CenterSurface = 'browser' | 'document'
 export type BrowserRepairReason = 'protected_title' | 'dropped_tabs' | 'reselected_active_tab' | 'metadata_adjusted'
 
@@ -161,6 +163,13 @@ export interface WorkspaceSnapshot {
   activeArtifactId?: string | null
   activeArtifactPage?: number
   activeArtifactZoom?: number
+  activeTopLevelWorkspace?: TopLevelWorkspace
+  browseMode?: BrowseMode
+  browseFocusJobId?: string | null
+  browseQuery?: string
+  browseStatusGroup?: string
+  browseSortMode?: JobSortMode
+  browseRailWidth?: number
 }
 
 export type ArtifactMediaType = 'application/pdf' | 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'

@@ -3278,6 +3278,68 @@
             "title": "Active Center Surface",
             "type": "string"
           },
+          "active_top_level_workspace": {
+            "default": "review",
+            "enum": [
+              "research",
+              "review",
+              "agent-focus",
+              "browse"
+            ],
+            "title": "Active Top Level Workspace",
+            "type": "string"
+          },
+          "browse_focus_job_id": {
+            "anyOf": [
+              {
+                "maxLength": 512,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Browse Focus Job Id"
+          },
+          "browse_mode": {
+            "default": "list",
+            "enum": [
+              "list",
+              "swipe"
+            ],
+            "title": "Browse Mode",
+            "type": "string"
+          },
+          "browse_query": {
+            "default": "",
+            "maxLength": 500,
+            "title": "Browse Query",
+            "type": "string"
+          },
+          "browse_rail_width": {
+            "default": 292,
+            "maximum": 360.0,
+            "minimum": 260.0,
+            "title": "Browse Rail Width",
+            "type": "integer"
+          },
+          "browse_sort_mode": {
+            "default": "manual",
+            "enum": [
+              "manual",
+              "recent",
+              "alphabetical",
+              "status"
+            ],
+            "title": "Browse Sort Mode",
+            "type": "string"
+          },
+          "browse_status_group": {
+            "default": "",
+            "maxLength": 80,
+            "title": "Browse Status Group",
+            "type": "string"
+          },
           "browser_tabs": {
             "items": {
               "$ref": "#/components/schemas/BrowserTabMetadata"
@@ -3400,6 +3462,68 @@
               "document"
             ],
             "title": "Active Center Surface",
+            "type": "string"
+          },
+          "active_top_level_workspace": {
+            "default": "review",
+            "enum": [
+              "research",
+              "review",
+              "agent-focus",
+              "browse"
+            ],
+            "title": "Active Top Level Workspace",
+            "type": "string"
+          },
+          "browse_focus_job_id": {
+            "anyOf": [
+              {
+                "maxLength": 512,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Browse Focus Job Id"
+          },
+          "browse_mode": {
+            "default": "list",
+            "enum": [
+              "list",
+              "swipe"
+            ],
+            "title": "Browse Mode",
+            "type": "string"
+          },
+          "browse_query": {
+            "default": "",
+            "maxLength": 500,
+            "title": "Browse Query",
+            "type": "string"
+          },
+          "browse_rail_width": {
+            "default": 292,
+            "maximum": 360.0,
+            "minimum": 260.0,
+            "title": "Browse Rail Width",
+            "type": "integer"
+          },
+          "browse_sort_mode": {
+            "default": "manual",
+            "enum": [
+              "manual",
+              "recent",
+              "alphabetical",
+              "status"
+            ],
+            "title": "Browse Sort Mode",
+            "type": "string"
+          },
+          "browse_status_group": {
+            "default": "",
+            "maxLength": 80,
+            "title": "Browse Status Group",
             "type": "string"
           },
           "browser_repair_reasons": {
