@@ -300,21 +300,13 @@ test('keeps activities with matching IDs isolated between turns', () => {
   ])
 })
 
-test('preserves and deduplicates valid ownerless activity records', () => {
+test('drops ownerless activity records from agent chat', () => {
   const projected = projectConversation([
     event(1, { turnId: null, summary: 'Saved browser job', state: 'working', detail: { activity_id: 'mcp-save', phase: 'start' } }),
     event(2, { turnId: null, summary: 'Saved browser job', state: 'completed', detail: { activity_id: 'mcp-save', phase: 'complete' } })
   ])
 
-  expect(projected).toEqual([
-    expect.objectContaining({
-      kind: 'activity',
-      turnId: null,
-      activityId: 'mcp-save',
-      eventId: 1,
-      state: 'completed'
-    })
-  ])
+  expect(projected).toEqual([])
 })
 
 test('ownerless assistant events from a broken restart are not rendered as messages', () => {

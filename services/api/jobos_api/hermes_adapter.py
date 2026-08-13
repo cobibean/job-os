@@ -553,18 +553,18 @@ class HermesWebSocketGateway:
             frame["type"] = frame_type
             frame["session_id"] = session_id
         else:
-            frame = dict(raw_frame)
-            frame_type = frame.get("type")
+            # Transcript events are only trustworthy inside Hermes' JSON-RPC
+            # event envelope, where the live session ID can be verified.
+            return None
         if not frame_type and "error" in raw_frame:
             frame_type = "error"
         if not isinstance(frame_type, str) or frame_type == "gateway.ready":
             return None
-        if is_event_envelope:
-            session_id = frame.get("session_id")
-            if frame_type == "session.info":
-                return self._normalize_session_info(frame, session_id)
-            if self._live_session_id is None or session_id != self._live_session_id:
-                return None
+        session_id = frame.get("session_id")
+        if frame_type == "session.info":
+            return self._normalize_session_info(frame, session_id)
+        if self._live_session_id is None or session_id != self._live_session_id:
+            return None
         supported_types = {
             "message.start",
             "message.delta",

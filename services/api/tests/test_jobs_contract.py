@@ -359,7 +359,7 @@ def test_mcp_job_create_requires_the_separate_trusted_credential(tmp_path):
     assert response.json()["detail"] == "MCP operations require the trusted local MCP credential"
 
 
-def test_agent_can_create_a_job_through_the_same_canonical_ingest_seam(tmp_path):
+def test_agent_job_create_stays_in_audit_without_injecting_ownerless_chat_activity(tmp_path):
     facade = FakeJobHunterFacade()
 
     with make_client(tmp_path, facade) as client:
@@ -372,12 +372,26 @@ def test_agent_can_create_a_job_through_the_same_canonical_ingest_seam(tmp_path)
 
     assert response.status_code == 200
     assert response.json()["job"]["title"] == "Applied AI Product Builder"
-    assert any(
-        entry["type"] == "activity"
-        and entry["summary"] == "Saved job from browser"
-        and entry["detail"]["origin"] == "mcp"
-        for entry in conversation.json()["entries"]
-    )
+    assert not any(entry["type"] == "activity" for entry in conversation.json()["entries"])
+
+
+def test_agent_read_stays_in_audit_without_injecting_ownerless_chat_activity(tmp_path):
+    with make_client(tmp_path) as client:
+        response = client.get(
+            "/v1/jobs",
+            headers=auth_headers(),
+            params={"origin": "mcp", "idempotency_key": "agent-read-audit-1"},
+        )
+        conversation = client.get("/v1/conversations/current", headers=auth_headers())
+
+    assert response.status_code == 200
+    assert not any(entry["type"] == "activity" for entry in conversation.json()["entries"])
+    with sqlite3.connect(tmp_path / "jobos.db") as connection:
+        audit = connection.execute(
+            "SELECT event_type, command_name FROM job_events WHERE idempotency_key = ?",
+            ("agent-read-audit-1",),
+        ).fetchone()
+    assert audit == ("agent_read", "job.list")
 
 
 def test_agent_updates_full_description_with_idempotent_recorded_mutation(tmp_path):
@@ -428,11 +442,7 @@ def test_agent_updates_full_description_with_idempotent_recorded_mutation(tmp_pa
             "description_length": len(payload["description_text"]),
         }
     ]
-    assert any(
-        entry["summary"] == "Updated full job listing"
-        and entry["detail"]["description_length"] == len(payload["description_text"])
-        for entry in conversation.json()["entries"]
-    )
+    assert not any(entry["type"] == "activity" for entry in conversation.json()["entries"])
 
 
 def test_description_update_requires_trusted_mcp_credential_and_valid_job(tmp_path):
@@ -1624,7 +1634,7 @@ def test_failed_or_cross_job_artifact_cannot_be_approved(tmp_path):
     assert cross_job.status_code == 409
 
 
-def test_failed_render_records_failed_agent_activity(tmp_path):
+def test_failed_render_stays_in_audit_without_injecting_chat_activity(tmp_path):
     class FailedRenderFacade(FakeJobHunterFacade):
         def render_resume(self, job_id, source_id, output_options):
             return {
@@ -1652,20 +1662,14 @@ def test_failed_render_records_failed_agent_activity(tmp_path):
     assert response.status_code == 200
     assert response.json()["artifacts"][0]["render_status"] == "failed"
     with sqlite3.connect(tmp_path / "jobos.db") as connection:
-        state, detail_json = connection.execute(
-            "SELECT state, detail_json FROM conversation_events "
-            "WHERE source_event_id = ?",
-            (
-                mutation_activity_source_id(
-                    actor_id="primary-device",
-                    target_resource="jobs/job-0/artifacts",
-                    command_name="document.render",
-                    idempotency_key="failed-render-activity",
-                ),
-            ),
-        ).fetchone()
-    assert state == "failed"
-    assert json.loads(detail_json)["outcome"] == "failed"
+        chat_count = connection.execute(
+            "SELECT COUNT(*) FROM conversation_events WHERE event_type = 'activity'"
+        ).fetchone()[0]
+        outcome = connection.execute(
+            "SELECT outcome FROM job_events WHERE command_name = 'document.render'"
+        ).fetchone()[0]
+    assert chat_count == 0
+    assert outcome == "failed"
 
 
 @pytest.mark.parametrize("manifest_order", ["oldest-first", "newest-first"])
@@ -2105,7 +2109,7 @@ def test_workspace_rejects_cross_job_stale_and_unselected_active_artifacts(tmp_p
         ),
     ],
 )
-def test_mutation_replay_repairs_a_missing_activity_row(
+def test_mutation_replay_does_not_recreate_agent_chat_activity(
     tmp_path, method, endpoint, payload, source_event_id
 ):
     facade = FakeJobHunterFacade()
@@ -2134,10 +2138,10 @@ def test_mutation_replay_repairs_a_missing_activity_row(
             "SELECT COUNT(*) FROM conversation_events WHERE source_event_id = ?",
             (source_event_id,),
         ).fetchone()[0]
-    assert count == 1
+    assert count == 0
 
 
-def test_workspace_save_replay_repairs_a_missing_activity_row(tmp_path):
+def test_workspace_save_replay_does_not_recreate_agent_chat_activity(tmp_path):
     with make_client(tmp_path) as client:
         body = client.get("/v1/workspace", headers=auth_headers()).json()
         for key in ("repaired_presets", "repaired_browser", "browser_repair_reasons"):
@@ -2157,7 +2161,7 @@ def test_workspace_save_replay_repairs_a_missing_activity_row(tmp_path):
         assert connection.execute(
             "SELECT COUNT(*) FROM conversation_events WHERE source_event_id = ?",
             (source_event_id,),
-        ).fetchone()[0] == 1
+        ).fetchone()[0] == 0
 
 
 def test_concurrent_identical_artifact_registration_executes_the_facade_once(tmp_path):

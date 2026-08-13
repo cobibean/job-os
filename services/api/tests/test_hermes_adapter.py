@@ -766,31 +766,26 @@ def test_reconnect_resets_session_isolation_verification(tmp_path):
     asyncio.run(scenario())
 
 
-def test_adapter_does_not_require_hermes_event_ids_sequences_or_replay(tmp_path):
+def test_adapter_rejects_raw_events_without_verified_session_ownership(tmp_path):
     gateway = HermesWebSocketGateway(
         url="ws://127.0.0.1:9119/api/ws",
         token=TOKEN,
         cwd=tmp_path,
         request_timeout=0.01,
     )
+    gateway._live_session_id = "live-1"
     gateway._active_turn_id = "turn-1"
 
-    first = gateway.normalize_frame(
+    assert gateway.normalize_frame(
         {"type": "message.delta", "event_id": "one", "sequence": 1, "delta": "hello"}
-    )
-    same_optional_metadata = gateway.normalize_frame(
-        {"type": "message.delta", "event_id": "one", "sequence": 1, "delta": "again"}
-    )
-
-    assert first is not None
-    assert same_optional_metadata is not None
-    assert same_optional_metadata.summary == "again"
-    assert gateway.normalize_frame({"type": "message.delta", "sequence": 0}) is not None
+    ) is None
+    assert gateway.normalize_frame(
+        {"type": "tool.start", "tool_id": "foreign-tool", "name": "read_file"}
+    ) is None
+    assert gateway.normalize_frame(
+        {"type": "status.update", "event_id": "two", "message": "Working"}
+    ) is None
     assert gateway.normalize_frame({"unexpected": "raw-secret", "sequence": 99}) is None
-    valid_after_malformed = gateway.normalize_frame(
-        {"type": "status.update", "event_id": "two", "sequence": 2, "message": "Working"}
-    )
-    assert valid_after_malformed is not None
     assert TOKEN not in repr(gateway)
 
 
@@ -990,20 +985,21 @@ def test_adapter_normalizes_waiting_file_render_errors_and_redacts_output(tmp_pa
         event("clarify.request", "live-1", {"question": "Choose one"})
     )
     changed = gateway.normalize_frame(
-        {"type": "file.changed", "event_id": "b", "path": "resume/source.md"}
+        event("file.changed", "live-1", {"event_id": "b", "path": "resume/source.md"})
     )
     rendered = gateway.normalize_frame(
-        {"type": "render.complete", "event_id": "c", "artifact": "resume.pdf"}
+        event("render.complete", "live-1", {"event_id": "c", "artifact": "resume.pdf"})
     )
-    error = gateway.normalize_frame({"error": {"authorization": "Bearer raw-secret"}})
+    error = gateway.normalize_frame(
+        event("error", "live-1", {"authorization": "Bearer raw-secret"})
+    )
     gateway._active_turn_id = "turn-1"
     message = gateway.normalize_frame(
-        {
-            "type": "message.complete",
-            "event_id": "d",
-            "status": "complete",
-            "text": "token=raw-secret",
-        }
+        event(
+            "message.complete",
+            "live-1",
+            {"event_id": "d", "status": "complete", "text": "token=raw-secret"},
+        )
     )
 
     assert waiting.state == "waiting"

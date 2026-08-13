@@ -227,7 +227,7 @@ export function projectConversation(entries: ConversationEvent[]): ProjectedConv
   const projected: ProjectedConversationItem[] = []
   const turns = new Map<string, ProjectedAgentTurn>()
   const activityIndexes = new Map<string, Map<string, number>>()
-  const ownerlessActivityIndexes = new Map<string, number>()
+
   const terminalStates = new Map<string, ConversationEvent['state']>()
 
   for (const entry of [...entries].sort((a, b) => a.eventId - b.eventId)) {
@@ -238,25 +238,7 @@ export function projectConversation(entries: ConversationEvent[]): ProjectedConv
     }
 
     if (!entry.turnId) {
-      if (entry.type === 'activity') {
-        const activityId = detailString(entry, 'activity_id') ?? `event-${entry.eventId}`
-        const existing = ownerlessActivityIndexes.get(activityId)
-        const item: ActivityItem = {
-          ...base,
-          id: `activity-ownerless-${activityId}`,
-          kind: 'activity',
-          activityId,
-          label: entry.summary,
-          detail: entry.detail
-        }
-        if (existing === undefined) {
-          ownerlessActivityIndexes.set(activityId, projected.length)
-          projected.push(item)
-        } else {
-          const first = projected[existing]!
-          projected[existing] = { ...item, eventId: first.eventId, occurredAt: first.occurredAt }
-        }
-      } else if (entry.type === 'error') {
+      if (entry.type === 'error') {
         projected.push(statusOrErrorItem(entry))
       } else if (entry.type === 'status' && ['waiting', 'interrupted', 'failed'].includes(entry.state)) {
         projected.push(statusOrErrorItem(entry))

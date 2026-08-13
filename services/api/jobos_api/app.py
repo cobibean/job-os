@@ -120,7 +120,6 @@ from jobos_api.state_store import (
     IdempotencyConflict,
     JobOsStateStore,
     WorkspaceRevisionConflict,
-    mutation_activity_source_id,
 )
 from jobos_api.workspace import WorkspaceSnapshotCommand, WorkspaceSnapshotResponse
 
@@ -297,13 +296,6 @@ def create_app(
             idempotency_key=idempotency_key,
             request_hash=request_hash,
         )
-        if result is not None:
-            state_store.ensure_mutation_activity(
-                actor_id=identity.device_id,
-                target_resource=target,
-                command_name=command_name,
-                idempotency_key=idempotency_key,
-            )
         return result
 
     def record_mutation(
@@ -344,25 +336,6 @@ def create_app(
             inject_event_id=inject_event_id,
             reserved_event_id=reserved_event_id,
         )
-        if origin == "mcp":
-            state_store.ensure_conversation_event(
-                turn_id=None,
-                event_type="activity",
-                state="completed" if outcome == "completed" else "failed",
-                summary=label,
-                detail={
-                    "origin": origin,
-                    "command": command_name,
-                    "outcome": outcome,
-                    **(detail or {}),
-                },
-                source_event_id=mutation_activity_source_id(
-                    actor_id=identity.device_id,
-                    target_resource=target,
-                    command_name=command_name,
-                    idempotency_key=idempotency_key,
-                ),
-            )
         return event_id
 
     def atomic_editable_mutation(
@@ -396,12 +369,6 @@ def create_app(
             },
             job_id=job_id,
         )
-        state_store.ensure_mutation_activity(
-            actor_id=identity.device_id,
-            target_resource=target,
-            command_name=command_name,
-            idempotency_key=idempotency_key,
-        )
         return result
 
     def record_agent_read(
@@ -415,19 +382,24 @@ def create_app(
     ) -> None:
         if origin != "mcp" or not idempotency_key:
             return
-        state_store.append_conversation_event(
-            turn_id=None,
-            event_type="activity",
-            state="completed",
-            summary=label,
-            detail={
-                "origin": "mcp",
-                "command": command_name,
-                "outcome": "completed",
-                **(detail or {}),
-            },
-            source_event_id=f"read:{identity.device_id}:{command_name}:{idempotency_key}",
-        )
+        audit_detail = {"label": label, "origin": "mcp", **(detail or {})}
+        request_hash = mutation_hash(command_name, audit_detail)
+        try:
+            state_store.record_mutation_result(
+                event_type="agent_read",
+                origin="mcp",
+                actor_id=identity.device_id,
+                target_resource=f"audit/{command_name}",
+                command_name=command_name,
+                outcome="completed",
+                idempotency_key=idempotency_key,
+                request_hash=request_hash,
+                result={},
+                detail=audit_detail,
+            )
+        except IdempotencyConflict:
+            # Audit collisions must not turn a successful read into an error.
+            return
 
     @app.websocket("/v1/desktop/capabilities")
     async def desktop_capabilities(socket: WebSocket) -> None:
@@ -525,30 +497,30 @@ def create_app(
                 )
             )
 
-        def ensure_activity(result: BrowserCommandResponse) -> None:
-            if command.origin != "mcp":
+        def audit_non_durable_command(result: BrowserCommandResponse) -> None:
+            if durable_command or command.origin != "mcp":
                 return
-            state_store.ensure_conversation_event(
-                turn_id=None,
-                event_type="activity",
-                state="completed" if result.state == "completed" else "failed",
-                summary=(
-                    f"Document: {command.command.removeprefix('document.').replace('_', ' ')}"
+            state_store.record_mutation_result(
+                event_type=(
+                    "document_action"
                     if command.command.startswith("document.")
-                    else f"Browser: {command.command.replace('.', ' ')}"
+                    else "browser_action"
                 ),
+                origin="mcp",
+                actor_id=identity.device_id,
+                target_resource=target,
+                command_name=command.command,
+                outcome=result.outcome,
+                idempotency_key=f"{command.idempotency_key}:{result.command_id}",
+                request_hash=request_hash,
+                result={},
                 detail={
+                    "label": command.command.replace(".", " "),
+                    "state": result.state,
                     "origin": "mcp",
-                    "command": command.command,
                     "outcome": result.outcome,
                     "error": result.error.model_dump() if result.error else None,
                 },
-                source_event_id=mutation_activity_source_id(
-                    actor_id=identity.device_id,
-                    target_resource=target,
-                    command_name=command.command,
-                    idempotency_key=command.idempotency_key,
-                ),
             )
 
         async def execute_or_replay() -> BrowserCommandResponse:
@@ -563,7 +535,6 @@ def create_app(
                 if replay is not None:
                     response = BrowserCommandResponse.model_validate(replay)
                     observe_document_result(response)
-                    ensure_activity(response)
                     return response
             result = await browser_capabilities.execute(command, device_id=target_device_id)
             observe_document_result(result)
@@ -591,7 +562,7 @@ def create_app(
                         "error": result.error.model_dump() if result.error else None,
                     },
                 )
-            ensure_activity(result)
+            audit_non_durable_command(result)
             return result
 
         try:
@@ -987,20 +958,6 @@ def create_app(
                     f"Workspace revision conflict; current revision is {error.current_revision}"
                 ),
             ) from error
-        if command.origin == "mcp":
-            state_store.ensure_conversation_event(
-                turn_id=None,
-                event_type="activity",
-                state="completed",
-                summary="Updated workspace",
-                detail={
-                    "origin": "mcp",
-                    "command": "workspace_snapshot.save",
-                    "outcome": "completed",
-                    "active_center_surface": record.snapshot["active_center_surface"],
-                },
-                source_event_id=f"workspace:{identity.device_id}:{command.idempotency_key}",
-            )
         return WorkspaceSnapshotResponse(
             revision=record.revision,
             repaired_presets=list(record.repaired_presets),
@@ -2366,27 +2323,9 @@ def create_app(
             )
         except IdempotencyConflict as error:
             raise HTTPException(status_code=409, detail=str(error)) from error
-        source_event_id = f"activity:{identity.device_id}:{command.idempotency_key}"
         if replay is not None:
-            state_store.ensure_conversation_event(
-                turn_id=None,
-                event_type="activity",
-                state=command.state,
-                summary=command.label,
-                detail={"origin": "mcp", **command.detail},
-                source_event_id=source_event_id,
-            )
             return ActivityReportResponse.model_validate(replay)
-        cursor = state_store.ensure_conversation_event(
-            turn_id=None,
-            event_type="activity",
-            state=command.state,
-            summary=command.label,
-            detail={"origin": "mcp", **command.detail},
-            source_event_id=source_event_id,
-        )
-        result = ActivityReportResponse(event_id=cursor)
-        state_store.record_mutation_result(
+        event_id = state_store.record_mutation_result(
             event_type="agent_action",
             origin="mcp",
             actor_id=identity.device_id,
@@ -2395,15 +2334,17 @@ def create_app(
             outcome=command.state,
             idempotency_key=command.idempotency_key,
             request_hash=request_hash,
-            result=result.model_dump(),
+            result={},
             detail={
+                **command.detail,
                 "label": command.label,
                 "state": command.state,
                 "origin": "mcp",
                 "outcome": command.state,
             },
+            inject_event_id=True,
         )
-        return result
+        return ActivityReportResponse(event_id=event_id)
 
     def registered_artifact_response(artifact_id: str, *, preview: bool) -> Response:
         if not ARTIFACT_ID_PATTERN.fullmatch(artifact_id):
