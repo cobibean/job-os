@@ -11,8 +11,9 @@ from fastapi.testclient import TestClient
 from jobos_api.app import create_app
 from jobos_api.documents import ArtifactPublishRequest
 from jobos_api.editable_documents import blank_content, default_settings
+from jobos_api.private_adapters.job_hunter import adapt_job_hunter_facade
 from jobos_api.settings import Settings
-from jobos_api.state_store import mutation_activity_source_id
+from jobos_api.state_store import JobOsStateStore, mutation_activity_source_id
 
 TITLE_POLICY_FIXTURES = json.loads(
     (Path(__file__).parents[3] / "tests/fixtures/browser-title-policy.json").read_text()
@@ -98,6 +99,7 @@ class FakeJobHunterFacade:
     def add_job(
         self,
         *,
+        job_id,
         company_name,
         title,
         canonical_url,
@@ -114,7 +116,6 @@ class FakeJobHunterFacade:
             self.descriptions[existing["job_id"]] = description_text
             self.locations[existing["job_id"]] = location_text
             return {"created": False, "job": self.inspect_job(existing["job_id"])}
-        job_id = f"browser-job-{len(self.jobs)}"
         self.jobs.append(
             {
                 "job_id": job_id,
@@ -212,7 +213,26 @@ class FakeJobHunterFacade:
         return published
 
 
-def make_client(tmp_path, facade=None):
+class FailOnceStatusSettlementStore(JobOsStateStore):
+    def __init__(self, path: Path) -> None:
+        super().__init__(path)
+        self.fail_status_settlement = True
+
+    def record_mutation_result(self, **kwargs):
+        if (
+            self.fail_status_settlement
+            and kwargs.get("command_name") == "job.update_status"
+            and kwargs.get("reserved_event_id") is not None
+        ):
+            self.fail_status_settlement = False
+            raise sqlite3.OperationalError("synthetic status settlement failure")
+        return super().record_mutation_result(**kwargs)
+
+
+def make_client(tmp_path, facade=None, state_store=None):
+    repository, artifact_gateway = adapt_job_hunter_facade(
+        facade or FakeJobHunterFacade()
+    )
     app = create_app(
         Settings(
             device_token="test-device-token",
@@ -221,7 +241,9 @@ def make_client(tmp_path, facade=None):
             artifact_roots=(tmp_path,),
             hermes_job_hunter_cwd=tmp_path,
         ),
-        job_facade=facade or FakeJobHunterFacade(),
+        job_repository=repository,
+        artifact_gateway=artifact_gateway,
+        state_store=state_store,
     )
     return TestClient(app)
 
@@ -246,6 +268,53 @@ def test_record_application_advances_through_required_internal_states(tmp_path):
     assert facade.status_update_calls == [
         ("discovered", "applied", True),
     ]
+
+
+def test_status_retry_preserves_original_transition_after_settlement_failure(tmp_path):
+    facade = FakeJobHunterFacade()
+    state_path = tmp_path / "jobos.db"
+    state_store = FailOnceStatusSettlementStore(state_path)
+    client = make_client(tmp_path, facade, state_store)
+    payload = {
+        "target_status": "reviewed",
+        "origin": "user",
+        "idempotency_key": "status-settlement-retry",
+    }
+
+    with client:
+        with pytest.raises(sqlite3.OperationalError, match="synthetic status settlement failure"):
+            client.put(
+                "/v1/jobs/job-0/status",
+                headers=auth_headers(),
+                json=payload,
+            )
+        retry = client.put(
+            "/v1/jobs/job-0/status",
+            headers=auth_headers(),
+            json=payload,
+        )
+
+    assert retry.status_code == 200
+    assert retry.json()["job"]["status"] == "reviewed"
+    assert facade.status_update_calls == [
+        ("discovered", "reviewed", False),
+        ("reviewed", "reviewed", False),
+    ]
+    with sqlite3.connect(state_path) as connection:
+        rows = connection.execute(
+            """
+            SELECT event_type, payload_json, result_json
+            FROM job_events
+            WHERE command_name = 'job.update_status'
+              AND idempotency_key = 'status-settlement-retry'
+            """
+        ).fetchall()
+    assert len(rows) == 1
+    event_type, payload_json, result_json = rows[0]
+    assert event_type == "job_status_changed"
+    assert json.loads(payload_json)["from_status"] == "discovered"
+    assert json.loads(payload_json)["to_status"] == "reviewed"
+    assert json.loads(result_json)["job"]["status"] == "reviewed"
 
 
 def auth_headers():

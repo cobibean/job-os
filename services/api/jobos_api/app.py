@@ -11,15 +11,16 @@ from functools import wraps
 from threading import Lock
 from typing import Annotated, Literal, ParamSpec, TypeVar, cast
 from urllib.parse import quote
+from uuid import uuid4
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request, WebSocket, WebSocketDisconnect
-from fastapi.responses import Response, StreamingResponse
+from fastapi.responses import JSONResponse, Response, StreamingResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from jobos_api import __version__
 from jobos_api.activity import ActivityReportRequest, ActivityReportResponse
-from jobos_api.adapters import create_job_hunter_adapter
 from jobos_api.agent_gateway import AgentGateway, OfflineAgentGateway
+from jobos_api.artifact_gateway import ArtifactGateway
 from jobos_api.capabilities import (
     BrowserCommandRequest,
     BrowserCommandResponse,
@@ -27,6 +28,7 @@ from jobos_api.capabilities import (
     DesktopCapabilityPresence,
     DesktopUnavailable,
 )
+from jobos_api.composition import create_job_services
 from jobos_api.conversations import (
     ConversationResponse,
     ConversationService,
@@ -90,6 +92,15 @@ from jobos_api.editable_documents import (
     validate_content,
 )
 from jobos_api.hermes_adapter import HermesWebSocketGateway
+from jobos_api.job_repository import (
+    Conflict,
+    CreateJobCommand,
+    JobRepository,
+    JobRepositoryError,
+    NotFound,
+    Unavailable,
+    Validation,
+)
 from jobos_api.jobs import (
     BrowserJobCreateRequest,
     BrowserJobCreateResponse,
@@ -97,7 +108,6 @@ from jobos_api.jobs import (
     JobDescriptionUpdateResponse,
     JobDetail,
     JobEventsResponse,
-    JobFacade,
     JobListResponse,
     JobMutationResponse,
     JobSelectionRequest,
@@ -130,16 +140,19 @@ R = TypeVar("R")
 def create_app(
     settings: Settings,
     *,
-    job_facade: JobFacade | None = None,
+    job_repository: JobRepository | None = None,
+    artifact_gateway: ArtifactGateway | None = None,
     agent_gateway: AgentGateway | None = None,
     capability_broker: CapabilityBroker | None = None,
     state_store: JobOsStateStore | None = None,
 ) -> FastAPI:
     state_store = state_store or JobOsStateStore(settings.state_db_path)
-    jobs = job_facade or create_job_hunter_adapter(
-        settings.job_hunter_db_path,
-        settings.hermes_job_hunter_cwd,
-    )
+    if job_repository is None or artifact_gateway is None:
+        composed_jobs, composed_artifacts = create_job_services(settings)
+        job_repository = job_repository or composed_jobs
+        artifact_gateway = artifact_gateway or composed_artifacts
+    jobs = job_repository
+    artifacts = artifact_gateway
     device_authenticator = DeviceAuthenticator(settings.device_credential_registry())
     bearer = HTTPBearer(auto_error=False)
     configured_gateway = agent_gateway
@@ -225,6 +238,7 @@ def create_app(
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         state_store.initialize()
+        jobs.initialize()
         await conversation_service.start()
         try:
             yield
@@ -236,6 +250,21 @@ def create_app(
         version=__version__,
         lifespan=lifespan,
     )
+
+    @app.exception_handler(JobRepositoryError)
+    async def job_repository_error_handler(
+        _: Request, error: JobRepositoryError
+    ) -> JSONResponse:
+        status_code = 503
+        if isinstance(error, NotFound):
+            status_code = 404
+        elif isinstance(error, Conflict):
+            status_code = 409
+        elif isinstance(error, Validation):
+            status_code = 422
+        elif isinstance(error, Unavailable):
+            status_code = 503
+        return JSONResponse(status_code=status_code, content={"detail": str(error)})
 
     @app.get("/v1/health", tags=["system"])
     def health() -> HealthResponse:
@@ -452,8 +481,8 @@ def create_app(
             raise HTTPException(status_code=422, detail=str(error)) from error
         if command.command == "tab.associate":
             try:
-                jobs.inspect_job(arguments["job_id"])
-            except (KeyError, ValueError) as error:
+                jobs.get_job(arguments["job_id"])
+            except (NotFound, Validation) as error:
                 raise HTTPException(
                     status_code=422,
                     detail="Cannot associate a browser tab with an unknown job",
@@ -641,12 +670,12 @@ def create_app(
         selected_job = None
         if selection is not None:
             try:
-                job = jobs.inspect_job(selection)
-            except (KeyError, ValueError):
+                job = jobs.get_job(selection)
+            except (NotFound, Validation):
                 job = None
             if job is not None:
-                company = sanitize_text(str(job.get("company", "")))[:200]
-                title = sanitize_text(str(job.get("title", "")))[:200]
+                company = sanitize_text(job.company)[:200]
+                title = sanitize_text(job.title)[:200]
                 if company and title:
                     selected_job = {
                         "job_id": selection,
@@ -801,23 +830,36 @@ def create_app(
         if replay is not None:
             return BrowserJobCreateResponse.model_validate(replay)
 
-        try:
-            saved = jobs.add_job(
+        command_job_id = str(uuid4())
+        saved = jobs.create_job(
+            CreateJobCommand(
+                job_id=command_job_id,
                 company_name=command.company_name,
                 title=command.title,
                 canonical_url=str(command.canonical_url),
                 location_text=command.location_text,
                 description_text=command.description_text,
                 application_url=str(command.application_url),
+                full_listing_text=command.full_listing_text,
+                analysis_text=command.analysis_text,
+                listing_completeness=command.listing_completeness,
+                listing_source_url=(
+                    str(command.listing_source_url) if command.listing_source_url else None
+                ),
+                listing_captured_at=command.listing_captured_at,
+                listing_verified_at=command.listing_verified_at,
+                listing_capture_method=command.listing_capture_method,
+                listing_sha256=command.listing_sha256,
+                listing_evidence=command.listing_evidence,
             )
-            normalized = normalize_job_detail(saved["job"])
-        except (KeyError, TypeError, ValueError) as error:
-            raise HTTPException(status_code=422, detail=str(error)) from error
-
+        )
+        normalized = normalize_job_detail(saved)
+        # The canonical job commits first. A retry converges on its unique URL,
+        # then the existing workbench idempotency ledger records selection/audit.
         event_id = state_store.save_job_selection(normalized.job_id, command.origin)
         result = BrowserJobCreateResponse(
             event_id=event_id,
-            created=bool(saved["created"]),
+            created=saved.job_id == command_job_id,
             job=normalized,
         )
         record_mutation(
@@ -861,7 +903,7 @@ def create_app(
             raise HTTPException(status_code=409, detail=str(error)) from error
         if replay is not None:
             return JobMutationResponse.model_validate(replay)
-        known_ids = {str(job["job_id"]) for job in jobs.list_jobs()}
+        known_ids = {job.job_id for job in jobs.list_jobs()}
         supplied_ids = set(command.job_ids)
         if len(supplied_ids) != len(command.job_ids) or supplied_ids != known_ids:
             raise HTTPException(
@@ -993,7 +1035,7 @@ def create_app(
             raise HTTPException(status_code=409, detail=str(error)) from error
         if replay is not None:
             return JobMutationResponse.model_validate(replay)
-        known_ids = {str(job["job_id"]) for job in jobs.list_jobs()}
+        known_ids = {job.job_id for job in jobs.list_jobs()}
         if command.job_id not in known_ids:
             raise HTTPException(status_code=404, detail="Job not found")
         event_id = state_store.save_job_selection(command.job_id, command.origin)
@@ -1060,7 +1102,7 @@ def create_app(
         idempotency_key: str | None = None,
     ) -> JobDetail:
         try:
-            result = normalize_job_detail(jobs.inspect_job(job_id))
+            result = normalize_job_detail(jobs.get_job(job_id))
             record_agent_read(
                 identity=identity,
                 origin=origin,
@@ -1070,7 +1112,7 @@ def create_app(
                 detail={"job_id": job_id},
             )
             return result
-        except KeyError as error:
+        except NotFound as error:
             raise HTTPException(status_code=404, detail="Job not found") from error
 
     @app.put(
@@ -1112,15 +1154,15 @@ def create_app(
             job_id=job_id,
         )
         try:
-            updated = jobs.update_job_description(
+            updated = jobs.update_description(
                 job_id,
                 command.description_text,
                 source=command.source,
                 provenance=command.provenance,
             )
-        except KeyError as error:
+        except NotFound as error:
             raise HTTPException(status_code=404, detail="Job not found") from error
-        except ValueError as error:
+        except Validation as error:
             raise HTTPException(status_code=422, detail=str(error)) from error
         normalized = normalize_job_detail(updated)
         result_payload = JobDescriptionUpdateResponse(event_id=0, job=normalized).model_dump(
@@ -1179,24 +1221,39 @@ def create_app(
         if replay is not None:
             return StatusChangeResponse.model_validate(replay)
         try:
-            before = jobs.inspect_job(job_id)
-            updated = jobs.update_lead_state(
+            before = jobs.get_job(job_id)
+        except NotFound as error:
+            raise HTTPException(status_code=404, detail="Job not found") from error
+        reservation_event_id = state_store.reserve_mutation(
+            origin=command.origin,
+            actor_id=identity.device_id,
+            target_resource=f"jobs/{job_id}",
+            command_name="job.update_status",
+            idempotency_key=command.idempotency_key,
+            request_hash=request_hash,
+            job_id=job_id,
+            detail={"from_status": before.status, "to_status": command.target_status},
+        )
+        reservation_detail = state_store.mutation_reservation_detail(
+            event_id=reservation_event_id,
+            request_hash=request_hash,
+        )
+        from_status = str(reservation_detail["from_status"])
+        try:
+            updated = jobs.update_status(
                 job_id,
                 command.target_status,
                 record_application=command.record_application,
                 reason=command.reason,
             )
-        except KeyError as error:
+        except NotFound as error:
             raise HTTPException(status_code=404, detail="Job not found") from error
-        except ValueError as error:
+        except Conflict as error:
             raise HTTPException(status_code=409, detail=str(error)) from error
-        event_id = state_store.record_status_event(
-            job_id=job_id,
-            origin=command.origin,
-            from_status=str(before["status"]),
-            to_status=str(updated["status"]),
+        result = StatusChangeResponse(
+            event_id=reservation_event_id,
+            job=normalize_job_detail(updated),
         )
-        result = StatusChangeResponse(event_id=event_id, job=normalize_job_detail(updated))
         record_mutation(
             identity=identity,
             target=f"jobs/{job_id}",
@@ -1207,7 +1264,10 @@ def create_app(
             result=result.model_dump(mode="json"),
             label=f"Updated job status to {command.target_status}",
             job_id=job_id,
-            detail={"from_status": str(before["status"]), "to_status": str(updated["status"])},
+            detail={"from_status": from_status, "to_status": updated.status},
+            event_type="job_status_changed",
+            inject_event_id=True,
+            reserved_event_id=reservation_event_id,
         )
         return result
 
@@ -1221,15 +1281,31 @@ def create_app(
         _: Annotated[DeviceIdentity, Depends(authenticated_device)],
     ) -> LeadHistoryResponse:
         try:
-            jobs.inspect_job(job_id)
-            return LeadHistoryResponse(events=jobs.get_lead_history(job_id))
-        except KeyError as error:
+            jobs.get_job(job_id)
+            return LeadHistoryResponse(
+                events=[
+                    {
+                        "event_id": event.event_id,
+                        "event_type": event.event_type,
+                        "from_status": event.from_status,
+                        "to_status": event.to_status,
+                        "occurred_at": event.occurred_at.isoformat(),
+                        "reason": event.reason,
+                        "source": event.source,
+                        "provenance": event.provenance,
+                        "from_sha256": event.from_sha256,
+                        "to_sha256": event.to_sha256,
+                    }
+                    for event in jobs.list_history(job_id)
+                ]
+            )
+        except NotFound as error:
             raise HTTPException(status_code=404, detail="Job not found") from error
 
     def ensure_job(job_id: str) -> None:
         try:
-            jobs.inspect_job(job_id)
-        except KeyError as error:
+            jobs.get_job(job_id)
+        except NotFound as error:
             raise HTTPException(status_code=404, detail="Job not found") from error
 
     def editable_conflict(error: EditableDocumentConflict) -> HTTPException:
@@ -1266,7 +1342,7 @@ def create_app(
             source_bytes=source_bytes,
             workspace_root=settings.hermes_job_hunter_cwd,
         )
-        raw = jobs.publish_document_artifact(
+        raw = artifacts.publish_document_artifact(
             job_id,
             source.document_key,
             LABELS[source.document_key],
@@ -1879,7 +1955,7 @@ def create_app(
                     job_id=str(current["job_id"]),
                     workspace_root=settings.hermes_job_hunter_cwd,
                 )
-                raw = jobs.publish_document_artifact(
+                raw = artifacts.publish_document_artifact(
                     str(current["job_id"]),
                     str(current["document_key"]),
                     str(current["document_label"]),
@@ -2093,7 +2169,7 @@ def create_app(
         if replay is not None:
             return JobArtifactsResponse.model_validate(replay)
         try:
-            raw_artifacts = jobs.list_job_artifacts(job_id)
+            raw_artifacts = artifacts.list_job_artifacts(job_id)
             verified = verify_facade_artifacts(raw_artifacts, settings.artifact_roots)
             state_store.register_document_artifacts(job_id, verified)
         except (ArtifactTrustError, ValueError) as error:
@@ -2142,7 +2218,9 @@ def create_app(
         if replay is not None:
             return JobArtifactsResponse.model_validate(replay)
         try:
-            raw = jobs.render_resume(job_id, command.source_id, {"format": command.output_format})
+            raw = artifacts.render_resume(
+                job_id, command.source_id, {"format": command.output_format}
+            )
             verified = verify_source_artifact(raw, settings.artifact_roots)
             state_store.register_document_artifacts(job_id, [verified])
         except KeyError as error:
@@ -2195,7 +2273,7 @@ def create_app(
             if replay is not None:
                 return JobArtifactsResponse.model_validate(replay)
             try:
-                raw = jobs.register_artifact(job_id, command.artifact_reference)
+                raw = artifacts.register_artifact(job_id, command.artifact_reference)
                 verified = verify_source_artifact(raw, settings.artifact_roots)
                 state_store.register_document_artifacts(job_id, [verified])
             except KeyError as error:
@@ -2264,7 +2342,7 @@ def create_app(
                 job_id=job_id,
                 workspace_root=settings.hermes_job_hunter_cwd,
             )
-            raw = jobs.publish_document_artifact(
+            raw = artifacts.publish_document_artifact(
                 job_id,
                 command.document_key,
                 command.document_label,

@@ -11,6 +11,7 @@ from jobos_api.capabilities import (
     BrowserCommandResponse,
     CapabilityBroker,
 )
+from jobos_api.private_adapters.job_hunter import adapt_job_hunter_facade
 from jobos_api.settings import DeviceCredential, Settings
 
 TOKEN = "phase-seven-device-token"
@@ -18,6 +19,10 @@ REMOTE_TOKEN = "phase-seven-remote-device-token"
 
 
 def make_app(tmp_path, *, broker=None, job_facade=None, gateway=None, settings=None):
+    repository = None
+    artifact_gateway = None
+    if job_facade is not None:
+        repository, artifact_gateway = adapt_job_hunter_facade(job_facade)
     return create_app(
         settings
         or Settings(
@@ -26,7 +31,8 @@ def make_app(tmp_path, *, broker=None, job_facade=None, gateway=None, settings=N
             state_db_path=tmp_path / "jobos.db",
         ),
         capability_broker=broker,
-        job_facade=job_facade,
+        job_repository=repository,
+        artifact_gateway=artifact_gateway,
         agent_gateway=gateway,
     )
 

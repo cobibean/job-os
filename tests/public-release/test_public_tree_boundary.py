@@ -56,6 +56,8 @@ def public_runtime_files() -> list[Path]:
     paths: list[Path] = []
     for relative_path in tracked_files():
         candidate = Path(relative_path)
+        if not (REPOSITORY_ROOT / candidate).is_file():
+            continue
         if EXCLUDED_SOURCE_PARTS.intersection(part.casefold() for part in candidate.parts):
             continue
         if ".test." in candidate.name or ".spec." in candidate.name:
@@ -77,10 +79,6 @@ def imported_python_modules(path: Path) -> set[str]:
     return modules
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="Phase 0 red gate: the private JobHunter import moves behind a private adapter later",
-)
 def test_public_runtime_does_not_import_private_job_hunter_package():
     violations: list[str] = []
     runtime_files = public_runtime_files()

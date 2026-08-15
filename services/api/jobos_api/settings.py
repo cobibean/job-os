@@ -1,5 +1,6 @@
 import json
 from pathlib import Path
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -43,6 +44,8 @@ class Settings(BaseModel):
     device_id: str = Field(default="primary-device", min_length=1, max_length=100)
     device_credentials: tuple[DeviceCredential, ...] = Field(default=(), repr=False)
     state_db_path: Path
+    job_provider: Literal["sqlite", "job-hunter"] = "sqlite"
+    jobs_db_path: Path | None = None
     job_hunter_db_path: Path | None = None
     artifact_roots: tuple[Path, ...] = ()
     hermes_dashboard_url: str | None = None
@@ -69,3 +72,6 @@ class Settings(BaseModel):
             self.device_id: self.device_token,
             **{item.device_id: item.token for item in self.device_credentials},
         }
+
+    def resolved_jobs_db_path(self) -> Path:
+        return self.jobs_db_path or self.state_db_path.parent / "jobs.db"
