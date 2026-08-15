@@ -1,3 +1,4 @@
+// This file is part of JobOS's modified GenOffice-derived package; see this package's UPSTREAM.md.
 /**
  * Word revisions (track changes) support for the TipTap editor.
  *

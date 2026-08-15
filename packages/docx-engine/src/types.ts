@@ -1,3 +1,4 @@
+// This file is part of JobOS's modified GenOffice-derived package; see this package's UPSTREAM.md.
 /** author/date of one tracked change (a w:ins or w:del wrapper). */
 export interface RevisionInfo {
   author: string

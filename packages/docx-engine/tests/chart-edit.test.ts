@@ -1,3 +1,4 @@
+// This file is part of JobOS's modified GenOffice-derived package; see this package's UPSTREAM.md.
 import JSZip from 'jszip'
 import { describe, expect, it } from 'vitest'
 import { parseChartPartXml, parseDocx, patchChartPartXml, saveDocx } from '../src/index'

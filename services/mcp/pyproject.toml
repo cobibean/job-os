@@ -1,12 +1,18 @@
 [project]
 name = "jobos-mcp"
 version = "0.1.0"
-description = "Thin MCP Adapter over the JobOS application API"
+description = "Thin MCP adapter over the local JobOS application API"
 requires-python = ">=3.11,<3.12"
+license = "Apache-2.0"
 dependencies = [
   "httpx==0.28.1",
   "mcp==1.28.1",
 ]
+
+[project.urls]
+Homepage = "https://github.com/cobibean/job-os"
+Repository = "https://github.com/cobibean/job-os.git"
+Issues = "https://github.com/cobibean/job-os/issues"
 
 [project.scripts]
 jobos-mcp = "jobos_mcp.server:main"

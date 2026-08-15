@@ -1,3 +1,4 @@
+// This file is part of JobOS's modified GenOffice-derived package; see this package's UPSTREAM.md.
 /**
  * Dual-slot run fonts (bug: editing the font flattened all four rFonts slots,
  * losing e.g. Times New Roman when a mixed CJK/Latin run was switched to KaiTi).

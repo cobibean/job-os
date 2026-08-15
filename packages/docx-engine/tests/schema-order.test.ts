@@ -1,3 +1,4 @@
+// This file is part of JobOS's modified GenOffice-derived package; see this package's UPSTREAM.md.
 /**
  * OOXML schema-order gatekeeper: in the output of mergeRPrModel/mergePPrFormat, known
  * children must appear in CT_RPr/CT_PPr sequence — wrong order makes Word show the

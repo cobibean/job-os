@@ -1,3 +1,4 @@
+// This file is part of JobOS's modified GenOffice-derived package; see this package's UPSTREAM.md.
 /**
  * Preset geometry → draw points (local px, relative to the element box top-left).
  *

@@ -1,0 +1,14 @@
+JobOS
+Copyright 2026 Cobi
+
+Licensed under the Apache License, Version 2.0. See LICENSE.
+
+This product includes modified portions of GenOffice, software developed by
+Mainfunc, Inc. The preserved upstream notices, licenses, pinned source commits,
+and JobOS modification summaries are available in:
+
+- packages/docx-engine/{LICENSE,NOTICE,UPSTREAM.md}
+- packages/docx-editor-core/{LICENSE,NOTICE,UPSTREAM.md}
+
+Additional dependency licenses and redistribution notices are documented in
+THIRD_PARTY_NOTICES.md. These files are included with packaged JobOS builds.

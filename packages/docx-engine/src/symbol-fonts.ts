@@ -1,3 +1,4 @@
+// This file is part of JobOS's modified GenOffice-derived package; see this package's UPSTREAM.md.
 /**
  * Symbol-encoded legacy fonts (Symbol / Wingdings / Webdings) carry glyphs at
  * arbitrary byte positions, stored either as that byte or as U+F0xx (private
