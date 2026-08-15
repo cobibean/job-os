@@ -7,6 +7,7 @@ import type { DesktopRuntimeConfig } from './runtimeConfig.js'
 interface LifecycleDependencies {
   probe: typeof probeConnectivity
   run: (file: string, arguments_: string[]) => Promise<void>
+  startSource: ((runtime: DesktopRuntimeConfig) => Promise<void>) | null
   sleep: (milliseconds: number) => Promise<void>
   now: () => number
   uid: number
@@ -48,6 +49,7 @@ export function createApiLifecycle(
   const dependencies: LifecycleDependencies = {
     probe: probeConnectivity,
     run: runCommand,
+    startSource: null,
     sleep,
     now: Date.now,
     uid: process.getuid?.() ?? 0,
@@ -66,14 +68,19 @@ export function createApiLifecycle(
       deviceToken
     })
     if (initial.state !== 'disconnected' || runtime.mode === 'remote-client') return initial
-    if (!runtime.launchdLabel) return failure('Local JobOS API service configuration is invalid')
 
     try {
-      await dependencies.run('/bin/launchctl', [
-        'kickstart',
-        '-k',
-        `gui/${dependencies.uid}/${runtime.launchdLabel}`
-      ])
+      if (runtime.launchdLabel) {
+        await dependencies.run('/bin/launchctl', [
+          'kickstart',
+          '-k',
+          `gui/${dependencies.uid}/${runtime.launchdLabel}`
+        ])
+      } else if (dependencies.startSource) {
+        await dependencies.startSource(runtime)
+      } else {
+        return failure('Local service unavailable')
+      }
     } catch {
       return failure('Local JobOS API service could not be started')
     }

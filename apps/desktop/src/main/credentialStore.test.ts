@@ -1,5 +1,9 @@
 // @vitest-environment node
 
+import { chmod, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises'
+import os from 'node:os'
+import path from 'node:path'
+
 import { expect, test } from 'vitest'
 
 import { loadDeviceCredential } from './credentialStore.js'
@@ -40,6 +44,44 @@ test('reads the device credential from the fixed macOS Keychain service', async 
       'mini-device'
     ]
   }])
+})
+
+test('file credentials reject symbolic links even when the target is private', async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'jobos-credential-test-'))
+  try {
+    const target = path.join(directory, 'target.json')
+    const link = path.join(directory, 'credentials.json')
+    await writeFile(target, JSON.stringify({ deviceToken: 'device-secret' }), 'utf8')
+    await chmod(target, 0o600)
+    await symlink(target, link)
+
+    await expect(loadDeviceCredential({
+      deviceId: 'local-device',
+      environment: {},
+      credentialStore: { provider: 'file', path: 'credentials.json' },
+      configPath: path.join(directory, 'config.json')
+    })).rejects.toThrow('JobOS device credential is unavailable')
+  } finally {
+    await rm(directory, { recursive: true, force: true })
+  }
+})
+
+test('file credentials reject non-string token values', async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'jobos-credential-test-'))
+  try {
+    const credentialPath = path.join(directory, 'credentials.json')
+    await writeFile(credentialPath, JSON.stringify({ deviceToken: { unsafe: true } }), 'utf8')
+    await chmod(credentialPath, 0o600)
+
+    await expect(loadDeviceCredential({
+      deviceId: 'local-device',
+      environment: {},
+      credentialStore: { provider: 'file', path: 'credentials.json' },
+      configPath: path.join(directory, 'config.json')
+    })).rejects.toThrow('JobOS device credential is unavailable')
+  } finally {
+    await rm(directory, { recursive: true, force: true })
+  }
 })
 
 test('missing or invalid Keychain values fail without exposing command output', async () => {

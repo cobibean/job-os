@@ -7,6 +7,33 @@ import { isExpectedSaveNavigation } from './components/CenterWorkspace'
 
 afterEach(cleanup)
 
+test('missing configuration opens setup without starting workbench services', async () => {
+  const getConnectivity = vi.fn()
+  const getJobs = vi.fn()
+  const getWorkspace = vi.fn()
+  Object.defineProperty(window, 'jobos', {
+    configurable: true,
+    value: {
+      setup: {
+        get: vi.fn().mockResolvedValue({ state: 'required', message: 'JobOS setup is required' }),
+        initialize: vi.fn(),
+        restart: vi.fn()
+      },
+      connectivity: { get: getConnectivity },
+      jobs: { getState: getJobs },
+      workspace: { get: getWorkspace }
+    }
+  })
+
+  render(<App />)
+
+  expect(await screen.findByRole('heading', { name: 'Set up JobOS on this Mac' })).not.toBeNull()
+  expect(screen.queryByLabelText('Job navigation')).toBeNull()
+  expect(getConnectivity).not.toHaveBeenCalled()
+  expect(getJobs).not.toHaveBeenCalled()
+  expect(getWorkspace).not.toHaveBeenCalled()
+})
+
 
 test('browser save navigation only accepts the original listing or its slug-matched detail page', () => {
   expect(isExpectedSaveNavigation(
@@ -20,7 +47,7 @@ test('browser save navigation only accepts the original listing or its slug-matc
 })
 
 
-test('the shell reports authenticated Mini connectivity without exposing credentials', async () => {
+test('the shell reports authenticated local connectivity without exposing credentials', async () => {
   const getConnectivity = vi.fn().mockResolvedValue({
     state: 'connected',
     apiVersion: '0.1.0',
@@ -36,8 +63,8 @@ test('the shell reports authenticated Mini connectivity without exposing credent
 
   render(<App />)
 
-  expect(screen.getByText('Connecting to Mac Mini…')).not.toBeNull()
-  expect(await screen.findByText('Mac Mini connected')).not.toBeNull()
+  expect(screen.getByText('Connecting to local service…')).not.toBeNull()
+  expect(await screen.findByText('Local service connected')).not.toBeNull()
   expect(screen.getByText('API 0.1.0')).not.toBeNull()
   expect(getConnectivity).toHaveBeenCalledOnce()
   expect(JSON.stringify(window.jobos)).not.toContain('test-device-token')
@@ -94,7 +121,7 @@ test('auth degradation is distinct from network unavailability', async () => {
     .mockResolvedValueOnce({
       state: 'disconnected',
       checkedAt: '2026-07-20T00:00:01.000Z',
-      message: 'Mac Mini unavailable'
+      message: 'Local service unavailable'
     })
   Object.defineProperty(window, 'jobos', {
     configurable: true,
@@ -102,9 +129,9 @@ test('auth degradation is distinct from network unavailability', async () => {
   })
 
   render(<App />)
-  expect(await screen.findByText('Mac Mini authentication failed')).not.toBeNull()
+  expect(await screen.findByText('Local service authentication failed')).not.toBeNull()
   fireEvent.focus(window)
-  expect(await screen.findByText('Mac Mini unavailable')).not.toBeNull()
+  expect(await screen.findByText('Local service unavailable')).not.toBeNull()
 })
 
 test('real jobs render compactly and user selection and status use the shared bridge', async () => {

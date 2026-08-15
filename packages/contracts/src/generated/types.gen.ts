@@ -574,6 +574,20 @@ export type DeleteBlock = {
 };
 
 /**
+ * DemoRemovalRequest
+ */
+export type DemoRemovalRequest = {
+    /**
+     * Idempotency Key
+     */
+    idempotency_key?: string;
+    /**
+     * Origin
+     */
+    origin: 'user' | 'mcp';
+};
+
+/**
  * DesktopCapabilityPresence
  */
 export type DesktopCapabilityPresence = {
@@ -1144,6 +1158,10 @@ export type JobDetail = {
      */
     company: string;
     /**
+     * Dataset Version
+     */
+    dataset_version?: string | null;
+    /**
      * Description
      */
     description: string;
@@ -1205,6 +1223,10 @@ export type JobDetail = {
      * Status Group
      */
     status_group: string;
+    /**
+     * Synthetic Demo
+     */
+    synthetic_demo?: boolean;
     /**
      * Title
      */
@@ -1288,6 +1310,10 @@ export type JobListItem = {
      */
     company: string;
     /**
+     * Dataset Version
+     */
+    dataset_version?: string | null;
+    /**
      * Discovered At
      */
     discovered_at: string;
@@ -1307,6 +1333,10 @@ export type JobListItem = {
      * Status Group
      */
     status_group: string;
+    /**
+     * Synthetic Demo
+     */
+    synthetic_demo?: boolean;
     /**
      * Title
      */
@@ -3066,6 +3096,54 @@ export type ApproveJobArtifactV1JobsJobIdArtifactsArtifactIdApprovePostResponses
 };
 
 export type ApproveJobArtifactV1JobsJobIdArtifactsArtifactIdApprovePostResponse = ApproveJobArtifactV1JobsJobIdArtifactsArtifactIdApprovePostResponses[keyof ApproveJobArtifactV1JobsJobIdArtifactsArtifactIdApprovePostResponses];
+
+export type JobRemoveDemoV1JobsJobIdDemoDeleteData = {
+    body: DemoRemovalRequest;
+    headers?: {
+        /**
+         * X-Jobos-Mcp-Token
+         */
+        'X-JobOS-MCP-Token'?: string | null;
+    };
+    path: {
+        /**
+         * Job Id
+         */
+        job_id: string;
+    };
+    query?: never;
+    url: '/v1/jobs/{job_id}/demo';
+};
+
+export type JobRemoveDemoV1JobsJobIdDemoDeleteErrors = {
+    /**
+     * Trusted MCP credential required
+     */
+    403: unknown;
+    /**
+     * Demo job not found
+     */
+    404: unknown;
+    /**
+     * The selected job is not the fictional demo
+     */
+    409: unknown;
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type JobRemoveDemoV1JobsJobIdDemoDeleteError = JobRemoveDemoV1JobsJobIdDemoDeleteErrors[keyof JobRemoveDemoV1JobsJobIdDemoDeleteErrors];
+
+export type JobRemoveDemoV1JobsJobIdDemoDeleteResponses = {
+    /**
+     * Successful Response
+     */
+    200: JobMutationResponse;
+};
+
+export type JobRemoveDemoV1JobsJobIdDemoDeleteResponse = JobRemoveDemoV1JobsJobIdDemoDeleteResponses[keyof JobRemoveDemoV1JobsJobIdDemoDeleteResponses];
 
 export type JobUpdateDescriptionV1JobsJobIdDescriptionPutData = {
     body: JobDescriptionUpdateRequest;

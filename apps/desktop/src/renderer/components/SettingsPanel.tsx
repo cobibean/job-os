@@ -2,6 +2,7 @@ import { Check, X } from 'lucide-react'
 import { useEffect, useRef } from 'react'
 
 import { THEMES, type ThemeMode } from '../theme/themes'
+import { DiagnosticsPanel } from '../diagnostics/DiagnosticsPanel'
 
 interface SettingsPanelProps {
   activeThemeId: string
@@ -72,6 +73,7 @@ export function SettingsPanel({ activeThemeId, mode, onClose, onSelectTheme }: S
             })}
           </div>
         </section>
+        <DiagnosticsPanel />
       </div>
     </div>
   )

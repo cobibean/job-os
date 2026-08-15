@@ -2,6 +2,7 @@ import {
   createJobOsApiClient,
   jobCreateFromBrowserV1JobsPost,
   jobInspectV1JobsJobIdGet,
+  jobRemoveDemoV1JobsJobIdDemoDelete,
   jobUpdateStatusV1JobsJobIdStatusPut,
   jobsListV1JobsGet,
   jobsReorderV1JobsOrderPut,
@@ -67,7 +68,9 @@ function toJob(job: ApiJobListItem): JobListItem {
     statusGroup: job.status_group,
     canonicalUrl: job.canonical_url,
     discoveredAt: job.discovered_at,
-    lastSeenAt: job.last_seen_at
+    lastSeenAt: job.last_seen_at,
+    syntheticDemo: job.synthetic_demo,
+    datasetVersion: job.dataset_version ?? null
   }
 }
 
@@ -150,6 +153,16 @@ export function createMainJobsClient(config: JobsConfig) {
       })
       const mutation = unwrap<StatusChangeResponse>(result, 'Status change failed')
       return { eventId: mutation.event_id, job: toJob(mutation.job) }
+    },
+
+    async removeDemo(jobId: string): Promise<JobMutationResult> {
+      const result = await jobRemoveDemoV1JobsJobIdDemoDelete({
+        client,
+        path: { job_id: jobId },
+        body: { origin: 'user' }
+      })
+      const mutation = unwrap<JobMutationResponse>(result, 'Demo removal failed')
+      return { eventId: mutation.event_id }
     },
 
     async createFromBrowser(
