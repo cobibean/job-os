@@ -48,10 +48,17 @@ may supply compatible adapters without changing the default composition.
 
 ## Current transition state
 
-The present source still has direct JobHunter coupling and operator-specific
-runtime defaults. Permanent public-boundary tests intentionally remain red until
-those dependencies are removed. This document describes the accepted target and
-must not be read as proof that clean-clone acceptance has already passed.
+The public composition now uses a dedicated mutable SQLite canonical-jobs
+repository, separate from workbench state. JobHunter loads dynamically only when
+an installed private runtime explicitly selects that provider, and artifact
+publication remains a separate gateway. Operator-specific runtime defaults and
+first-run initialization/demo onboarding are still unfinished, so this must not
+be read as proof that clean-clone acceptance has passed.
+
+Canonical-job mutations commit before the related workbench selection/audit
+event. If the second local write fails, retrying converges through canonical-URL
+deduplication and the existing state-store idempotency ledger; JobOS does not
+claim a distributed transaction across the two SQLite databases.
 
 ## Design principles
 

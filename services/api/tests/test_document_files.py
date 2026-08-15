@@ -1,11 +1,11 @@
 import sqlite3
-from typing import Any, cast
 
 import pytest
 from fastapi.testclient import TestClient
 from jobos_api.app import create_app
 from jobos_api.capabilities import BrowserCommandResponse
 from jobos_api.document_files import DocumentFileCapabilities, DocumentFileRecord, document_file_id
+from jobos_api.private_adapters.job_hunter import adapt_job_hunter_facade
 from jobos_api.settings import Settings
 from jobos_api.state_store import JobOsStateStore
 
@@ -67,6 +67,7 @@ class DocumentBroker:
 
 
 def make_app(tmp_path, broker):
+    repository, artifact_gateway = adapt_job_hunter_facade(FakeJobs())
     return create_app(
         Settings(
             device_token=TOKEN,
@@ -74,7 +75,8 @@ def make_app(tmp_path, broker):
             state_db_path=tmp_path / "jobos.db",
         ),
         capability_broker=broker,
-        job_facade=cast(Any, FakeJobs()),
+        job_repository=repository,
+        artifact_gateway=artifact_gateway,
     )
 
 

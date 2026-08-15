@@ -18,7 +18,7 @@ A candidate must have:
    package metadata;
 2. no required JobHunter, Hermes, Tailscale, private-network, private path, or
    operator identity in public startup;
-3. built-in mutable SQLite jobs and local artifact ownership;
+3. local artifact ownership and clean first-run initialization of built-in SQLite jobs;
 4. idempotent initialization with exactly one labeled synthetic demo job;
 5. truthful API, MCP, desktop, and capability/error contracts;
 6. no tracked private memory, documents, databases, logs, credentials,

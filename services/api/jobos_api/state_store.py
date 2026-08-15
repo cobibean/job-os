@@ -2558,7 +2558,9 @@ class JobOsStateStore:
         idempotency_key: str,
         request_hash: str,
         job_id: str | None = None,
+        detail: dict[str, object] | None = None,
     ) -> int:
+        safe_detail = redact_detail(detail or {})
         with sqlite3.connect(self._path) as connection:
             connection.execute("BEGIN IMMEDIATE")
             prior = connection.execute(
@@ -2581,11 +2583,12 @@ class JobOsStateStore:
                 INSERT INTO job_events(
                     event_type, job_id, origin, payload_json, actor_id, target_resource,
                     command_name, outcome, idempotency_key, request_hash, result_json
-                ) VALUES ('mutation_pending', ?, ?, '{}', ?, ?, ?, 'pending', ?, ?, NULL)
+                ) VALUES ('mutation_pending', ?, ?, ?, ?, ?, ?, 'pending', ?, ?, NULL)
                 """,
                 (
                     job_id,
                     origin,
+                    json.dumps(safe_detail, separators=(",", ":"), sort_keys=True),
                     actor_id,
                     target_resource,
                     command_name,
@@ -2596,6 +2599,25 @@ class JobOsStateStore:
             if cursor.lastrowid is None:  # pragma: no cover - SQLite INSERT guarantees this
                 raise RuntimeError("Mutation reservation did not return an event ID")
             return int(cursor.lastrowid)
+
+    def mutation_reservation_detail(
+        self, *, event_id: int, request_hash: str
+    ) -> dict[str, object]:
+        with sqlite3.connect(f"file:{self._path}?mode=ro", uri=True) as connection:
+            row = connection.execute(
+                """
+                SELECT request_hash, payload_json
+                FROM job_events
+                WHERE event_id = ? AND result_json IS NULL
+                """,
+                (event_id,),
+            ).fetchone()
+        if row is None or row[0] != request_hash:
+            raise IdempotencyConflict("Mutation reservation is no longer pending")
+        detail = json.loads(row[1])
+        if not isinstance(detail, dict):  # pragma: no cover - reservation invariant
+            raise IdempotencyConflict("Mutation reservation detail is invalid")
+        return detail
 
     def ensure_mutation_activity(
         self,
@@ -2825,7 +2847,10 @@ class JobOsStateStore:
                 SELECT event_id, event_type, job_id, origin, occurred_at, payload_json
                 FROM job_events
                 WHERE event_id > ?
-                    AND (command_name IS NULL OR event_type = 'job_description_updated')
+                    AND (
+                        command_name IS NULL
+                        OR event_type IN ('job_description_updated', 'job_status_changed')
+                    )
                 ORDER BY event_id
                 """,
                 (after,),
@@ -2836,6 +2861,10 @@ class JobOsStateStore:
             if row["event_type"] == "job_description_updated":
                 payload = {
                     key: payload[key] for key in ("source", "description_length") if key in payload
+                }
+            elif row["event_type"] == "job_status_changed":
+                payload = {
+                    key: payload[key] for key in ("from_status", "to_status") if key in payload
                 }
             events.append(
                 {
