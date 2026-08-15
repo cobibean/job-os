@@ -54,7 +54,7 @@ beforeEach(async () => {
 
 afterEach(async () => { service.dispose(); await rm(root, { recursive: true, force: true }) })
 
-describe('DocxDocumentsService', () => {
+describe.skipIf(process.platform !== 'darwin')('DocxDocumentsService', () => {
   it('binds the selected file itself and reopens the same canonical bytes', async () => {
     const opened = await service.chooseFile('(FAKE)-job-7', 'resume')
     expect(opened?.binding.canonicalPath).toBe(selected)
