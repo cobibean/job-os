@@ -1,3 +1,4 @@
+// This file is part of JobOS's modified GenOffice-derived package; see this package's UPSTREAM.md.
 /**
  * Composite "has unsaved changes" check shared by the close guard, the autosave
  * tick and the crash-recovery push. Only persisted state counts — transient UI

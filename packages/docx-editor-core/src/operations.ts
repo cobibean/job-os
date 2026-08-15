@@ -1,3 +1,4 @@
+// This file is part of JobOS's modified GenOffice-derived package; see this package's UPSTREAM.md.
 import type { PmNode } from './editor/convert.js'
 
 export interface ContextBlock {

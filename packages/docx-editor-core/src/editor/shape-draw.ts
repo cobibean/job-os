@@ -1,3 +1,4 @@
+// This file is part of JobOS's modified GenOffice-derived package; see this package's UPSTREAM.md.
 /**
  * Word-parity shape draw mode: picking a shape in the ribbon gallery arms a
  * crosshair on the document instead of inserting immediately. A single click

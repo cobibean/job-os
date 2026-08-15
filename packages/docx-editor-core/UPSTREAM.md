@@ -7,3 +7,8 @@
 - Deliberately excluded: `ee/`, desktop shell, updater, accounts, provider transport, project store, slides, sheets, and GenOffice assistant branding.
 
 JobOS owns this package boundary and the integration API in `src/document.ts`.
+
+Every tracked source file in this modified package carries a prominent JobOS
+change notice in its opening lines. That notice identifies the file as part of
+JobOS's modified GenOffice-derived package and points back to this provenance
+record.

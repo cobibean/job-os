@@ -1,3 +1,4 @@
+// This file is part of JobOS's modified GenOffice-derived package; see this package's UPSTREAM.md.
 export type Lang = 'en' | 'zh' | 'zh-TW' | 'ja' | 'ko' | 'fr' | 'de' | 'es' | 'th' | 'id' | 'ru' | 'ar' | 'pt' | 'it' | 'pl' | 'nl' | 'ms' | 'he' | 'hi'
 export type StringKey = string
 export type Params = Record<string, string | number>

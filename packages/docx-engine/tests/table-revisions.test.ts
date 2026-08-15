@@ -1,3 +1,4 @@
+// This file is part of JobOS's modified GenOffice-derived package; see this package's UPSTREAM.md.
 import { describe, expect, it } from 'vitest'
 import { parseDocx, saveDocx } from '../src/index'
 import { buildDocx, REVISION_TABLE_XML } from './helpers/build-docx'
