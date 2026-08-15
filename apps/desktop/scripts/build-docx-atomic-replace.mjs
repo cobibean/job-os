@@ -9,6 +9,11 @@ const source = path.join(desktopRoot, 'native', 'JobOSDocxAtomicReplace.swift')
 const outputDirectory = path.join(desktopRoot, 'build')
 const output = path.join(outputDirectory, 'jobos-docx-atomic-replace')
 
+if (process.platform !== 'darwin') {
+  console.log('Skipping macOS-only DOCX atomic-replace helper build')
+  process.exit(0)
+}
+
 mkdirSync(outputDirectory, { recursive: true })
 execFileSync(
   '/usr/bin/xcrun',
