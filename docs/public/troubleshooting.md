@@ -61,7 +61,8 @@ README.
 
 ## Resetting local development state
 
-Current source-development state may exist at `data/jobos.db`; installed macOS
+Current source-development state may exist at `data/jobos.db` and
+`data/jobs.db`; installed macOS
 state lives under the user's JobOS Application Support directory. Back up files
 before deleting anything. The accepted public reset command will arrive with the
 idempotent initializer and is not available yet.

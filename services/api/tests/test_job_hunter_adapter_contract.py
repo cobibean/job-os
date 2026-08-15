@@ -1,7 +1,8 @@
 from datetime import UTC, datetime
 
 import pytest
-from jobos_api.adapters import create_job_hunter_adapter
+from job_repository_contract import exercise_repository_contract
+from jobos_api.private_adapters.job_hunter import create_job_hunter_services
 
 job_hunter_models = pytest.importorskip(
     "job_hunter.models",
@@ -14,6 +15,14 @@ job_hunter_storage = pytest.importorskip(
 
 JobRecord = job_hunter_models.JobRecord
 JobStorage = job_hunter_storage.JobStorage
+
+
+def test_real_job_hunter_adapter_satisfies_repository_contract(tmp_path):
+    database = tmp_path / "contract-jobs.db"
+    JobStorage(database)
+    adapter, _ = create_job_hunter_services(database, tmp_path)
+
+    exercise_repository_contract(adapter)
 
 
 def test_real_job_hunter_adapter_records_direct_application(tmp_path):
@@ -34,9 +43,9 @@ def test_real_job_hunter_adapter_records_direct_application(tmp_path):
             last_seen_at=observed_at,
         )
     )
-    adapter = create_job_hunter_adapter(database, tmp_path)
+    adapter, _ = create_job_hunter_services(database, tmp_path)
 
-    updated = adapter.update_lead_state(
+    updated = adapter.update_status(
         "job-contract",
         "applied",
         record_application=True,
@@ -49,7 +58,7 @@ def test_real_job_hunter_adapter_records_direct_application(tmp_path):
         if event["event_type"] == "lead_state_changed"
     ]
 
-    assert updated["status"] == "applied"
+    assert updated.status == "applied"
     assert lead is not None
     assert lead.applied_at is not None
     assert [(event["from_value"], event["to_value"]) for event in transitions] == [

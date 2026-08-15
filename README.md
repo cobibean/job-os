@@ -26,7 +26,7 @@ research, documents, and agent-assisted tasks in one place.
 | Capability | Current source status | Public-alpha target |
 |---|---|---|
 | Desktop workbench | Runs from source on macOS | Clean first-run onboarding |
-| Jobs and history | Still coupled to an optional private JobHunter adapter | Built-in mutable SQLite jobs |
+| Jobs and history | Built-in mutable SQLite repository; private installs may explicitly select JobHunter | Clean first-run initialization and synthetic demo data |
 | Browser workspace | Electron-owned local capability | Local capability with truthful unavailable states |
 | Documents | Local editor and retained-OOXML engine exist; some artifact flows remain privately coupled | Local create, edit, save, reopen, and export |
 | Agent | Existing private deployments can connect an agent runtime | Clearly optional; offline/not-configured by default |
@@ -62,9 +62,9 @@ pnpm contracts:check
 ```
 
 Expected result: lint, generated-contract checks, TypeScript checks, desktop and
-Python tests, and the production source build complete successfully. The three
-Phase 0 public-boundary tests remain strict expected failures until the private
-adapter, operator defaults, and private tracked paths are removed.
+Python tests, and the production source build complete successfully. The two
+remaining Phase 0 public-boundary tests stay strict expected failures until
+operator defaults and private tracked paths are removed.
 
 ### Developer commands
 
@@ -74,9 +74,9 @@ pnpm check            # lint, typecheck, test, and build
 pnpm contracts:check  # prove generated API contracts are current
 ```
 
-`pnpm dev` currently exposes the existing source application. Job data and agent
-features still require configuration that will become optional in later public
-readiness phases; do not treat a disconnected window as completed onboarding.
+`pnpm dev` currently exposes the existing source application. Canonical jobs use
+the built-in local SQLite repository by default; agent features remain optional.
+Do not treat a disconnected window as completed onboarding.
 
 ## Demo data
 
@@ -88,16 +88,19 @@ documentation.
 
 ## Data and privacy
 
-Source development currently defaults workbench state to `data/jobos.db` when
-explicit configuration is absent. Installed macOS runtime files live under the
-user's JobOS Application Support directory. These are runtime files—not source
-artifacts—and must never be committed.
+Source development currently defaults workbench state to `data/jobos.db` and
+canonical jobs to the separate `data/jobs.db` when explicit configuration is
+absent. Installed macOS runtime files live under the user's JobOS Application
+Support directory. These are runtime files—not source artifacts—and must never
+be committed.
 
-Before manipulating current runtime data, stop JobOS and copy `data/jobos.db`
+Before manipulating current runtime data, stop JobOS and copy `data/jobos.db` and
+`data/jobs.db`
 for source development. For an installed private build, copy the entire JobOS
 Application Support directory, then inspect `service/runtime.json` and also copy
 every configured `state_db_path`, `job_hunter_db_path`, and `artifact_roots`
-location; those paths may live elsewhere. Verify each backup is non-empty.
+location; those paths may live elsewhere. If a source or custom runtime sets
+`JOBOS_JOBS_DB_PATH`, copy that database too. Verify each backup is non-empty.
 Credentials stored in macOS Keychain are not included in file backups and may
 need to be configured again after a restore. There is no supported public reset
 command yet, and uninstalling the app/source does not intentionally remove the

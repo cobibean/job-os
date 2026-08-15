@@ -92,6 +92,7 @@ def test_service_environment_and_uvicorn_command_are_fixed_and_loopback_only(tmp
         "JOBOS_MCP_TOKEN": "mcp-secret-value",
         "JOBOS_DEVICE_ID": "mini-device",
         "JOBOS_STATE_DB_PATH": str(tmp_path / "state/jobos.db"),
+        "JOBOS_JOB_PROVIDER": "job-hunter",
         "JOBOS_JOB_HUNTER_DB_PATH": str(tmp_path / "job-hunter/data/jobs/jobs.db"),
         "JOBOS_ARTIFACT_ROOTS": str(tmp_path / "job-hunter/resume/exports"),
         "JOBOS_HERMES_DASHBOARD_URL": "ws://127.0.0.1:9119/api/ws",
