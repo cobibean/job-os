@@ -1,0 +1,41 @@
+name: Feature request
+description: Suggest a focused improvement to JobOS
+title: "[Feature]: "
+labels: ["enhancement", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Describe the user problem before prescribing architecture. Keep examples synthetic and public-safe.
+  - type: textarea
+    id: problem
+    attributes:
+      label: User problem
+      description: What becomes difficult, slow, confusing, or unreliable today?
+    validations:
+      required: true
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Desired outcome
+      description: What should the user be able to accomplish?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Smallest useful proposal
+      description: Optional—describe the smallest coherent product change.
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+  - type: checkboxes
+    id: scope
+    attributes:
+      label: Scope check
+      options:
+        - label: This request does not require private JobHunter code or operator data to become public.
+          required: true
+        - label: I used synthetic examples and removed private paths, people, jobs, documents, and credentials.
+          required: true

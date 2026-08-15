@@ -1,7 +1,13 @@
 {
   "name": "@jobos/contracts",
   "version": "0.1.0",
+  "description": "Generated and shared API contracts for JobOS.",
   "private": true,
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/cobibean/job-os.git"
+  },
   "type": "module",
   "exports": {
     ".": {

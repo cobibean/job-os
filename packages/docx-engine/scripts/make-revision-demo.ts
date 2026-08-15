@@ -1,3 +1,4 @@
+// This file is part of JobOS's modified GenOffice-derived package; see this package's UPSTREAM.md.
 /** throwaway: build /tmp/revdemo.docx + /tmp/revdemo-v2.docx for manual review-mode verification */
 import { writeFileSync } from 'node:fs'
 import { buildDocx } from '../tests/helpers/build-docx'

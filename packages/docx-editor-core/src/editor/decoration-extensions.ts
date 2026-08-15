@@ -1,3 +1,4 @@
+// This file is part of JobOS's modified GenOffice-derived package; see this package's UPSTREAM.md.
 import { Extension } from '@tiptap/core'
 import { Plugin, PluginKey, type EditorState } from '@tiptap/pm/state'
 import { Decoration, DecorationSet, type EditorView } from '@tiptap/pm/view'

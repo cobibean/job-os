@@ -1,3 +1,4 @@
+// This file is part of JobOS's modified GenOffice-derived package; see this package's UPSTREAM.md.
 /// Convergence wrapper for the close guard. A save that raced with typing writes
 /// a snapshot that is already one step behind, and reporting that as success lets
 /// the window close over unpersisted edits — so keep saving until the file caught

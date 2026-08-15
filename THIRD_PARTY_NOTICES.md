@@ -1,32 +1,46 @@
 # Third-Party Notices
 
-JobOS includes the following pinned, local-only open-source document-editor dependencies. No Tiptap Pro, cloud, hosted conversion, or paid package is included.
+JobOS uses pinned open-source dependencies in its desktop, API, MCP, and local document stack. No Tiptap Pro, hosted conversion service, paid package, or private JobHunter implementation is included by this license grant.
+
+The machine-verifiable direct dependency inventory runs with `pnpm license:check`. It fails when a direct Node or Python dependency has missing/unknown license metadata and also verifies that required legal/provenance files are packaged with the desktop application.
 
 ## GenOffice-derived OOXML components
 
-JobOS includes modified source from GenOffice, Copyright 2026 Mainfunc, Inc., licensed under Apache-2.0. The pinned source and modifications are documented in `packages/docx-engine/UPSTREAM.md` and `packages/docx-editor-core/UPSTREAM.md`. JobOS excludes GenOffice enterprise (`ee/`), shell, accounts, updater, provider/assistant, search, sheets, slides, branding, and bundled font assets.
+JobOS includes modified source from GenOffice, Copyright 2026 Mainfunc, Inc., licensed under Apache-2.0. The pinned source and JobOS modification boundaries are documented in `packages/docx-engine/UPSTREAM.md` and `packages/docx-editor-core/UPSTREAM.md`. JobOS excludes GenOffice enterprise (`ee/`), shell, accounts, updater, provider/assistant, search, sheets, slides, branding, and bundled font assets.
 
 > GenOffice — This product includes software developed at Mainfunc, Inc.
 
-The Apache-2.0 license is preserved with each adapted package and in the packaged application resources.
+Each adapted package preserves its own `LICENSE`, `NOTICE`, and `UPSTREAM.md`. Those files, the root `LICENSE`/`NOTICE`, and this document are included in packaged desktop resources.
+
+## Declared direct runtime dependency inventory
 
 | Package | Version | License | JobOS use |
 |---|---:|---|---|
-| `@tiptap/core`, `@tiptap/react`, `@tiptap/starter-kit`, `@tiptap/extension-table`, `@tiptap/extension-image`, `@tiptap/extension-text-style`, `@tiptap/extension-text-align`, `@tiptap/extension-highlight`, `@tiptap/extension-unique-id`, `@tiptap/extension-placeholder`, `@tiptap/html` | 3.29.2 | MIT | Structured editor, schema, HTML conversion |
+| `@tiptap/core`, `@tiptap/react`, `@tiptap/starter-kit`, `@tiptap/extensions`, `@tiptap/pm`, `@tiptap/extension-table`, `@tiptap/extension-image`, `@tiptap/extension-text-style`, `@tiptap/extension-text-align`, `@tiptap/extension-highlight`, `@tiptap/extension-unique-id`, `@tiptap/extension-placeholder`, `@tiptap/html` | 3.29.2 | MIT | Structured editor, schema, HTML conversion |
 | `tiptap-pagination-plus` | 3.1.0 | MIT | Approximate live page canvas |
 | `mammoth` | 1.12.0 | BSD-2-Clause | Semantic DOCX import |
-| `sanitize-html` / `@types/sanitize-html` | 2.17.6 / 2.16.1 | MIT | Imported HTML allowlist and typings |
+| `sanitize-html` | 2.17.6 | MIT | Imported HTML allowlist |
 | `prosemirror-docx` | 0.6.1 | MIT | Supported-schema DOCX serialization |
 | `docx` | 9.7.1 | MIT | DOCX sections and media |
 | `pagedjs` | 0.4.3 | MIT | Local print pagination |
 | `docx-preview` | 0.4.0 | Apache-2.0 | Diagnostic original-DOCX preview |
-| `jszip` | 3.10.1 | MIT OR GPL-3.0-or-later (MIT option used) | Bounded OOXML ZIP inspection |
+| `pdfjs-dist` | 6.1.200 | Apache-2.0 | Local PDF rendering |
+| `jszip` | 3.10.1 | MIT OR GPL-3.0-or-later (MIT option selected) | Bounded OOXML ZIP inspection |
 | `fast-xml-parser` | 5.10.1 | MIT | Bounded OOXML metadata parsing |
+| `react`, `react-dom` | 19.2.7 | MIT | Desktop renderer |
+| `react-markdown` | 10.1.0 | MIT | Safe structured message rendering |
+| `lucide-react` | 1.25.0 | ISC | Interface icons |
+| `happy-dom` | 20.11.2 | MIT | Desktop DOM test environment declared by the runtime workspace |
+| `fastapi` | 0.139.2 | MIT | Local application API |
+| `pydantic` | 2.13.4 | MIT | Runtime validation and contracts |
+| `uvicorn` | 0.51.0 | BSD-3-Clause | Local ASGI server |
+| `websockets` | 16.1.1 | BSD-3-Clause | Local capability transport |
+| `httpx` | 0.28.1 | BSD-3-Clause | MCP-to-API HTTP client |
+| `mcp` | 1.28.1 | MIT | MCP protocol adapter |
 
-Copyright and license texts remain available in each package distribution under `node_modules`; redistribution of a packaged application must preserve those license files and this notice. Apache-2.0 and BSD-2-Clause notice obligations apply to `docx-preview` and `mammoth` respectively.
+Transitive dependency licenses are reported by `pnpm licenses list --json --prod` and installed Python package metadata. Copyright and license texts remain available in each package distribution under `node_modules` or the installed Python environment. Redistribution must preserve applicable license texts and this notice.
 
-
-The complete redistribution notices for dependencies with explicit notice obligations or a selected dual-license option follow. Packaged JobOS distributions must include this file.
+The complete redistribution notices below cover dependencies with explicit notice obligations or a selected dual-license option. Packaged JobOS distributions must include this file.
 
 ## Mammoth 1.12.0 — BSD-2-Clause
 

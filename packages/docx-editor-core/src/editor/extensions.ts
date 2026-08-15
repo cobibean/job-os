@@ -1,3 +1,4 @@
+// This file is part of JobOS's modified GenOffice-derived package; see this package's UPSTREAM.md.
 import { Editor, Extension, Node } from '@tiptap/core'
 import type { ChainedCommands, RawCommands } from '@tiptap/core'
 import { UndoRedo } from '@tiptap/extensions'

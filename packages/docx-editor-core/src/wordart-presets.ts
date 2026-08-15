@@ -1,3 +1,4 @@
+// This file is part of JobOS's modified GenOffice-derived package; see this package's UPSTREAM.md.
 /**
  * Shared WordArt gallery presets consumed by the docs and slides ribbons, so the
  * Insert → WordArt gallery is identical across apps (same recipes, same order,
