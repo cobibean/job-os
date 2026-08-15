@@ -183,6 +183,23 @@ export function useJobs() {
     }
   }, [bridge])
 
+  const removeDemo = useCallback(async (jobId: string) => {
+    if (!bridge) return
+    try {
+      await bridge.removeDemo(jobId)
+      setJobs(current => current.filter(job => job.jobId !== jobId))
+      if (selectedJobId === jobId) {
+        setSelectedJobId(null)
+        setSelectedJob(null)
+        setSelectedJobDetail(null)
+      }
+      setFeedback('Fictional demo removed')
+      setError(null)
+    } catch {
+      setError('Demo removal failed')
+    }
+  }, [bridge, selectedJobId])
+
   const reorder = useCallback(async (jobId: string, direction: -1 | 1) => {
     if (!bridge || sortMode !== 'manual' || query || statusGroup) return
     const index = jobs.findIndex(job => job.jobId === jobId)
@@ -237,6 +254,7 @@ export function useJobs() {
     setStatusGroup,
     selectJob,
     changeStatus,
+    removeDemo,
     changeSort,
     reorder,
     reorderTo

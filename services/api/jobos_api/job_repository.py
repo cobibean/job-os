@@ -97,6 +97,8 @@ class JobRecord:
     listing_capture_method: str | None = None
     listing_sha256: str | None = None
     listing_evidence: Mapping[str, object] = field(default_factory=dict)
+    synthetic_demo: bool = False
+    dataset_version: str | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "listing_evidence", immutable_evidence(self.listing_evidence))
@@ -121,6 +123,8 @@ class CreateJobCommand:
     listing_capture_method: str | None = None
     listing_sha256: str | None = None
     listing_evidence: Mapping[str, object] = field(default_factory=dict)
+    synthetic_demo: bool = False
+    dataset_version: str | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "listing_evidence", immutable_evidence(self.listing_evidence))
@@ -172,3 +176,5 @@ class JobRepository(Protocol):
     ) -> JobRecord: ...
 
     def list_history(self, job_id: str) -> Sequence[JobHistoryRecord]: ...
+
+    def delete_job(self, job_id: str) -> None: ...

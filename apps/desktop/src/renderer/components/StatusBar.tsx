@@ -11,15 +11,15 @@ interface StatusBarProps {
 
 function ConnectionLabel({ apiVersion, state }: Pick<StatusBarProps, 'apiVersion' | 'state'>) {
   if (state === 'connecting') {
-    return <><LoaderCircle aria-hidden="true" className="spin" size={14} /> Connecting to Mac Mini…</>
+    return <><LoaderCircle aria-hidden="true" className="spin" size={14} /> Connecting to local service…</>
   }
   if (state === 'connected') {
-    return <><CheckCircle2 aria-hidden="true" size={14} /> Mac Mini connected <span className="api-version">API {apiVersion}</span></>
+    return <><CheckCircle2 aria-hidden="true" size={14} /> Local service connected <span className="api-version">API {apiVersion}</span></>
   }
   if (state === 'degraded') {
-    return <><CircleAlert aria-hidden="true" size={14} /> Mac Mini authentication failed</>
+    return <><CircleAlert aria-hidden="true" size={14} /> Local service authentication failed</>
   }
-  return <><CircleAlert aria-hidden="true" size={14} /> Mac Mini unavailable</>
+  return <><CircleAlert aria-hidden="true" size={14} /> Local service unavailable</>
 }
 
 export function StatusBar({ apiVersion, message, onOpenSettings, state }: StatusBarProps) {

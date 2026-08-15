@@ -80,31 +80,27 @@ Do not treat a disconnected window as completed onboarding.
 
 ## Demo data
 
-There is no accepted public demo dataset yet. The public alpha will initialize a
-fresh local profile with exactly one clearly labeled synthetic demo job. Removing
-that job will be persistent; JobOS will not silently re-seed it. Until that path
-lands, do not use private or historical operator data for screenshots, tests, or
-documentation.
+`jobos-init` initializes a fresh local profile with exactly one clearly labeled
+synthetic demo job. Removing that job is persistent; JobOS will not silently
+re-seed it. `jobos-init --reset-demo --confirm-reset-demo` is the separate,
+explicitly confirmed reset path.
 
 ## Data and privacy
 
-Source development currently defaults workbench state to `data/jobos.db` and
-canonical jobs to the separate `data/jobs.db` when explicit configuration is
-absent. Installed macOS runtime files live under the user's JobOS Application
-Support directory. These are runtime files—not source artifacts—and must never
-be committed.
+Run `uv run jobos-init` for the default platform data directory, or pass
+`--data-dir` for an isolated source/test profile. The generated `config.json`
+uses a loopback local service, separate state and jobs SQLite databases, local
+artifacts, and an offline agent by default. Runtime files are not source
+artifacts and must never be committed.
 
-Before manipulating current runtime data, stop JobOS and copy `data/jobos.db` and
-`data/jobs.db`
-for source development. For an installed private build, copy the entire JobOS
-Application Support directory, then inspect `service/runtime.json` and also copy
-every configured `state_db_path`, `job_hunter_db_path`, and `artifact_roots`
-location; those paths may live elsewhere. If a source or custom runtime sets
-`JOBOS_JOBS_DB_PATH`, copy that database too. Verify each backup is non-empty.
+Before manipulating runtime data, stop JobOS and use diagnostics to open the
+active data location. Back up the complete configured profile and verify every
+database and artifact directory required by the enabled capabilities. Private
+runtime modes may configure additional locations and remain responsible for
+backing those up.
 Credentials stored in macOS Keychain are not included in file backups and may
-need to be configured again after a restore. There is no supported public reset
-command yet, and uninstalling the app/source does not intentionally remove the
-separate runtime data. See
+need to be configured again after a restore. Uninstalling the app/source does
+not intentionally remove the separate runtime data. See
 [data and privacy](docs/public/data-privacy.md) for the conservative move-aside
 procedure and the future public contract.
 

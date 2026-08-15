@@ -13,6 +13,18 @@ import type {
 } from '../shared/editableDocuments.js'
 
 const bridge: JobOsRendererBridge = Object.freeze({
+  setup: Object.freeze({
+    get: () => ipcRenderer.invoke('jobos:setup:get'),
+    initialize: (resetDemo = false, confirmed = false) => (
+      ipcRenderer.invoke('jobos:setup:initialize', resetDemo, confirmed)
+    ),
+    restart: () => ipcRenderer.invoke('jobos:setup:restart')
+  }),
+  diagnostics: Object.freeze({
+    get: () => ipcRenderer.invoke('jobos:diagnostics:get'),
+    openData: () => ipcRenderer.invoke('jobos:diagnostics:open-data'),
+    openLogs: () => ipcRenderer.invoke('jobos:diagnostics:open-logs')
+  }),
   lifecycle: Object.freeze({
     subscribePrepareClose: (handler: () => Promise<boolean>) => {
       const wrapped = (_event: IpcRendererEvent, requestId: string) => {
@@ -51,6 +63,7 @@ const bridge: JobOsRendererBridge = Object.freeze({
     reorder: (jobIds: string[]) => ipcRenderer.invoke('jobos:jobs:reorder', jobIds),
     setSort: (sort: JobSortMode) => ipcRenderer.invoke('jobos:jobs:set-sort', sort),
     updateStatus: (jobId: string, status: JobStatus) => ipcRenderer.invoke('jobos:jobs:update-status', jobId, status),
+    removeDemo: (jobId: string) => ipcRenderer.invoke('jobos:jobs:remove-demo', jobId),
     saveFromBrowser: (tabId: string, expectedUrl: string, extraction: BrowserJobExtraction, idempotencyKey: string) => (
       ipcRenderer.invoke('jobos:jobs:save-from-browser', tabId, expectedUrl, extraction, idempotencyKey)
     ),

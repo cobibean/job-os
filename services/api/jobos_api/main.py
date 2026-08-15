@@ -1,17 +1,31 @@
 import os
 from pathlib import Path
 
+from fastapi import FastAPI
+from fastapi.responses import JSONResponse
+
 from jobos_api.app import create_app
+from jobos_api.local_config import (
+    LocalConfigError,
+    config_path,
+    default_data_dir,
+    settings_from_config,
+)
 from jobos_api.settings import Settings, parse_device_credentials
 
 
 def settings_from_environment() -> Settings:
     token = os.environ.get("JOBOS_DEVICE_TOKEN", "")
-    if not token:
-        raise RuntimeError("JOBOS_DEVICE_TOKEN is required")
     mcp_token = os.environ.get("JOBOS_MCP_TOKEN", "")
-    if not mcp_token:
-        raise RuntimeError("JOBOS_MCP_TOKEN is required")
+    if not token and not mcp_token:
+        configured_path = Path(
+            os.environ.get("JOBOS_CONFIG_PATH", config_path(default_data_dir()))
+        )
+        return settings_from_config(configured_path)
+    if not token or not mcp_token:
+        raise LocalConfigError(
+            "JOBOS_DEVICE_TOKEN and JOBOS_MCP_TOKEN must be configured together."
+        )
     state_db_path = Path(os.environ.get("JOBOS_STATE_DB_PATH", "data/jobos.db"))
     jobs_db = os.environ.get("JOBOS_JOBS_DB_PATH")
     job_hunter_db = os.environ.get("JOBOS_JOB_HUNTER_DB_PATH")
@@ -42,4 +56,25 @@ def settings_from_environment() -> Settings:
     )
 
 
-app = create_app(settings_from_environment())
+def create_application() -> FastAPI:
+    return create_app(settings_from_environment())
+
+
+def _configuration_error_app(error: Exception) -> FastAPI:
+    unavailable = FastAPI(title="JobOS API", version="0.1.0")
+    message = str(error)
+
+    @unavailable.get("/v1/health")
+    def health() -> JSONResponse:
+        return JSONResponse(
+            status_code=503,
+            content={"status": "setup_required", "detail": message},
+        )
+
+    return unavailable
+
+
+try:
+    app = create_application()
+except (LocalConfigError, OSError, ValueError) as error:
+    app = _configuration_error_app(error)
