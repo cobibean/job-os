@@ -1,0 +1,162 @@
+{
+  "schemaVersion": 1,
+  "policy": "Every tracked binary asset must be checksum-pinned and publication-approved; every binary test fixture must be synthetic.",
+  "assets": [
+    {
+      "path": "apps/desktop/build/icon.icns",
+      "sha256": "328bc6fba639806631d537800f079b61017cb4d17167f6d3655586a5202bf23b",
+      "classification": "project-asset",
+      "publication": "keep",
+      "source": "JobOS-owned application artwork",
+      "purpose": "Packaged macOS application icon"
+    },
+    {
+      "path": "apps/desktop/build/icon.png",
+      "sha256": "8e298d527af9286a59b45c3c3956c9b511bdad55b79d1a03a57555c629c38f6d",
+      "classification": "project-asset",
+      "publication": "keep",
+      "source": "JobOS-owned application artwork",
+      "purpose": "Application icon source image"
+    },
+    {
+      "path": "apps/desktop/src/main/document-import/fixtures/cover-letter-header-footer.docx",
+      "sha256": "88b35120b228bacc9ac5b9eba759b5cb1a0dff5c87a73a6e6b5dad0f32ceab7f",
+      "classification": "synthetic",
+      "publication": "keep",
+      "source": "Generated test document with fictional content",
+      "purpose": "DOCX header and footer import behavior",
+      "provenance": {
+        "trackedSource": "apps/desktop/src/main/document-import/fixtures/buildFixtures.mjs",
+        "method": "Generated deterministically from fictional Alex Morgan fixture data by the tracked builder."
+      }
+    },
+    {
+      "path": "apps/desktop/src/main/document-import/fixtures/one-page-resume.docx",
+      "sha256": "ceb3f3783fa58b66f052aeb3980b39dccfee72572af2ab0e2b750760a370ae17",
+      "classification": "synthetic",
+      "publication": "keep",
+      "source": "Generated test document with fictional content",
+      "purpose": "Single-page DOCX resume import behavior",
+      "provenance": {
+        "trackedSource": "apps/desktop/src/main/document-import/fixtures/buildFixtures.mjs",
+        "method": "Generated deterministically from fictional Alex Morgan fixture data by the tracked builder."
+      }
+    },
+    {
+      "path": "apps/desktop/src/main/document-import/fixtures/references-sheet.docx",
+      "sha256": "6ca397219956837beea2d56ff4f7c9acc68ea94bf8f6b04142aaac50c64bd0fd",
+      "classification": "synthetic",
+      "publication": "keep",
+      "source": "Generated test document with fictional content",
+      "purpose": "References-sheet import behavior",
+      "provenance": {
+        "trackedSource": "apps/desktop/src/main/document-import/fixtures/buildFixtures.mjs",
+        "method": "Generated deterministically from fictional Alex Morgan fixture data by the tracked builder."
+      }
+    },
+    {
+      "path": "apps/desktop/src/main/document-import/fixtures/tracked-changes.docx",
+      "sha256": "b43bf26647f521d394282e0a7a17eb65cf410c3d1caa1acbe8e6bc70ee641ffc",
+      "classification": "synthetic",
+      "publication": "keep",
+      "source": "Generated test document with fictional content",
+      "purpose": "Tracked-change import behavior",
+      "provenance": {
+        "trackedSource": "apps/desktop/src/main/document-import/fixtures/buildFixtures.mjs",
+        "method": "Generated deterministically from fictional Alex Morgan fixture data by the tracked builder."
+      }
+    },
+    {
+      "path": "apps/desktop/src/main/document-import/fixtures/two-page-resume-table.docx",
+      "sha256": "3f8e75bd745092ee9e80e5538e2e10bb25e53919e94a3346884f2d0d69155826",
+      "classification": "synthetic",
+      "publication": "keep",
+      "source": "Generated test document with fictional content",
+      "purpose": "Multipage table-layout import behavior",
+      "provenance": {
+        "trackedSource": "apps/desktop/src/main/document-import/fixtures/buildFixtures.mjs",
+        "method": "Generated deterministically from fictional Alex Morgan fixture data by the tracked builder."
+      }
+    },
+    {
+      "path": "apps/desktop/src/main/document-import/fixtures/unsafe-content.docx",
+      "sha256": "694eda2c35b936c777b182559702d852fc2cc344adf79fa6ba07dd0704c87b83",
+      "classification": "synthetic",
+      "publication": "keep",
+      "source": "Generated adversarial test document with fictional content",
+      "purpose": "Unsafe DOCX content rejection",
+      "provenance": {
+        "trackedSource": "apps/desktop/src/main/document-import/fixtures/buildFixtures.mjs",
+        "method": "Generated deterministically from fictional Alex Morgan fixture data by the tracked builder."
+      }
+    },
+    {
+      "path": "apps/desktop/src/main/document-import/fixtures/unsupported-objects.docx",
+      "sha256": "8ba3fda0d2d453cf3838bd986976a232eff4b681aeab7765eb08db514a8723d3",
+      "classification": "synthetic",
+      "publication": "keep",
+      "source": "Generated test document with fictional content",
+      "purpose": "Unsupported DOCX object handling",
+      "provenance": {
+        "trackedSource": "apps/desktop/src/main/document-import/fixtures/buildFixtures.mjs",
+        "method": "Generated deterministically from fictional Alex Morgan fixture data by the tracked builder."
+      }
+    },
+    {
+      "path": "docs/design/references/jobos-v1-locked-direction.png",
+      "sha256": "79d8716f89c43ce339e673825dde239871206cf28eaa247e417353b1dc84ce19",
+      "classification": "project-asset",
+      "publication": "keep",
+      "source": "JobOS-owned product architecture artwork",
+      "purpose": "Historical product-direction reference"
+    },
+    {
+      "path": "packages/docx-engine/tests/fixtures/(FAKE)-cover-letter.docx",
+      "sha256": "e6cbea4e5185250e63f369ce0b1c7491c81547d4f2eb1783d7018a959b1ca04e",
+      "classification": "synthetic",
+      "publication": "keep",
+      "source": "Generated and visibly FAKE-labeled test document",
+      "purpose": "Retained-OOXML cover-letter behavior",
+      "provenance": {
+        "trackedSource": "docs/implementation/jobos-ooxml-editor-fixture-manifest.md",
+        "method": "Derived from the generated desktop fixtures and visibly FAKE-labeled in OOXML as documented."
+      }
+    },
+    {
+      "path": "packages/docx-engine/tests/fixtures/(FAKE)-polished-resume.docx",
+      "sha256": "e186ad31837323391222c2549de5bb9623347eab8b92263896f3273c6fd73217",
+      "classification": "synthetic",
+      "publication": "keep",
+      "source": "Generated and visibly FAKE-labeled test document",
+      "purpose": "Retained-OOXML resume fidelity",
+      "provenance": {
+        "trackedSource": "docs/implementation/jobos-ooxml-editor-fixture-manifest.md",
+        "method": "Derived from the generated desktop fixtures and visibly FAKE-labeled in OOXML as documented."
+      }
+    },
+    {
+      "path": "packages/docx-engine/tests/fixtures/(FAKE)-protected-constructs.docx",
+      "sha256": "3b26c88a39b74bd4e2eb3b97c6f4de3a7cd50dc094193902ddffbb2fa42c3d90",
+      "classification": "synthetic",
+      "publication": "keep",
+      "source": "Generated and visibly FAKE-labeled test document",
+      "purpose": "Protected OOXML construct handling",
+      "provenance": {
+        "trackedSource": "docs/implementation/jobos-ooxml-editor-fixture-manifest.md",
+        "method": "Derived from the generated desktop fixtures and visibly FAKE-labeled in OOXML as documented."
+      }
+    },
+    {
+      "path": "packages/docx-engine/tests/fixtures/(FAKE)-references.docx",
+      "sha256": "eb192def1f4e2e2314c53defeac2db3068ce8bab2f287f9a1ade7e401e850279",
+      "classification": "synthetic",
+      "publication": "keep",
+      "source": "Generated and visibly FAKE-labeled test document",
+      "purpose": "Retained-OOXML references-sheet behavior",
+      "provenance": {
+        "trackedSource": "docs/implementation/jobos-ooxml-editor-fixture-manifest.md",
+        "method": "Derived from the generated desktop fixtures and visibly FAKE-labeled in OOXML as documented."
+      }
+    }
+  ]
+}
