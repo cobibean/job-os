@@ -1,9 +1,17 @@
 from __future__ import annotations
 
-from typing import Any, Literal, Protocol
+from datetime import datetime
+from typing import Literal
 from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl, field_validator
+
+from jobos_api.job_repository import (
+    JobRecord,
+    JobRepository,
+    ListingCompleteness,
+    mutable_evidence,
+)
 
 STATUS_GROUPS = {
     "discovered": "Inbox",
@@ -22,117 +30,6 @@ STATUS_GROUPS = {
 STATUS_GROUP_ORDER = ("Inbox", "Considering", "Applied", "Interviewing", "Closed", "Inactive")
 SortMode = Literal["manual", "recent", "alphabetical", "status"]
 
-class JobFacade(Protocol):
-    def list_jobs(self) -> list[dict[str, Any]]: ...
-
-    def add_job(
-        self,
-        *,
-        company_name: str,
-        title: str,
-        canonical_url: str,
-        location_text: str,
-        description_text: str,
-        application_url: str,
-    ) -> dict[str, Any]: ...
-
-    def inspect_job(self, job_id: str) -> dict[str, Any]: ...
-
-    def get_lead_history(self, job_id: str) -> list[dict[str, Any]]: ...
-
-    def update_lead_state(
-        self,
-        job_id: str,
-        target_state: str,
-        *,
-        reason: str | None = None,
-        record_application: bool = False,
-    ) -> dict[str, Any]: ...
-
-    def update_job_description(
-        self,
-        job_id: str,
-        description_text: str,
-        *,
-        source: str,
-        provenance: str | None = None,
-    ) -> dict[str, Any]: ...
-
-    def list_job_artifacts(self, job_id: str) -> list[dict[str, Any]]:
-        """Return the full manifest with a unique non-negative render_sequence per item."""
-        ...
-
-    def register_artifact(self, job_id: str, artifact_reference: str) -> dict[str, Any]: ...
-
-    def publish_document_artifact(
-        self,
-        job_id: str,
-        document_key: str,
-        document_label: str,
-        source_path: str,
-        artifact_path: str,
-    ) -> dict[str, Any]: ...
-
-    def render_resume(
-        self, job_id: str, source_id: str, output_options: dict[str, Any]
-    ) -> dict[str, Any]: ...
-
-
-class EmptyJobFacade:
-    def list_jobs(self) -> list[dict[str, Any]]:
-        return []
-
-    def add_job(self, **_: str) -> dict[str, Any]:
-        raise RuntimeError("Job Hunter is unavailable")
-
-    def inspect_job(self, job_id: str) -> dict[str, Any]:
-        raise KeyError(job_id)
-
-    def get_lead_history(self, job_id: str) -> list[dict[str, Any]]:
-        raise KeyError(job_id)
-
-    def update_lead_state(
-        self,
-        job_id: str,
-        target_state: str,
-        *,
-        reason: str | None = None,
-        record_application: bool = False,
-    ) -> dict[str, Any]:
-        raise KeyError(job_id)
-
-    def update_job_description(
-        self,
-        job_id: str,
-        description_text: str,
-        *,
-        source: str,
-        provenance: str | None = None,
-    ) -> dict[str, Any]:
-        raise KeyError(job_id)
-
-    def list_job_artifacts(self, job_id: str) -> list[dict[str, Any]]:
-        return []
-
-    def register_artifact(self, job_id: str, artifact_reference: str) -> dict[str, Any]:
-        raise KeyError(artifact_reference)
-
-    def publish_document_artifact(
-        self,
-        job_id: str,
-        document_key: str,
-        document_label: str,
-        source_path: str,
-        artifact_path: str,
-    ) -> dict[str, Any]:
-        raise KeyError(job_id)
-
-    def render_resume(
-        self, job_id: str, source_id: str, output_options: dict[str, Any]
-    ) -> dict[str, Any]:
-        raise KeyError(job_id)
-
-
 class JobListItem(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -149,6 +46,15 @@ class JobListItem(BaseModel):
 class JobDetail(JobListItem):
     description: str
     location: str | None
+    full_listing_text: str | None = None
+    analysis_text: str | None = None
+    listing_completeness: ListingCompleteness = "unknown"
+    listing_source_url: HttpUrl | None = None
+    listing_captured_at: datetime | None = None
+    listing_verified_at: datetime | None = None
+    listing_capture_method: str | None = None
+    listing_sha256: str | None = None
+    listing_evidence: dict[str, object] = Field(default_factory=dict)
 
 
 class JobListResponse(BaseModel):
@@ -166,22 +72,43 @@ class BrowserJobCreateRequest(BaseModel):
     location_text: str = Field(min_length=1, max_length=1000)
     description_text: str = Field(min_length=1, max_length=100_000)
     application_url: HttpUrl
+    full_listing_text: str | None = Field(default=None, min_length=1, max_length=100_000)
+    analysis_text: str | None = Field(default=None, max_length=100_000)
+    listing_completeness: ListingCompleteness | None = None
+    listing_source_url: HttpUrl | None = None
+    listing_captured_at: datetime | None = None
+    listing_verified_at: datetime | None = None
+    listing_capture_method: str | None = Field(default=None, max_length=100)
+    listing_sha256: str | None = Field(default=None, pattern=r"^[0-9a-fA-F]{64}$")
+    listing_evidence: dict[str, object] = Field(default_factory=dict)
     origin: Literal["user", "mcp"] = "user"
     idempotency_key: str = Field(
         default_factory=lambda: str(uuid4()), min_length=1, max_length=128
     )
 
-    @field_validator("company_name", "title", "location_text", "description_text")
+    @field_validator(
+        "company_name",
+        "title",
+        "location_text",
+        "description_text",
+        "full_listing_text",
+        "analysis_text",
+        "listing_capture_method",
+    )
     @classmethod
-    def strip_required_text(cls, value: str) -> str:
+    def strip_required_text(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
         stripped = value.strip()
         if not stripped:
             raise ValueError("field must not be blank")
         return stripped
 
-    @field_validator("canonical_url", "application_url")
+    @field_validator("canonical_url", "application_url", "listing_source_url")
     @classmethod
-    def reject_url_credentials(cls, value: HttpUrl) -> HttpUrl:
+    def reject_url_credentials(cls, value: HttpUrl | None) -> HttpUrl | None:
+        if value is None:
+            return None
         if value.username or value.password:
             raise ValueError("URL credentials are not allowed")
         return value
@@ -335,7 +262,7 @@ class JobEventsResponse(BaseModel):
 
 
 def list_jobs(
-    facade: JobFacade,
+    repository: JobRepository,
     *,
     sort: SortMode = "manual",
     query: str | None = None,
@@ -343,9 +270,8 @@ def list_jobs(
     manual_order: list[str] | None = None,
 ) -> JobListResponse:
     jobs: list[JobListItem] = []
-    for row in facade.list_jobs():
-        status = str(row["status"])
-        jobs.append(JobListItem(**row, status_group=STATUS_GROUPS[status]))
+    for record in repository.list_jobs():
+        jobs.append(_list_item(record))
     if query:
         normalized_query = query.casefold().strip()
         jobs = [job for job in jobs if normalized_query in f"{job.company} {job.title}".casefold()]
@@ -369,6 +295,35 @@ def list_jobs(
     return JobListResponse(jobs=jobs)
 
 
-def normalize_job_detail(row: dict[str, Any]) -> JobDetail:
-    status = str(row["status"])
-    return JobDetail(**row, status_group=STATUS_GROUPS[status])
+def _list_item(record: JobRecord) -> JobListItem:
+    return JobListItem(
+        job_id=record.job_id,
+        company=record.company,
+        title=record.title,
+        status=record.status,
+        status_group=STATUS_GROUPS[record.status],
+        canonical_url=record.canonical_url,
+        discovered_at=record.discovered_at.isoformat(),
+        last_seen_at=record.last_seen_at.isoformat(),
+    )
+
+
+def normalize_job_detail(record: JobRecord) -> JobDetail:
+    return JobDetail(
+        **_list_item(record).model_dump(),
+        description=record.description,
+        location=record.location,
+        full_listing_text=record.full_listing_text,
+        analysis_text=record.analysis_text,
+        listing_completeness=record.listing_completeness,
+        listing_source_url=record.listing_source_url,
+        listing_captured_at=(
+            record.listing_captured_at.isoformat() if record.listing_captured_at else None
+        ),
+        listing_verified_at=(
+            record.listing_verified_at.isoformat() if record.listing_verified_at else None
+        ),
+        listing_capture_method=record.listing_capture_method,
+        listing_sha256=record.listing_sha256,
+        listing_evidence=mutable_evidence(record.listing_evidence),
+    )

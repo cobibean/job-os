@@ -11,6 +11,7 @@ from jobos_api.conversations import (
     SendMessageRequest,
     conversation_event_source,
 )
+from jobos_api.private_adapters.job_hunter import adapt_job_hunter_facade
 from jobos_api.settings import Settings
 from jobos_api.state_store import JobOsStateStore
 
@@ -207,13 +208,15 @@ def headers():
 
 
 def make_client(tmp_path, gateway=None):
+    repository, artifact_gateway = adapt_job_hunter_facade(FakeJobFacade())
     app = create_app(
         Settings(
             device_token=TOKEN,
             mcp_token="test-mcp-trusted-token",
             state_db_path=tmp_path / "jobos.db",
         ),
-        job_facade=FakeJobFacade(),
+        job_repository=repository,
+        artifact_gateway=artifact_gateway,
         agent_gateway=gateway or FakeGateway(),
     )
     return TestClient(app)

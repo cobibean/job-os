@@ -294,6 +294,10 @@ export type BrowserCommandResponse = {
  */
 export type BrowserJobCreateRequest = {
     /**
+     * Analysis Text
+     */
+    analysis_text?: string | null;
+    /**
      * Application Url
      */
     application_url: string;
@@ -310,9 +314,43 @@ export type BrowserJobCreateRequest = {
      */
     description_text: string;
     /**
+     * Full Listing Text
+     */
+    full_listing_text?: string | null;
+    /**
      * Idempotency Key
      */
     idempotency_key?: string;
+    /**
+     * Listing Capture Method
+     */
+    listing_capture_method?: string | null;
+    /**
+     * Listing Captured At
+     */
+    listing_captured_at?: string | null;
+    /**
+     * Listing Completeness
+     */
+    listing_completeness?: 'unknown' | 'unavailable' | 'summary_only' | 'partial' | 'complete' | null;
+    /**
+     * Listing Evidence
+     */
+    listing_evidence?: {
+        [key: string]: unknown;
+    };
+    /**
+     * Listing Sha256
+     */
+    listing_sha256?: string | null;
+    /**
+     * Listing Source Url
+     */
+    listing_source_url?: string | null;
+    /**
+     * Listing Verified At
+     */
+    listing_verified_at?: string | null;
     /**
      * Location Text
      */
@@ -1094,6 +1132,10 @@ export type JobDescriptionUpdateResponse = {
  */
 export type JobDetail = {
     /**
+     * Analysis Text
+     */
+    analysis_text?: string | null;
+    /**
      * Canonical Url
      */
     canonical_url: string;
@@ -1110,6 +1152,10 @@ export type JobDetail = {
      */
     discovered_at: string;
     /**
+     * Full Listing Text
+     */
+    full_listing_text?: string | null;
+    /**
      * Job Id
      */
     job_id: string;
@@ -1117,6 +1163,36 @@ export type JobDetail = {
      * Last Seen At
      */
     last_seen_at: string;
+    /**
+     * Listing Capture Method
+     */
+    listing_capture_method?: string | null;
+    /**
+     * Listing Captured At
+     */
+    listing_captured_at?: string | null;
+    /**
+     * Listing Completeness
+     */
+    listing_completeness?: 'unknown' | 'unavailable' | 'summary_only' | 'partial' | 'complete';
+    /**
+     * Listing Evidence
+     */
+    listing_evidence?: {
+        [key: string]: unknown;
+    };
+    /**
+     * Listing Sha256
+     */
+    listing_sha256?: string | null;
+    /**
+     * Listing Source Url
+     */
+    listing_source_url?: string | null;
+    /**
+     * Listing Verified At
+     */
+    listing_verified_at?: string | null;
     /**
      * Location
      */

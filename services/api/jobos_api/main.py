@@ -13,6 +13,7 @@ def settings_from_environment() -> Settings:
     if not mcp_token:
         raise RuntimeError("JOBOS_MCP_TOKEN is required")
     state_db_path = Path(os.environ.get("JOBOS_STATE_DB_PATH", "data/jobos.db"))
+    jobs_db = os.environ.get("JOBOS_JOBS_DB_PATH")
     job_hunter_db = os.environ.get("JOBOS_JOB_HUNTER_DB_PATH")
     artifact_roots = tuple(
         Path(value)
@@ -30,6 +31,8 @@ def settings_from_environment() -> Settings:
             os.environ.get("JOBOS_DEVICE_CREDENTIALS_JSON")
         ),
         state_db_path=state_db_path,
+        job_provider=os.environ.get("JOBOS_JOB_PROVIDER", "sqlite"),
+        jobs_db_path=Path(jobs_db) if jobs_db else None,
         job_hunter_db_path=Path(job_hunter_db) if job_hunter_db else None,
         artifact_roots=artifact_roots,
         hermes_dashboard_url=hermes_url,

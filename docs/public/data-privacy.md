@@ -30,9 +30,10 @@ be included in source, fixtures, documentation, or launch media.
 ## Data locations
 
 During current source development, API workbench state defaults to
-`data/jobos.db` unless explicitly configured. Installed macOS runtime files use
-the user's JobOS Application Support directory. Later initialization work will
-make the complete layout configurable and document exact backup/reset behavior.
+`data/jobos.db` and canonical jobs default to the separate `data/jobs.db` unless
+explicitly configured. Installed macOS runtime files use the user's JobOS
+Application Support directory. Later initialization work will document the full
+first-run, demo, backup, and reset behavior.
 
 Do not commit runtime databases, logs, exports, backups, support bundles,
 credentials, `.env` files, local runtime configuration, or `.DS_Store` files.
@@ -57,11 +58,13 @@ The current source build has no supported one-command backup or reset flow. Use
 this conservative procedure until the clean-home lifecycle is implemented:
 
 1. Stop the desktop application and local API before copying or moving data.
-2. For source development, copy `data/jobos.db`. For an installed private macOS
+2. For source development, copy `data/jobos.db` and `data/jobs.db`. For an
+   installed private macOS
    build, copy the entire JobOS Application Support directory, inspect
    `service/runtime.json`, and also copy every configured `state_db_path`,
-   `job_hunter_db_path`, and `artifact_roots` location. Those absolute paths can
-   point outside Application Support.
+   `job_hunter_db_path`, and `artifact_roots` location. Those paths can point outside
+   Application Support. If a source or custom runtime sets `JOBOS_JOBS_DB_PATH`,
+   copy that database too.
 3. Verify that every backup exists and is non-empty before editing, resetting,
    or uninstalling anything.
 

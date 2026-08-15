@@ -528,6 +528,18 @@
       "BrowserJobCreateRequest": {
         "additionalProperties": false,
         "properties": {
+          "analysis_text": {
+            "anyOf": [
+              {
+                "maxLength": 100000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Analysis Text"
+          },
           "application_url": {
             "format": "uri",
             "maxLength": 2083,
@@ -554,11 +566,109 @@
             "title": "Description Text",
             "type": "string"
           },
+          "full_listing_text": {
+            "anyOf": [
+              {
+                "maxLength": 100000,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Full Listing Text"
+          },
           "idempotency_key": {
             "maxLength": 128,
             "minLength": 1,
             "title": "Idempotency Key",
             "type": "string"
+          },
+          "listing_capture_method": {
+            "anyOf": [
+              {
+                "maxLength": 100,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Listing Capture Method"
+          },
+          "listing_captured_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Listing Captured At"
+          },
+          "listing_completeness": {
+            "anyOf": [
+              {
+                "enum": [
+                  "unknown",
+                  "unavailable",
+                  "summary_only",
+                  "partial",
+                  "complete"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Listing Completeness"
+          },
+          "listing_evidence": {
+            "additionalProperties": true,
+            "title": "Listing Evidence",
+            "type": "object"
+          },
+          "listing_sha256": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-fA-F]{64}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Listing Sha256"
+          },
+          "listing_source_url": {
+            "anyOf": [
+              {
+                "format": "uri",
+                "maxLength": 2083,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Listing Source Url"
+          },
+          "listing_verified_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Listing Verified At"
           },
           "location_text": {
             "maxLength": 1000,
@@ -1948,6 +2058,17 @@
       "JobDetail": {
         "additionalProperties": false,
         "properties": {
+          "analysis_text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Analysis Text"
+          },
           "canonical_url": {
             "format": "uri",
             "maxLength": 2083,
@@ -1967,6 +2088,17 @@
             "title": "Discovered At",
             "type": "string"
           },
+          "full_listing_text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Full Listing Text"
+          },
           "job_id": {
             "title": "Job Id",
             "type": "string"
@@ -1974,6 +2106,83 @@
           "last_seen_at": {
             "title": "Last Seen At",
             "type": "string"
+          },
+          "listing_capture_method": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Listing Capture Method"
+          },
+          "listing_captured_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Listing Captured At"
+          },
+          "listing_completeness": {
+            "default": "unknown",
+            "enum": [
+              "unknown",
+              "unavailable",
+              "summary_only",
+              "partial",
+              "complete"
+            ],
+            "title": "Listing Completeness",
+            "type": "string"
+          },
+          "listing_evidence": {
+            "additionalProperties": true,
+            "title": "Listing Evidence",
+            "type": "object"
+          },
+          "listing_sha256": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Listing Sha256"
+          },
+          "listing_source_url": {
+            "anyOf": [
+              {
+                "format": "uri",
+                "maxLength": 2083,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Listing Source Url"
+          },
+          "listing_verified_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Listing Verified At"
           },
           "location": {
             "anyOf": [
