@@ -1,3 +1,4 @@
+// This file is part of JobOS's modified GenOffice-derived package; see this package's UPSTREAM.md.
 import { isPillPreset, presetPath, presetPolygon } from './preset-geometry.js'
 export { WORDART_PRESETS, wordArtStrokePx, wordArtSolidColor } from './wordart-presets.js'
 

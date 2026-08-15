@@ -1,3 +1,4 @@
+// This file is part of JobOS's modified GenOffice-derived package; see this package's UPSTREAM.md.
 import { XMLParser } from 'fast-xml-parser'
 
 /** preserveOrder node shape from fast-xml-parser */

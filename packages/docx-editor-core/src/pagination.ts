@@ -1,3 +1,4 @@
+// This file is part of JobOS's modified GenOffice-derived package; see this package's UPSTREAM.md.
 /**
  * Pagination slicing: greedy page breaking over the continuous-flow render result, by top-level block.
  * Pure functions; all coordinates are content-area Y at 100% zoom (px, 0 = top of page 1 content).

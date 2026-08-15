@@ -1,3 +1,4 @@
+// This file is part of JobOS's modified GenOffice-derived package; see this package's UPSTREAM.md.
 /** Word's default endnote numbering is lowercase roman (footnotes stay arabic) — the visual cue that separates the two note kinds. */
 const ROMAN: Array<[number, string]> = [
   [1000, 'm'],

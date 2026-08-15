@@ -1,3 +1,4 @@
+// This file is part of JobOS's modified GenOffice-derived package; see this package's UPSTREAM.md.
 /**
  * rawRPr passthrough: run-level unmodeled properties (caps/vanish/dstrike/bdr/double
  * underline/themeColor/character spacing/all four rFonts slots…) survive paragraph

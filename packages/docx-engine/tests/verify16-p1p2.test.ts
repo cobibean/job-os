@@ -1,3 +1,4 @@
+// This file is part of JobOS's modified GenOffice-derived package; see this package's UPSTREAM.md.
 /**
  * verify16-p1p2.test.ts
  * P1+P2 end-to-end verification (pure engine layer, no Electron)

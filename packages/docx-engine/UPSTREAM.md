@@ -9,3 +9,8 @@
 - Empirical benchmark: GenOffice macOS ARM64 `v0.5.83` preserved the tested DOCX layout in Apple Pages after a paragraph edit; that release binary is a benchmark, not a runtime dependency
 
 This package is a modified Apache-2.0 work. Preserve upstream copyright headers and this provenance file when redistributing it.
+
+Every tracked source, test, and script file in this modified package carries a
+prominent JobOS change notice in its opening lines. That notice identifies the
+file as part of JobOS's modified GenOffice-derived package and points back to
+this provenance record.

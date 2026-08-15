@@ -1,9 +1,18 @@
 {
   "name": "@jobos/desktop",
   "version": "0.1.0",
-  "description": "Private job-search workbench",
+  "description": "Local-first desktop workbench for job-search workflows, documents, and agent-assisted research.",
   "author": "Cobi",
   "private": true,
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/cobibean/job-os.git"
+  },
+  "homepage": "https://github.com/cobibean/job-os#readme",
+  "bugs": {
+    "url": "https://github.com/cobibean/job-os/issues"
+  },
   "type": "module",
   "main": "dist/main/main.js",
   "scripts": {
@@ -90,6 +99,38 @@
       {
         "from": "../../THIRD_PARTY_NOTICES.md",
         "to": "THIRD_PARTY_NOTICES.md"
+      },
+      {
+        "from": "../../LICENSE",
+        "to": "LICENSE"
+      },
+      {
+        "from": "../../NOTICE",
+        "to": "NOTICE"
+      },
+      {
+        "from": "../../packages/docx-engine/LICENSE",
+        "to": "licenses/docx-engine/LICENSE"
+      },
+      {
+        "from": "../../packages/docx-engine/NOTICE",
+        "to": "licenses/docx-engine/NOTICE"
+      },
+      {
+        "from": "../../packages/docx-engine/UPSTREAM.md",
+        "to": "licenses/docx-engine/UPSTREAM.md"
+      },
+      {
+        "from": "../../packages/docx-editor-core/LICENSE",
+        "to": "licenses/docx-editor-core/LICENSE"
+      },
+      {
+        "from": "../../packages/docx-editor-core/NOTICE",
+        "to": "licenses/docx-editor-core/NOTICE"
+      },
+      {
+        "from": "../../packages/docx-editor-core/UPSTREAM.md",
+        "to": "licenses/docx-editor-core/UPSTREAM.md"
       }
     ],
     "mac": {
