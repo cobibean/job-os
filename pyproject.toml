@@ -11,7 +11,7 @@ members = ["services/api", "services/mcp"]
 
 [tool.pytest.ini_options]
 addopts = "-q"
-testpaths = ["services/api/tests", "services/mcp/tests"]
+testpaths = ["services/api/tests", "services/mcp/tests", "tests/public-release"]
 
 [tool.ruff]
 line-length = 100
