@@ -256,7 +256,7 @@ function main() {
     const publishedArchivePath = path.join(handoffRoot, `${bundleName}.zip`)
     const innerSize = statSync(innerArchivePath).size
     const innerSha256 = sha256(innerArchivePath)
-    const verification = `JobOS MacBook Update\n\nGenerated: ${generatedAt}\nSource commit: ${sourceCommit}\nApp version: ${packageJson.version}\nArchitecture: arm64\n\nInstall\n1. Unzip this outer MacBook update.\n2. Double-click “Update JobOS.command”.\n3. The updater verifies, replaces, and reopens JobOS while preserving external runtime config and Keychain data.\n\nInner app package\nFilename: ${innerArchiveName}\nSize: ${innerSize} bytes\nSHA-256: ${innerSha256}\n\nThis is a private, ad-hoc-signed JobOS demo update for Cobi's Apple-silicon Macs.\n`
+    const verification = `JobOS MacBook Update\n\nGenerated: ${generatedAt}\nSource commit: ${sourceCommit}\nApp version: ${packageJson.version}\nArchitecture: arm64\n\nInstall\n1. Unzip this outer MacBook update.\n2. Double-click “Update JobOS.command”.\n3. The updater verifies, replaces, and reopens JobOS while preserving external runtime config and Keychain data.\n\nInner app package\nFilename: ${innerArchiveName}\nSize: ${innerSize} bytes\nSHA-256: ${innerSha256}\n\nThis is an ad-hoc-signed updater for an existing private installation. It is not a public release.\n`
 
     mkdirSync(handoffRoot, { recursive: true })
     buildRoot = mkdtempSync(path.join(handoffRoot, '.build-'))

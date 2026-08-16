@@ -102,7 +102,7 @@ def make_remote_app(tmp_path):
             device_token=TOKEN,
             mcp_token="test-mcp-trusted-token",
             device_credentials=(
-                DeviceCredential(device_id="cobi-macbook", token=REMOTE_TOKEN),
+                DeviceCredential(device_id="example-macbook", token=REMOTE_TOKEN),
             ),
             state_db_path=tmp_path / "jobos.db",
         )
@@ -125,7 +125,7 @@ def test_capability_broker_routes_commands_to_the_originating_desktop():
         mini = Socket()
         macbook = Socket()
         assert await broker.register(mini, "primary-device") is True
-        assert await broker.register(macbook, "cobi-macbook") is True
+        assert await broker.register(macbook, "example-macbook") is True
 
         execution = asyncio.create_task(
             broker.execute(
@@ -135,7 +135,7 @@ def test_capability_broker_routes_commands_to_the_originating_desktop():
                     origin="mcp",
                     idempotency_key="macbook-snapshot-1",
                 ),
-                device_id="cobi-macbook",
+                device_id="example-macbook",
             )
         )
         await asyncio.sleep(0)
@@ -202,7 +202,7 @@ def test_mcp_browser_command_targets_the_desktop_that_started_the_turn(tmp_path)
     settings = Settings(
         device_token=TOKEN,
         mcp_token="test-mcp-trusted-token",
-        device_credentials=(DeviceCredential(device_id="cobi-macbook", token=REMOTE_TOKEN),),
+        device_credentials=(DeviceCredential(device_id="example-macbook", token=REMOTE_TOKEN),),
         state_db_path=tmp_path / "jobos.db",
     )
     app = make_app(tmp_path, broker=broker, gateway=Gateway(), settings=settings)
@@ -225,7 +225,7 @@ def test_mcp_browser_command_targets_the_desktop_that_started_the_turn(tmp_path)
 
     assert turn.status_code == 201
     assert result.status_code == 200
-    assert broker.device_id == "cobi-macbook"
+    assert broker.device_id == "example-macbook"
 
 
 def test_remote_desktop_credential_routes_direct_commands_to_that_device(tmp_path):
@@ -237,7 +237,7 @@ def test_remote_desktop_credential_routes_direct_commands_to_that_device(tmp_pat
             {
                 "type": "authenticate",
                 "token": REMOTE_TOKEN,
-                "device_id": "cobi-macbook",
+                "device_id": "example-macbook",
             }
         )
         assert socket.receive_json()["type"] == "ready"

@@ -5,10 +5,9 @@ import json
 import subprocess
 from pathlib import Path
 
-import pytest
-
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 MANIFEST_PATH = Path(__file__).with_name("synthetic-fixtures.json")
+VERIFY_MANIFEST = REPOSITORY_ROOT / "scripts/public-release/verify-fixture-manifest.py"
 DATABASE_SUFFIXES = {".db", ".sqlite", ".sqlite3"}
 LOG_SUFFIXES = {".log"}
 CONTROLLED_BINARY_SUFFIXES = {
@@ -67,15 +66,9 @@ def prohibited_reason(path: str) -> str | None:
     return None
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="Phase 0 red gate: private memory and OS metadata remain in the tracked tree",
-)
 def test_public_tree_excludes_prohibited_path_classes():
     violations = {
-        path: reason
-        for path in tracked_files()
-        if (reason := prohibited_reason(path)) is not None
+        path: reason for path in tracked_files() if (reason := prohibited_reason(path)) is not None
     }
 
     assert violations == {}
@@ -147,3 +140,84 @@ def test_publication_manifest_checksums_match_tracked_bytes():
             mismatches.append(entry["path"])
 
     assert mismatches == []
+
+
+def write_manifest_fixture(root: Path) -> Path:
+    subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+    asset = root / "fixtures/demo.png"
+    source = root / "fixtures/demo.json"
+    asset.parent.mkdir(parents=True)
+    asset.write_bytes(b"\x89PNG\r\n\x1a\nsynthetic")
+    source.write_text('{"synthetic":true}\n', encoding="utf-8")
+    manifest = root / "manifest.json"
+    manifest.write_text(
+        json.dumps(
+            {
+                "schemaVersion": 1,
+                "assets": [
+                    {
+                        "path": "fixtures/demo.png",
+                        "classification": "synthetic",
+                        "publication": "keep",
+                        "purpose": "negative-test fixture",
+                        "source": "generated in test",
+                        "sha256": hashlib.sha256(asset.read_bytes()).hexdigest(),
+                        "provenance": {
+                            "trackedSource": "fixtures/demo.json",
+                            "method": "deterministic test bytes",
+                        },
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    subprocess.run(
+        ["git", "add", "fixtures/demo.png", "fixtures/demo.json", "manifest.json"],
+        cwd=root,
+        check=True,
+    )
+    return manifest
+
+
+def run_manifest_verifier(root: Path, manifest: Path) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        ["python3", str(VERIFY_MANIFEST), "--root", str(root), "--manifest", str(manifest)],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+
+def test_fixture_verifier_rejects_missing_stale_checksum_and_provenance(tmp_path: Path):
+    manifest_path = write_manifest_fixture(tmp_path)
+    base = json.loads(manifest_path.read_text(encoding="utf-8"))
+
+    mutations = (
+        {**base, "assets": []},
+        {**base, "assets": [{**base["assets"][0], "path": "fixtures/missing.png"}]},
+        {**base, "assets": [{**base["assets"][0], "sha256": "0" * 64}]},
+        {**base, "assets": [{**base["assets"][0], "publication": "remove"}]},
+        {
+            **base,
+            "assets": [
+                {key: value for key, value in base["assets"][0].items() if key != "provenance"}
+            ],
+        },
+    )
+    for mutation in mutations:
+        manifest_path.write_text(json.dumps(mutation), encoding="utf-8")
+        assert run_manifest_verifier(tmp_path, manifest_path).returncode == 1
+
+
+def test_fixture_verifier_rejects_tracked_symlink(tmp_path: Path):
+    manifest_path = write_manifest_fixture(tmp_path)
+    target = tmp_path / "target.txt"
+    target.write_text("outside\n", encoding="utf-8")
+    (tmp_path / "fixtures/link.txt").symlink_to(target)
+    subprocess.run(["git", "add", "fixtures/link.txt"], cwd=tmp_path, check=True)
+
+    result = run_manifest_verifier(tmp_path, manifest_path)
+
+    assert result.returncode == 1
+    assert "tracked symbolic link" in result.stdout

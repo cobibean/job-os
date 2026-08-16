@@ -1,18 +1,54 @@
-.DS_Store
+# Dependencies
 node_modules/
-dist/
-coverage/
-.vite/
 .venv/
 __pycache__/
 .pytest_cache/
 .ruff_cache/
 *.pyc
+
+# Build and test output
+dist/
+coverage/
+.vite/
+output/
+release/
+*.log
+logs/
+
+# Local runtime state
 *.db
 *.db-shm
 *.db-wal
+*.sqlite
+*.sqlite3
+*.backup
+*.bak
+backups/
+exports/
+support-bundles/
+runtime-config/
+
+# Credentials and local configuration
 .env
-output/
-release/
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+*.crt
+*.cer
+credentials/
+secrets/
+
+# Agent and editor state
+.agent/
+.hermes/
+.DS_Store
+._*
+Thumbs.db
+desktop.ini
+
+# Generated native helpers
 apps/desktop/build/jobos-keychain
 apps/desktop/build/jobos-docx-atomic-replace

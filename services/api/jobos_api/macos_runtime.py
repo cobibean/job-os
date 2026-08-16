@@ -13,7 +13,7 @@ import time
 from collections.abc import Callable
 from dataclasses import asdict, dataclass, replace
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
 from urllib.request import Request, urlopen
@@ -33,12 +33,31 @@ _CONFIG_FIELDS = {
     "label",
     "jobos_root",
     "python_path",
+    "job_provider",
+    "artifact_provider",
     "facade_source_path",
     "state_db_path",
+    "jobs_db_path",
+    "local_artifact_root",
     "job_hunter_db_path",
     "artifact_roots",
     "hermes_dashboard_url",
     "hermes_job_hunter_cwd",
+    "device_id",
+    "remote_device_ids",
+    "host",
+    "port",
+}
+_REQUIRED_CONFIG_FIELDS = {
+    "schema_version",
+    "label",
+    "jobos_root",
+    "python_path",
+    "job_provider",
+    "artifact_provider",
+    "state_db_path",
+    "jobs_db_path",
+    "local_artifact_root",
     "device_id",
     "remote_device_ids",
     "host",
@@ -54,6 +73,10 @@ def _absolute_path(value: object, field: str) -> Path:
     if not path.is_absolute():
         raise ValueError(f"{field} must be an absolute path")
     return path
+
+
+def _optional_absolute_path(value: object, field: str) -> Path | None:
+    return None if value is None else _absolute_path(value, field)
 
 
 def _loopback_dashboard_url(value: object) -> str | None:
@@ -80,9 +103,13 @@ class RuntimeServiceConfig:
     label: str
     jobos_root: Path
     python_path: Path
-    facade_source_path: Path
+    job_provider: Literal["sqlite", "job-hunter"]
+    artifact_provider: Literal["local", "gateway"]
+    facade_source_path: Path | None
     state_db_path: Path
-    job_hunter_db_path: Path
+    jobs_db_path: Path
+    local_artifact_root: Path
+    job_hunter_db_path: Path | None
     artifact_roots: tuple[Path, ...]
     hermes_dashboard_url: str | None
     hermes_job_hunter_cwd: Path | None
@@ -95,10 +122,30 @@ class RuntimeServiceConfig:
     def from_mapping(cls, value: object) -> RuntimeServiceConfig:
         if not isinstance(value, dict):
             raise ValueError("runtime config must be an object")
+        value = dict(value)
+        legacy_private_profile = (
+            "job_provider" not in value
+            and "artifact_provider" not in value
+            and value.get("facade_source_path") is not None
+            and value.get("job_hunter_db_path") is not None
+        )
+        if legacy_private_profile:
+            state_path = _absolute_path(value.get("state_db_path"), "state_db_path")
+            roots = value.get("artifact_roots")
+            if not isinstance(roots, list) or not roots:
+                raise ValueError("legacy private runtime requires artifact roots")
+            value.update(
+                {
+                    "job_provider": "job-hunter",
+                    "artifact_provider": "gateway",
+                    "jobs_db_path": str(state_path.parent / "jobs.db"),
+                    "local_artifact_root": roots[0],
+                }
+            )
         unknown = set(value) - _CONFIG_FIELDS
         if unknown:
             raise ValueError("runtime config contains unknown fields")
-        missing = _CONFIG_FIELDS - set(value)
+        missing = _REQUIRED_CONFIG_FIELDS - set(value)
         if missing:
             raise ValueError("runtime config is missing required fields")
         if value["schema_version"] != 1:
@@ -117,34 +164,49 @@ class RuntimeServiceConfig:
         if (
             not isinstance(remote_device_ids, list)
             or any(
-                not isinstance(remote_id, str)
-                or not _DEVICE_PATTERN.fullmatch(remote_id)
+                not isinstance(remote_id, str) or not _DEVICE_PATTERN.fullmatch(remote_id)
                 for remote_id in remote_device_ids
             )
             or device_id in remote_device_ids
             or len(set(remote_device_ids)) != len(remote_device_ids)
         ):
             raise ValueError("remote device identifiers are invalid")
-        roots = value["artifact_roots"]
-        if not isinstance(roots, list) or not roots:
-            raise ValueError("artifact roots must be a non-empty list")
-        hermes_cwd = value["hermes_job_hunter_cwd"]
+        job_provider = value["job_provider"]
+        artifact_provider = value["artifact_provider"]
+        if job_provider not in {"sqlite", "job-hunter"}:
+            raise ValueError("runtime job provider is invalid")
+        if artifact_provider not in {"local", "gateway"}:
+            raise ValueError("runtime artifact provider is invalid")
+        roots = value.get("artifact_roots", [])
+        if not isinstance(roots, list):
+            raise ValueError("artifact roots must be a list")
+        facade_source = _optional_absolute_path(
+            value.get("facade_source_path"), "facade_source_path"
+        )
+        job_hunter_db = _optional_absolute_path(
+            value.get("job_hunter_db_path"), "job_hunter_db_path"
+        )
+        hermes_cwd = value.get("hermes_job_hunter_cwd")
+        if (job_provider == "job-hunter" or artifact_provider == "gateway") and (
+            facade_source is None or job_hunter_db is None
+        ):
+            raise ValueError("private providers require facade and JobHunter paths")
+        if artifact_provider == "gateway" and not roots:
+            raise ValueError("the gateway provider requires artifact roots")
         return cls(
             schema_version=1,
             label=SERVICE_LABEL,
             jobos_root=_absolute_path(value["jobos_root"], "jobos_root"),
             python_path=_absolute_path(value["python_path"], "python_path"),
-            facade_source_path=_absolute_path(
-                value["facade_source_path"], "facade_source_path"
-            ),
+            job_provider=job_provider,
+            artifact_provider=artifact_provider,
+            facade_source_path=facade_source,
             state_db_path=_absolute_path(value["state_db_path"], "state_db_path"),
-            job_hunter_db_path=_absolute_path(
-                value["job_hunter_db_path"], "job_hunter_db_path"
-            ),
-            artifact_roots=tuple(
-                _absolute_path(root, "artifact_roots") for root in roots
-            ),
-            hermes_dashboard_url=_loopback_dashboard_url(value["hermes_dashboard_url"]),
+            jobs_db_path=_absolute_path(value["jobs_db_path"], "jobs_db_path"),
+            local_artifact_root=_absolute_path(value["local_artifact_root"], "local_artifact_root"),
+            job_hunter_db_path=job_hunter_db,
+            artifact_roots=tuple(_absolute_path(root, "artifact_roots") for root in roots),
+            hermes_dashboard_url=_loopback_dashboard_url(value.get("hermes_dashboard_url")),
             hermes_job_hunter_cwd=(
                 _absolute_path(hermes_cwd, "hermes_job_hunter_cwd")
                 if hermes_cwd is not None
@@ -170,6 +232,8 @@ class RuntimeServiceConfig:
             "python_path",
             "facade_source_path",
             "state_db_path",
+            "jobs_db_path",
+            "local_artifact_root",
             "job_hunter_db_path",
             "hermes_job_hunter_cwd",
         ):
@@ -210,17 +274,24 @@ def build_service_environment(
         "PATH": source.get("PATH", "/usr/bin:/bin:/usr/sbin:/sbin"),
         "PYTHONUNBUFFERED": "1",
         "PYTHONPATH": os.pathsep.join(
-            (str(config.jobos_root / "services/api"), str(config.facade_source_path))
+            [
+                str(config.jobos_root / "services/api"),
+                *([str(config.facade_source_path)] if config.facade_source_path else []),
+            ]
         ),
         "JOBOS_DEVICE_TOKEN": device_token,
         "JOBOS_MCP_TOKEN": mcp_token,
         "JOBOS_DEVICE_ID": config.device_id,
         "JOBOS_STATE_DB_PATH": str(config.state_db_path),
-        "JOBOS_JOB_PROVIDER": "job-hunter",
-        "JOBOS_ARTIFACT_PROVIDER": "gateway",
-        "JOBOS_JOB_HUNTER_DB_PATH": str(config.job_hunter_db_path),
-        "JOBOS_ARTIFACT_ROOTS": os.pathsep.join(map(str, config.artifact_roots)),
+        "JOBOS_JOB_PROVIDER": config.job_provider,
+        "JOBOS_ARTIFACT_PROVIDER": config.artifact_provider,
+        "JOBOS_JOBS_DB_PATH": str(config.jobs_db_path),
+        "JOBOS_LOCAL_ARTIFACT_ROOT": str(config.local_artifact_root),
     }
+    if config.job_hunter_db_path:
+        environment["JOBOS_JOB_HUNTER_DB_PATH"] = str(config.job_hunter_db_path)
+    if config.artifact_roots:
+        environment["JOBOS_ARTIFACT_ROOTS"] = os.pathsep.join(map(str, config.artifact_roots))
     if config.hermes_dashboard_url:
         environment["JOBOS_HERMES_DASHBOARD_URL"] = config.hermes_dashboard_url
     if hermes_dashboard_token:
@@ -247,6 +318,38 @@ def build_uvicorn_arguments(config: RuntimeServiceConfig) -> list[str]:
         "--port",
         str(config.port),
     ]
+
+
+def build_local_runtime_config(
+    *,
+    jobos_root: Path,
+    python_path: Path,
+    data_dir: Path,
+    device_id: str,
+    port: int,
+) -> RuntimeServiceConfig:
+    return RuntimeServiceConfig.from_mapping(
+        {
+            "schema_version": 1,
+            "label": SERVICE_LABEL,
+            "jobos_root": str(jobos_root),
+            "python_path": str(python_path),
+            "job_provider": "sqlite",
+            "artifact_provider": "local",
+            "facade_source_path": None,
+            "state_db_path": str(data_dir / "state/jobos.db"),
+            "jobs_db_path": str(data_dir / "jobs/jobs.db"),
+            "local_artifact_root": str(data_dir / "artifacts"),
+            "job_hunter_db_path": None,
+            "artifact_roots": [],
+            "hermes_dashboard_url": None,
+            "hermes_job_hunter_cwd": None,
+            "device_id": device_id,
+            "remote_device_ids": [],
+            "host": "127.0.0.1",
+            "port": port,
+        }
+    )
 
 
 def render_launchd_plist(
@@ -397,10 +500,7 @@ def _verify_authenticated_readiness(
             )
             with urlopen(request, timeout=1) as session:
                 session_value = json.loads(session.read())
-            if (
-                health_value.get("status") == "ready"
-                and session_value.get("authenticated") is True
-            ):
+            if health_value.get("status") == "ready" and session_value.get("authenticated") is True:
                 return
         except (HTTPError, URLError, OSError, ValueError):
             pass
@@ -474,9 +574,7 @@ def install_runtime(
         raise ValueError("Hermes credential is required for the configured dashboard")
 
     paths = _installation_paths(home, config.label)
-    service_config = (
-        json.dumps(config.to_mapping(), indent=2, sort_keys=True) + "\n"
-    ).encode()
+    service_config = (json.dumps(config.to_mapping(), indent=2, sort_keys=True) + "\n").encode()
     desktop_config = (
         json.dumps(render_desktop_runtime(config), indent=2, sort_keys=True) + "\n"
     ).encode()
@@ -612,9 +710,7 @@ def authorize_remote_device(
         config,
         remote_device_ids=(*config.remote_device_ids, device_id),
     )
-    persisted = (
-        json.dumps(updated.to_mapping(), indent=2, sort_keys=True) + "\n"
-    ).encode()
+    persisted = (json.dumps(updated.to_mapping(), indent=2, sort_keys=True) + "\n").encode()
     previous_config = _snapshot_file(config_path)
     restart = [
         "/bin/launchctl",
@@ -705,19 +801,25 @@ def _read_keychain(service: str, account: str) -> str:
 
 
 def validate_runtime_paths(config: RuntimeServiceConfig) -> None:
-    required_files = (config.python_path, config.job_hunter_db_path)
-    required_directories = (
-        config.jobos_root / "services/api/jobos_api",
-        config.facade_source_path,
-        *config.artifact_roots,
-    )
+    required_files = (config.python_path,)
+    required_directories = (config.jobos_root / "services/api/jobos_api",)
+    if config.facade_source_path:
+        required_directories += (config.facade_source_path,)
+    if config.job_hunter_db_path:
+        required_files += (config.job_hunter_db_path,)
+    required_directories += config.artifact_roots
     if config.hermes_job_hunter_cwd:
         required_directories += (config.hermes_job_hunter_cwd,)
     if any(not path.is_file() for path in required_files):
         raise RuntimeError("required JobOS runtime file is unavailable")
     if any(not path.is_dir() for path in required_directories):
         raise RuntimeError("required JobOS runtime directory is unavailable")
-    config.state_db_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    for directory in {
+        config.state_db_path.parent,
+        config.jobs_db_path.parent,
+        config.local_artifact_root,
+    }:
+        directory.mkdir(parents=True, exist_ok=True, mode=0o700)
 
 
 def run_service(config_path: Path) -> None:
@@ -755,6 +857,16 @@ def parse_arguments(arguments: list[str]) -> argparse.Namespace:
     install.add_argument("--config", type=Path, required=True)
     install.add_argument("--home", type=Path, default=Path.home())
     install.add_argument("--launcher", type=Path, required=True)
+    install_local = subparsers.add_parser(
+        "install-local", help="install the public local SQLite API service"
+    )
+    install_local.add_argument("--jobos-root", type=Path, required=True)
+    install_local.add_argument("--python", dest="python_path", type=Path, required=True)
+    install_local.add_argument("--data-dir", type=Path, required=True)
+    install_local.add_argument("--device-id", default="primary-device")
+    install_local.add_argument("--port", type=int, default=8766)
+    install_local.add_argument("--home", type=Path, default=Path.home())
+    install_local.add_argument("--launcher", type=Path, required=True)
     authorize = subparsers.add_parser(
         "authorize-remote",
         help="authorize one remote desktop device",
@@ -774,12 +886,22 @@ def parse_arguments(arguments: list[str]) -> argparse.Namespace:
 def main(arguments: list[str] | None = None) -> int:
     options = parse_arguments(arguments if arguments is not None else sys.argv[1:])
     try:
-        if options.command == "install":
+        if options.command in {"install", "install-local"}:
             device_token = os.environ.get("JOBOS_DEVICE_TOKEN", "")
             if not device_token:
                 raise RuntimeError("JOBOS_DEVICE_TOKEN is required for installation")
             mcp_token = os.environ.get("JOBOS_MCP_TOKEN") or secrets.token_urlsafe(48)
-            config = RuntimeServiceConfig.load(options.config)
+            config = (
+                RuntimeServiceConfig.load(options.config)
+                if options.command == "install"
+                else build_local_runtime_config(
+                    jobos_root=options.jobos_root,
+                    python_path=options.python_path,
+                    data_dir=options.data_dir,
+                    device_id=options.device_id,
+                    port=options.port,
+                )
+            )
             install_runtime(
                 config,
                 home=options.home,

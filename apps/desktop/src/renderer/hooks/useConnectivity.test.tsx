@@ -18,7 +18,7 @@ test('connectivity can fail after launch and recover on focus', async () => {
     .mockResolvedValueOnce({
       state: 'disconnected',
       checkedAt: '2026-07-20T00:00:01.000Z',
-      message: 'Mac Mini unavailable'
+      message: 'Remote service unavailable'
     })
     .mockResolvedValueOnce(connected)
   Object.defineProperty(window, 'jobos', {

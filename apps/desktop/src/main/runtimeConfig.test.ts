@@ -5,8 +5,8 @@ import { expect, test } from 'vitest'
 import { loadDesktopRuntimeConfig, runtimeConfigPath } from './runtimeConfig.js'
 
 test('uses the stable JobOS Application Support directory', () => {
-  expect(runtimeConfigPath('/Users/cobi/Library/Application Support')).toBe(
-    '/Users/cobi/Library/Application Support/JobOS/config.json'
+  expect(runtimeConfigPath('/Users/example/Library/Application Support')).toBe(
+    '/Users/example/Library/Application Support/JobOS/config.json'
   )
 })
 

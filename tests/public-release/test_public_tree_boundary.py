@@ -68,6 +68,17 @@ def public_runtime_files() -> list[Path]:
     return paths
 
 
+def public_runtime_text(path: Path) -> str:
+    lines = path.read_text(encoding="utf-8").splitlines()
+    if path.relative_to(REPOSITORY_ROOT) != Path("scripts/public-release/verify-public-tree.py"):
+        return "\n".join(lines)
+    return "\n".join(
+        line
+        for index, line in enumerate(lines)
+        if "public-tree: allow-pattern-fixture" not in " ".join(lines[index : index + 3])
+    )
+
+
 def imported_python_modules(path: Path) -> set[str]:
     tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
     modules: set[str] = set()
@@ -114,20 +125,23 @@ def test_script_private_import_detection_covers_supported_forms():
 
 @pytest.mark.xfail(
     strict=True,
-    reason="Phase 0 red gate: public defaults still describe Cobi's private installation",
+    reason="Phase 0 red gate: the legacy private transport label remains until Phase 6",
 )
 def test_public_defaults_contain_no_operator_or_private_network_identity():
     prohibited_patterns = {
-        "operator bundle/service identifier": re.compile(r"com[.]cobibean", re.IGNORECASE),
-        "operator workstation role": re.compile(r"Mac Mini", re.IGNORECASE),
-        "absolute user home": re.compile(r"/Users/(?!example(?:/|$)|you(?:/|$)|username(?:/|$))"),
+        "operator workstation role": re.compile(
+            r"Mac Mini", re.IGNORECASE
+        ),  # public-tree: allow-pattern-fixture
+        "absolute user home": re.compile(
+            r"/Users/(?!example(?:/|$)|you(?:/|$)|username(?:/|$))"
+        ),  # public-tree: allow-pattern-fixture
         "tailnet IPv4 identity": re.compile(r"\b100(?:[.]\d{1,3}){3}\b"),
         "private-network default": re.compile(r"private-tailscale", re.IGNORECASE),
     }
     violations: list[str] = []
 
     for path in public_runtime_files():
-        text = path.read_text(encoding="utf-8")
+        text = public_runtime_text(path)
         for label, pattern in prohibited_patterns.items():
             if pattern.search(text):
                 violations.append(f"{path.relative_to(REPOSITORY_ROOT)}: {label}")

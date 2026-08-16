@@ -62,9 +62,9 @@ pnpm contracts:check
 ```
 
 Expected result: lint, generated-contract checks, TypeScript checks, desktop and
-Python tests, and the production source build complete successfully. The two
-remaining Phase 0 public-boundary tests stay strict expected failures until
-operator defaults and private tracked paths are removed.
+Python tests, and the production source build complete successfully. One
+remaining Phase 0 public-boundary test stays a strict expected failure until
+the legacy private transport label is replaced in Phase 6.
 
 ### Developer commands
 
@@ -132,6 +132,8 @@ make a Git repository private and does not replace the Apache-2.0 license.
 ## Documentation
 
 - [Architecture](docs/public/architecture.md)
+- [Product contract](docs/public/product-contract.md)
+- [Agent capability parity](docs/public/capability-parity.md)
 - [Data and privacy](docs/public/data-privacy.md)
 - [Troubleshooting](docs/public/troubleshooting.md)
 - [Release process](docs/public/release-process.md)

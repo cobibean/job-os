@@ -2,6 +2,7 @@ import json
 import plistlib
 from pathlib import Path
 
+import jobos_api.macos_runtime as macos_runtime
 import pytest
 from jobos_api.macos_runtime import (
     RuntimeServiceConfig,
@@ -23,8 +24,12 @@ def runtime_mapping(tmp_path: Path) -> dict[str, object]:
         "label": "com.cobibean.jobos.api",
         "jobos_root": str(tmp_path / "job-os"),
         "python_path": str(tmp_path / "job-os/.venv/bin/python"),
+        "job_provider": "job-hunter",
+        "artifact_provider": "gateway",
         "facade_source_path": str(tmp_path / "facade/src"),
         "state_db_path": str(tmp_path / "state/jobos.db"),
+        "jobs_db_path": str(tmp_path / "jobs/jobs.db"),
+        "local_artifact_root": str(tmp_path / "artifacts"),
         "job_hunter_db_path": str(tmp_path / "job-hunter/data/jobs/jobs.db"),
         "artifact_roots": [str(tmp_path / "job-hunter/resume/exports")],
         "hermes_dashboard_url": "ws://127.0.0.1:9119/api/ws",
@@ -34,6 +39,34 @@ def runtime_mapping(tmp_path: Path) -> dict[str, object]:
         "host": "127.0.0.1",
         "port": 8766,
     }
+
+
+def local_runtime_mapping(tmp_path: Path) -> dict[str, object]:
+    value = runtime_mapping(tmp_path)
+    value.update(
+        {
+            "job_provider": "sqlite",
+            "artifact_provider": "local",
+            "facade_source_path": None,
+            "job_hunter_db_path": None,
+            "artifact_roots": [],
+            "hermes_dashboard_url": None,
+            "hermes_job_hunter_cwd": None,
+        }
+    )
+    return value
+
+
+def legacy_private_runtime_mapping(tmp_path: Path) -> dict[str, object]:
+    value = runtime_mapping(tmp_path)
+    for field in (
+        "job_provider",
+        "artifact_provider",
+        "jobs_db_path",
+        "local_artifact_root",
+    ):
+        value.pop(field)
+    return value
 
 
 def test_runtime_config_accepts_only_explicit_loopback_service_fields(tmp_path):
@@ -53,6 +86,15 @@ def test_runtime_config_accepts_only_explicit_loopback_service_fields(tmp_path):
     unknown["tailnet_hostname"] = "must-not-be-tracked"
     with pytest.raises(ValueError, match="unknown"):
         RuntimeServiceConfig.from_mapping(unknown)
+
+
+def test_legacy_private_schema_one_config_migrates_without_breaking_installations(tmp_path):
+    config = RuntimeServiceConfig.from_mapping(legacy_private_runtime_mapping(tmp_path))
+
+    assert config.job_provider == "job-hunter"
+    assert config.artifact_provider == "gateway"
+    assert config.jobs_db_path == tmp_path / "state/jobs.db"
+    assert config.local_artifact_root == tmp_path / "job-hunter/resume/exports"
 
 
 @pytest.mark.parametrize(
@@ -85,13 +127,13 @@ def test_service_environment_and_uvicorn_command_are_fixed_and_loopback_only(tmp
     assert environment == {
         "PATH": "/usr/bin:/bin",
         "PYTHONUNBUFFERED": "1",
-        "PYTHONPATH": (
-            f"{tmp_path / 'job-os/services/api'}:{tmp_path / 'facade/src'}"
-        ),
+        "PYTHONPATH": (f"{tmp_path / 'job-os/services/api'}:{tmp_path / 'facade/src'}"),
         "JOBOS_DEVICE_TOKEN": "device-secret-value",
         "JOBOS_MCP_TOKEN": "mcp-secret-value",
         "JOBOS_DEVICE_ID": "mini-device",
         "JOBOS_STATE_DB_PATH": str(tmp_path / "state/jobos.db"),
+        "JOBOS_JOBS_DB_PATH": str(tmp_path / "jobs/jobs.db"),
+        "JOBOS_LOCAL_ARTIFACT_ROOT": str(tmp_path / "artifacts"),
         "JOBOS_JOB_PROVIDER": "job-hunter",
         "JOBOS_ARTIFACT_PROVIDER": "gateway",
         "JOBOS_JOB_HUNTER_DB_PATH": str(tmp_path / "job-hunter/data/jobs/jobs.db"),
@@ -122,6 +164,72 @@ def test_service_environment_and_uvicorn_command_are_fixed_and_loopback_only(tmp
     assert json.loads(remote_environment["JOBOS_DEVICE_CREDENTIALS_JSON"]) == {
         "macbook-device": "macbook-secret-value"
     }
+
+
+def test_local_service_environment_has_no_private_provider_inputs(tmp_path):
+    config = RuntimeServiceConfig.from_mapping(local_runtime_mapping(tmp_path))
+    environment = build_service_environment(
+        config,
+        device_token="device-secret-value",
+        mcp_token="mcp-secret-value",
+        hermes_dashboard_token=None,
+        base_environment={"PATH": "/usr/bin:/bin"},
+    )
+
+    assert environment["JOBOS_JOB_PROVIDER"] == "sqlite"
+    assert environment["JOBOS_ARTIFACT_PROVIDER"] == "local"
+    assert environment["PYTHONPATH"] == str(tmp_path / "job-os/services/api")
+    assert not any("JOB_HUNTER" in key or "HERMES" in key for key in environment)
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [("job_provider", "job-hunter"), ("artifact_provider", "gateway")],
+)
+def test_private_provider_selection_requires_private_paths(tmp_path, field, value):
+    mapping = local_runtime_mapping(tmp_path)
+    mapping[field] = value
+    with pytest.raises(ValueError, match="private providers"):
+        RuntimeServiceConfig.from_mapping(mapping)
+
+
+def test_install_accepts_public_local_runtime_without_private_trees(tmp_path):
+    mapping = local_runtime_mapping(tmp_path)
+    (tmp_path / "job-os/services/api/jobos_api").mkdir(parents=True)
+    for file_path in (
+        tmp_path / "job-os/.venv/bin/python",
+        tmp_path / "job-os/scripts/macos/jobos_runtime.py",
+    ):
+        file_path.parent.mkdir(parents=True, exist_ok=True)
+        file_path.write_text("test", encoding="utf-8")
+    loaded = False
+
+    def run(command, allow_failure=False):
+        nonlocal loaded
+        if "bootout" in command:
+            loaded = False
+        elif "bootstrap" in command:
+            loaded = True
+
+    config = RuntimeServiceConfig.from_mapping(mapping)
+    install_runtime(
+        config,
+        home=tmp_path / "home",
+        launcher_path=tmp_path / "job-os/scripts/macos/jobos_runtime.py",
+        uid=501,
+        device_token="device-secret-value",
+        mcp_token="mcp-secret-value",
+        hermes_dashboard_token=None,
+        store_secret=lambda *_args: None,
+        read_secret=lambda *_args: None,
+        delete_secret=lambda *_args: None,
+        run=run,
+        is_loaded=lambda _uid, _label: loaded,
+        verify_ready=lambda *_args: None,
+    )
+
+    assert (tmp_path / "jobs").is_dir()
+    assert (tmp_path / "artifacts").is_dir()
 
 
 def test_launchd_plist_and_persisted_configs_never_contain_secrets(tmp_path):
@@ -293,6 +401,58 @@ def test_runtime_cli_requires_explicit_non_secret_install_inputs(tmp_path):
     assert authorize.command == "authorize-remote"
     assert authorize.device_id == "macbook-device"
 
+    local = parse_arguments(
+        [
+            "install-local",
+            "--jobos-root",
+            str(tmp_path / "job-os"),
+            "--python",
+            str(tmp_path / "python"),
+            "--data-dir",
+            str(tmp_path / "data"),
+            "--home",
+            str(tmp_path / "home"),
+            "--launcher",
+            str(tmp_path / "jobos_runtime.py"),
+        ]
+    )
+    assert local.command == "install-local"
+    assert local.data_dir == tmp_path / "data"
+
+
+def test_install_local_cli_builds_and_installs_public_profile(tmp_path, monkeypatch):
+    captured = {}
+    monkeypatch.setenv("JOBOS_DEVICE_TOKEN", "device-token-long-value")
+    monkeypatch.setenv("JOBOS_MCP_TOKEN", "mcp-token-long-value")
+    monkeypatch.setattr(
+        macos_runtime,
+        "install_runtime",
+        lambda config, **kwargs: captured.update(config=config, kwargs=kwargs),
+    )
+
+    result = macos_runtime.main(
+        [
+            "install-local",
+            "--jobos-root",
+            str(tmp_path / "job-os"),
+            "--python",
+            str(tmp_path / "python"),
+            "--data-dir",
+            str(tmp_path / "data"),
+            "--home",
+            str(tmp_path / "home"),
+            "--launcher",
+            str(tmp_path / "jobos_runtime.py"),
+        ]
+    )
+
+    assert result == 0
+    config = captured["config"]
+    assert config.job_provider == "sqlite"
+    assert config.artifact_provider == "local"
+    assert config.facade_source_path is None
+    assert config.job_hunter_db_path is None
+
 
 def test_authorize_remote_device_updates_only_ids_and_keychain_then_restarts(tmp_path):
     config_path = tmp_path / "runtime.json"
@@ -378,15 +538,11 @@ def test_authorize_rolls_back_config_and_keychain_when_readiness_fails(tmp_path)
             store_secret=lambda *_args: None,
             delete_secret=lambda service, account: deleted.append((service, account)),
             run=lambda command, allow_failure=False: commands.append(command),
-            verify_ready=lambda *_args: (_ for _ in ()).throw(
-                RuntimeError("not ready")
-            ),
+            verify_ready=lambda *_args: (_ for _ in ()).throw(RuntimeError("not ready")),
         )
 
     assert config_path.read_text(encoding="utf-8") == original
-    assert deleted == [
-        ("com.cobibean.jobos.device-token", "macbook-device")
-    ]
+    assert deleted == [("com.cobibean.jobos.device-token", "macbook-device")]
     assert len(commands) == 2
 
 
@@ -452,19 +608,16 @@ def test_install_restores_previous_files_credentials_and_service_on_failure(tmp_
             delete_secret=delete_secret,
             run=run,
             is_loaded=lambda _uid, _label: loaded,
-            verify_ready=lambda *_args: (_ for _ in ()).throw(
-                RuntimeError("not ready")
-            ),
+            verify_ready=lambda *_args: (_ for _ in ()).throw(RuntimeError("not ready")),
         )
 
     assert loaded is True
     assert all(path.read_bytes() == contents for path, contents in old_files.items())
-    assert secrets[("com.cobibean.jobos.device-token", "mini-device")] == (
-        "old-device-token-value"
+    assert secrets[("com.cobibean.jobos.device-token", "mini-device")] == ("old-device-token-value")
+    assert (
+        secrets[("com.cobibean.jobos.hermes-dashboard-token", "mini-device")]
+        == "old-hermes-token-value"
     )
-    assert secrets[
-        ("com.cobibean.jobos.hermes-dashboard-token", "mini-device")
-    ] == "old-hermes-token-value"
 
 
 def test_uninstall_removes_exact_service_files_and_registered_credentials(tmp_path):
