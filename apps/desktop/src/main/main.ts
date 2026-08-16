@@ -33,6 +33,7 @@ import { createMainEditableDocumentsClient } from './editableDocuments.js'
 import { registerEditableDocumentsIpc } from './editableDocumentsIpc.js'
 import { isTrustedRendererUrl } from './security.js'
 import { createMainWorkspaceClient } from './workspace.js'
+import { bindMediaFixture, loadMediaCaptureSpec, runMediaCapture } from './mediaCapture.js'
 
 const currentDirectory = path.dirname(fileURLToPath(import.meta.url))
 const rendererRoot = path.resolve(currentDirectory, '../renderer')
@@ -48,6 +49,7 @@ let appIsQuitting = false
 let markBrowserRestored: () => void = () => undefined
 let activeConfigPath: string | null = null
 let sourceApiProcess: ReturnType<typeof spawn> | null = null
+let mediaCaptureSpec: Awaited<ReturnType<typeof loadMediaCaptureSpec>> = null
 const apiLifecycle = createApiLifecycle({ startSource: startSourceApi })
 let desktopRuntimeState: DesktopRuntimeState = {
   runtime: null,
@@ -490,6 +492,7 @@ async function createWindow(): Promise<BrowserWindow> {
     width: 1440,
     height: 1024,
     useContentSize: true,
+    enableLargerThanScreen: Boolean(mediaCaptureSpec),
     minWidth: 980,
     minHeight: 640,
     backgroundColor: '#0f1114',
@@ -604,17 +607,24 @@ async function createWindow(): Promise<BrowserWindow> {
     browserManager = null
   })
 
-  const capturePath = process.env.JOBOS_CAPTURE_PATH
-  if (capturePath) {
-    const requestedDelay = Number(process.env.JOBOS_CAPTURE_DELAY_MS ?? 1_200)
-    const captureDelay = Number.isFinite(requestedDelay)
-      ? Math.max(500, Math.min(requestedDelay, 10_000))
-      : 1_200
-    setTimeout(async () => {
-      const image = await window.webContents.capturePage()
-      await writeFile(capturePath, image.toPNG())
-      app.quit()
-    }, captureDelay)
+  if (mediaCaptureSpec) {
+    void runMediaCapture(window, mediaCaptureSpec).then(() => app.quit()).catch(() => {
+      console.error('[JobOS media capture] Capture failed')
+      app.exit(1)
+    })
+  } else {
+    const capturePath = process.env.JOBOS_CAPTURE_PATH
+    if (capturePath) {
+      const requestedDelay = Number(process.env.JOBOS_CAPTURE_DELAY_MS ?? 1_200)
+      const captureDelay = Number.isFinite(requestedDelay)
+        ? Math.max(500, Math.min(requestedDelay, 10_000))
+        : 1_200
+      setTimeout(async () => {
+        const image = await window.webContents.capturePage()
+        await writeFile(capturePath, image.toPNG())
+        app.quit()
+      }, captureDelay)
+    }
   }
 
   mainWindow = window
@@ -630,6 +640,7 @@ app.whenReady().then(async () => {
     callback(false)
   })
   const configPath = process.env.JOBOS_CONFIG_PATH ?? runtimeConfigPath(app.getPath('appData'))
+  mediaCaptureSpec = await loadMediaCaptureSpec(process.env.JOBOS_MEDIA_CAPTURE_SPEC)
   activeConfigPath = configPath
   desktopRuntimeState = await initializeDesktopRuntime({
     configPath,
@@ -646,6 +657,7 @@ app.whenReady().then(async () => {
   registerBrowserInterface()
   registerDocumentsInterface()
   await registerDocxDocumentsInterface()
+  if (mediaCaptureSpec && docxDocumentsService) await bindMediaFixture(docxDocumentsService, sourceRoot)
   registerEditableDocumentsInterface()
   await createWindow()
 

@@ -109,8 +109,9 @@ def test_readme_states_the_source_alpha_contract_honestly():
     normalized_readme = " ".join(readme.replace(">", " ").split())
     missing = sorted(phrase for phrase in REQUIRED_README_PHRASES if phrase not in readme)
     assert missing == []
-    assert "not yet the accepted clean-clone public alpha" in normalized_readme
+    assert "The source-first clean-clone path is accepted" in normalized_readme
     assert "There is no supported public JobOS binary yet" in normalized_readme
+    assert "not an announcement of public distribution" in normalized_readme
 
 
 def test_public_markdown_relative_links_resolve():
