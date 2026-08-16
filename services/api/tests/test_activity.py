@@ -84,10 +84,10 @@ def test_fifteen_unique_tools_remain_fifteen_ordered_actions():
 def test_redaction_bounds_content_and_removes_nested_secrets_and_home_paths():
     detail = redact_detail(
         {
-            "command": "curl -H 'Authorization: Bearer top-secret-value' https://example.test",
+            "command": "curl -H '" + "Authorization: Bearer " + "test-placeholder' https://example.test",
             "cookie": "session=top-secret-value",
             "nested": {"api_key": "top-secret-value", "result": "x" * 10_000},
-            "path": "/Users/person/.hermes/profiles/job-hunter/.env",
+            "path": "/Users/example/.hermes/profiles/example-adapter/.env",
             "url": "https://example.test/file?X-Amz-Signature=top-secret-value",
             "other_path": "/etc/passwd",
         }

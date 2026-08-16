@@ -161,7 +161,7 @@ test('assistant completion renders full transcript text instead of its bounded e
 
 test('[protected path] cannot erase an already streamed assistant response', () => {
   const placeholder = '[protected path]'
-  const visible = 'Saved the cover letter to /Users/person/.hermes/workspaces/acme/cover-letter.pdf.'
+  const visible = 'Saved the cover letter to /Users/example/.hermes/workspaces/example/cover-letter.pdf.'
   const [turn] = projectConversation([
     event(1, { type: 'assistant_message', summary: visible, detail: { type: 'message.delta', text: visible } }),
     event(2, { type: 'assistant_message', state: 'completed', summary: placeholder, detail: { type: 'message.complete', text: placeholder } })
