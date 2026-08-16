@@ -13,8 +13,29 @@ import { useWorkspace } from './hooks/useWorkspace'
 import { useTheme } from './theme/useTheme'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { DocxOpenResult } from '../shared/docxDocuments'
+import type { SetupSnapshot } from '../shared/contracts'
+import { OnboardingScreen } from './onboarding/OnboardingScreen'
 
 export function App() {
+  const [setup, setSetup] = useState<SetupSnapshot | null>(
+    window.jobos?.setup ? null : { state: 'ready', message: 'JobOS is configured' }
+  )
+
+  useEffect(() => {
+    if (!window.jobos?.setup) return
+    let active = true
+    void window.jobos.setup.get().then(value => { if (active) setSetup(value) }).catch(() => {
+      if (active) setSetup({ state: 'required', message: 'JobOS setup is required' })
+    })
+    return () => { active = false }
+  }, [])
+
+  if (setup === null) return <div className="onboarding-loading" role="status">Checking local setup…</div>
+  if (setup.state !== 'ready') return <OnboardingScreen initial={setup} />
+  return <WorkbenchApp />
+}
+
+function WorkbenchApp() {
   const connectivity = useConnectivity()
   const jobState = useJobs()
   const layoutState = useWorkspace(jobState.selectedJobId, jobState.ready)
@@ -218,6 +239,7 @@ export function App() {
           onSelect={selectJobFromNavigator}
           onSortChange={jobState.changeSort}
           onStatusChange={jobState.changeStatus}
+          onRemoveDemo={jobState.removeDemo}
           onStatusGroupChange={jobState.setStatusGroup}
           query={jobState.query}
           selectedJobId={jobState.selectedJobId}

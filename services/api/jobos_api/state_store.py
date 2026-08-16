@@ -2750,7 +2750,7 @@ class JobOsStateStore:
                 )
         return event_id
 
-    def save_job_selection(self, job_id: str, origin: str) -> int:
+    def save_job_selection(self, job_id: str | None, origin: str) -> int:
         payload = json.dumps({"selected_job_id": job_id}, separators=(",", ":"))
         with sqlite3.connect(self._path) as connection:
             connection.execute("BEGIN IMMEDIATE")

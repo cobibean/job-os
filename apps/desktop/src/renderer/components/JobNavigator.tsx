@@ -19,6 +19,7 @@ interface JobNavigatorProps {
   onSortChange: (sort: JobSortMode) => void
   onSelect: (jobId: string) => void
   onStatusChange: (jobId: string, status: JobStatus) => void
+  onRemoveDemo?: (jobId: string) => void
   onMove: (jobId: string, direction: -1 | 1) => void
   onReorder: (sourceJobId: string, targetJobId: string) => void
 }
@@ -71,7 +72,7 @@ export function JobNavigator(props: JobNavigatorProps) {
       <div className="job-row-main">
         <button aria-label={`Select ${job.company} ${job.title}`} className="job-select" onClick={() => props.onSelect(job.jobId)} type="button">
           <BriefcaseBusiness aria-hidden="true" size={17} strokeWidth={1.45} />
-          <span><strong>{job.company}</strong><small>{job.title}</small></span>
+          <span><strong>{job.company}{job.syntheticDemo ? <span className="demo-badge">Demo</span> : null}</strong><small>{job.title}</small></span>
         </button>
         {canReorder ? (
           <span className="order-buttons">
@@ -91,6 +92,9 @@ export function JobNavigator(props: JobNavigatorProps) {
             <summary>Full listing</summary>
             <div className="full-listing-text">{detail.description}</div>
           </details>
+          {job.syntheticDemo ? (
+            <button className="remove-demo-button" onClick={() => props.onRemoveDemo?.(job.jobId)} type="button">Remove demo job</button>
+          ) : null}
         </div>
       ) : null}
     </div>
@@ -129,7 +133,7 @@ export function JobNavigator(props: JobNavigatorProps) {
           <div className="navigator-empty">
             <BriefcaseBusiness aria-hidden="true" size={22} strokeWidth={1.4} />
             <h2>No matching opportunities</h2>
-            <p>Try another filter or reconnect the shared job source.</p>
+            <p>Try another filter or check whether the local service is available.</p>
           </div>
         ) : null}
         {props.sortMode === 'status' ? groupedJobs.map(group => {

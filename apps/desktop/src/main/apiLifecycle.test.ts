@@ -13,6 +13,12 @@ const localRuntime: DesktopRuntimeConfig = {
   deviceId: 'mini-device',
   launchdLabel: 'com.cobibean.jobos.api'
 }
+const sourceRuntime: DesktopRuntimeConfig = {
+  schemaVersion: 1,
+  mode: 'local-service',
+  apiBaseUrl: 'http://127.0.0.1:8766',
+  deviceId: 'source-device'
+}
 const remoteRuntime: DesktopRuntimeConfig = {
   schemaVersion: 1,
   mode: 'remote-client',
@@ -64,6 +70,24 @@ test('starts one launchd service and waits for authenticated readiness', async (
     file: '/bin/launchctl',
     arguments: ['kickstart', '-k', 'gui/501/com.cobibean.jobos.api']
   }])
+})
+
+test('starts the source API when local config has no installed service', async () => {
+  const results = [disconnected, connected]
+  let starts = 0
+  const lifecycle = createApiLifecycle({
+    probe: async () => results.shift() ?? connected,
+    startSource: async runtime => {
+      expect(runtime).toBe(sourceRuntime)
+      starts += 1
+    },
+    sleep: async () => undefined,
+    now: () => 0,
+    uid: 501
+  })
+
+  await expect(lifecycle.ensureApiReady(sourceRuntime, 'device-token')).resolves.toEqual(connected)
+  expect(starts).toBe(1)
 })
 
 test('remote clients and authentication failures never invoke local lifecycle', async () => {

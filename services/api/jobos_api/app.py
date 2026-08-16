@@ -104,6 +104,7 @@ from jobos_api.job_repository import (
 from jobos_api.jobs import (
     BrowserJobCreateRequest,
     BrowserJobCreateResponse,
+    DemoRemovalRequest,
     JobDescriptionUpdateRequest,
     JobDescriptionUpdateResponse,
     JobDetail,
@@ -131,6 +132,7 @@ from jobos_api.state_store import (
     JobOsStateStore,
     WorkspaceRevisionConflict,
 )
+from jobos_api.synthetic_demo import DEMO_JOB_ID
 from jobos_api.workspace import WorkspaceSnapshotCommand, WorkspaceSnapshotResponse
 
 P = ParamSpec("P")
@@ -1114,6 +1116,67 @@ def create_app(
             return result
         except NotFound as error:
             raise HTTPException(status_code=404, detail="Job not found") from error
+
+    @app.delete(
+        "/v1/jobs/{job_id}/demo",
+        tags=["jobs"],
+        responses={
+            403: {"description": "Trusted MCP credential required"},
+            404: {"description": "Demo job not found"},
+            409: {"description": "The selected job is not the fictional demo"},
+        },
+    )
+    @serialized_mutation_route
+    def job_remove_demo(
+        job_id: str,
+        command: DemoRemovalRequest,
+        identity: Annotated[DeviceIdentity, Depends(authenticated_device)],
+        mcp_token: Annotated[str | None, Header(alias="X-JobOS-MCP-Token")] = None,
+    ) -> JobMutationResponse:
+        require_trusted_mcp(identity, command.origin, mcp_token)
+        request_hash = mutation_hash(
+            "job.remove_demo", {"job_id": job_id, "origin": command.origin}
+        )
+        try:
+            replay = mutation_replay(
+                identity=identity,
+                target=f"jobs/{job_id}/demo",
+                command_name="job.remove_demo",
+                idempotency_key=command.idempotency_key,
+                request_hash=request_hash,
+            )
+        except IdempotencyConflict as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
+        if replay is not None:
+            return JobMutationResponse.model_validate(replay)
+        try:
+            record = jobs.get_job(job_id)
+        except NotFound as error:
+            if job_id != DEMO_JOB_ID:
+                raise HTTPException(status_code=404, detail="Demo job not found") from error
+        else:
+            if not record.synthetic_demo:
+                raise HTTPException(
+                    status_code=409,
+                    detail="Only a fictional demo job can be removed",
+                )
+            jobs.delete_job(job_id)
+        if state_store.job_workspace_state().selected_job_id == job_id:
+            state_store.save_job_selection(None, command.origin)
+        result_payload = JobMutationResponse(event_id=0).model_dump(mode="json")
+        event_id = record_mutation(
+            identity=identity,
+            target=f"jobs/{job_id}/demo",
+            command_name="job.remove_demo",
+            origin=command.origin,
+            idempotency_key=command.idempotency_key,
+            request_hash=request_hash,
+            result=result_payload,
+            label="Removed fictional demo job",
+            job_id=job_id,
+            inject_event_id=True,
+        )
+        return JobMutationResponse(event_id=event_id)
 
     @app.put(
         "/v1/jobs/{job_id}/description",

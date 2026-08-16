@@ -1,0 +1,8 @@
+{
+  "dataset_id": "jobos.synthetic-starter",
+  "dataset_version": "jobos-demo-v1",
+  "fixture_sha256": "fab713e7bc7a78fee87e3e8b05368935548f22a409025eed56d7378de8020fa9",
+  "jobs": ["jobos-demo-v1.json"],
+  "job_count": 1,
+  "synthetic": true
+}

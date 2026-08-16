@@ -5,6 +5,7 @@ import { expect, test, vi } from 'vitest'
 vi.mock('@jobos/contracts', () => ({
   createJobOsApiClient: vi.fn(() => ({})),
   jobCreateFromBrowserV1JobsPost: vi.fn(),
+  jobRemoveDemoV1JobsJobIdDemoDelete: vi.fn(),
   jobUpdateStatusV1JobsJobIdStatusPut: vi.fn(),
   jobsListV1JobsGet: vi.fn(),
   jobsReorderV1JobsOrderPut: vi.fn(),
@@ -13,7 +14,11 @@ vi.mock('@jobos/contracts', () => ({
   workspaceSortJobsV1WorkspaceJobsSortPut: vi.fn()
 }))
 
-import { jobCreateFromBrowserV1JobsPost, jobUpdateStatusV1JobsJobIdStatusPut } from '@jobos/contracts'
+import {
+  jobCreateFromBrowserV1JobsPost,
+  jobRemoveDemoV1JobsJobIdDemoDelete,
+  jobUpdateStatusV1JobsJobIdStatusPut
+} from '@jobos/contracts'
 
 import { createMainJobsClient, JobEventDecoder } from './jobs.js'
 
@@ -84,6 +89,31 @@ test('marking a job applied requests the application-recording shortcut', async 
     body: { target_status: 'applied', origin: 'user', record_application: true }
   }))
   expect(result.job.status).toBe('applied')
+})
+
+test('fictional demo metadata is mapped and intentional removal uses the public contract', async () => {
+  vi.mocked(jobCreateFromBrowserV1JobsPost).mockResolvedValue({
+    response: new Response(null, { status: 200 }),
+    data: {
+      event_id: 20, created: true,
+      job: {
+        job_id: 'jobos-demo-v1', company: 'Fictional Co', title: 'Demo Role',
+        status: 'discovered', status_group: 'Inbox', canonical_url: 'https://jobs.example.com/demo',
+        discovered_at: '', last_seen_at: '', description: 'Demo', location: 'Example City',
+        synthetic_demo: true, dataset_version: 'jobos-demo-v1'
+      }
+    }
+  } as never)
+  vi.mocked(jobRemoveDemoV1JobsJobIdDemoDelete).mockResolvedValue({
+    response: new Response(null, { status: 200 }), data: { event_id: 21 }
+  } as never)
+  const client = createMainJobsClient({ baseUrl: 'http://127.0.0.1:8766', deviceToken: 'test-token' })
+  const created = await client.createFromBrowser({
+    companyName: 'Fictional Co', title: 'Demo Role', canonicalUrl: 'https://jobs.example.com/demo',
+    locationText: 'Example City', descriptionText: 'Demo', applicationUrl: 'https://jobs.example.com/demo/apply'
+  }, 'demo')
+  expect(created.job).toMatchObject({ syntheticDemo: true, datasetVersion: 'jobos-demo-v1' })
+  await expect(client.removeDemo('jobos-demo-v1')).resolves.toEqual({ eventId: 21 })
 })
 
 test('the desktop event decoder preserves SSE events split across network chunks', () => {

@@ -1,0 +1,11 @@
+{
+  "job_id": "jobos-demo-v1",
+  "company_name": "Northstar Kites (Fictional Demo)",
+  "title": "Imaginary Kite Systems Tuner — Demo Role",
+  "canonical_url": "https://jobs.example.com/jobos-demo-v1",
+  "location_text": "Example City · Remote",
+  "description_text": "This is fictional sample data for learning JobOS. Tune an imaginary fleet of sensor-equipped kites, document experiments, and collaborate with a made-up aerodynamics team. This is not a real vacancy and applications are not accepted.",
+  "application_url": "https://jobs.example.com/jobos-demo-v1/apply",
+  "observed_at": "2026-08-15T12:00:00+00:00",
+  "dataset_version": "jobos-demo-v1"
+}

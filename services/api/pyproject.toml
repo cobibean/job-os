@@ -16,6 +16,9 @@ Homepage = "https://github.com/cobibean/job-os"
 Repository = "https://github.com/cobibean/job-os.git"
 Issues = "https://github.com/cobibean/job-os/issues"
 
+[project.scripts]
+jobos-init = "jobos_api.initialize_cli:main"
+
 [dependency-groups]
 dev = [
   "httpx2==2.7.0",

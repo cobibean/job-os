@@ -26,6 +26,8 @@ export interface JobListItem {
   canonicalUrl: string
   discoveredAt: string
   lastSeenAt: string
+  syntheticDemo?: boolean
+  datasetVersion?: string | null
 }
 
 export interface JobDetail extends JobListItem {
@@ -226,6 +228,22 @@ export interface ConnectivitySnapshot {
   message: string
 }
 
+export interface SetupSnapshot {
+  state: 'required' | 'working' | 'succeeded' | 'ready' | 'error'
+  message: string
+}
+
+export interface DiagnosticsSnapshot {
+  mode: 'local-service' | 'remote-client' | 'not-configured'
+  appVersion: string
+  apiVersion?: string
+  capabilities: {
+    localService: 'available' | 'unavailable' | 'not-configured'
+    agent: 'available' | 'offline' | 'not-configured'
+    desktop: 'available' | 'unavailable'
+  }
+}
+
 export type AgentConnectionState = 'online' | 'connecting' | 'offline' | 'reconnecting'
 export type ConversationEntryType = 'user_message' | 'turn' | 'activity' | 'assistant_message' | 'status' | 'error'
 export type ConversationEntryState = 'queued' | 'working' | 'waiting' | 'completed' | 'failed' | 'interrupted'
@@ -271,6 +289,16 @@ export type AgentStreamUpdate =
   | { kind: 'connection'; state: AgentConnectionState }
 
 export interface JobOsRendererBridge {
+  setup: {
+    get: () => Promise<SetupSnapshot>
+    initialize: (resetDemo?: boolean, confirmed?: boolean) => Promise<SetupSnapshot>
+    restart: () => Promise<void>
+  }
+  diagnostics: {
+    get: () => Promise<DiagnosticsSnapshot>
+    openData: () => Promise<void>
+    openLogs: () => Promise<void>
+  }
   lifecycle: {
     subscribePrepareClose: (handler: () => Promise<boolean>) => () => void
   }
@@ -297,6 +325,7 @@ export interface JobOsRendererBridge {
     reorder: (jobIds: string[]) => Promise<JobMutationResult>
     setSort: (sort: JobSortMode) => Promise<JobMutationResult>
     updateStatus: (jobId: string, status: JobStatus) => Promise<JobStatusMutationResult>
+    removeDemo: (jobId: string) => Promise<JobMutationResult>
     saveFromBrowser: (
       tabId: string,
       expectedUrl: string,

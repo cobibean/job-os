@@ -41,6 +41,8 @@ class JobListItem(BaseModel):
     canonical_url: HttpUrl
     discovered_at: str
     last_seen_at: str
+    synthetic_demo: bool = False
+    dataset_version: str | None = None
 
 
 class JobDetail(JobListItem):
@@ -134,6 +136,15 @@ class JobMutationResponse(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     event_id: int
+
+
+class DemoRemovalRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    origin: Literal["user", "mcp"]
+    idempotency_key: str = Field(
+        default_factory=lambda: str(uuid4()), min_length=1, max_length=128
+    )
 
 
 class WorkspaceJobsResponse(BaseModel):
@@ -305,6 +316,8 @@ def _list_item(record: JobRecord) -> JobListItem:
         canonical_url=record.canonical_url,
         discovered_at=record.discovered_at.isoformat(),
         last_seen_at=record.last_seen_at.isoformat(),
+        synthetic_demo=record.synthetic_demo,
+        dataset_version=record.dataset_version,
     )
 
 

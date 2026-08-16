@@ -6,7 +6,7 @@ import { loadDesktopRuntimeConfig, runtimeConfigPath } from './runtimeConfig.js'
 
 test('uses the stable JobOS Application Support directory', () => {
   expect(runtimeConfigPath('/Users/cobi/Library/Application Support')).toBe(
-    '/Users/cobi/Library/Application Support/JobOS/runtime.json'
+    '/Users/cobi/Library/Application Support/JobOS/config.json'
   )
 })
 
@@ -91,5 +91,5 @@ test('missing persisted configuration produces an actionable error', async () =>
     configPath: '/runtime.json',
     environment: {},
     readText: async () => { throw missing }
-  })).rejects.toThrow('JobOS runtime configuration is required')
+  })).rejects.toThrow('JobOS setup is required')
 })
