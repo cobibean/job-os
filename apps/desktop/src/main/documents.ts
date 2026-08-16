@@ -3,6 +3,7 @@ import { mkdir, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 
 import type { Dialog, Shell } from 'electron'
+import type { ArtifactRecord as ApiArtifact, JobArtifactsResponse as ApiArtifactList } from '@jobos/contracts'
 
 import type { DocumentArtifact, JobArtifactsState, PdfArtifactPayload } from '../shared/contracts.js'
 import type { JobsConfig } from './jobs.js'
@@ -10,35 +11,11 @@ import type { JobsConfig } from './jobs.js'
 const MAX_ARTIFACT_BYTES = 25 * 1024 * 1024
 const ARTIFACT_ID = /^art_[A-Za-z0-9_-]{16,80}$/
 
-interface ApiArtifact {
-  artifact_id: string
-  job_id: string
-  document_key: DocumentArtifact['documentKey']
-  document_label: string
-  render_sequence: number
-  source_revision: string
-  artifact_revision: string
-  media_type: DocumentArtifact['mediaType']
-  sha256: string | null
-  render_status: DocumentArtifact['renderStatus']
-  filename: string | null
-  failure_message: string | null
-  created_at: string
-  is_current: boolean
-  is_last_successful: boolean
-  is_approved: boolean
-  preview_available: boolean
-}
-
-interface ApiArtifactList {
-  job_id: string
-  artifacts: ApiArtifact[]
-  current_artifact_id: string | null
-  last_successful_artifact_id: string | null
-  approved_artifact_id: string | null
-}
-
 function toArtifact(value: ApiArtifact): DocumentArtifact {
+  if (value.media_type !== 'application/pdf'
+    && value.media_type !== 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
+    throw new Error('JobOS returned an invalid artifact media type')
+  }
   return {
     artifactId: value.artifact_id,
     jobId: value.job_id,

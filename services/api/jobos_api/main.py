@@ -1,5 +1,6 @@
 import os
 from pathlib import Path
+from uuid import uuid4
 
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
@@ -12,6 +13,7 @@ from jobos_api.local_config import (
     default_data_dir,
     settings_from_config,
 )
+from jobos_api.responses import ApiErrorResponse
 from jobos_api.settings import Settings, parse_device_credentials
 
 
@@ -54,6 +56,7 @@ def settings_from_environment() -> Settings:
         jobs_db_path=Path(jobs_db) if jobs_db else application_data / "jobs/jobs.db",
         job_hunter_db_path=Path(job_hunter_db) if job_hunter_db else None,
         artifact_provider=os.environ.get("JOBOS_ARTIFACT_PROVIDER", "local"),
+        transport=os.environ.get("JOBOS_TRANSPORT", "local-loopback"),
         local_artifact_root=(
             Path(local_artifact_root) if local_artifact_root else application_data / "artifacts"
         ),
@@ -69,15 +72,30 @@ def create_application() -> FastAPI:
     return create_app(settings_from_environment())
 
 
-def _configuration_error_app(error: Exception) -> FastAPI:
+def _configuration_error_app(_: Exception) -> FastAPI:
     unavailable = FastAPI(title="JobOS API", version="0.1.0")
-    message = str(error)
+    message = "JobOS setup is unavailable; verify the local configuration and artifact storage"
 
-    @unavailable.get("/v1/health")
+    @unavailable.get(
+        "/v1/health",
+        status_code=503,
+        response_model=ApiErrorResponse,
+        responses={503: {"model": ApiErrorResponse}},
+    )
     def health() -> JSONResponse:
+        correlation_id = uuid4().hex
+        payload = ApiErrorResponse(
+            error_schema="jobos-error-v1",
+            code="setup_required",
+            message=message,
+            retryable=True,
+            correlation_id=correlation_id,
+            detail=message,
+        )
         return JSONResponse(
             status_code=503,
-            content={"status": "setup_required", "detail": message},
+            content=payload.model_dump(),
+            headers={"X-Correlation-ID": correlation_id},
         )
 
     return unavailable

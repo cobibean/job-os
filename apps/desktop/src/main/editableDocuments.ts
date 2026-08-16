@@ -3,6 +3,12 @@ import { readFile, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 
 import type { Dialog } from 'electron'
+import type {
+  EditableDocument as GeneratedEditableDocument,
+  EditableDocumentSnapshot as ApiSnapshot,
+  EditableDocumentSummary as ApiSummary,
+  OperationReceipt as GeneratedOperationReceipt
+} from '@jobos/contracts'
 
 import type {
   ApplyEditableDocumentOperationsRequest,
@@ -91,52 +97,15 @@ interface ApiImportReport {
   issues: Array<{ code: string; severity: 'normalized' | 'dropped'; message: string; count: number }>
 }
 
-interface ApiDocument {
-  schema_version: 1
-  document_id: string
-  job_id: string
-  document_key: DocumentKey
-  document_label: EditableDocument['documentLabel']
-  revision: number
+type ApiDocument = Omit<GeneratedEditableDocument, 'content' | 'settings' | 'comments' | 'import_report'> & {
   content: TiptapDocumentJson
   settings: ApiSettings
   comments: ApiComment[]
-  source_artifact_id: string | null
-  source_filename: string | null
-  source_sha256: string | null
-  published_revision: number | null
   import_report: ApiImportReport
-  created_at: string
-  updated_at: string
 }
 
-interface ApiSummary {
-  document_id: string
-  job_id: string
-  document_key: DocumentKey
-  document_label: EditableDocument['documentLabel']
-  revision: number
-  source_artifact_id: string | null
-  published_revision: number | null
-  created_at: string
-  updated_at: string
-}
-
-interface ApiSnapshot {
-  snapshot_id: string
-  document_id: string
-  document_revision: number
-  reason: EditableDocumentSnapshot['reason']
-  actor: EditableDocumentSnapshot['actor']
-  label: string | null
-  created_at: string
-}
-
-interface ApiOperationReceipt {
+type ApiOperationReceipt = Omit<GeneratedOperationReceipt, 'document'> & {
   document: ApiDocument
-  changed_block_ids: string[]
-  changes: Array<{ block_id: string; before: string; after: string }>
-  snapshot_id: string
 }
 
 function safeString(value: unknown, label: string, maximum = 512): string {
@@ -171,6 +140,13 @@ export function safeEditableArtifactId(value: unknown): string {
 export function safeDocumentKey(value: unknown): DocumentKey {
   if (typeof value !== 'string' || !DOCUMENT_KEYS.has(value as DocumentKey)) throw new Error('Invalid document type')
   return value as DocumentKey
+}
+
+function safeDocumentLabel(value: unknown): EditableDocument['documentLabel'] {
+  if (value !== 'Resume' && value !== 'Cover Letter' && value !== 'References') {
+    throw new Error('Invalid document label')
+  }
+  return value
 }
 
 function safeIdempotencyKey(value: unknown): string {
@@ -265,7 +241,7 @@ function toDocument(value: ApiDocument): EditableDocument {
     documentId: safeEditableDocumentId(value.document_id),
     jobId: safeEditableJobId(value.job_id),
     documentKey: safeDocumentKey(value.document_key),
-    documentLabel: value.document_label,
+    documentLabel: safeDocumentLabel(value.document_label),
     revision: safeRevision(value.revision),
     content: value.content,
     settings: toSettings(value.settings),
@@ -291,7 +267,7 @@ function toSummary(value: ApiSummary): EditableDocumentSummary {
     documentId: safeEditableDocumentId(value.document_id),
     jobId: safeEditableJobId(value.job_id),
     documentKey: safeDocumentKey(value.document_key),
-    documentLabel: value.document_label,
+    documentLabel: safeDocumentLabel(value.document_label),
     revision: safeRevision(value.revision),
     sourceArtifactId: value.source_artifact_id === null ? null : safeEditableArtifactId(value.source_artifact_id),
     publishedRevision: value.published_revision === null ? null : safeRevision(value.published_revision),

@@ -80,6 +80,23 @@ afterEach(() => {
 })
 
 describe('DocxWorkerManager', () => {
+  it('reports unavailable until the lazy renderer has actually loaded', async () => {
+    const manager = new DocxWorkerManager(ipcMain())
+    expect(manager.isAvailable()).toBe(false)
+
+    const run = manager.run({ kind: 'inspect', bytes: new ArrayBuffer(0) })
+    expect(manager.isAvailable()).toBe(false)
+    const worker = electron.FakeBrowserWindow.instances[0]
+    worker?.webContents.emit('did-finish-load')
+    await Promise.resolve()
+    expect(manager.isAvailable()).toBe(true)
+
+    worker?.close()
+    await expect(run).rejects.toThrow('DOCX worker closed')
+    expect(manager.isAvailable()).toBe(false)
+    manager.dispose()
+  })
+
   it('rejects an early close and recreates the worker on the next request', async () => {
     const manager = new DocxWorkerManager(ipcMain())
     const firstRun = manager.run({ kind: 'inspect', bytes: new ArrayBuffer(0) })
@@ -99,6 +116,7 @@ describe('DocxWorkerManager', () => {
     const firstWorker = electron.FakeBrowserWindow.instances[0]
     firstWorker?.webContents.emit('did-fail-load', {}, -2, 'failed')
     await expect(firstRun).rejects.toThrow('failed to load')
+    expect(manager.isAvailable()).toBe(false)
 
     const replacementRun = manager.run({ kind: 'inspect', bytes: new ArrayBuffer(0) })
     let replacementOutcome = 'pending'
@@ -109,6 +127,10 @@ describe('DocxWorkerManager', () => {
     const replacement = electron.FakeBrowserWindow.instances[1]
     replacement?.webContents.emit('did-finish-load')
     await Promise.resolve()
+
+    firstWorker?.webContents.emit('render-process-gone', {}, { reason: 'crashed' })
+    await Promise.resolve()
+    expect(manager.isAvailable()).toBe(true)
 
     firstWorker?.close()
     await Promise.resolve()
@@ -129,6 +151,7 @@ describe('DocxWorkerManager', () => {
     expect(worker?.webContents.send).toHaveBeenCalledTimes(1)
 
     worker?.webContents.emit('render-process-gone', {}, { reason: 'crashed' })
+    expect(manager.isAvailable()).toBe(false)
     worker?.close()
     await expect(run).rejects.toThrow('DOCX worker closed')
     manager.dispose()

@@ -116,6 +116,9 @@ class FakeJobHunterFacade:
         self.locations = {}
         self.publish_calls = []
 
+    def is_available(self):
+        return True
+
     def list_jobs(self):
         return list(self.jobs)
 
@@ -199,6 +202,9 @@ class FakeJobHunterFacade:
             for artifact in self.list_job_artifacts(job_id)
             if artifact.get("artifact_reference") == artifact_reference
         )
+
+    def render_resume(self, job_id, source_id, _output_options):
+        return self.register_artifact(job_id, source_id)
 
     def publish_document_artifact(
         self, job_id, document_key, document_label, source_path, artifact_path

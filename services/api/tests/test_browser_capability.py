@@ -14,8 +14,8 @@ from jobos_api.capabilities import (
 from jobos_api.private_adapters.job_hunter import adapt_job_hunter_facade
 from jobos_api.settings import DeviceCredential, Settings
 
-TOKEN = "phase-seven-device-token"
-REMOTE_TOKEN = "phase-seven-remote-device-token"
+TOKEN = "browser-device-token"
+REMOTE_TOKEN = "remote-browser-device-token"
 
 
 def make_app(tmp_path, *, broker=None, job_facade=None, gateway=None, settings=None):
@@ -309,10 +309,10 @@ def test_browser_command_fails_immediately_without_a_desktop(tmp_path):
         "lease_remaining_ms": 0,
     }
     assert response.status_code == 503
-    assert response.json()["detail"] == {
-        "code": "desktop_unavailable",
-        "message": "Open JobOS on the configured desktop and retry.",
-    }
+    assert response.json()["code"] == "desktop_unavailable"
+    assert response.json()["message"] == "Open JobOS on the configured desktop and retry."
+    assert response.json()["retryable"] is True
+    assert response.json()["correlation_id"] == response.headers["x-correlation-id"]
 
 
 def test_authenticated_desktop_receives_correlated_command_and_replay_is_idempotent(tmp_path):
@@ -518,7 +518,7 @@ def test_activity_report_is_idempotent_without_injecting_agent_chat_activity(tmp
 @pytest.mark.parametrize(
     ("payload", "message"),
     [
-        ({"command": "script.execute", "arguments": {}}, "Input should be"),
+        ({"command": "script.execute", "arguments": {}}, "Request validation failed"),
         (
             {
                 "command": "element.click",

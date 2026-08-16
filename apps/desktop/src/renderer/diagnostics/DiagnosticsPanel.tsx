@@ -6,6 +6,8 @@ function capabilityLabel(label: string, state: string): string {
   if (state === 'not-configured') return `${label} not configured`
   if (state === 'unavailable') return `${label} unavailable`
   if (state === 'offline') return `${label} offline`
+  if (state === 'connecting') return `${label} connecting`
+  if (state === 'disconnected') return `${label} disconnected`
   return `${label} available`
 }
 
@@ -32,6 +34,10 @@ export function DiagnosticsPanel() {
           <div><dt>Local service</dt><dd>{capabilityLabel('Local service', snapshot.capabilities.localService)}</dd></div>
           <div><dt>Agent</dt><dd>{capabilityLabel('Agent', snapshot.capabilities.agent)}</dd></div>
           <div><dt>Desktop capability</dt><dd>{capabilityLabel('Desktop capability', snapshot.capabilities.desktop)}</dd></div>
+          <div><dt>Renderer</dt><dd>{capabilityLabel('Renderer', snapshot.capabilities.renderer)}</dd></div>
+          <div><dt>Artifact storage</dt><dd>{capabilityLabel('Artifact storage', snapshot.capabilities.artifactStorage)}</dd></div>
+          <div><dt>Artifact gateway</dt><dd>{capabilityLabel('Artifact gateway', snapshot.capabilities.artifactGateway)}</dd></div>
+          <div><dt>Transport</dt><dd>{snapshot.capabilities.transport}</dd></div>
         </dl>
       )}
       <div className="diagnostics-actions">

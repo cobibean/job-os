@@ -5,8 +5,6 @@ import re
 import subprocess
 from pathlib import Path
 
-import pytest
-
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 TEXT_SOURCE_SUFFIXES = {
     ".bash",
@@ -123,10 +121,6 @@ def test_script_private_import_detection_covers_supported_forms():
     assert all(SCRIPT_PRIVATE_IMPORT.search(statement) for statement in prohibited_imports)
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="Phase 0 red gate: the legacy private transport label remains until Phase 6",
-)
 def test_public_defaults_contain_no_operator_or_private_network_identity():
     prohibited_patterns = {
         "operator workstation role": re.compile(
@@ -136,7 +130,7 @@ def test_public_defaults_contain_no_operator_or_private_network_identity():
             r"/Users/(?!example(?:/|$)|you(?:/|$)|username(?:/|$))"
         ),  # public-tree: allow-pattern-fixture
         "tailnet IPv4 identity": re.compile(r"\b100(?:[.]\d{1,3}){3}\b"),
-        "private-network default": re.compile(r"private-tailscale", re.IGNORECASE),
+        "private-network default": re.compile(r"private-" r"tailscale", re.IGNORECASE),
     }
     violations: list[str] = []
 

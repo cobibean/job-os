@@ -43,6 +43,36 @@ export type ActivityReportResponse = {
 };
 
 /**
+ * ApiErrorResponse
+ */
+export type ApiErrorResponse = {
+    /**
+     * Code
+     */
+    code: string;
+    /**
+     * Correlation Id
+     */
+    correlation_id: string;
+    /**
+     * Detail
+     */
+    detail?: unknown | null;
+    /**
+     * Error Schema
+     */
+    error_schema: 'jobos-error-v1';
+    /**
+     * Message
+     */
+    message: string;
+    /**
+     * Retryable
+     */
+    retryable: boolean;
+};
+
+/**
  * ApplyOperationsRequest
  */
 export type ApplyOperationsRequest = {
@@ -618,9 +648,13 @@ export type DeviceSessionResponse = {
      */
     authenticated: true;
     /**
+     * Desktop
+     */
+    desktop: 'connected' | 'disconnected';
+    /**
      * Transport
      */
-    transport: 'private-tailscale';
+    transport: 'local-loopback' | 'private-remote';
 };
 
 /**
@@ -995,16 +1029,6 @@ export type EditableDocumentSummary = {
 };
 
 /**
- * HTTPValidationError
- */
-export type HttpValidationError = {
-    /**
-     * Detail
-     */
-    detail?: Array<ValidationError>;
-};
-
-/**
  * HeaderFooter
  */
 export type HeaderFooter = {
@@ -1031,9 +1055,17 @@ export type HeaderFooter = {
  */
 export type HealthResponse = {
     /**
-     * Agent Connection
+     * Agent
      */
-    agent_connection: 'online' | 'connecting' | 'offline';
+    agent: 'not-configured' | 'online' | 'connecting' | 'offline';
+    /**
+     * Artifact Gateway
+     */
+    artifact_gateway: 'not-configured' | 'available' | 'unavailable';
+    /**
+     * Artifact Storage
+     */
+    artifact_storage: 'available' | 'unavailable';
     /**
      * Service
      */
@@ -1046,6 +1078,10 @@ export type HealthResponse = {
      * Status
      */
     status: 'ready';
+    /**
+     * Transport
+     */
+    transport: 'local-loopback' | 'private-remote';
     /**
      * Version
      */
@@ -1845,34 +1881,6 @@ export type TurnMutationResponse = {
 };
 
 /**
- * ValidationError
- */
-export type ValidationError = {
-    /**
-     * Context
-     */
-    ctx?: {
-        [key: string]: unknown;
-    };
-    /**
-     * Input
-     */
-    input?: unknown;
-    /**
-     * Location
-     */
-    loc: Array<string | number>;
-    /**
-     * Message
-     */
-    msg: string;
-    /**
-     * Error Type
-     */
-    type: string;
-};
-
-/**
  * VersionResponse
  */
 export type VersionResponse = {
@@ -1883,7 +1891,11 @@ export type VersionResponse = {
     /**
      * Contract
      */
-    contract: 'jobos-v1-phase7-parity';
+    contract: 'jobos-api-v1';
+    /**
+     * Error Schema
+     */
+    error_schema: 'jobos-error-v1';
 };
 
 /**
@@ -2085,9 +2097,21 @@ export type ReportActivityV1ActivityPostData = {
 
 export type ReportActivityV1ActivityPostErrors = {
     /**
-     * Validation Error
+     * Device authentication required
      */
-    422: HttpValidationError;
+    401: ApiErrorResponse;
+    /**
+     * Resource state conflict
+     */
+    409: ApiErrorResponse;
+    /**
+     * Request validation failed
+     */
+    422: ApiErrorResponse;
+    /**
+     * Internal server error
+     */
+    500: ApiErrorResponse;
 };
 
 export type ReportActivityV1ActivityPostError = ReportActivityV1ActivityPostErrors[keyof ReportActivityV1ActivityPostErrors];
@@ -2115,9 +2139,33 @@ export type ArtifactContentV1ArtifactsArtifactIdContentGetData = {
 
 export type ArtifactContentV1ArtifactsArtifactIdContentGetErrors = {
     /**
-     * Validation Error
+     * Device authentication required
      */
-    422: HttpValidationError;
+    401: ApiErrorResponse;
+    /**
+     * Resource not found
+     */
+    404: ApiErrorResponse;
+    /**
+     * Resource state conflict
+     */
+    409: ApiErrorResponse;
+    /**
+     * Unsupported media type
+     */
+    415: ApiErrorResponse;
+    /**
+     * Request validation failed
+     */
+    422: ApiErrorResponse;
+    /**
+     * Internal server error
+     */
+    500: ApiErrorResponse;
+    /**
+     * Required capability unavailable
+     */
+    503: ApiErrorResponse;
 };
 
 export type ArtifactContentV1ArtifactsArtifactIdContentGetError = ArtifactContentV1ArtifactsArtifactIdContentGetErrors[keyof ArtifactContentV1ArtifactsArtifactIdContentGetErrors];
@@ -2143,9 +2191,29 @@ export type ArtifactDownloadV1ArtifactsArtifactIdDownloadGetData = {
 
 export type ArtifactDownloadV1ArtifactsArtifactIdDownloadGetErrors = {
     /**
-     * Validation Error
+     * Device authentication required
      */
-    422: HttpValidationError;
+    401: ApiErrorResponse;
+    /**
+     * Resource not found
+     */
+    404: ApiErrorResponse;
+    /**
+     * Resource state conflict
+     */
+    409: ApiErrorResponse;
+    /**
+     * Request validation failed
+     */
+    422: ApiErrorResponse;
+    /**
+     * Internal server error
+     */
+    500: ApiErrorResponse;
+    /**
+     * Required capability unavailable
+     */
+    503: ApiErrorResponse;
 };
 
 export type ArtifactDownloadV1ArtifactsArtifactIdDownloadGetError = ArtifactDownloadV1ArtifactsArtifactIdDownloadGetErrors[keyof ArtifactDownloadV1ArtifactsArtifactIdDownloadGetErrors];
@@ -2172,13 +2240,29 @@ export type BrowserCommandV1BrowserCommandsPostData = {
 
 export type BrowserCommandV1BrowserCommandsPostErrors = {
     /**
+     * Device authentication required
+     */
+    401: ApiErrorResponse;
+    /**
      * Trusted MCP credential required
      */
-    403: unknown;
+    403: ApiErrorResponse;
     /**
-     * Validation Error
+     * Resource state conflict
      */
-    422: HttpValidationError;
+    409: ApiErrorResponse;
+    /**
+     * Request validation failed
+     */
+    422: ApiErrorResponse;
+    /**
+     * Internal server error
+     */
+    500: ApiErrorResponse;
+    /**
+     * Required capability unavailable
+     */
+    503: ApiErrorResponse;
 };
 
 export type BrowserCommandV1BrowserCommandsPostError = BrowserCommandV1BrowserCommandsPostErrors[keyof BrowserCommandV1BrowserCommandsPostErrors];
@@ -2198,6 +2282,19 @@ export type ConversationCurrentV1ConversationsCurrentGetData = {
     query?: never;
     url: '/v1/conversations/current';
 };
+
+export type ConversationCurrentV1ConversationsCurrentGetErrors = {
+    /**
+     * Device authentication required
+     */
+    401: ApiErrorResponse;
+    /**
+     * Internal server error
+     */
+    500: ApiErrorResponse;
+};
+
+export type ConversationCurrentV1ConversationsCurrentGetError = ConversationCurrentV1ConversationsCurrentGetErrors[keyof ConversationCurrentV1ConversationsCurrentGetErrors];
 
 export type ConversationCurrentV1ConversationsCurrentGetResponses = {
     /**
@@ -2226,9 +2323,17 @@ export type ConversationStreamV1ConversationsCurrentEventsStreamGetData = {
 
 export type ConversationStreamV1ConversationsCurrentEventsStreamGetErrors = {
     /**
-     * Validation Error
+     * Device authentication required
      */
-    422: HttpValidationError;
+    401: ApiErrorResponse;
+    /**
+     * Request validation failed
+     */
+    422: ApiErrorResponse;
+    /**
+     * Internal server error
+     */
+    500: ApiErrorResponse;
 };
 
 export type ConversationStreamV1ConversationsCurrentEventsStreamGetError = ConversationStreamV1ConversationsCurrentEventsStreamGetErrors[keyof ConversationStreamV1ConversationsCurrentEventsStreamGetErrors];
@@ -2249,9 +2354,21 @@ export type ConversationSendV1ConversationsCurrentMessagesPostData = {
 
 export type ConversationSendV1ConversationsCurrentMessagesPostErrors = {
     /**
-     * Validation Error
+     * Device authentication required
      */
-    422: HttpValidationError;
+    401: ApiErrorResponse;
+    /**
+     * Resource state conflict
+     */
+    409: ApiErrorResponse;
+    /**
+     * Request validation failed
+     */
+    422: ApiErrorResponse;
+    /**
+     * Internal server error
+     */
+    500: ApiErrorResponse;
 };
 
 export type ConversationSendV1ConversationsCurrentMessagesPostError = ConversationSendV1ConversationsCurrentMessagesPostErrors[keyof ConversationSendV1ConversationsCurrentMessagesPostErrors];
@@ -2271,6 +2388,23 @@ export type ConversationResetV1ConversationsCurrentResetPostData = {
     query?: never;
     url: '/v1/conversations/current/reset';
 };
+
+export type ConversationResetV1ConversationsCurrentResetPostErrors = {
+    /**
+     * Device authentication required
+     */
+    401: ApiErrorResponse;
+    /**
+     * Resource state conflict
+     */
+    409: ApiErrorResponse;
+    /**
+     * Internal server error
+     */
+    500: ApiErrorResponse;
+};
+
+export type ConversationResetV1ConversationsCurrentResetPostError = ConversationResetV1ConversationsCurrentResetPostErrors[keyof ConversationResetV1ConversationsCurrentResetPostErrors];
 
 export type ConversationResetV1ConversationsCurrentResetPostResponses = {
     /**
@@ -2295,9 +2429,21 @@ export type ConversationCancelV1ConversationsCurrentTurnsTurnIdCancelPostData = 
 
 export type ConversationCancelV1ConversationsCurrentTurnsTurnIdCancelPostErrors = {
     /**
-     * Validation Error
+     * Device authentication required
      */
-    422: HttpValidationError;
+    401: ApiErrorResponse;
+    /**
+     * Resource not found
+     */
+    404: ApiErrorResponse;
+    /**
+     * Request validation failed
+     */
+    422: ApiErrorResponse;
+    /**
+     * Internal server error
+     */
+    500: ApiErrorResponse;
 };
 
 export type ConversationCancelV1ConversationsCurrentTurnsTurnIdCancelPostError = ConversationCancelV1ConversationsCurrentTurnsTurnIdCancelPostErrors[keyof ConversationCancelV1ConversationsCurrentTurnsTurnIdCancelPostErrors];
@@ -2325,9 +2471,25 @@ export type ConversationRetryV1ConversationsCurrentTurnsTurnIdRetryPostData = {
 
 export type ConversationRetryV1ConversationsCurrentTurnsTurnIdRetryPostErrors = {
     /**
-     * Validation Error
+     * Device authentication required
      */
-    422: HttpValidationError;
+    401: ApiErrorResponse;
+    /**
+     * Resource not found
+     */
+    404: ApiErrorResponse;
+    /**
+     * Resource state conflict
+     */
+    409: ApiErrorResponse;
+    /**
+     * Request validation failed
+     */
+    422: ApiErrorResponse;
+    /**
+     * Internal server error
+     */
+    500: ApiErrorResponse;
 };
 
 export type ConversationRetryV1ConversationsCurrentTurnsTurnIdRetryPostError = ConversationRetryV1ConversationsCurrentTurnsTurnIdRetryPostErrors[keyof ConversationRetryV1ConversationsCurrentTurnsTurnIdRetryPostErrors];
@@ -2348,6 +2510,19 @@ export type DesktopCapabilityPresenceV1DesktopCapabilitiesGetData = {
     url: '/v1/desktop/capabilities';
 };
 
+export type DesktopCapabilityPresenceV1DesktopCapabilitiesGetErrors = {
+    /**
+     * Device authentication required
+     */
+    401: ApiErrorResponse;
+    /**
+     * Internal server error
+     */
+    500: ApiErrorResponse;
+};
+
+export type DesktopCapabilityPresenceV1DesktopCapabilitiesGetError = DesktopCapabilityPresenceV1DesktopCapabilitiesGetErrors[keyof DesktopCapabilityPresenceV1DesktopCapabilitiesGetErrors];
+
 export type DesktopCapabilityPresenceV1DesktopCapabilitiesGetResponses = {
     /**
      * Successful Response
@@ -2363,6 +2538,19 @@ export type DeviceSessionV1DeviceSessionGetData = {
     query?: never;
     url: '/v1/device-session';
 };
+
+export type DeviceSessionV1DeviceSessionGetErrors = {
+    /**
+     * Device authentication required
+     */
+    401: ApiErrorResponse;
+    /**
+     * Internal server error
+     */
+    500: ApiErrorResponse;
+};
+
+export type DeviceSessionV1DeviceSessionGetError = DeviceSessionV1DeviceSessionGetErrors[keyof DeviceSessionV1DeviceSessionGetErrors];
 
 export type DeviceSessionV1DeviceSessionGetResponses = {
     /**
@@ -2387,9 +2575,21 @@ export type DocumentFileGetV1DocumentFilesDocumentIdGetData = {
 
 export type DocumentFileGetV1DocumentFilesDocumentIdGetErrors = {
     /**
-     * Validation Error
+     * Device authentication required
      */
-    422: HttpValidationError;
+    401: ApiErrorResponse;
+    /**
+     * Resource not found
+     */
+    404: ApiErrorResponse;
+    /**
+     * Request validation failed
+     */
+    422: ApiErrorResponse;
+    /**
+     * Internal server error
+     */
+    500: ApiErrorResponse;
 };
 
 export type DocumentFileGetV1DocumentFilesDocumentIdGetError = DocumentFileGetV1DocumentFilesDocumentIdGetErrors[keyof DocumentFileGetV1DocumentFilesDocumentIdGetErrors];
@@ -2417,9 +2617,21 @@ export type EditableDocumentGetV1EditableDocumentsDocumentIdGetData = {
 
 export type EditableDocumentGetV1EditableDocumentsDocumentIdGetErrors = {
     /**
-     * Validation Error
+     * Device authentication required
      */
-    422: HttpValidationError;
+    401: ApiErrorResponse;
+    /**
+     * Resource not found
+     */
+    404: ApiErrorResponse;
+    /**
+     * Request validation failed
+     */
+    422: ApiErrorResponse;
+    /**
+     * Internal server error
+     */
+    500: ApiErrorResponse;
 };
 
 export type EditableDocumentGetV1EditableDocumentsDocumentIdGetError = EditableDocumentGetV1EditableDocumentsDocumentIdGetErrors[keyof EditableDocumentGetV1EditableDocumentsDocumentIdGetErrors];
@@ -2447,9 +2659,25 @@ export type EditableDocumentSaveV1EditableDocumentsDocumentIdPutData = {
 
 export type EditableDocumentSaveV1EditableDocumentsDocumentIdPutErrors = {
     /**
-     * Validation Error
+     * Device authentication required
      */
-    422: HttpValidationError;
+    401: ApiErrorResponse;
+    /**
+     * Resource not found
+     */
+    404: ApiErrorResponse;
+    /**
+     * Resource state conflict
+     */
+    409: ApiErrorResponse;
+    /**
+     * Request validation failed
+     */
+    422: ApiErrorResponse;
+    /**
+     * Internal server error
+     */
+    500: ApiErrorResponse;
 };
 
 export type EditableDocumentSaveV1EditableDocumentsDocumentIdPutError = EditableDocumentSaveV1EditableDocumentsDocumentIdPutErrors[keyof EditableDocumentSaveV1EditableDocumentsDocumentIdPutErrors];
@@ -2477,9 +2705,29 @@ export type EditableDocumentImportV1EditableDocumentsDocumentIdImportPostData = 
 
 export type EditableDocumentImportV1EditableDocumentsDocumentIdImportPostErrors = {
     /**
-     * Validation Error
+     * Device authentication required
      */
-    422: HttpValidationError;
+    401: ApiErrorResponse;
+    /**
+     * Resource not found
+     */
+    404: ApiErrorResponse;
+    /**
+     * Resource state conflict
+     */
+    409: ApiErrorResponse;
+    /**
+     * Request validation failed
+     */
+    422: ApiErrorResponse;
+    /**
+     * Internal server error
+     */
+    500: ApiErrorResponse;
+    /**
+     * Required capability unavailable
+     */
+    503: ApiErrorResponse;
 };
 
 export type EditableDocumentImportV1EditableDocumentsDocumentIdImportPostError = EditableDocumentImportV1EditableDocumentsDocumentIdImportPostErrors[keyof EditableDocumentImportV1EditableDocumentsDocumentIdImportPostErrors];
@@ -2513,9 +2761,29 @@ export type EditableOperationsV1EditableDocumentsDocumentIdOperationsPostData = 
 
 export type EditableOperationsV1EditableDocumentsDocumentIdOperationsPostErrors = {
     /**
-     * Validation Error
+     * Device authentication required
      */
-    422: HttpValidationError;
+    401: ApiErrorResponse;
+    /**
+     * Operation is not permitted
+     */
+    403: ApiErrorResponse;
+    /**
+     * Resource not found
+     */
+    404: ApiErrorResponse;
+    /**
+     * Resource state conflict
+     */
+    409: ApiErrorResponse;
+    /**
+     * Request validation failed
+     */
+    422: ApiErrorResponse;
+    /**
+     * Internal server error
+     */
+    500: ApiErrorResponse;
 };
 
 export type EditableOperationsV1EditableDocumentsDocumentIdOperationsPostError = EditableOperationsV1EditableDocumentsDocumentIdOperationsPostErrors[keyof EditableOperationsV1EditableDocumentsDocumentIdOperationsPostErrors];
@@ -2543,9 +2811,29 @@ export type EditableDocumentPublishV1EditableDocumentsDocumentIdPublishPostData 
 
 export type EditableDocumentPublishV1EditableDocumentsDocumentIdPublishPostErrors = {
     /**
-     * Validation Error
+     * Device authentication required
      */
-    422: HttpValidationError;
+    401: ApiErrorResponse;
+    /**
+     * Resource not found
+     */
+    404: ApiErrorResponse;
+    /**
+     * Resource state conflict
+     */
+    409: ApiErrorResponse;
+    /**
+     * Request validation failed
+     */
+    422: ApiErrorResponse;
+    /**
+     * Internal server error
+     */
+    500: ApiErrorResponse;
+    /**
+     * Required capability unavailable
+     */
+    503: ApiErrorResponse;
 };
 
 export type EditableDocumentPublishV1EditableDocumentsDocumentIdPublishPostError = EditableDocumentPublishV1EditableDocumentsDocumentIdPublishPostErrors[keyof EditableDocumentPublishV1EditableDocumentsDocumentIdPublishPostErrors];
@@ -2573,9 +2861,21 @@ export type EditableSnapshotListV1EditableDocumentsDocumentIdSnapshotsGetData = 
 
 export type EditableSnapshotListV1EditableDocumentsDocumentIdSnapshotsGetErrors = {
     /**
-     * Validation Error
+     * Device authentication required
      */
-    422: HttpValidationError;
+    401: ApiErrorResponse;
+    /**
+     * Resource not found
+     */
+    404: ApiErrorResponse;
+    /**
+     * Request validation failed
+     */
+    422: ApiErrorResponse;
+    /**
+     * Internal server error
+     */
+    500: ApiErrorResponse;
 };
 
 export type EditableSnapshotListV1EditableDocumentsDocumentIdSnapshotsGetError = EditableSnapshotListV1EditableDocumentsDocumentIdSnapshotsGetErrors[keyof EditableSnapshotListV1EditableDocumentsDocumentIdSnapshotsGetErrors];
@@ -2609,9 +2909,29 @@ export type EditableSnapshotCreateV1EditableDocumentsDocumentIdSnapshotsPostData
 
 export type EditableSnapshotCreateV1EditableDocumentsDocumentIdSnapshotsPostErrors = {
     /**
-     * Validation Error
+     * Device authentication required
      */
-    422: HttpValidationError;
+    401: ApiErrorResponse;
+    /**
+     * Operation is not permitted
+     */
+    403: ApiErrorResponse;
+    /**
+     * Resource not found
+     */
+    404: ApiErrorResponse;
+    /**
+     * Resource state conflict
+     */
+    409: ApiErrorResponse;
+    /**
+     * Request validation failed
+     */
+    422: ApiErrorResponse;
+    /**
+     * Internal server error
+     */
+    500: ApiErrorResponse;
 };
 
 export type EditableSnapshotCreateV1EditableDocumentsDocumentIdSnapshotsPostError = EditableSnapshotCreateV1EditableDocumentsDocumentIdSnapshotsPostErrors[keyof EditableSnapshotCreateV1EditableDocumentsDocumentIdSnapshotsPostErrors];
@@ -2643,9 +2963,25 @@ export type EditableSnapshotRestoreV1EditableDocumentsDocumentIdSnapshotsSnapsho
 
 export type EditableSnapshotRestoreV1EditableDocumentsDocumentIdSnapshotsSnapshotIdRestorePostErrors = {
     /**
-     * Validation Error
+     * Device authentication required
      */
-    422: HttpValidationError;
+    401: ApiErrorResponse;
+    /**
+     * Resource not found
+     */
+    404: ApiErrorResponse;
+    /**
+     * Resource state conflict
+     */
+    409: ApiErrorResponse;
+    /**
+     * Request validation failed
+     */
+    422: ApiErrorResponse;
+    /**
+     * Internal server error
+     */
+    500: ApiErrorResponse;
 };
 
 export type EditableSnapshotRestoreV1EditableDocumentsDocumentIdSnapshotsSnapshotIdRestorePostError = EditableSnapshotRestoreV1EditableDocumentsDocumentIdSnapshotsSnapshotIdRestorePostErrors[keyof EditableSnapshotRestoreV1EditableDocumentsDocumentIdSnapshotsSnapshotIdRestorePostErrors];
@@ -2673,9 +3009,17 @@ export type EventsListV1EventsGetData = {
 
 export type EventsListV1EventsGetErrors = {
     /**
-     * Validation Error
+     * Device authentication required
      */
-    422: HttpValidationError;
+    401: ApiErrorResponse;
+    /**
+     * Request validation failed
+     */
+    422: ApiErrorResponse;
+    /**
+     * Internal server error
+     */
+    500: ApiErrorResponse;
 };
 
 export type EventsListV1EventsGetError = EventsListV1EventsGetErrors[keyof EventsListV1EventsGetErrors];
@@ -2707,9 +3051,17 @@ export type EventsStreamV1EventsStreamGetData = {
 
 export type EventsStreamV1EventsStreamGetErrors = {
     /**
-     * Validation Error
+     * Device authentication required
      */
-    422: HttpValidationError;
+    401: ApiErrorResponse;
+    /**
+     * Request validation failed
+     */
+    422: ApiErrorResponse;
+    /**
+     * Internal server error
+     */
+    500: ApiErrorResponse;
 };
 
 export type EventsStreamV1EventsStreamGetError = EventsStreamV1EventsStreamGetErrors[keyof EventsStreamV1EventsStreamGetErrors];
@@ -2727,6 +3079,19 @@ export type HealthV1HealthGetData = {
     query?: never;
     url: '/v1/health';
 };
+
+export type HealthV1HealthGetErrors = {
+    /**
+     * Internal server error
+     */
+    500: ApiErrorResponse;
+    /**
+     * Service Unavailable
+     */
+    503: ApiErrorResponse;
+};
+
+export type HealthV1HealthGetError = HealthV1HealthGetErrors[keyof HealthV1HealthGetErrors];
 
 export type HealthV1HealthGetResponses = {
     /**
@@ -2767,9 +3132,21 @@ export type JobsListV1JobsGetData = {
 
 export type JobsListV1JobsGetErrors = {
     /**
-     * Validation Error
+     * Device authentication required
      */
-    422: HttpValidationError;
+    401: ApiErrorResponse;
+    /**
+     * Request validation failed
+     */
+    422: ApiErrorResponse;
+    /**
+     * Internal server error
+     */
+    500: ApiErrorResponse;
+    /**
+     * Required capability unavailable
+     */
+    503: ApiErrorResponse;
 };
 
 export type JobsListV1JobsGetError = JobsListV1JobsGetErrors[keyof JobsListV1JobsGetErrors];
@@ -2798,13 +3175,29 @@ export type JobCreateFromBrowserV1JobsPostData = {
 
 export type JobCreateFromBrowserV1JobsPostErrors = {
     /**
+     * Device authentication required
+     */
+    401: ApiErrorResponse;
+    /**
      * Trusted MCP credential required
      */
-    403: unknown;
+    403: ApiErrorResponse;
     /**
-     * Validation Error
+     * Resource state conflict
      */
-    422: HttpValidationError;
+    409: ApiErrorResponse;
+    /**
+     * Request validation failed
+     */
+    422: ApiErrorResponse;
+    /**
+     * Internal server error
+     */
+    500: ApiErrorResponse;
+    /**
+     * Required capability unavailable
+     */
+    503: ApiErrorResponse;
 };
 
 export type JobCreateFromBrowserV1JobsPostError = JobCreateFromBrowserV1JobsPostErrors[keyof JobCreateFromBrowserV1JobsPostErrors];
@@ -2833,13 +3226,29 @@ export type JobsReorderV1JobsOrderPutData = {
 
 export type JobsReorderV1JobsOrderPutErrors = {
     /**
+     * Device authentication required
+     */
+    401: ApiErrorResponse;
+    /**
      * Trusted MCP credential required
      */
-    403: unknown;
+    403: ApiErrorResponse;
     /**
-     * Validation Error
+     * Resource state conflict
      */
-    422: HttpValidationError;
+    409: ApiErrorResponse;
+    /**
+     * Request validation failed
+     */
+    422: ApiErrorResponse;
+    /**
+     * Internal server error
+     */
+    500: ApiErrorResponse;
+    /**
+     * Required capability unavailable
+     */
+    503: ApiErrorResponse;
 };
 
 export type JobsReorderV1JobsOrderPutError = JobsReorderV1JobsOrderPutErrors[keyof JobsReorderV1JobsOrderPutErrors];
@@ -2876,9 +3285,25 @@ export type JobInspectV1JobsJobIdGetData = {
 
 export type JobInspectV1JobsJobIdGetErrors = {
     /**
-     * Validation Error
+     * Device authentication required
      */
-    422: HttpValidationError;
+    401: ApiErrorResponse;
+    /**
+     * Resource not found
+     */
+    404: ApiErrorResponse;
+    /**
+     * Request validation failed
+     */
+    422: ApiErrorResponse;
+    /**
+     * Internal server error
+     */
+    500: ApiErrorResponse;
+    /**
+     * Required capability unavailable
+     */
+    503: ApiErrorResponse;
 };
 
 export type JobInspectV1JobsJobIdGetError = JobInspectV1JobsJobIdGetErrors[keyof JobInspectV1JobsJobIdGetErrors];
@@ -2915,9 +3340,25 @@ export type JobArtifactsV1JobsJobIdArtifactsGetData = {
 
 export type JobArtifactsV1JobsJobIdArtifactsGetErrors = {
     /**
-     * Validation Error
+     * Device authentication required
      */
-    422: HttpValidationError;
+    401: ApiErrorResponse;
+    /**
+     * Resource not found
+     */
+    404: ApiErrorResponse;
+    /**
+     * Request validation failed
+     */
+    422: ApiErrorResponse;
+    /**
+     * Internal server error
+     */
+    500: ApiErrorResponse;
+    /**
+     * Required capability unavailable
+     */
+    503: ApiErrorResponse;
 };
 
 export type JobArtifactsV1JobsJobIdArtifactsGetError = JobArtifactsV1JobsJobIdArtifactsGetErrors[keyof JobArtifactsV1JobsJobIdArtifactsGetErrors];
@@ -2951,9 +3392,33 @@ export type PublishJobArtifactV1JobsJobIdArtifactsPublishPostData = {
 
 export type PublishJobArtifactV1JobsJobIdArtifactsPublishPostErrors = {
     /**
-     * Validation Error
+     * Device authentication required
      */
-    422: HttpValidationError;
+    401: ApiErrorResponse;
+    /**
+     * Operation is not permitted
+     */
+    403: ApiErrorResponse;
+    /**
+     * Resource not found
+     */
+    404: ApiErrorResponse;
+    /**
+     * Resource state conflict
+     */
+    409: ApiErrorResponse;
+    /**
+     * Request validation failed
+     */
+    422: ApiErrorResponse;
+    /**
+     * Internal server error
+     */
+    500: ApiErrorResponse;
+    /**
+     * Required capability unavailable
+     */
+    503: ApiErrorResponse;
 };
 
 export type PublishJobArtifactV1JobsJobIdArtifactsPublishPostError = PublishJobArtifactV1JobsJobIdArtifactsPublishPostErrors[keyof PublishJobArtifactV1JobsJobIdArtifactsPublishPostErrors];
@@ -2984,9 +3449,29 @@ export type RefreshJobArtifactsV1JobsJobIdArtifactsRefreshPostData = {
 
 export type RefreshJobArtifactsV1JobsJobIdArtifactsRefreshPostErrors = {
     /**
-     * Validation Error
+     * Device authentication required
      */
-    422: HttpValidationError;
+    401: ApiErrorResponse;
+    /**
+     * Resource not found
+     */
+    404: ApiErrorResponse;
+    /**
+     * Resource state conflict
+     */
+    409: ApiErrorResponse;
+    /**
+     * Request validation failed
+     */
+    422: ApiErrorResponse;
+    /**
+     * Internal server error
+     */
+    500: ApiErrorResponse;
+    /**
+     * Required capability unavailable
+     */
+    503: ApiErrorResponse;
 };
 
 export type RefreshJobArtifactsV1JobsJobIdArtifactsRefreshPostError = RefreshJobArtifactsV1JobsJobIdArtifactsRefreshPostErrors[keyof RefreshJobArtifactsV1JobsJobIdArtifactsRefreshPostErrors];
@@ -3014,9 +3499,29 @@ export type RegisterJobArtifactV1JobsJobIdArtifactsRegisterPostData = {
 
 export type RegisterJobArtifactV1JobsJobIdArtifactsRegisterPostErrors = {
     /**
-     * Validation Error
+     * Device authentication required
      */
-    422: HttpValidationError;
+    401: ApiErrorResponse;
+    /**
+     * Resource not found
+     */
+    404: ApiErrorResponse;
+    /**
+     * Resource state conflict
+     */
+    409: ApiErrorResponse;
+    /**
+     * Request validation failed
+     */
+    422: ApiErrorResponse;
+    /**
+     * Internal server error
+     */
+    500: ApiErrorResponse;
+    /**
+     * Required capability unavailable
+     */
+    503: ApiErrorResponse;
 };
 
 export type RegisterJobArtifactV1JobsJobIdArtifactsRegisterPostError = RegisterJobArtifactV1JobsJobIdArtifactsRegisterPostErrors[keyof RegisterJobArtifactV1JobsJobIdArtifactsRegisterPostErrors];
@@ -3044,9 +3549,29 @@ export type RenderJobArtifactV1JobsJobIdArtifactsRenderPostData = {
 
 export type RenderJobArtifactV1JobsJobIdArtifactsRenderPostErrors = {
     /**
-     * Validation Error
+     * Device authentication required
      */
-    422: HttpValidationError;
+    401: ApiErrorResponse;
+    /**
+     * Resource not found
+     */
+    404: ApiErrorResponse;
+    /**
+     * Resource state conflict
+     */
+    409: ApiErrorResponse;
+    /**
+     * Request validation failed
+     */
+    422: ApiErrorResponse;
+    /**
+     * Internal server error
+     */
+    500: ApiErrorResponse;
+    /**
+     * Required capability unavailable
+     */
+    503: ApiErrorResponse;
 };
 
 export type RenderJobArtifactV1JobsJobIdArtifactsRenderPostError = RenderJobArtifactV1JobsJobIdArtifactsRenderPostErrors[keyof RenderJobArtifactV1JobsJobIdArtifactsRenderPostErrors];
@@ -3081,9 +3606,29 @@ export type ApproveJobArtifactV1JobsJobIdArtifactsArtifactIdApprovePostData = {
 
 export type ApproveJobArtifactV1JobsJobIdArtifactsArtifactIdApprovePostErrors = {
     /**
-     * Validation Error
+     * Device authentication required
      */
-    422: HttpValidationError;
+    401: ApiErrorResponse;
+    /**
+     * Resource not found
+     */
+    404: ApiErrorResponse;
+    /**
+     * Resource state conflict
+     */
+    409: ApiErrorResponse;
+    /**
+     * Request validation failed
+     */
+    422: ApiErrorResponse;
+    /**
+     * Internal server error
+     */
+    500: ApiErrorResponse;
+    /**
+     * Required capability unavailable
+     */
+    503: ApiErrorResponse;
 };
 
 export type ApproveJobArtifactV1JobsJobIdArtifactsArtifactIdApprovePostError = ApproveJobArtifactV1JobsJobIdArtifactsArtifactIdApprovePostErrors[keyof ApproveJobArtifactV1JobsJobIdArtifactsArtifactIdApprovePostErrors];
@@ -3117,21 +3662,33 @@ export type JobRemoveDemoV1JobsJobIdDemoDeleteData = {
 
 export type JobRemoveDemoV1JobsJobIdDemoDeleteErrors = {
     /**
+     * Device authentication required
+     */
+    401: ApiErrorResponse;
+    /**
      * Trusted MCP credential required
      */
-    403: unknown;
+    403: ApiErrorResponse;
     /**
      * Demo job not found
      */
-    404: unknown;
+    404: ApiErrorResponse;
     /**
      * The selected job is not the fictional demo
      */
-    409: unknown;
+    409: ApiErrorResponse;
     /**
-     * Validation Error
+     * Request validation failed
      */
-    422: HttpValidationError;
+    422: ApiErrorResponse;
+    /**
+     * Internal server error
+     */
+    500: ApiErrorResponse;
+    /**
+     * Required capability unavailable
+     */
+    503: ApiErrorResponse;
 };
 
 export type JobRemoveDemoV1JobsJobIdDemoDeleteError = JobRemoveDemoV1JobsJobIdDemoDeleteErrors[keyof JobRemoveDemoV1JobsJobIdDemoDeleteErrors];
@@ -3165,13 +3722,33 @@ export type JobUpdateDescriptionV1JobsJobIdDescriptionPutData = {
 
 export type JobUpdateDescriptionV1JobsJobIdDescriptionPutErrors = {
     /**
+     * Device authentication required
+     */
+    401: ApiErrorResponse;
+    /**
      * Trusted MCP credential required
      */
-    403: unknown;
+    403: ApiErrorResponse;
     /**
-     * Validation Error
+     * Resource not found
      */
-    422: HttpValidationError;
+    404: ApiErrorResponse;
+    /**
+     * Resource state conflict
+     */
+    409: ApiErrorResponse;
+    /**
+     * Request validation failed
+     */
+    422: ApiErrorResponse;
+    /**
+     * Internal server error
+     */
+    500: ApiErrorResponse;
+    /**
+     * Required capability unavailable
+     */
+    503: ApiErrorResponse;
 };
 
 export type JobUpdateDescriptionV1JobsJobIdDescriptionPutError = JobUpdateDescriptionV1JobsJobIdDescriptionPutErrors[keyof JobUpdateDescriptionV1JobsJobIdDescriptionPutErrors];
@@ -3199,9 +3776,25 @@ export type DocumentFilesListV1JobsJobIdDocumentFilesGetData = {
 
 export type DocumentFilesListV1JobsJobIdDocumentFilesGetErrors = {
     /**
-     * Validation Error
+     * Device authentication required
      */
-    422: HttpValidationError;
+    401: ApiErrorResponse;
+    /**
+     * Resource not found
+     */
+    404: ApiErrorResponse;
+    /**
+     * Request validation failed
+     */
+    422: ApiErrorResponse;
+    /**
+     * Internal server error
+     */
+    500: ApiErrorResponse;
+    /**
+     * Required capability unavailable
+     */
+    503: ApiErrorResponse;
 };
 
 export type DocumentFilesListV1JobsJobIdDocumentFilesGetError = DocumentFilesListV1JobsJobIdDocumentFilesGetErrors[keyof DocumentFilesListV1JobsJobIdDocumentFilesGetErrors];
@@ -3248,9 +3841,29 @@ export type EditableDocumentOutlineV1JobsJobIdEditableDocumentOutlinesDocumentKe
 
 export type EditableDocumentOutlineV1JobsJobIdEditableDocumentOutlinesDocumentKeyGetErrors = {
     /**
-     * Validation Error
+     * Device authentication required
      */
-    422: HttpValidationError;
+    401: ApiErrorResponse;
+    /**
+     * Operation is not permitted
+     */
+    403: ApiErrorResponse;
+    /**
+     * Resource not found
+     */
+    404: ApiErrorResponse;
+    /**
+     * Request validation failed
+     */
+    422: ApiErrorResponse;
+    /**
+     * Internal server error
+     */
+    500: ApiErrorResponse;
+    /**
+     * Required capability unavailable
+     */
+    503: ApiErrorResponse;
 };
 
 export type EditableDocumentOutlineV1JobsJobIdEditableDocumentOutlinesDocumentKeyGetError = EditableDocumentOutlineV1JobsJobIdEditableDocumentOutlinesDocumentKeyGetErrors[keyof EditableDocumentOutlineV1JobsJobIdEditableDocumentOutlinesDocumentKeyGetErrors];
@@ -3278,9 +3891,25 @@ export type EditableDocumentsListV1JobsJobIdEditableDocumentsGetData = {
 
 export type EditableDocumentsListV1JobsJobIdEditableDocumentsGetErrors = {
     /**
-     * Validation Error
+     * Device authentication required
      */
-    422: HttpValidationError;
+    401: ApiErrorResponse;
+    /**
+     * Resource not found
+     */
+    404: ApiErrorResponse;
+    /**
+     * Request validation failed
+     */
+    422: ApiErrorResponse;
+    /**
+     * Internal server error
+     */
+    500: ApiErrorResponse;
+    /**
+     * Required capability unavailable
+     */
+    503: ApiErrorResponse;
 };
 
 export type EditableDocumentsListV1JobsJobIdEditableDocumentsGetError = EditableDocumentsListV1JobsJobIdEditableDocumentsGetErrors[keyof EditableDocumentsListV1JobsJobIdEditableDocumentsGetErrors];
@@ -3317,9 +3946,29 @@ export type EditableDocumentCreateV1JobsJobIdEditableDocumentsPostData = {
 
 export type EditableDocumentCreateV1JobsJobIdEditableDocumentsPostErrors = {
     /**
-     * Validation Error
+     * Device authentication required
      */
-    422: HttpValidationError;
+    401: ApiErrorResponse;
+    /**
+     * Resource not found
+     */
+    404: ApiErrorResponse;
+    /**
+     * Resource state conflict
+     */
+    409: ApiErrorResponse;
+    /**
+     * Request validation failed
+     */
+    422: ApiErrorResponse;
+    /**
+     * Internal server error
+     */
+    500: ApiErrorResponse;
+    /**
+     * Required capability unavailable
+     */
+    503: ApiErrorResponse;
 };
 
 export type EditableDocumentCreateV1JobsJobIdEditableDocumentsPostError = EditableDocumentCreateV1JobsJobIdEditableDocumentsPostErrors[keyof EditableDocumentCreateV1JobsJobIdEditableDocumentsPostErrors];
@@ -3351,9 +4000,25 @@ export type EditableDocumentForJobV1JobsJobIdEditableDocumentsDocumentKeyGetData
 
 export type EditableDocumentForJobV1JobsJobIdEditableDocumentsDocumentKeyGetErrors = {
     /**
-     * Validation Error
+     * Device authentication required
      */
-    422: HttpValidationError;
+    401: ApiErrorResponse;
+    /**
+     * Resource not found
+     */
+    404: ApiErrorResponse;
+    /**
+     * Request validation failed
+     */
+    422: ApiErrorResponse;
+    /**
+     * Internal server error
+     */
+    500: ApiErrorResponse;
+    /**
+     * Required capability unavailable
+     */
+    503: ApiErrorResponse;
 };
 
 export type EditableDocumentForJobV1JobsJobIdEditableDocumentsDocumentKeyGetError = EditableDocumentForJobV1JobsJobIdEditableDocumentsDocumentKeyGetErrors[keyof EditableDocumentForJobV1JobsJobIdEditableDocumentsDocumentKeyGetErrors];
@@ -3381,9 +4046,25 @@ export type JobHistoryV1JobsJobIdHistoryGetData = {
 
 export type JobHistoryV1JobsJobIdHistoryGetErrors = {
     /**
-     * Validation Error
+     * Device authentication required
      */
-    422: HttpValidationError;
+    401: ApiErrorResponse;
+    /**
+     * Resource not found
+     */
+    404: ApiErrorResponse;
+    /**
+     * Request validation failed
+     */
+    422: ApiErrorResponse;
+    /**
+     * Internal server error
+     */
+    500: ApiErrorResponse;
+    /**
+     * Required capability unavailable
+     */
+    503: ApiErrorResponse;
 };
 
 export type JobHistoryV1JobsJobIdHistoryGetError = JobHistoryV1JobsJobIdHistoryGetErrors[keyof JobHistoryV1JobsJobIdHistoryGetErrors];
@@ -3417,13 +4098,33 @@ export type JobUpdateStatusV1JobsJobIdStatusPutData = {
 
 export type JobUpdateStatusV1JobsJobIdStatusPutErrors = {
     /**
+     * Device authentication required
+     */
+    401: ApiErrorResponse;
+    /**
      * Trusted MCP credential required
      */
-    403: unknown;
+    403: ApiErrorResponse;
     /**
-     * Validation Error
+     * Resource not found
      */
-    422: HttpValidationError;
+    404: ApiErrorResponse;
+    /**
+     * Resource state conflict
+     */
+    409: ApiErrorResponse;
+    /**
+     * Request validation failed
+     */
+    422: ApiErrorResponse;
+    /**
+     * Internal server error
+     */
+    500: ApiErrorResponse;
+    /**
+     * Required capability unavailable
+     */
+    503: ApiErrorResponse;
 };
 
 export type JobUpdateStatusV1JobsJobIdStatusPutError = JobUpdateStatusV1JobsJobIdStatusPutErrors[keyof JobUpdateStatusV1JobsJobIdStatusPutErrors];
@@ -3443,6 +4144,15 @@ export type VersionV1VersionGetData = {
     query?: never;
     url: '/v1/version';
 };
+
+export type VersionV1VersionGetErrors = {
+    /**
+     * Internal server error
+     */
+    500: ApiErrorResponse;
+};
+
+export type VersionV1VersionGetError = VersionV1VersionGetErrors[keyof VersionV1VersionGetErrors];
 
 export type VersionV1VersionGetResponses = {
     /**
@@ -3471,9 +4181,17 @@ export type WorkspaceGetV1WorkspaceGetData = {
 
 export type WorkspaceGetV1WorkspaceGetErrors = {
     /**
-     * Validation Error
+     * Device authentication required
      */
-    422: HttpValidationError;
+    401: ApiErrorResponse;
+    /**
+     * Request validation failed
+     */
+    422: ApiErrorResponse;
+    /**
+     * Internal server error
+     */
+    500: ApiErrorResponse;
 };
 
 export type WorkspaceGetV1WorkspaceGetError = WorkspaceGetV1WorkspaceGetErrors[keyof WorkspaceGetV1WorkspaceGetErrors];
@@ -3502,13 +4220,25 @@ export type WorkspacePutV1WorkspacePutData = {
 
 export type WorkspacePutV1WorkspacePutErrors = {
     /**
+     * Device authentication required
+     */
+    401: ApiErrorResponse;
+    /**
      * Trusted MCP credential required
      */
-    403: unknown;
+    403: ApiErrorResponse;
     /**
-     * Validation Error
+     * Resource state conflict
      */
-    422: HttpValidationError;
+    409: ApiErrorResponse;
+    /**
+     * Request validation failed
+     */
+    422: ApiErrorResponse;
+    /**
+     * Internal server error
+     */
+    500: ApiErrorResponse;
 };
 
 export type WorkspacePutV1WorkspacePutError = WorkspacePutV1WorkspacePutErrors[keyof WorkspacePutV1WorkspacePutErrors];
@@ -3528,6 +4258,19 @@ export type WorkspaceJobsV1WorkspaceJobsGetData = {
     query?: never;
     url: '/v1/workspace/jobs';
 };
+
+export type WorkspaceJobsV1WorkspaceJobsGetErrors = {
+    /**
+     * Device authentication required
+     */
+    401: ApiErrorResponse;
+    /**
+     * Internal server error
+     */
+    500: ApiErrorResponse;
+};
+
+export type WorkspaceJobsV1WorkspaceJobsGetError = WorkspaceJobsV1WorkspaceJobsGetErrors[keyof WorkspaceJobsV1WorkspaceJobsGetErrors];
 
 export type WorkspaceJobsV1WorkspaceJobsGetResponses = {
     /**
@@ -3553,13 +4296,33 @@ export type WorkspaceSelectJobV1WorkspaceJobsSelectionPutData = {
 
 export type WorkspaceSelectJobV1WorkspaceJobsSelectionPutErrors = {
     /**
+     * Device authentication required
+     */
+    401: ApiErrorResponse;
+    /**
      * Trusted MCP credential required
      */
-    403: unknown;
+    403: ApiErrorResponse;
     /**
-     * Validation Error
+     * Resource not found
      */
-    422: HttpValidationError;
+    404: ApiErrorResponse;
+    /**
+     * Resource state conflict
+     */
+    409: ApiErrorResponse;
+    /**
+     * Request validation failed
+     */
+    422: ApiErrorResponse;
+    /**
+     * Internal server error
+     */
+    500: ApiErrorResponse;
+    /**
+     * Required capability unavailable
+     */
+    503: ApiErrorResponse;
 };
 
 export type WorkspaceSelectJobV1WorkspaceJobsSelectionPutError = WorkspaceSelectJobV1WorkspaceJobsSelectionPutErrors[keyof WorkspaceSelectJobV1WorkspaceJobsSelectionPutErrors];
@@ -3588,13 +4351,25 @@ export type WorkspaceSortJobsV1WorkspaceJobsSortPutData = {
 
 export type WorkspaceSortJobsV1WorkspaceJobsSortPutErrors = {
     /**
+     * Device authentication required
+     */
+    401: ApiErrorResponse;
+    /**
      * Trusted MCP credential required
      */
-    403: unknown;
+    403: ApiErrorResponse;
     /**
-     * Validation Error
+     * Resource state conflict
      */
-    422: HttpValidationError;
+    409: ApiErrorResponse;
+    /**
+     * Request validation failed
+     */
+    422: ApiErrorResponse;
+    /**
+     * Internal server error
+     */
+    500: ApiErrorResponse;
 };
 
 export type WorkspaceSortJobsV1WorkspaceJobsSortPutError = WorkspaceSortJobsV1WorkspaceJobsSortPutErrors[keyof WorkspaceSortJobsV1WorkspaceJobsSortPutErrors];

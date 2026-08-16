@@ -110,7 +110,11 @@ function startSourceApi(runtime: DesktopRuntimeConfig): Promise<void> {
       address.port || '8766'
     ], {
       cwd: sourceRoot,
-      env: { ...childEnvironment, JOBOS_CONFIG_PATH: configPath },
+      env: {
+        ...childEnvironment,
+        JOBOS_CONFIG_PATH: configPath,
+        JOBOS_TRANSPORT: runtime.mode === 'remote-client' ? 'private-remote' : 'local-loopback'
+      },
       stdio: 'ignore'
     })
     child.once('spawn', () => {
@@ -191,10 +195,16 @@ function registerDiagnosticsInterface(configPath: string): void {
         ? { apiVersion: desktopRuntimeState.connectivity.apiVersion }
         : {}),
       capabilities: {
-        localService: !runtime ? 'not-configured'
+        localService: !runtime || runtime.mode !== 'local-service' ? 'not-configured'
           : desktopRuntimeState.connectivity.state === 'connected' ? 'available' : 'unavailable',
-        agent: !runtime || runtime.agentProvider === 'offline' ? 'not-configured' : 'available',
-        desktop: browserManager ? 'available' : 'unavailable'
+        agent: !runtime || desktopRuntimeState.connectivity.agent === 'not-configured' ? 'not-configured'
+          : desktopRuntimeState.connectivity.agent === 'offline' ? 'offline'
+            : desktopRuntimeState.connectivity.agent === 'connecting' ? 'connecting' : 'available',
+        desktop: desktopRuntimeState.connectivity.desktop === 'connected' ? 'available' : 'disconnected',
+        renderer: docxWorkerManager?.isAvailable() ? 'available' : 'unavailable',
+        artifactStorage: desktopRuntimeState.connectivity.artifactStorage ?? 'unavailable',
+        artifactGateway: desktopRuntimeState.connectivity.artifactGateway ?? 'not-configured',
+        transport: desktopRuntimeState.connectivity.transport ?? 'not-configured'
       }
     }
   })

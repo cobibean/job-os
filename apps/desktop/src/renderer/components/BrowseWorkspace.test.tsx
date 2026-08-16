@@ -94,13 +94,14 @@ test('stale detail responses are ignored', async () => {
 
 test('detail loading is keyed to focus and never flashes an uninspected empty description', async () => {
   let resolveTwo!: (value: JobDetail) => void
-  installJobsBridge(vi.fn((jobId: string) => jobId === 'two'
+  const bridge = installJobsBridge(vi.fn((jobId: string) => jobId === 'two'
     ? new Promise<JobDetail>(resolve => { resolveTwo = resolve })
     : Promise.resolve({ ...jobs.find(job => job.jobId === jobId)!, description: '', location: null })))
   render(<Harness />)
 
   expect(await screen.findByText('Loading job detail…')).not.toBeNull()
   expect(screen.queryByText('No description available.')).toBeNull()
+  await waitFor(() => expect(bridge.inspect).toHaveBeenCalledWith('two'))
   resolveTwo({ ...jobs[1]!, description: '', location: null })
   expect(await screen.findByText('No description available.')).not.toBeNull()
 })

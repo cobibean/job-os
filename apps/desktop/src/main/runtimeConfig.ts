@@ -17,6 +17,8 @@ export interface DesktopRuntimeConfig {
     logs: string
   }
   agentProvider?: 'offline' | 'hermes'
+  jobProvider?: 'sqlite' | 'job-hunter'
+  artifactProvider?: 'local' | 'gateway'
   demoEnabled?: boolean
 }
 
@@ -131,6 +133,12 @@ function validateConfig(value: unknown): DesktopRuntimeConfig {
   if (value.agentProvider === 'offline' || value.agentProvider === 'hermes') {
     config.agentProvider = value.agentProvider
   } else if (value.agentProvider !== undefined) throw new Error('JobOS agent configuration is invalid')
+  if (value.jobProvider === 'sqlite' || value.jobProvider === 'job-hunter') {
+    config.jobProvider = value.jobProvider
+  } else if (value.jobProvider !== undefined) throw new Error('JobOS job provider configuration is invalid')
+  if (value.artifactProvider === 'local' || value.artifactProvider === 'gateway') {
+    config.artifactProvider = value.artifactProvider
+  } else if (value.artifactProvider !== undefined) throw new Error('JobOS artifact provider configuration is invalid')
   if (typeof value.demoEnabled === 'boolean') config.demoEnabled = value.demoEnabled
   else if (value.demoEnabled !== undefined) throw new Error('JobOS demo configuration is invalid')
   if (value.mode === 'local-service') {
