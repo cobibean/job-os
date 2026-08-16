@@ -69,14 +69,19 @@ async def call(session: ClientSession, name: str, arguments: dict[str, Any]) -> 
 
 
 async def assert_optional_error(
-    session: ClientSession, name: str, arguments: dict[str, Any], code: str
+    session: ClientSession,
+    name: str,
+    arguments: dict[str, Any],
+    code: str,
+    *,
+    retryable: bool = True,
 ) -> None:
     with anyio.fail_after(10):
         result = await session.call_tool(name, arguments)
     assert result.isError is True
     text = " ".join(str(item) for item in result.content)
     assert code in text
-    assert "retryable=true" in text
+    assert f"retryable={str(retryable).lower()}" in text
     assert "correlation_id=" in text
 
 
@@ -439,6 +444,7 @@ async def test_clean_home_golden_path(clean_runtime) -> None:
                 "browser_tabs_inspect",
                 {"conversation_id": conversation_id, "timeout_ms": 500},
                 "http_409",
+                retryable=False,
             )
             await assert_optional_error(
                 mcp,
@@ -449,6 +455,7 @@ async def test_clean_home_golden_path(clean_runtime) -> None:
                     "idempotency_key": "clean-refresh-1",
                 },
                 "http_409",
+                retryable=False,
             )
             await assert_optional_error(
                 mcp,
@@ -460,6 +467,7 @@ async def test_clean_home_golden_path(clean_runtime) -> None:
                     "idempotency_key": "clean-render-1",
                 },
                 "http_409",
+                retryable=False,
             )
         with api.client() as client:
             health = assert_response(client.get("/v1/health"))
