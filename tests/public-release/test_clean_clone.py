@@ -454,8 +454,7 @@ async def test_clean_home_golden_path(clean_runtime) -> None:
                     "conversation_id": conversation_id,
                     "idempotency_key": "clean-refresh-1",
                 },
-                "http_409",
-                retryable=False,
+                "artifact_provider_unavailable",
             )
             await assert_optional_error(
                 mcp,
@@ -466,8 +465,7 @@ async def test_clean_home_golden_path(clean_runtime) -> None:
                     "conversation_id": conversation_id,
                     "idempotency_key": "clean-render-1",
                 },
-                "http_409",
-                retryable=False,
+                "renderer_unavailable",
             )
         with api.client() as client:
             health = assert_response(client.get("/v1/health"))
