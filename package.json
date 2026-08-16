@@ -17,6 +17,11 @@
   "engines": {
     "node": ">=26.5.0 <27"
   },
+  "pnpm": {
+    "overrides": {
+      "js-yaml": "4.3.1"
+    }
+  },
   "scripts": {
     "api:export": "uv run python scripts/export_openapi.py",
     "build": "pnpm contracts:generate && pnpm --filter @jobos/contracts build && pnpm --filter @jobos/desktop build && node scripts/verify-packaged-renderer.mjs",
