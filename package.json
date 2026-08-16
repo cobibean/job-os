@@ -37,6 +37,7 @@
     "public:smoke-clean-clone": "python scripts/public-release/smoke-clean-clone.py --source . --ref HEAD",
     "lint": "pnpm --filter @jobos/contracts lint && pnpm --filter @jobos/desktop lint && uv run ruff check services scripts",
     "test": "pnpm --filter @jobos/desktop test && uv run pytest",
+    "test:updater": "pnpm --filter @jobos/desktop test:macbook-update",
     "typecheck": "pnpm contracts:generate && pnpm --filter @jobos/contracts build && pnpm --filter @jobos/contracts typecheck && pnpm --filter @jobos/desktop typecheck"
   }
 }
