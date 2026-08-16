@@ -2316,7 +2316,7 @@ def create_app(
                 idempotency_key=command.idempotency_key,
                 request_hash=request_hash,
                 mutation=apply_document_operations,
-                label="Applied JobHunter document edits",
+                label="Applied MCP document edits",
             )
         except EditableDocumentConflict as error:
             raise editable_conflict(error) from error
