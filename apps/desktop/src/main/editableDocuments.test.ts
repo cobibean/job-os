@@ -202,7 +202,7 @@ describe('editable document main client', () => {
       baseUrl: 'http://127.0.0.1:8766',
       deviceToken: 'token'
     }, { dialog: {
-        showOpenDialog: vi.fn(async () => ({ canceled: false, filePaths: ['/Users/cobi/resume.pdf'] })),
+        showOpenDialog: vi.fn(async () => ({ canceled: false, filePaths: ['/Users/example/resume.pdf'] })),
         showSaveDialog: vi.fn(async () => ({ canceled: true, filePath: '/unused' }))
     } })
 

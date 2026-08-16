@@ -1,0 +1,43 @@
+name: Security
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "23 7 * * 1"
+
+permissions:
+  contents: read
+
+jobs:
+  public-tree:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+      - uses: astral-sh/setup-uv@v8.3.2
+        with:
+          version: "0.11.18"
+      - run: uv sync --all-packages --frozen
+      - run: uv run python scripts/public-release/verify-public-tree.py
+      - run: uv run python scripts/public-release/verify-fixture-manifest.py
+
+  codeql:
+    if: github.event.repository.private == false
+    permissions:
+      contents: read
+      security-events: write
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [javascript-typescript, python]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: github/codeql-action/init@v4
+        with:
+          languages: ${{ matrix.language }}
+      - uses: github/codeql-action/analyze@v4

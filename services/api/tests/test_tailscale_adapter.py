@@ -21,7 +21,7 @@ def test_tailscale_status_requires_a_running_node_with_magic_dns():
                 "BackendState": "Running",
                 "Self": {
                     "DNSName": "mini.private-tailnet.example.",
-                    "TailscaleIPs": ["100.64.0.10", "fd7a:115c:a1e0::1"],
+                    "TailscaleIPs": ["192.0.2.10", "2001:db8::10"],
                 },
             }
         )
@@ -29,7 +29,7 @@ def test_tailscale_status_requires_a_running_node_with_magic_dns():
 
     assert node == TailscaleNode(
         dns_name="mini.private-tailnet.example",
-        addresses=("100.64.0.10", "fd7a:115c:a1e0::1"),
+        addresses=("192.0.2.10", "2001:db8::10"),
     )
     with pytest.raises(ValueError, match="not running"):
         parse_tailscale_status('{"BackendState":"Stopped","Self":{}}')
@@ -60,7 +60,7 @@ def test_serve_command_is_private_additive_and_loopback_only():
 
 def test_remote_runtime_uses_discovered_private_https_endpoint_without_secrets():
     runtime = build_remote_desktop_runtime(
-        TailscaleNode("mini.private-tailnet.example", ("100.64.0.10",)),
+        TailscaleNode("mini.private-tailnet.example", ("192.0.2.10",)),
         https_port=10448,
         device_id="macbook-device",
     )
@@ -98,7 +98,7 @@ def test_serve_status_must_match_exact_jobos_port_and_loopback_backend():
 def test_remote_provisioning_writes_only_non_secret_config_and_keychain_credential(tmp_path):
     keychain_writes = []
     config_path = provision_remote_client(
-        TailscaleNode("mini.private-tailnet.example", ("100.64.0.10",)),
+        TailscaleNode("mini.private-tailnet.example", ("192.0.2.10",)),
         home=tmp_path,
         https_port=10448,
         device_id="macbook-device",
@@ -129,7 +129,7 @@ def test_configure_serve_discovers_identity_applies_one_route_and_verifies_it():
             "BackendState": "Running",
             "Self": {
                 "DNSName": "mini.private-tailnet.example.",
-                "TailscaleIPs": ["100.64.0.10"],
+                "TailscaleIPs": ["192.0.2.10"],
             },
         }
     )
@@ -170,7 +170,7 @@ def test_failed_serve_verification_rolls_back_only_selected_port():
             "BackendState": "Running",
             "Self": {
                 "DNSName": "mini.private-tailnet.example.",
-                "TailscaleIPs": ["100.64.0.10"],
+                "TailscaleIPs": ["192.0.2.10"],
             },
         }
     )

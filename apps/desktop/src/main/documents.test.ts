@@ -175,7 +175,7 @@ describe('trusted document client', () => {
 
   it('exports the exact registered DOCX bytes with its filename', async () => {
     const outputRoot = await mkdtemp(path.join(os.tmpdir(), 'jobos-docx-export-test-'))
-    const output = path.join(outputRoot, 'Jacobi_Lange_Cover_Letter.docx')
+    const output = path.join(outputRoot, 'Example_User_Cover_Letter.docx')
     const docx = Buffer.from('PK\x03\x04trusted docx fixture')
     const docxHash = createHash('sha256').update(docx).digest('hex')
     globalThis.fetch = vi.fn(async () => new Response(docx, {
@@ -183,7 +183,7 @@ describe('trusted document client', () => {
       headers: {
         'Content-Type': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
         'Content-Length': String(docx.length),
-        'Content-Disposition': "attachment; filename*=UTF-8''Jacobi_Lange_Cover_Letter.docx",
+        'Content-Disposition': "attachment; filename*=UTF-8''Example_User_Cover_Letter.docx",
         'X-Artifact-ID': artifactId,
         'X-Artifact-Revision': 'cover-docx-1',
         'X-Source-Revision': 'cover-source-1',
@@ -195,7 +195,7 @@ describe('trusted document client', () => {
       {
         cacheRoot: outputRoot,
         dialog: { showSaveDialog: vi.fn(async options => {
-          expect(options.defaultPath).toBe('Jacobi_Lange_Cover_Letter.docx')
+          expect(options.defaultPath).toBe('Example_User_Cover_Letter.docx')
           return { canceled: false, filePath: output, bookmark: '' }
         }) },
         shell: { openPath: vi.fn(async () => ''), showItemInFolder: vi.fn() }
@@ -203,7 +203,7 @@ describe('trusted document client', () => {
     )
 
     await expect(documents.exportArtifact(artifactId)).resolves.toBe(
-      'Exported Jacobi_Lange_Cover_Letter.docx'
+      'Exported Example_User_Cover_Letter.docx'
     )
     expect(await readFile(output)).toEqual(docx)
     await rm(outputRoot, { recursive: true, force: true })

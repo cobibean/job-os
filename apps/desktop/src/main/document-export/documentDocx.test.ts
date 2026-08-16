@@ -27,8 +27,8 @@ function documentFixture(): EditableDocument {
   const settings = defaultDocumentSettings()
   settings.pageSize = 'a4'
   settings.marginsInches = { top: 0.5, right: 0.75, bottom: 1, left: 1.25 }
-  settings.header.left = 'Cobi Bean'
-  settings.footer.right = 'Private'
+  settings.header.left = 'Example User'
+  settings.footer.right = 'Draft'
   settings.showPageNumbers = true
   return {
     schemaVersion: 1,
@@ -65,8 +65,8 @@ describe('native DOCX export', () => {
     expect(documentXml).toContain('w:type="page"')
     expect(documentXml).toContain('w:pgSz w:w="11906" w:h="16838"')
     expect(documentXml).toContain('w:pgMar w:top="720" w:right="1080" w:bottom="1440" w:left="1800"')
-    expect(headerXml).toContain('Cobi Bean')
-    expect(footerXml).toContain('Private')
+    expect(headerXml).toContain('Example User')
+    expect(footerXml).toContain('Draft')
     expect(footerXml).toContain('PAGE')
     expect(relationships).toContain('https://example.com/profile')
   })
