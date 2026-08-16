@@ -149,6 +149,54 @@
         "trackedSource": "docs/implementation/jobos-ooxml-editor-fixture-manifest.md",
         "method": "Derived from the generated desktop fixtures and visibly FAKE-labeled in OOXML as documented."
       }
+    },
+    {
+      "path": "docs/media/jobos-demo.gif",
+      "sha256": "dd4b00ce6e1f1c4f24f592ab3dfc2599f3f072c09001cffc8a97a94d0e7cadda",
+      "classification": "project-asset",
+      "publication": "keep",
+      "source": "Production Electron capture of the isolated fictional starter profile",
+      "purpose": "Silent launch-media walkthrough",
+      "provenance": {
+        "trackedSource": "docs/media/source/capture-media.mjs",
+        "method": "Captured from the production renderer, privacy-checked, metadata-stripped, and checksum-pinned by the repository workflow."
+      }
+    },
+    {
+      "path": "docs/media/screenshots/jobos-browse-detail-1440x1024.png",
+      "sha256": "6c92123b89a2b975b979bb0ac4e6c35d6b85458e6dee230c509d36140c980c64",
+      "classification": "project-asset",
+      "publication": "keep",
+      "source": "Production Electron capture of the isolated fictional starter profile",
+      "purpose": "Static Browse workspace launch media",
+      "provenance": {
+        "trackedSource": "docs/media/source/capture-media.mjs",
+        "method": "Captured from the production renderer, privacy-checked, metadata-stripped, and checksum-pinned by the repository workflow."
+      }
+    },
+    {
+      "path": "docs/media/screenshots/jobos-hero-1440x1024.png",
+      "sha256": "26bf469285822a84f9a6a94ce47f6b4edef02083fc60794d0f18ea8f2c50e56c",
+      "classification": "project-asset",
+      "publication": "keep",
+      "source": "Production Electron capture of the isolated fictional starter profile",
+      "purpose": "Static Review workspace launch media",
+      "provenance": {
+        "trackedSource": "docs/media/source/capture-media.mjs",
+        "method": "Captured from the production renderer, privacy-checked, metadata-stripped, and checksum-pinned by the repository workflow."
+      }
+    },
+    {
+      "path": "docs/media/screenshots/jobos-ooxml-editor-saved-1440x1024.png",
+      "sha256": "73fe5628b19820da011570a5572e63ff01413aa7f38d57447a18c58ab4fd6007",
+      "classification": "project-asset",
+      "publication": "keep",
+      "source": "Production Electron capture of the isolated fictional starter profile",
+      "purpose": "Static retained-OOXML editor launch media",
+      "provenance": {
+        "trackedSource": "docs/media/source/capture-media.mjs",
+        "method": "Captured from the production renderer, privacy-checked, metadata-stripped, and checksum-pinned by the repository workflow."
+      }
     }
   ]
 }

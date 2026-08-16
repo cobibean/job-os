@@ -262,22 +262,31 @@ export function DocumentWorkspace(props: DocumentWorkspaceProps) {
     setExportOpen(false)
     setLoading(true)
     setMessage('Loading registered artifacts…')
-    bridge.list(jobId).then(listed => {
-      if (!active) return
-      setState(listed)
-      const listedId = choosePreview(listed, pendingId)
-      return bridge.refresh(jobId).then(refreshed => ({ refreshed, listedId }))
-    }).then(result => {
-      if (!active || !result) return
-      const { refreshed, listedId } = result
-      setState(refreshed)
-      choosePreview(refreshed, listedId)
-      setMessage(refreshed.artifacts.length ? 'Artifact registry is current' : 'No artifacts registered for this job')
-    }).catch(error => {
-      if (active) setMessage(error instanceof Error ? error.message : 'Artifact refresh failed')
-    }).finally(() => {
-      if (active) setLoading(false)
-    })
+    void (async () => {
+      try {
+        const listed = await bridge.list(jobId)
+        if (!active) return
+        setState(listed)
+        const listedId = choosePreview(listed, pendingId)
+        try {
+          const refreshed = await bridge.refresh(jobId)
+          if (!active) return
+          setState(refreshed)
+          choosePreview(refreshed, listedId)
+          setMessage(refreshed.artifacts.length ? 'Artifact registry is current' : 'No artifacts registered for this job')
+        } catch {
+          if (active) {
+            setMessage(listed.artifacts.length
+              ? 'Local documents loaded; optional artifact refresh is unavailable'
+              : 'No local artifacts registered; optional artifact refresh is unavailable')
+          }
+        }
+      } catch {
+        if (active) setMessage('Documents are unavailable right now')
+      } finally {
+        if (active) setLoading(false)
+      }
+    })()
     return () => { active = false }
   }, [bridge, choosePreview, jobId])
 
@@ -429,8 +438,8 @@ export function DocumentWorkspace(props: DocumentWorkspaceProps) {
       setState(refreshed)
       choosePreview(refreshed, selectedId.current)
       setMessage('Checked for newer artifacts')
-    } catch (error) {
-      if (activeJobId.current === requestJobId) setMessage(error instanceof Error ? error.message : 'Artifact refresh failed')
+    } catch {
+      if (activeJobId.current === requestJobId) setMessage('Optional artifact refresh is unavailable; local documents remain available')
     } finally {
       if (activeJobId.current === requestJobId) setLoading(false)
     }
