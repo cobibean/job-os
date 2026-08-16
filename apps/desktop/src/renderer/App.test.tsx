@@ -5,7 +5,7 @@ import type { AgentSessionStreamUpdate, JobListItem } from '../shared/contracts'
 import { App } from './App'
 import { isExpectedSaveNavigation } from './components/CenterWorkspace'
 
-afterEach(() => { cleanup(); localStorage.clear() })
+afterEach(() => { cleanup(); window.localStorage.clear() })
 
 test('missing configuration opens setup without starting workbench services', async () => {
   const getConnectivity = vi.fn()
@@ -449,7 +449,7 @@ test('saving dispatches job-hunter and reconciles a failure emitted before send 
     tabs: [{ ...browserTab, url: 'https://wellfound.com/jobs/another-listing' }]
   })
   await waitFor(() => expect(cancel).toHaveBeenCalledWith('conv-1', 'turn-save-job-3'))
-  expect(screen.getByText('The browser listing changed before saving finished. Retry on the intended listing.')).not.toBeNull()
+  expect(await screen.findByText('The browser listing changed before saving finished. Retry on the intended listing.')).not.toBeNull()
 
   browserListener(browserState)
   await waitFor(() => expect(screen.getByRole('button', { name: 'Save this job to JobOS' }).textContent).toContain('Save job'))

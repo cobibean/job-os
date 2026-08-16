@@ -279,6 +279,9 @@ async def test_clean_home_golden_path(clean_runtime) -> None:
             session_state = assert_response(client.get("/v1/device-session"))
             assert session_state["desktop"] == "disconnected"
             assert session_state["transport"] == "local-loopback"
+            conversations = assert_response(client.get("/v1/conversations"))["conversations"]
+            assert len(conversations) == 1
+            conversation_id = conversations[0]["conversation_id"]
 
         async with mcp_session(
             root,
@@ -373,6 +376,7 @@ async def test_clean_home_golden_path(clean_runtime) -> None:
                 {
                     "job_id": job_id,
                     "document_key": "cover_letter",
+                    "conversation_id": conversation_id,
                     "idempotency_key": "clean-document-read-1",
                 },
             )
@@ -383,6 +387,7 @@ async def test_clean_home_golden_path(clean_runtime) -> None:
                 {
                     "job_id": job_id,
                     "document_id": document["document_id"],
+                    "conversation_id": conversation_id,
                     "label": values["snapshotLabel"],
                     "idempotency_key": "clean-document-snapshot-1",
                 },
@@ -431,13 +436,17 @@ async def test_clean_home_golden_path(clean_runtime) -> None:
             await assert_optional_error(
                 mcp,
                 "browser_tabs_inspect",
-                {"timeout_ms": 500},
+                {"conversation_id": conversation_id, "timeout_ms": 500},
                 "desktop_unavailable",
             )
             await assert_optional_error(
                 mcp,
                 "document_refresh",
-                {"job_id": job_id, "idempotency_key": "clean-refresh-1"},
+                {
+                    "job_id": job_id,
+                    "conversation_id": conversation_id,
+                    "idempotency_key": "clean-refresh-1",
+                },
                 "artifact_provider_unavailable",
             )
             await assert_optional_error(
@@ -446,6 +455,7 @@ async def test_clean_home_golden_path(clean_runtime) -> None:
                 {
                     "job_id": job_id,
                     "source_id": "synthetic-source",
+                    "conversation_id": conversation_id,
                     "idempotency_key": "clean-render-1",
                 },
                 "renderer_unavailable",

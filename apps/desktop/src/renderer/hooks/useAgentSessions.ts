@@ -177,7 +177,7 @@ export function useAgentSessions() {
         const summaries = await bridge.list()
         if (!mounted) return
       const sorted = [...summaries].sort((left, right) => left.position - right.position).slice(0, MAX_SESSIONS)
-      const stored = localStorage.getItem(ACTIVE_CONVERSATION_KEY)
+      const stored = window.localStorage.getItem(ACTIVE_CONVERSATION_KEY)
       const activeId = sorted.some(item => item.conversationId === stored) ? stored : (sorted[0]?.conversationId ?? null)
       const sessions: Record<string, AgentSessionViewState> = {}
       for (const summary of sorted) {
@@ -195,7 +195,7 @@ export function useAgentSessions() {
       }
       updateState(() => restoredState)
       if (replayAnnouncement) setAnnouncement(replayAnnouncement)
-      if (activeId) localStorage.setItem(ACTIVE_CONVERSATION_KEY, activeId)
+      if (activeId) window.localStorage.setItem(ACTIVE_CONVERSATION_KEY, activeId)
       await Promise.all(sorted.map(async summary => {
         try {
           const snapshot = await bridge.get(summary.conversationId)
@@ -258,7 +258,7 @@ export function useAgentSessions() {
         [conversationId]: { ...current.sessions[conversationId]!, unreadTerminal: false }
       }
     }))
-    localStorage.setItem(ACTIVE_CONVERSATION_KEY, conversationId)
+    window.localStorage.setItem(ACTIVE_CONVERSATION_KEY, conversationId)
     return true
   }, [updateState])
 
@@ -292,7 +292,7 @@ export function useAgentSessions() {
         }
         earlyUpdates.current.delete(snapshot.conversationId)
         updateState(() => createdState)
-        localStorage.setItem(ACTIVE_CONVERSATION_KEY, snapshot.conversationId)
+        window.localStorage.setItem(ACTIVE_CONVERSATION_KEY, snapshot.conversationId)
         setAnnouncement(`Session ${stateRef.current.order.length} created`)
         return true
       } catch {
@@ -409,8 +409,8 @@ export function useAgentSessions() {
         const sessions = { ...value.sessions }
         delete sessions[conversationId]
         const activeId = value.activeId === conversationId ? (order[Math.min(index, order.length - 1)] ?? null) : value.activeId
-        if (activeId) localStorage.setItem(ACTIVE_CONVERSATION_KEY, activeId)
-        else localStorage.removeItem(ACTIVE_CONVERSATION_KEY)
+        if (activeId) window.localStorage.setItem(ACTIVE_CONVERSATION_KEY, activeId)
+        else window.localStorage.removeItem(ACTIVE_CONVERSATION_KEY)
         return { order, sessions, activeId }
       })
       return true

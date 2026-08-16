@@ -5,7 +5,7 @@ import type { AgentConversationSnapshot, AgentSessionStreamUpdate, ConversationE
 import { useAgentSessions } from '../hooks/useAgentSessions'
 import { AgentPanel } from './AgentPanel'
 
-afterEach(() => { cleanup(); localStorage.clear() })
+afterEach(() => { cleanup(); window.localStorage.clear() })
 
 const CONVERSATION_ID = 'conv-current'
 type TestSnapshot = Partial<AgentConversationSnapshot> & Pick<AgentConversationSnapshot, 'entries' | 'activeTurn' | 'connection' | 'latestEventId'>

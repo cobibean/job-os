@@ -5,7 +5,7 @@ import type { AgentConversationSnapshot, AgentSessionStreamUpdate, AgentSessionS
 import { useAgentSessions } from '../hooks/useAgentSessions'
 import { AgentPanel } from './AgentPanel'
 
-afterEach(() => { cleanup(); localStorage.clear() })
+afterEach(() => { cleanup(); window.localStorage.clear() })
 
 const summary = (position: number, activeTurn: AgentSessionSummary['activeTurn'] = null): AgentSessionSummary => ({
   conversationId: `conv_${position}`, position, title: `Session ${position}`, createdAt: '2026-08-16T10:00:00Z',

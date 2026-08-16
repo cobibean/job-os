@@ -4,7 +4,7 @@ import { afterEach, expect, test, vi } from 'vitest'
 import type { AgentConversationSnapshot, AgentSessionStreamUpdate, AgentSessionSummary, ConversationEvent } from '../../shared/contracts'
 import { useAgentSessions } from './useAgentSessions'
 
-afterEach(() => { cleanup(); localStorage.clear() })
+afterEach(() => { cleanup(); window.localStorage.clear() })
 
 const summary = (position: number): AgentSessionSummary => ({
   conversationId: `conv_${position}`, position, title: `Session ${position}`,
@@ -170,13 +170,13 @@ test('a terminal SSE crossing the retry response barrier cannot resurrect the fa
 })
 
 test('selection persists only a valid opaque id and otherwise falls back to position one', async () => {
-  localStorage.setItem('jobos.agent.activeConversationId', 'conv_2')
+  window.localStorage.setItem('jobos.agent.activeConversationId', 'conv_2')
   install([summary(1), summary(2)])
   const { result } = renderHook(() => useAgentSessions())
   await waitFor(() => expect(result.current.activeId).toBe('conv_2'))
-  expect(Object.keys(localStorage)).toEqual(['jobos.agent.activeConversationId'])
+  expect(Object.keys(window.localStorage)).toEqual(['jobos.agent.activeConversationId'])
   cleanup()
-  localStorage.setItem('jobos.agent.activeConversationId', 'conv_missing')
+  window.localStorage.setItem('jobos.agent.activeConversationId', 'conv_missing')
   install([summary(1), summary(2)])
   const secondRender = renderHook(() => useAgentSessions())
   await waitFor(() => expect(secondRender.result.current.activeId).toBe('conv_1'))
@@ -229,7 +229,7 @@ test('buffered terminal overlap uses the live transition for unread, announcemen
   const pendingList = deferred<AgentSessionSummary[]>()
   const { agent, emit } = install([summary(1), summary(2)], [snapshot(1), snapshot(2, [event(7, 'completed')])])
   agent.list.mockImplementation(() => pendingList.promise)
-  localStorage.setItem('jobos.agent.activeConversationId', 'conv_1')
+  window.localStorage.setItem('jobos.agent.activeConversationId', 'conv_1')
   const { result } = renderHook(() => useAgentSessions())
   act(() => emit({ kind: 'event', conversationId: 'conv_2', recoveryState: 'ready', event: event(7, 'completed') }))
   await act(async () => pendingList.resolve([summary(1), summary(2)]))
