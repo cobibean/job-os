@@ -188,7 +188,7 @@ describe('packaged identity and generated artifacts', () => {
     assert.match(updater, /\$HOME\/Applications\/JobOS\.app/)
   })
 
-  test('an empty process scan remains successful under zsh errexit', () => {
+  test('an empty process scan remains successful under zsh errexit', { skip: process.platform !== 'darwin' }, () => {
     const updater = createUpdater('d'.repeat(64))
     const functionStart = updater.indexOf('running_target_pids()')
     const functionEnd = updater.indexOf('\n}\n\ncleanup()', functionStart) + 3
@@ -200,7 +200,7 @@ describe('packaged identity and generated artifacts', () => {
     assert.equal(probe.stdout.trim(), 'REACHED')
   })
 
-  test('the updater lock excludes a live owner and recovers after owner death', async () => {
+  test('the updater lock excludes a live owner and recovers after owner death', { skip: process.platform !== 'darwin' }, async () => {
     const updater = createUpdater('e'.repeat(64))
     const functionStart = updater.indexOf('acquire_update_lock()')
     const functionEnd = updater.indexOf('\n}\n\nrecover_interrupted_update()', functionStart) + 3
