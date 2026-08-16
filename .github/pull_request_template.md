@@ -9,6 +9,7 @@
 - [ ] Focused tests
 - [ ] `pnpm check`
 - [ ] `pnpm contracts:check` when API/contracts changed
+- [ ] Public schema changes include a backward-compatibility review and migration note
 - [ ] Built or exercised the real user-facing path when practical
 
 ## Privacy and release safety

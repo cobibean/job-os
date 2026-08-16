@@ -28,6 +28,65 @@ def write(filename: str, media_type: str, content: bytes) -> ArtifactWrite:
     return ArtifactWrite(filename, media_type, content, sha256(content).hexdigest())
 
 
+def test_local_repository_availability_proves_write_fsync_and_cleanup(tmp_path, monkeypatch):
+    root = tmp_path / "artifacts"
+    repository = LocalArtifactRepository(root)
+    real_open = os.open
+
+    def reject_probe(path, flags, mode=0o777, *, dir_fd=None):
+        if isinstance(path, str) and path.startswith(".availability-"):
+            raise PermissionError("read-only artifact directory")
+        return real_open(path, flags, mode, dir_fd=dir_fd)
+
+    monkeypatch.setattr(local_repository_module.os, "open", reject_probe)
+
+    assert repository.is_available() is False
+    assert list(root.iterdir()) == []
+
+
+def test_local_repository_availability_cleans_a_failed_probe(tmp_path, monkeypatch):
+    root = tmp_path / "artifacts"
+    repository = LocalArtifactRepository(root)
+
+    def fail_write(_descriptor, _content):
+        raise OSError("simulated probe write failure")
+
+    monkeypatch.setattr(local_repository_module.os, "write", fail_write)
+
+    assert repository.is_available() is False
+    assert list(root.iterdir()) == []
+
+
+def test_local_repository_availability_never_unlinks_a_replacement(tmp_path, monkeypatch):
+    root = tmp_path / "artifacts"
+    repository = LocalArtifactRepository(root)
+    real_open = os.open
+    real_write = os.write
+    probe_name = None
+    replacement = b"user data"
+
+    def capture_probe(path, flags, mode=0o777, *, dir_fd=None):
+        nonlocal probe_name
+        descriptor = real_open(path, flags, mode, dir_fd=dir_fd)
+        if isinstance(path, str) and path.startswith(".availability-"):
+            probe_name = path
+        return descriptor
+
+    def replace_after_unlink(descriptor, content):
+        assert probe_name is not None
+        replacement_path = root / probe_name
+        assert not replacement_path.exists()
+        replacement_path.write_bytes(replacement)
+        return real_write(descriptor, content)
+
+    monkeypatch.setattr(local_repository_module.os, "open", capture_probe)
+    monkeypatch.setattr(local_repository_module.os, "write", replace_after_unlink)
+
+    assert repository.is_available() is True
+    replacement_path = next(root.glob(".availability-*.tmp"))
+    assert replacement_path.read_bytes() == replacement
+
+
 def test_local_repository_atomically_stores_and_reopens_a_publication_pair(
     tmp_path, minimal_docx, minimal_pdf
 ):

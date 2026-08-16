@@ -226,6 +226,11 @@ export interface ConnectivitySnapshot {
   apiVersion?: string
   checkedAt: string
   message: string
+  transport?: 'local-loopback' | 'private-remote'
+  agent?: 'not-configured' | 'online' | 'connecting' | 'offline'
+  desktop?: 'connected' | 'disconnected'
+  artifactStorage?: 'available' | 'unavailable'
+  artifactGateway?: 'not-configured' | 'available' | 'unavailable'
 }
 
 export interface SetupSnapshot {
@@ -239,8 +244,12 @@ export interface DiagnosticsSnapshot {
   apiVersion?: string
   capabilities: {
     localService: 'available' | 'unavailable' | 'not-configured'
-    agent: 'available' | 'offline' | 'not-configured'
-    desktop: 'available' | 'unavailable'
+    agent: 'available' | 'connecting' | 'offline' | 'not-configured'
+    desktop: 'available' | 'disconnected'
+    renderer: 'available' | 'unavailable'
+    artifactStorage: 'available' | 'unavailable'
+    artifactGateway: 'not-configured' | 'available' | 'unavailable'
+    transport: 'local-loopback' | 'private-remote' | 'not-configured'
   }
 }
 

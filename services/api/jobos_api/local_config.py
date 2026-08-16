@@ -143,6 +143,9 @@ def settings_from_config(path: Path) -> Settings:
         local_artifact_root=artifact_root,
         artifact_roots=(artifact_root,),
         job_provider=str(config.get("jobProvider", "sqlite")),
+        transport=(
+            "private-remote" if config.get("mode") == "remote-client" else "local-loopback"
+        ),
     )
 
 

@@ -20,6 +20,9 @@ def headers():
 
 
 class FakeJobs:
+    def is_available(self):
+        return True
+
     def inspect_job(self, job_id):
         if job_id != "(FAKE)-job-7":
             raise KeyError(job_id)
