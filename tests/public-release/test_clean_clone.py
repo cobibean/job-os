@@ -279,9 +279,10 @@ async def test_clean_home_golden_path(clean_runtime) -> None:
             session_state = assert_response(client.get("/v1/device-session"))
             assert session_state["desktop"] == "disconnected"
             assert session_state["transport"] == "local-loopback"
+            created_conversation = assert_response(client.post("/v1/conversations"), 201)
+            conversation_id = created_conversation["conversation_id"]
             conversations = assert_response(client.get("/v1/conversations"))["conversations"]
-            assert len(conversations) == 1
-            conversation_id = conversations[0]["conversation_id"]
+            assert [item["conversation_id"] for item in conversations] == [conversation_id]
 
         async with mcp_session(
             root,
