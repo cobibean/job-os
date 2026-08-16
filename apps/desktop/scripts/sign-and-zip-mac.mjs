@@ -21,7 +21,7 @@ rmSync(`${archivePath}.blockmap`, { force: true })
 run('/usr/bin/ditto', [
   '-c',
   '-k',
-  '--sequesterRsrc',
+  '--norsrc',
   '--keepParent',
   appPath,
   archivePath
