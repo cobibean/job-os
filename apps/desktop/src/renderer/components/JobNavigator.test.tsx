@@ -149,3 +149,24 @@ test('a stale detail response is never rendered on a newly selected card', () =>
   expect(screen.queryByText('Stale listing')).toBeNull()
   expect(screen.queryByText('Old place')).toBeNull()
 })
+
+test('a selected fictional job has an accessible Demo badge and intentional remove action', () => {
+  const onRemoveDemo = vi.fn()
+  const job = {
+    jobId: 'jobos-demo-v1', company: 'Fictional Co', title: 'Demo Role',
+    status: 'discovered' as const, statusGroup: 'Inbox', canonicalUrl: 'https://jobs.example.com/demo',
+    discoveredAt: '', lastSeenAt: '', syntheticDemo: true, datasetVersion: 'jobos-demo-v1'
+  }
+  render(
+    <JobNavigator
+      error={null} feedback={null} jobs={[job]} loading={false}
+      onMove={vi.fn()} onQueryChange={vi.fn()} onRemoveDemo={onRemoveDemo} onReorder={vi.fn()}
+      onSelect={vi.fn()} onSortChange={vi.fn()} onStatusChange={vi.fn()}
+      onStatusGroupChange={vi.fn()} query="" selectedJobDetail={{ ...job, description: 'Demo', location: 'Example City' }}
+      selectedJobId={job.jobId} sortMode="manual" statusGroup=""
+    />
+  )
+  expect(document.querySelector('.demo-badge')?.textContent).toBe('Demo')
+  fireEvent.click(screen.getByRole('button', { name: 'Remove demo job' }))
+  expect(onRemoveDemo).toHaveBeenCalledWith(job.jobId)
+})

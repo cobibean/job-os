@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto'
+import { execFile, spawn } from 'node:child_process'
 import { writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -17,6 +18,7 @@ import { startDesktopCapabilityClient } from './capabilityClient.js'
 import { initializeDesktopRuntime } from './desktopRuntime.js'
 import type { DesktopRuntimeState } from './desktopRuntime.js'
 import { runtimeConfigPath } from './runtimeConfig.js'
+import type { DesktopRuntimeConfig } from './runtimeConfig.js'
 import { DocxWorkerManager } from './DocxWorkerManager.js'
 import { registerDocxDocumentsIpc } from './docxDocumentsIpc.js'
 import { DocxDocumentsService } from './docxDocuments.js'
@@ -34,6 +36,7 @@ import { createMainWorkspaceClient } from './workspace.js'
 
 const currentDirectory = path.dirname(fileURLToPath(import.meta.url))
 const rendererRoot = path.resolve(currentDirectory, '../renderer')
+const sourceRoot = path.resolve(currentDirectory, '../../../..')
 const developmentUrl = process.env.VITE_DEV_SERVER_URL
 const developmentOrigin = developmentUrl ? new URL(developmentUrl).origin : undefined
 let browserManager: BrowserManager | null = null
@@ -43,7 +46,9 @@ let docxWorkerManager: DocxWorkerManager | null = null
 let mainDocumentsClient: ReturnType<typeof createMainDocumentsClient> | null = null
 let appIsQuitting = false
 let markBrowserRestored: () => void = () => undefined
-const apiLifecycle = createApiLifecycle()
+let activeConfigPath: string | null = null
+let sourceApiProcess: ReturnType<typeof spawn> | null = null
+const apiLifecycle = createApiLifecycle({ startSource: startSourceApi })
 let desktopRuntimeState: DesktopRuntimeState = {
   runtime: null,
   deviceToken: null,
@@ -52,6 +57,10 @@ let desktopRuntimeState: DesktopRuntimeState = {
     checkedAt: new Date().toISOString(),
     message: 'JobOS setup is required'
   }
+}
+let setupState: import('../shared/contracts.js').SetupSnapshot = {
+  state: 'required',
+  message: 'JobOS setup is required'
 }
 
 function assertTrustedRenderer(event: IpcMainInvokeEvent): void {
@@ -76,6 +85,130 @@ function registerShellInterface(): void {
     const url = safeExternalUrl(rawUrl)
     if (!url) throw new Error('Invalid external link')
     await shell.openExternal(url)
+  })
+}
+
+function startSourceApi(runtime: DesktopRuntimeConfig): Promise<void> {
+  const configPath = activeConfigPath
+  if (app.isPackaged || !configPath) {
+    return Promise.reject(new Error('Source API startup is unavailable'))
+  }
+  if (sourceApiProcess && sourceApiProcess.exitCode === null) return Promise.resolve()
+  const address = new URL(runtime.apiBaseUrl)
+  const uvExecutable = process.env.JOBOS_UV_EXECUTABLE ?? 'uv'
+  const childEnvironment = { ...process.env }
+  delete childEnvironment.JOBOS_DEVICE_TOKEN
+  delete childEnvironment.JOBOS_MCP_TOKEN
+  return new Promise((resolve, reject) => {
+    const child = spawn(uvExecutable, [
+      'run',
+      'uvicorn',
+      'jobos_api.main:app',
+      '--host',
+      address.hostname,
+      '--port',
+      address.port || '8766'
+    ], {
+      cwd: sourceRoot,
+      env: { ...childEnvironment, JOBOS_CONFIG_PATH: configPath },
+      stdio: 'ignore'
+    })
+    child.once('spawn', () => {
+      sourceApiProcess = child
+      resolve()
+    })
+    child.once('error', error => {
+      if (sourceApiProcess === child) sourceApiProcess = null
+      reject(error)
+    })
+    child.once('exit', () => {
+      if (sourceApiProcess === child) sourceApiProcess = null
+    })
+  })
+}
+
+function runInitializer(arguments_: string[]): Promise<void> {
+  const override = process.env.JOBOS_INIT_EXECUTABLE
+  const executable = override ?? 'uv'
+  const commandArguments = override ? arguments_ : ['run', 'jobos-init', ...arguments_]
+  if (app.isPackaged && !override) {
+    return Promise.reject(new Error('Packaged setup executable is unavailable'))
+  }
+  return new Promise((resolve, reject) => {
+    execFile(
+      executable,
+      commandArguments,
+      { cwd: sourceRoot, encoding: 'utf8', maxBuffer: 8192, timeout: 30_000 },
+      error => error ? reject(new Error('Local setup command failed')) : resolve()
+    )
+  })
+}
+
+function registerSetupInterface(configPath: string): void {
+  setupState = desktopRuntimeState.runtime && desktopRuntimeState.deviceToken
+    ? { state: 'ready', message: 'JobOS is configured' }
+    : { state: 'required', message: 'JobOS setup or credential repair is required' }
+  ipcMain.handle('jobos:setup:get', event => {
+    assertTrustedRenderer(event)
+    return setupState
+  })
+  ipcMain.handle('jobos:setup:initialize', async (event, resetDemo: unknown, confirmed: unknown) => {
+    assertTrustedRenderer(event)
+    if (resetDemo && confirmed !== true) {
+      return { state: 'error', message: 'Demo reset requires confirmation' }
+    }
+    setupState = { state: 'working', message: resetDemo ? 'Resetting demo…' : 'Creating local profile…' }
+    try {
+      await runInitializer([
+        '--data-dir', path.dirname(configPath),
+        '--config-path', configPath,
+        ...(resetDemo ? ['--reset-demo', '--confirm-reset-demo'] : [])
+      ])
+      setupState = { state: 'succeeded', message: 'Setup complete. Restart JobOS to continue.' }
+    } catch {
+      setupState = { state: 'error', message: 'Setup could not finish. Check that the local JobOS tools are installed, then retry.' }
+    }
+    return setupState
+  })
+  ipcMain.handle('jobos:setup:restart', event => {
+    assertTrustedRenderer(event)
+    if (setupState.state !== 'succeeded' && setupState.state !== 'ready') {
+      throw new Error('JobOS restart is unavailable until setup succeeds')
+    }
+    app.relaunch()
+    app.quit()
+  })
+}
+
+function registerDiagnosticsInterface(configPath: string): void {
+  ipcMain.handle('jobos:diagnostics:get', event => {
+    assertTrustedRenderer(event)
+    const runtime = desktopRuntimeState.runtime
+    return {
+      mode: runtime?.mode ?? 'not-configured',
+      appVersion: app.getVersion(),
+      ...(desktopRuntimeState.connectivity.apiVersion
+        ? { apiVersion: desktopRuntimeState.connectivity.apiVersion }
+        : {}),
+      capabilities: {
+        localService: !runtime ? 'not-configured'
+          : desktopRuntimeState.connectivity.state === 'connected' ? 'available' : 'unavailable',
+        agent: !runtime || runtime.agentProvider === 'offline' ? 'not-configured' : 'available',
+        desktop: browserManager ? 'available' : 'unavailable'
+      }
+    }
+  })
+  ipcMain.handle('jobos:diagnostics:open-data', async event => {
+    assertTrustedRenderer(event)
+    await shell.openPath(path.dirname(configPath))
+  })
+  ipcMain.handle('jobos:diagnostics:open-logs', async event => {
+    assertTrustedRenderer(event)
+    const configuredLogs = desktopRuntimeState.runtime?.paths?.logs ?? 'logs'
+    const logsPath = path.isAbsolute(configuredLogs)
+      ? configuredLogs
+      : path.resolve(path.dirname(configPath), configuredLogs)
+    await shell.openPath(logsPath)
   })
 }
 
@@ -145,6 +278,10 @@ function registerJobsInterface(): void {
   ipcMain.handle('jobos:jobs:update-status', (event, jobId: string, status: JobStatus) => {
     if (typeof jobId !== 'string' || !jobId || !statuses.has(status)) throw new Error('Invalid job status change')
     return trusted(event).updateStatus(jobId, status)
+  })
+  ipcMain.handle('jobos:jobs:remove-demo', (event, jobId: string) => {
+    if (typeof jobId !== 'string' || !jobId) throw new Error('Invalid demo job')
+    return trusted(event).removeDemo(jobId)
   })
   ipcMain.handle('jobos:jobs:save-from-browser', async (
     event,
@@ -482,11 +619,15 @@ app.whenReady().then(async () => {
   session.defaultSession.setPermissionRequestHandler((_webContents, _permission, callback) => {
     callback(false)
   })
+  const configPath = process.env.JOBOS_CONFIG_PATH ?? runtimeConfigPath(app.getPath('appData'))
+  activeConfigPath = configPath
   desktopRuntimeState = await initializeDesktopRuntime({
-    configPath: runtimeConfigPath(app.getPath('appData')),
+    configPath,
     environment: process.env,
     ensureApiReady: apiLifecycle.ensureApiReady
   })
+  registerSetupInterface(configPath)
+  registerDiagnosticsInterface(configPath)
   registerShellInterface()
   registerConnectivityInterface()
   registerAgentInterface()
@@ -511,6 +652,8 @@ app.on('before-quit', () => {
 })
 
 app.on('will-quit', () => {
+  sourceApiProcess?.kill()
+  sourceApiProcess = null
   mainDocumentsClient = null
   docxDocumentsService?.dispose()
   docxDocumentsService = null

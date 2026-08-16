@@ -82,12 +82,40 @@ def _create_canonical_jobs_schema(connection: sqlite3.Connection) -> None:
     )
 
 
+def _add_synthetic_demo_metadata(connection: sqlite3.Connection) -> None:
+    connection.execute(
+        "ALTER TABLE canonical_jobs ADD COLUMN synthetic_demo INTEGER NOT NULL DEFAULT 0"
+    )
+    connection.execute("ALTER TABLE canonical_jobs ADD COLUMN dataset_version TEXT")
+    connection.execute(
+        """
+        CREATE TABLE synthetic_demo_ledger (
+            dataset_id TEXT PRIMARY KEY,
+            dataset_version TEXT NOT NULL,
+            fixture_sha256 TEXT NOT NULL CHECK(length(fixture_sha256) = 64),
+            demo_job_id TEXT NOT NULL,
+            state TEXT NOT NULL CHECK(state IN ('seeded', 'deleted')),
+            first_seeded_at TEXT NOT NULL,
+            state_changed_at TEXT NOT NULL,
+            reset_count INTEGER NOT NULL DEFAULT 0 CHECK(reset_count >= 0),
+            last_reset_at TEXT
+        )
+        """
+    )
+
+
 MIGRATIONS: tuple[Migration, ...] = (
     Migration(
         version=1,
         name="create_canonical_jobs",
         checksum="sha256:7681d21619b250c8c289418ba6578161e457d2c08f8c4da9f9a8814097450106",
         apply=_create_canonical_jobs_schema,
+    ),
+    Migration(
+        version=2,
+        name="add_synthetic_demo_metadata",
+        checksum="sha256:654a5b33e07655f952ded412c46f8f92d3c4e0a45a8e0b82ed15c2caab3598c2",
+        apply=_add_synthetic_demo_metadata,
     ),
 )
 

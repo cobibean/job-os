@@ -39,7 +39,7 @@ export function useConnectivity(refreshMs = defaultRefreshMs): ConnectivityView 
           setConnectivity({
             state: 'disconnected',
             checkedAt: new Date().toISOString(),
-            message: error instanceof Error ? error.message : 'Mac Mini unavailable'
+            message: error instanceof Error ? error.message : 'Local service unavailable'
           })
         }
       } finally {

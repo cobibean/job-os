@@ -47,7 +47,9 @@ export async function initializeDesktopRuntime(
   try {
     deviceToken = await (options.loadCredential ?? loadDeviceCredential)({
       deviceId: runtime.deviceId,
-      environment: options.environment
+      environment: options.environment,
+      credentialStore: runtime.credentialStore,
+      configPath: options.configPath
     })
   } catch {
     return {

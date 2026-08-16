@@ -229,18 +229,67 @@ def test_concurrent_initialization_applies_schema_once(tmp_path):
     with sqlite3.connect(database) as connection:
         assert connection.execute(
             "SELECT version, COUNT(*) FROM job_repository_migrations GROUP BY version"
-        ).fetchall() == [(1, 1)]
+        ).fetchall() == [(migration.version, 1) for migration in MIGRATIONS]
 
 
-def _second_migration(counter: list[str], *, destructive: bool = False) -> Migration:
+def test_v1_database_upgrades_to_v2_without_losing_jobs(tmp_path):
+    database = tmp_path / "jobs.db"
+    SQLiteJobRepository(database, migrations=(MIGRATIONS[0],))
+    observed_at = datetime(2026, 8, 15, 12, tzinfo=UTC).isoformat()
+    with sqlite3.connect(database) as connection:
+        connection.execute(
+            """
+            INSERT INTO canonical_jobs(
+                job_id, canonical_url, normalized_url, company, title, status,
+                discovered_at, last_seen_at, description, listing_evidence_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, '{}')
+            """,
+            (
+                "pre-v2",
+                "https://jobs.example.com/roles/pre-v2",
+                "https://jobs.example.com/roles/pre-v2",
+                "Example Labs",
+                "Product Builder",
+                "discovered",
+                observed_at,
+                observed_at,
+                "Existing user job from the Phase 2 schema.",
+            ),
+        )
+        connection.commit()
+
+    upgraded = SQLiteJobRepository(database)
+
+    assert upgraded.get_job("pre-v2").canonical_url == (
+        "https://jobs.example.com/roles/pre-v2"
+    )
+    with sqlite3.connect(database) as connection:
+        columns = {
+            row[1]
+            for row in connection.execute("PRAGMA table_info(canonical_jobs)").fetchall()
+        }
+        assert {"synthetic_demo", "dataset_version"} <= columns
+        assert connection.execute(
+            "SELECT name FROM sqlite_master "
+            "WHERE type = 'table' AND name = 'synthetic_demo_ledger'"
+        ).fetchone() == ("synthetic_demo_ledger",)
+        assert connection.execute(
+            "SELECT version FROM job_repository_migrations ORDER BY version"
+        ).fetchall() == [(migration.version,) for migration in MIGRATIONS]
+        assert connection.execute(
+            "SELECT COUNT(*) FROM synthetic_demo_ledger"
+        ).fetchone() == (0,)
+
+
+def _next_migration(counter: list[str], *, destructive: bool = False) -> Migration:
     def apply(connection: sqlite3.Connection) -> None:
         counter.append("applied")
-        connection.execute("CREATE TABLE migration_two(value TEXT)")
+        connection.execute("CREATE TABLE migration_after_catalog(value TEXT)")
 
     return Migration(
-        version=2,
-        name="migration_two",
-        checksum="sha256:migration-two",
+        version=len(MIGRATIONS) + 1,
+        name="migration_after_catalog",
+        checksum="sha256:migration-after-catalog",
         apply=apply,
         destructive=destructive,
     )
@@ -250,7 +299,7 @@ def test_migration_applies_once_and_non_destructive_steps_make_no_backup(tmp_pat
     database = tmp_path / "jobs.db"
     backup_directory = tmp_path / "backups"
     counter: list[str] = []
-    migrations = (*MIGRATIONS, _second_migration(counter))
+    migrations = (*MIGRATIONS, _next_migration(counter))
 
     SQLiteJobRepository(
         database, migrations=migrations, backup_directory=backup_directory
@@ -272,7 +321,7 @@ def test_failed_migration_rolls_back_schema_and_ledger(tmp_path):
         raise RuntimeError("injected migration failure")
 
     migration = Migration(
-        version=2,
+        version=len(MIGRATIONS) + 1,
         name="failing",
         checksum="sha256:failing",
         apply=fail,
@@ -286,7 +335,7 @@ def test_failed_migration_rolls_back_schema_and_ledger(tmp_path):
         ).fetchone() is None
         assert connection.execute(
             "SELECT version FROM job_repository_migrations ORDER BY version"
-        ).fetchall() == [(1,)]
+        ).fetchall() == [(migration.version,) for migration in MIGRATIONS]
 
 
 @pytest.mark.parametrize("history_kind", ["ahead", "non-prefix"])
@@ -315,21 +364,21 @@ def test_destructive_migration_requires_and_verifies_pre_migration_backup(tmp_pa
     database = tmp_path / "jobs.db"
     backup_directory = tmp_path / "backups"
     counter: list[str] = []
-    SQLiteJobRepository(database, migrations=(*MIGRATIONS, _second_migration(counter)))
+    SQLiteJobRepository(database, migrations=(*MIGRATIONS, _next_migration(counter)))
 
     def destructive(connection: sqlite3.Connection) -> None:
-        connection.execute("DROP TABLE migration_two")
+        connection.execute("DROP TABLE migration_after_catalog")
 
     migration = Migration(
-        version=3,
-        name="drop_migration_two",
-        checksum="sha256:drop-migration-two",
+        version=len(MIGRATIONS) + 2,
+        name="drop_migration_after_catalog",
+        checksum="sha256:drop-migration-after-catalog",
         apply=destructive,
         destructive=True,
     )
     SQLiteJobRepository(
         database,
-        migrations=(*MIGRATIONS, _second_migration(counter), migration),
+        migrations=(*MIGRATIONS, _next_migration(counter), migration),
         backup_directory=backup_directory,
     )
 
@@ -339,14 +388,14 @@ def test_destructive_migration_requires_and_verifies_pre_migration_backup(tmp_pa
     with sqlite3.connect(backups[0]) as connection:
         assert connection.execute("PRAGMA integrity_check").fetchone() == ("ok",)
         assert connection.execute(
-            "SELECT name FROM sqlite_master WHERE name = 'migration_two'"
-        ).fetchone() == ("migration_two",)
+            "SELECT name FROM sqlite_master WHERE name = 'migration_after_catalog'"
+        ).fetchone() == ("migration_after_catalog",)
 
 
 def test_destructive_migration_does_not_run_when_backup_cannot_be_created(tmp_path):
     database = tmp_path / "jobs.db"
     counter: list[str] = []
-    second = _second_migration(counter)
+    second = _next_migration(counter)
     SQLiteJobRepository(database, migrations=(*MIGRATIONS, second))
     invalid_backup_directory = tmp_path / "not-a-directory"
     invalid_backup_directory.write_text("blocked", encoding="utf-8")
@@ -354,10 +403,10 @@ def test_destructive_migration_does_not_run_when_backup_cannot_be_created(tmp_pa
 
     def destructive(connection: sqlite3.Connection) -> None:
         destructive_calls.append("called")
-        connection.execute("DROP TABLE migration_two")
+        connection.execute("DROP TABLE migration_after_catalog")
 
     migration = Migration(
-        version=3,
+        version=len(MIGRATIONS) + 2,
         name="blocked_destructive",
         checksum="sha256:blocked-destructive",
         apply=destructive,
@@ -374,10 +423,10 @@ def test_destructive_migration_does_not_run_when_backup_cannot_be_created(tmp_pa
     with sqlite3.connect(database) as connection:
         assert connection.execute(
             "SELECT MAX(version) FROM job_repository_migrations"
-        ).fetchone() == (2,)
+        ).fetchone() == (len(MIGRATIONS) + 1,)
         assert connection.execute(
-            "SELECT name FROM sqlite_master WHERE name = 'migration_two'"
-        ).fetchone() == ("migration_two",)
+            "SELECT name FROM sqlite_master WHERE name = 'migration_after_catalog'"
+        ).fetchone() == ("migration_after_catalog",)
 
 
 def test_job_id_conflicts_do_not_overwrite_an_unrelated_url(tmp_path):

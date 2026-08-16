@@ -1,4 +1,5 @@
 import { execFile } from 'node:child_process'
+import { lstat, readFile } from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -13,6 +14,8 @@ interface CredentialOptions {
   environment: Record<string, string | undefined>
   helperPath?: string
   run?: (file: string, arguments_: string[]) => Promise<CommandResult>
+  credentialStore?: { provider: 'keychain' | 'file', path?: string }
+  configPath?: string
 }
 
 function runCommand(file: string, arguments_: string[]): Promise<CommandResult> {
@@ -49,6 +52,26 @@ function validateCredential(value: string): string {
 export async function loadDeviceCredential(options: CredentialOptions): Promise<string> {
   const override = options.environment.JOBOS_DEVICE_TOKEN
   if (override) return validateCredential(override)
+
+  if (options.credentialStore?.provider === 'file') {
+    if (!options.credentialStore.path || !options.configPath) {
+      throw new Error('JobOS device credential is unavailable')
+    }
+    try {
+      const credentialPath = path.resolve(path.dirname(options.configPath), options.credentialStore.path)
+      const metadata = await lstat(credentialPath)
+      if (metadata.isSymbolicLink() || !metadata.isFile()) {
+        throw new Error('unsafe credential file')
+      }
+      if ((metadata.mode & 0o777) !== 0o600) throw new Error('unsafe permissions')
+      const value: unknown = JSON.parse(await readFile(credentialPath, 'utf8'))
+      if (!value || typeof value !== 'object' || !('deviceToken' in value)) throw new Error('invalid')
+      if (typeof value.deviceToken !== 'string') throw new Error('invalid')
+      return validateCredential(value.deviceToken)
+    } catch {
+      throw new Error('JobOS device credential is unavailable')
+    }
+  }
 
   try {
     const result = await (options.run ?? runCommand)(

@@ -218,6 +218,10 @@ class SQLiteJobRepository:
                     str(row["listing_sha256"]) if row["listing_sha256"] is not None else None
                 ),
                 listing_evidence=evidence,
+                synthetic_demo=bool(row["synthetic_demo"]),
+                dataset_version=(
+                    str(row["dataset_version"]) if row["dataset_version"] is not None else None
+                ),
             )
         except (KeyError, TypeError, ValueError, json.JSONDecodeError) as error:
             raise Unavailable("Canonical jobs database contains an invalid record") from error
@@ -296,8 +300,11 @@ class SQLiteJobRepository:
                         discovered_at, last_seen_at, description, location, application_url,
                         full_listing_text, analysis_text, listing_completeness,
                         listing_source_url, listing_captured_at, listing_verified_at,
-                        listing_capture_method, listing_sha256, listing_evidence_json
-                    ) VALUES (?, ?, ?, ?, ?, 'discovered', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        listing_capture_method, listing_sha256, listing_evidence_json,
+                        synthetic_demo, dataset_version
+                    ) VALUES (
+                        ?, ?, ?, ?, ?, 'discovered', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+                    )
                     """,
                     (
                         job_id,
@@ -319,6 +326,8 @@ class SQLiteJobRepository:
                         capture_method,
                         listing_digest.casefold(),
                         evidence_json,
+                        int(command.synthetic_demo),
+                        command.dataset_version,
                     ),
                 )
                 canonical_job_id = job_id
@@ -606,3 +615,33 @@ class SQLiteJobRepository:
             )
         except sqlite3.Error as error:
             raise Unavailable(f"Could not list canonical job history: {error}") from error
+
+    def delete_job(self, job_id: str) -> None:
+        connection = self._connect()
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute(
+                "SELECT synthetic_demo FROM canonical_jobs WHERE job_id = ?", (job_id,)
+            ).fetchone()
+            if row is None:
+                raise NotFound(f"Unknown job {job_id}")
+            if bool(row["synthetic_demo"]):
+                occurred_at = datetime.now(UTC).isoformat()
+                connection.execute(
+                    """
+                    UPDATE synthetic_demo_ledger
+                    SET state = 'deleted', state_changed_at = ?
+                    WHERE demo_job_id = ?
+                    """,
+                    (occurred_at, job_id),
+                )
+            connection.execute("DELETE FROM canonical_jobs WHERE job_id = ?", (job_id,))
+            connection.commit()
+        except NotFound:
+            connection.rollback()
+            raise
+        except sqlite3.Error as error:
+            connection.rollback()
+            raise Unavailable(f"Could not delete canonical job: {error}") from error
+        finally:
+            connection.close()

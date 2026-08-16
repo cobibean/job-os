@@ -3,15 +3,20 @@ import { mkdirSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-const scriptDirectory = path.dirname(fileURLToPath(import.meta.url));
-const desktopRoot = path.resolve(scriptDirectory, "..");
-const source = path.join(desktopRoot, "native", "JobOSKeychain.swift");
-const outputDirectory = path.join(desktopRoot, "build");
-const output = path.join(outputDirectory, "jobos-keychain");
+const scriptDirectory = path.dirname(fileURLToPath(import.meta.url))
+const desktopRoot = path.resolve(scriptDirectory, '..')
+const source = path.join(desktopRoot, 'native', 'JobOSKeychain.swift')
+const outputDirectory = path.join(desktopRoot, 'build')
+const output = path.join(outputDirectory, 'jobos-keychain')
 
-mkdirSync(outputDirectory, { recursive: true });
+if (process.platform !== 'darwin') {
+  console.log('Skipping macOS-only Keychain helper build')
+  process.exit(0)
+}
+
+mkdirSync(outputDirectory, { recursive: true })
 execFileSync(
-  "/usr/bin/xcrun",
-  ["swiftc", source, "-framework", "Security", "-o", output],
-  { stdio: "inherit" },
-);
+  '/usr/bin/xcrun',
+  ['swiftc', source, '-framework', 'Security', '-o', output],
+  { stdio: 'inherit' }
+)

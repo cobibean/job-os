@@ -9,6 +9,15 @@ export interface DesktopRuntimeConfig {
   apiBaseUrl: string
   deviceId: string
   launchdLabel?: string
+  credentialStore?: { provider: 'keychain' | 'file', path?: string }
+  paths?: {
+    stateDatabase: string
+    jobsDatabase: string
+    artifacts: string
+    logs: string
+  }
+  agentProvider?: 'offline' | 'hermes'
+  demoEnabled?: boolean
 }
 
 interface RuntimeConfigOptions {
@@ -22,13 +31,19 @@ const CONFIG_KEYS = new Set([
   'mode',
   'apiBaseUrl',
   'deviceId',
-  'launchdLabel'
+  'launchdLabel',
+  'credentialStore',
+  'paths',
+  'jobProvider',
+  'artifactProvider',
+  'agentProvider',
+  'demoEnabled'
 ])
 const LOCAL_HOSTS = new Set(['127.0.0.1', 'localhost', '[::1]', '::1'])
 const DEFAULT_LAUNCHD_LABEL = 'com.cobibean.jobos.api'
 
 export function runtimeConfigPath(appDataPath: string): string {
-  return path.join(appDataPath, 'JobOS', 'runtime.json')
+  return path.join(appDataPath, 'JobOS', 'config.json')
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -94,8 +109,32 @@ function validateConfig(value: unknown): DesktopRuntimeConfig {
     apiBaseUrl: validateBaseUrl(value.apiBaseUrl, value.mode),
     deviceId: validateIdentifier(value.deviceId)
   }
+  if (value.credentialStore !== undefined) {
+    if (!isRecord(value.credentialStore)
+      || (value.credentialStore.provider !== 'keychain' && value.credentialStore.provider !== 'file')
+      || (value.credentialStore.provider === 'file' && typeof value.credentialStore.path !== 'string')) {
+      throw new Error('JobOS credential configuration is invalid')
+    }
+    config.credentialStore = {
+      provider: value.credentialStore.provider,
+      ...(typeof value.credentialStore.path === 'string' ? { path: value.credentialStore.path } : {})
+    }
+  }
+  if (value.paths !== undefined) {
+    const paths = value.paths
+    if (!isRecord(paths) || ['stateDatabase', 'jobsDatabase', 'artifacts', 'logs']
+      .some(key => typeof paths[key] !== 'string')) {
+      throw new Error('JobOS path configuration is invalid')
+    }
+    config.paths = paths as unknown as DesktopRuntimeConfig['paths']
+  }
+  if (value.agentProvider === 'offline' || value.agentProvider === 'hermes') {
+    config.agentProvider = value.agentProvider
+  } else if (value.agentProvider !== undefined) throw new Error('JobOS agent configuration is invalid')
+  if (typeof value.demoEnabled === 'boolean') config.demoEnabled = value.demoEnabled
+  else if (value.demoEnabled !== undefined) throw new Error('JobOS demo configuration is invalid')
   if (value.mode === 'local-service') {
-    config.launchdLabel = validateLaunchdLabel(value.launchdLabel ?? DEFAULT_LAUNCHD_LABEL)
+    if (value.launchdLabel !== undefined) config.launchdLabel = validateLaunchdLabel(value.launchdLabel)
   } else if (value.launchdLabel !== undefined) {
     throw new Error('Remote JobOS runtime must not configure launchd')
   }
@@ -129,7 +168,16 @@ export async function loadDesktopRuntimeConfig(options: RuntimeConfigOptions): P
     return validateConfig(JSON.parse(contents))
   } catch (error) {
     if (isRecord(error) && error.code === 'ENOENT') {
-      throw new Error('JobOS runtime configuration is required')
+      const legacyPath = path.join(path.dirname(options.configPath), 'runtime.json')
+      if (legacyPath !== options.configPath) {
+        try {
+          const contents = await (options.readText ?? (path => readFile(path, 'utf8')))(legacyPath)
+          return validateConfig(JSON.parse(contents))
+        } catch (legacyError) {
+          if (!(isRecord(legacyError) && legacyError.code === 'ENOENT')) throw legacyError
+        }
+      }
+      throw new Error('JobOS setup is required')
     }
     if (error instanceof SyntaxError) throw new Error('JobOS runtime configuration is invalid')
     throw error
