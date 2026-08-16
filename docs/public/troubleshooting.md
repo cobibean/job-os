@@ -53,19 +53,24 @@ request as the API schema change. Do not hand-edit generated clients.
 
 ## Desktop opens but services are unavailable
 
-That is currently possible during open-source preparation. The public local
-composition and onboarding flow have not landed yet. Do not add private paths or
-credentials merely to make a public-source test appear connected. Capture only
-safe capability/status text and check the current release-status section in the
-README.
+That is currently possible during open-source preparation. Local SQLite jobs and
+editable artifact storage do not require JobHunter or Hermes, but agent features
+and JobHunter artifact render/refresh/publication remain optional and return an
+unconfigured capability when absent. Do not add private paths or credentials
+merely to make a public-source test appear connected. This does not mean packaged
+binary provisioning or installed-app acceptance is complete.
 
 ## Resetting local development state
 
-Current source-development state may exist at `data/jobos.db` and
-`data/jobs.db`; installed macOS
-state lives under the user's JobOS Application Support directory. Back up files
-before deleting anything. The accepted public reset command will arrive with the
-idempotent initializer and is not available yet.
+Use `config.json` to locate the active state database, jobs database, artifact
+root, and logs. Installed macOS state normally lives under the user's JobOS
+Application Support directory. Back up every configured location before changing
+anything. The narrow fictional-demo reset is `jobos-init --reset-demo
+--confirm-reset-demo`; it restores only the demo job and its starter document.
+
+MCP document publication reads files only below `JOBOS_DOCUMENT_ROOTS` when set,
+or below the artifact root in the active local config. It deliberately does not
+fall back to the launch directory or a Hermes profile cache.
 
 ## Filing a useful bug
 

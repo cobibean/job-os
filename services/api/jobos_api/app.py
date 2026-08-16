@@ -6,8 +6,10 @@ import json
 import sqlite3
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager, contextmanager
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from functools import wraps
+from pathlib import Path
 from threading import Lock
 from typing import Annotated, Literal, ParamSpec, TypeVar, cast
 from urllib.parse import quote
@@ -21,6 +23,15 @@ from jobos_api import __version__
 from jobos_api.activity import ActivityReportRequest, ActivityReportResponse
 from jobos_api.agent_gateway import AgentGateway, OfflineAgentGateway
 from jobos_api.artifact_gateway import ArtifactGateway
+from jobos_api.artifact_repository import (
+    DOCX_MEDIA_TYPE,
+    PDF_MEDIA_TYPE,
+    ArtifactRepository,
+    ArtifactStorageError,
+    ArtifactValidationError,
+    ArtifactWrite,
+    StoredArtifact,
+)
 from jobos_api.capabilities import (
     BrowserCommandRequest,
     BrowserCommandResponse,
@@ -51,7 +62,6 @@ from jobos_api.document_operations import (
 )
 from jobos_api.documents import (
     ARTIFACT_ID_PATTERN,
-    PDF_MEDIA_TYPE,
     ArtifactApprovalRequest,
     ArtifactPublishRequest,
     ArtifactRefreshRequest,
@@ -59,9 +69,9 @@ from jobos_api.documents import (
     ArtifactTrustError,
     JobArtifactsResponse,
     ResumeRenderRequest,
+    VerifiedArtifact,
     artifact_record,
     content_headers,
-    materialize_external_import,
     materialize_published_document,
     read_source_artifact,
     verify_facade_artifacts,
@@ -122,12 +132,14 @@ from jobos_api.jobs import (
     list_jobs,
     normalize_job_detail,
 )
+from jobos_api.local_artifact_repository import LocalArtifactRepository
 from jobos_api.redaction import sanitize_text
 from jobos_api.responses import DeviceSessionResponse, HealthResponse, VersionResponse
 from jobos_api.settings import Settings
 from jobos_api.state_store import (
     ConversationBusy,
     EditableDocumentConflict,
+    EditablePublicationConflict,
     IdempotencyConflict,
     JobOsStateStore,
     WorkspaceRevisionConflict,
@@ -137,6 +149,16 @@ from jobos_api.workspace import WorkspaceSnapshotCommand, WorkspaceSnapshotRespo
 
 P = ParamSpec("P")
 R = TypeVar("R")
+LOCAL_ARTIFACT_STORAGE_UNAVAILABLE = "Local artifact storage is unavailable"
+
+
+@dataclass(frozen=True, slots=True)
+class PreparedEditableImport:
+    artifact_id: str | None
+    filename: str | None
+    sha256: str
+    document_key: Literal["resume", "cover_letter", "references"]
+    stored: StoredArtifact | None = None
 
 
 def create_app(
@@ -144,6 +166,7 @@ def create_app(
     *,
     job_repository: JobRepository | None = None,
     artifact_gateway: ArtifactGateway | None = None,
+    artifact_repository: ArtifactRepository | None = None,
     agent_gateway: AgentGateway | None = None,
     capability_broker: CapabilityBroker | None = None,
     state_store: JobOsStateStore | None = None,
@@ -155,6 +178,10 @@ def create_app(
         artifact_gateway = artifact_gateway or composed_artifacts
     jobs = job_repository
     artifacts = artifact_gateway
+    local_artifacts = artifact_repository or LocalArtifactRepository(
+        settings.resolved_local_artifact_root()
+    )
+    trusted_artifact_roots = settings.resolved_artifact_roots()
     device_authenticator = DeviceAuthenticator(settings.device_credential_registry())
     bearer = HTTPBearer(auto_error=False)
     configured_gateway = agent_gateway
@@ -1161,6 +1188,7 @@ def create_app(
                     detail="Only a fictional demo job can be removed",
                 )
             jobs.delete_job(job_id)
+        state_store.delete_job_documents(job_id)
         if state_store.job_workspace_state().selected_job_id == job_id:
             state_store.save_job_selection(None, command.origin)
         result_payload = JobMutationResponse(event_id=0).model_dump(mode="json")
@@ -1380,53 +1408,65 @@ def create_app(
         job_id: str,
         document_id: str,
         source: CreateRegisteredImportRequest | CreateExternalImportRequest,
-    ) -> tuple[str, str | None, str]:
+    ) -> PreparedEditableImport:
         if source.mode == "import_registered_artifact":
             artifact = state_store.editable_import_source(job_id, source.source_artifact_id)
-            return (
-                source.source_artifact_id,
-                str(artifact["filename"]) if artifact.get("filename") else None,
-                str(artifact["sha256"]),
-            )
-        if settings.hermes_job_hunter_cwd is None:
-            raise HTTPException(
-                status_code=503,
-                detail=(
-                    "External DOCX import requires the configured Job Hunter publication workspace"
-                ),
+            return PreparedEditableImport(
+                artifact_id=source.source_artifact_id,
+                filename=str(artifact["filename"]) if artifact.get("filename") else None,
+                sha256=str(artifact["sha256"]),
+                document_key=source.document_key,
             )
         source_bytes = source.source_bytes()
-        manifest_path, artifact_path = materialize_external_import(
+        stored = local_artifacts.store_import(
             job_id=job_id,
             document_id=document_id,
+            artifact=ArtifactWrite(
+                filename=source.source_filename,
+                media_type=DOCX_MEDIA_TYPE,
+                content=source_bytes,
+                sha256=source.source_sha256,
+            ),
+        )
+        return PreparedEditableImport(
+            artifact_id=None,
+            filename=source.source_filename,
+            sha256=source.source_sha256,
             document_key=source.document_key,
-            source_filename=source.source_filename,
-            source_sha256=source.source_sha256,
-            source_bytes=source_bytes,
-            workspace_root=settings.hermes_job_hunter_cwd,
+            stored=stored,
         )
-        raw = artifacts.publish_document_artifact(
-            job_id,
-            source.document_key,
-            LABELS[source.document_key],
-            str(manifest_path),
-            str(artifact_path),
+
+    def register_import_source(
+        job_id: str,
+        prepared: PreparedEditableImport,
+        connection: sqlite3.Connection,
+    ) -> tuple[str, str | None, str]:
+        if prepared.artifact_id is not None:
+            return prepared.artifact_id, prepared.filename, prepared.sha256
+        if prepared.stored is None:  # pragma: no cover - dataclass construction is local
+            raise ArtifactStorageError("External DOCX was not stored")
+        verified = VerifiedArtifact(
+            job_id=job_id,
+            document_key=prepared.document_key,
+            document_label=LABELS[prepared.document_key],
+            source_revision=f"external:{prepared.sha256}",
+            artifact_revision=prepared.sha256,
+            media_type=DOCX_MEDIA_TYPE,
+            sha256=prepared.sha256,
+            render_status="succeeded",
+            render_sequence=state_store.next_document_artifact_sequence(
+                job_id, connection=connection
+            ),
+            canonical_path=str(prepared.stored.canonical_path),
+            filename=prepared.filename,
+            failure_message=None,
         )
-        verified = verify_source_artifact(raw, settings.artifact_roots)
-        if (
-            verified.job_id != job_id
-            or verified.document_key != source.document_key
-            or verified.document_label != LABELS[source.document_key]
-            or verified.media_type
-            != "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-            or verified.render_status != "succeeded"
-            or verified.sha256 != source.source_sha256
-        ):
-            raise ArtifactTrustError("Published external DOCX metadata does not match the import")
-        artifact_id, _ = state_store.register_document_artifacts(job_id, [verified])
+        artifact_id, _ = state_store.register_document_artifacts(
+            job_id, [verified], connection=connection
+        )
         if artifact_id is None:
-            raise ArtifactTrustError("Published external DOCX was not registered")
-        return artifact_id, source.source_filename, source.source_sha256
+            raise ArtifactStorageError("External DOCX was not registered")
+        return artifact_id, prepared.filename, prepared.sha256
 
     @app.get("/v1/jobs/{job_id}/editable-documents", tags=["editable-documents"])
     def editable_documents_list(
@@ -1515,9 +1555,9 @@ def create_app(
             content = blank_content(command.document_key)
             settings_value = default_settings()
             import_report = {"source_filename": None, "imported_at": None, "issues": []}
-            source_artifact_id = source_filename = source_sha256 = None
             imported = False
             document_id = None
+            prepared_import = None
             validate_content(content, DocumentSettings.model_validate(settings_value), [])
         else:
             if state_store.get_job_editable_document(job_id, command.document_key) is not None:
@@ -1527,10 +1567,12 @@ def create_app(
                 )
             document_id = state_store.new_editable_document_id()
             try:
-                source_artifact_id, source_filename, source_sha256 = resolve_import_source(
-                    job_id, document_id, command
-                )
-            except (ArtifactTrustError, OSError, ValueError) as error:
+                prepared_import = resolve_import_source(job_id, document_id, command)
+            except (ArtifactStorageError, OSError, sqlite3.OperationalError) as error:
+                raise HTTPException(
+                    status_code=503, detail=LOCAL_ARTIFACT_STORAGE_UNAVAILABLE
+                ) from error
+            except (ArtifactTrustError, ValueError) as error:
                 raise HTTPException(status_code=422, detail=str(error)) from error
             content = command.content
             settings_value = command.settings.model_dump(mode="json")
@@ -1543,6 +1585,12 @@ def create_app(
         )
 
         def create_document(connection: sqlite3.Connection) -> dict[str, object]:
+            if prepared_import is not None:
+                source_artifact_id, source_filename, source_sha256 = register_import_source(
+                    job_id, prepared_import, connection
+                )
+            else:
+                source_artifact_id = source_filename = source_sha256 = None
             row = state_store.create_editable_document(
                 job_id=job_id,
                 document_key=command.document_key,
@@ -1574,6 +1622,10 @@ def create_app(
             )
         except ValueError as error:
             raise HTTPException(status_code=409, detail=str(error)) from error
+        except (ArtifactStorageError, OSError, sqlite3.OperationalError) as error:
+            raise HTTPException(
+                status_code=503, detail=LOCAL_ARTIFACT_STORAGE_UNAVAILABLE
+            ) from error
         except IdempotencyConflict as error:
             raise HTTPException(status_code=409, detail=str(error)) from error
         return EditableDocument.model_validate(result)
@@ -1670,11 +1722,14 @@ def create_app(
                 detail="Imported document type must match the existing editable document",
             )
         try:
-            source_artifact_id, source_filename, source_sha256 = resolve_import_source(
+            prepared_import = resolve_import_source(
                 str(current["job_id"]), document_id, command.source
             )
 
             def replace_document(connection: sqlite3.Connection) -> dict[str, object]:
+                source_artifact_id, source_filename, source_sha256 = register_import_source(
+                    str(current["job_id"]), prepared_import, connection
+                )
                 row = state_store.replace_editable_document_from_import(
                     document_id,
                     expected_revision=command.base_revision,
@@ -1698,13 +1753,17 @@ def create_app(
                 mutation=replace_document,
                 label=f"Replaced {current['document_label']} from DOCX",
                 job_id=str(current["job_id"]),
-                detail={"source_artifact_id": source_artifact_id},
+                detail={"source_sha256": prepared_import.sha256},
             )
         except EditableDocumentConflict as error:
             raise editable_conflict(error) from error
         except KeyError as error:
             raise HTTPException(status_code=404, detail="Editable document not found") from error
-        except (ArtifactTrustError, OSError, ValueError) as error:
+        except (ArtifactStorageError, OSError, sqlite3.OperationalError) as error:
+            raise HTTPException(
+                status_code=503, detail=LOCAL_ARTIFACT_STORAGE_UNAVAILABLE
+            ) from error
+        except (ArtifactTrustError, ValueError) as error:
             raise HTTPException(status_code=422, detail=str(error)) from error
         except IdempotencyConflict as error:
             raise HTTPException(status_code=409, detail=str(error)) from error
@@ -1927,9 +1986,6 @@ def create_app(
                 status_code=409,
                 detail="Resolve all document suggestions before publication",
             )
-        if settings.hermes_job_hunter_cwd is None:
-            raise HTTPException(status_code=503, detail="Job Hunter workspace is unavailable")
-
         canonical_bytes = json.dumps(
             {
                 "schema_version": current["schema_version"],
@@ -1944,113 +2000,67 @@ def create_app(
             sort_keys=True,
         ).encode()
         canonical_sha256 = hashlib.sha256(canonical_bytes).hexdigest()
-        publication_source_bytes = json.dumps(
-            {
-                "schema_version": current["schema_version"],
-                "document_id": document_id,
-                "document_revision": current["revision"],
-                "canonical_sha256": canonical_sha256,
-                "original_source_sha256": current["source_sha256"],
-            },
-            separators=(",", ":"),
-            sort_keys=True,
-        ).encode()
-        publication_source_base64 = base64.b64encode(publication_source_bytes).decode("ascii")
-        publication_source_sha256 = hashlib.sha256(publication_source_bytes).hexdigest()
         try:
-            state_store.ensure_editable_publication_snapshot(
-                document_id,
-                expected_revision=command.expected_revision,
-                actor="user",
+            docx_bytes = base64.b64decode(command.docx_base64, validate=True)
+            pdf_bytes = base64.b64decode(command.pdf_base64, validate=True)
+            stored_docx, stored_pdf = local_artifacts.store_publication_pair(
+                job_id=str(current["job_id"]),
+                document_id=document_id,
+                document_revision=command.expected_revision,
+                docx=ArtifactWrite(
+                    command.docx_filename,
+                    DOCX_MEDIA_TYPE,
+                    docx_bytes,
+                    command.docx_sha256,
+                ),
+                pdf=ArtifactWrite(
+                    command.pdf_filename,
+                    PDF_MEDIA_TYPE,
+                    pdf_bytes,
+                    command.pdf_sha256,
+                ),
             )
-        except EditableDocumentConflict as error:
-            raise editable_conflict(error) from error
-        except KeyError as error:
-            raise HTTPException(status_code=404, detail="Editable document not found") from error
-
-        publications = (
-            (command.docx_filename, command.docx_base64, "docx"),
-            (command.pdf_filename, command.pdf_base64, "pdf"),
-        )
-        try:
-            for artifact_filename, artifact_base64, extension in publications:
-                publish_command = ArtifactPublishRequest(
-                    document_key=cast(
-                        Literal["resume", "cover_letter", "references"],
-                        current["document_key"],
-                    ),
-                    document_label=str(current["document_label"]),
-                    source_filename="publication-source.json",
-                    source_base64=publication_source_base64,
-                    artifact_filename=artifact_filename,
-                    artifact_base64=artifact_base64,
-                    origin="user",
-                    idempotency_key=(
-                        f"editable-{hashlib.sha256(f'{document_id}:{command.expected_revision}:{extension}'.encode()).hexdigest()[:32]}"
-                    ),
-                )
-                artifact_request_hash = mutation_hash(
-                    "document.publish",
-                    {
-                        "job_id": current["job_id"],
-                        "document_key": current["document_key"],
-                        "document_label": current["document_label"],
-                        "source_filename": "publication-source.json",
-                        "source_sha256": publication_source_sha256,
-                        "artifact_filename": artifact_filename,
-                        "artifact_sha256": (
-                            command.docx_sha256 if extension == "docx" else command.pdf_sha256
-                        ),
-                        "origin": "user",
-                    },
-                )
-                artifact_replay = mutation_replay(
-                    identity=identity,
-                    target=f"jobs/{current['job_id']}/artifacts",
-                    command_name="document.publish",
-                    idempotency_key=publish_command.idempotency_key,
-                    request_hash=artifact_request_hash,
-                )
-                if artifact_replay is not None:
-                    continue
-                source_path, artifact_path = materialize_published_document(
-                    publish_command,
-                    job_id=str(current["job_id"]),
-                    workspace_root=settings.hermes_job_hunter_cwd,
-                )
-                raw = artifacts.publish_document_artifact(
-                    str(current["job_id"]),
-                    str(current["document_key"]),
-                    str(current["document_label"]),
-                    str(source_path),
-                    str(artifact_path),
-                )
-                verified = verify_source_artifact(raw, settings.artifact_roots)
-                state_store.register_document_artifacts(
-                    str(current["job_id"]),
-                    [verified],
-                    editable_document_id=document_id,
-                    editable_document_revision=command.expected_revision,
-                )
-                publication_state = artifact_list(str(current["job_id"]))
-                record_mutation(
-                    identity=identity,
-                    target=f"jobs/{current['job_id']}/artifacts",
-                    command_name="document.publish",
-                    origin="user",
-                    idempotency_key=publish_command.idempotency_key,
-                    request_hash=artifact_request_hash,
-                    result=publication_state.model_dump(mode="json"),
-                    label=f"Published {current['document_label']} {extension.upper()}",
-                    job_id=str(current["job_id"]),
-                    detail={
-                        "artifact_id": publication_state.current_artifact_id,
-                        "document_key": current["document_key"],
-                    },
-                )
-        except (ArtifactTrustError, OSError, ValueError) as error:
+        except (ArtifactStorageError, OSError, sqlite3.OperationalError) as error:
+            raise HTTPException(
+                status_code=503, detail=LOCAL_ARTIFACT_STORAGE_UNAVAILABLE
+            ) from error
+        except (ArtifactValidationError, ValueError) as error:
             raise HTTPException(status_code=422, detail=str(error)) from error
+
         def mark_published(connection: sqlite3.Connection) -> dict[str, object]:
+            first_sequence = state_store.next_document_artifact_sequence(
+                str(current["job_id"]), connection=connection
+            )
+            document_key = cast(
+                Literal["resume", "cover_letter", "references"],
+                current["document_key"],
+            )
+            verified_pair = [
+                VerifiedArtifact(
+                    job_id=str(current["job_id"]),
+                    document_key=document_key,
+                    document_label=str(current["document_label"]),
+                    source_revision=(
+                        f"editable:{document_id}:{command.expected_revision}:{canonical_sha256}"
+                    ),
+                    artifact_revision=stored.sha256,
+                    media_type=stored.media_type,
+                    sha256=stored.sha256,
+                    render_status="succeeded",
+                    render_sequence=first_sequence + offset,
+                    canonical_path=str(stored.canonical_path),
+                    filename=stored.filename,
+                    failure_message=None,
+                )
+                for offset, stored in enumerate((stored_docx, stored_pdf))
+            ]
+            state_store.register_editable_publication_pair(
+                str(current["job_id"]),
+                verified_pair,
+                editable_document_id=document_id,
+                editable_document_revision=command.expected_revision,
+                connection=connection,
+            )
             row = state_store.mark_editable_document_published(
                 document_id,
                 expected_revision=command.expected_revision,
@@ -2072,8 +2082,14 @@ def create_app(
             )
         except EditableDocumentConflict as error:
             raise editable_conflict(error) from error
+        except EditablePublicationConflict as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
         except KeyError as error:
             raise HTTPException(status_code=404, detail="Editable document not found") from error
+        except (OSError, sqlite3.OperationalError) as error:
+            raise HTTPException(
+                status_code=503, detail=LOCAL_ARTIFACT_STORAGE_UNAVAILABLE
+            ) from error
         except IdempotencyConflict as error:
             raise HTTPException(status_code=409, detail=str(error)) from error
         return EditableDocument.model_validate(result)
@@ -2099,6 +2115,19 @@ def create_app(
         )
 
     def registered_artifact_payload(record: dict[str, object]) -> bytes:
+        registered_path = Path(str(record["canonical_path"])).expanduser()
+        local_root = local_artifacts.root
+        if registered_path == local_root or local_root in registered_path.parents:
+            try:
+                return local_artifacts.read(
+                    path=registered_path,
+                    media_type=str(record["media_type"]),
+                    expected_sha256=str(record["sha256"]),
+                )
+            except (ArtifactStorageError, OSError) as error:
+                raise HTTPException(
+                    status_code=503, detail=LOCAL_ARTIFACT_STORAGE_UNAVAILABLE
+                ) from error
         try:
             _, payload = read_source_artifact(
                 {
@@ -2115,8 +2144,12 @@ def create_app(
                     "render_sequence": 0,
                     "path": record["canonical_path"],
                 },
-                settings.artifact_roots,
+                trusted_artifact_roots,
             )
+        except ArtifactStorageError as error:
+            raise HTTPException(
+                status_code=503, detail=LOCAL_ARTIFACT_STORAGE_UNAVAILABLE
+            ) from error
         except (ArtifactTrustError, OSError) as error:
             raise HTTPException(
                 status_code=409,
@@ -2233,8 +2266,12 @@ def create_app(
             return JobArtifactsResponse.model_validate(replay)
         try:
             raw_artifacts = artifacts.list_job_artifacts(job_id)
-            verified = verify_facade_artifacts(raw_artifacts, settings.artifact_roots)
+            verified = verify_facade_artifacts(raw_artifacts, trusted_artifact_roots)
             state_store.register_document_artifacts(job_id, verified)
+        except (ArtifactStorageError, OSError) as error:
+            raise HTTPException(
+                status_code=503, detail=LOCAL_ARTIFACT_STORAGE_UNAVAILABLE
+            ) from error
         except (ArtifactTrustError, ValueError) as error:
             raise HTTPException(status_code=422, detail=str(error)) from error
         result = artifact_list(job_id)
@@ -2284,10 +2321,14 @@ def create_app(
             raw = artifacts.render_resume(
                 job_id, command.source_id, {"format": command.output_format}
             )
-            verified = verify_source_artifact(raw, settings.artifact_roots)
+            verified = verify_source_artifact(raw, trusted_artifact_roots)
             state_store.register_document_artifacts(job_id, [verified])
         except KeyError as error:
             raise HTTPException(status_code=404, detail="Resume source not found") from error
+        except (ArtifactStorageError, OSError) as error:
+            raise HTTPException(
+                status_code=503, detail=LOCAL_ARTIFACT_STORAGE_UNAVAILABLE
+            ) from error
         except (ArtifactTrustError, ValueError) as error:
             raise HTTPException(status_code=422, detail=str(error)) from error
         result = artifact_list(job_id)
@@ -2337,11 +2378,15 @@ def create_app(
                 return JobArtifactsResponse.model_validate(replay)
             try:
                 raw = artifacts.register_artifact(job_id, command.artifact_reference)
-                verified = verify_source_artifact(raw, settings.artifact_roots)
+                verified = verify_source_artifact(raw, trusted_artifact_roots)
                 state_store.register_document_artifacts(job_id, [verified])
             except KeyError as error:
                 raise HTTPException(
                     status_code=404, detail="Artifact reference not found"
+                ) from error
+            except (ArtifactStorageError, OSError) as error:
+                raise HTTPException(
+                    status_code=503, detail=LOCAL_ARTIFACT_STORAGE_UNAVAILABLE
                 ) from error
             except (ArtifactTrustError, ValueError) as error:
                 raise HTTPException(status_code=422, detail=str(error)) from error
@@ -2371,7 +2416,10 @@ def create_app(
         require_trusted_mcp(identity, command.origin, mcp_token)
         ensure_job(job_id)
         if settings.hermes_job_hunter_cwd is None:
-            raise HTTPException(status_code=503, detail="Job Hunter workspace is unavailable")
+            raise HTTPException(
+                status_code=503,
+                detail="JobHunter artifact publication is unconfigured",
+            )
         source_bytes = command.source_bytes()
         artifact_bytes = command.artifact_bytes()
         request_hash = mutation_hash(
@@ -2412,11 +2460,15 @@ def create_app(
                 str(source_path),
                 str(artifact_path),
             )
-            verified = verify_source_artifact(raw, settings.artifact_roots)
+            verified = verify_source_artifact(raw, trusted_artifact_roots)
             state_store.register_document_artifacts(job_id, [verified])
         except KeyError as error:
             raise HTTPException(status_code=404, detail="Job not found") from error
-        except (ArtifactTrustError, OSError, ValueError) as error:
+        except (ArtifactStorageError, OSError) as error:
+            raise HTTPException(
+                status_code=503, detail=LOCAL_ARTIFACT_STORAGE_UNAVAILABLE
+            ) from error
+        except (ArtifactTrustError, ValueError) as error:
             raise HTTPException(status_code=422, detail=str(error)) from error
         result = artifact_list(job_id)
         published = next(

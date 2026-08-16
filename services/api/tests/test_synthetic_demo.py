@@ -9,6 +9,7 @@ import pytest
 from fastapi.testclient import TestClient
 from job_repository_contract import command
 from jobos_api.app import create_app
+from jobos_api.editable_documents import plain_text
 from jobos_api.initialize import initialize_jobos
 from jobos_api.job_repository import Conflict
 from jobos_api.local_config import load_credentials, read_config, settings_from_config
@@ -48,10 +49,22 @@ def test_demo_seed_mutation_restart_deletion_and_confirmed_reset(tmp_path, monke
     assert demo.dataset_version == "jobos-demo-v1"
     assert "Fictional Demo" in demo.company
     assert demo.canonical_url.startswith("https://jobs.example.com/")
+    state_store = JobOsStateStore(tmp_path / "state/jobos.db")
+    starter = state_store.get_job_editable_document(DEMO_JOB_ID, "resume")
+    assert starter is not None
+    starter_id = starter["document_id"]
+    assert "(FAKE)" in plain_text(starter["content"])
+    assert "DO NOT APPLY" in plain_text(starter["content"])
 
     repository.update_description(demo.job_id, "My edited fictional demo.", source="test")
     initialize_jobos(tmp_path)
     assert _repository(tmp_path).get_job(demo.job_id).description == "My edited fictional demo."
+    assert (
+        JobOsStateStore(tmp_path / "state/jobos.db").get_job_editable_document(
+            DEMO_JOB_ID, "resume"
+        )["document_id"]
+        == starter_id
+    )
 
     repository.delete_job(demo.job_id)
     initialize_jobos(tmp_path)
@@ -102,6 +115,17 @@ def test_demo_metadata_and_intentional_removal_use_public_api_contract(tmp_path,
     config = read_config(tmp_path / "config.json")
     device_token, _ = load_credentials(config, tmp_path)
     headers = {"Authorization": f"Bearer {device_token}"}
+    state_store = JobOsStateStore(tmp_path / "state/jobos.db")
+    starter = state_store.get_job_editable_document(DEMO_JOB_ID, "resume")
+    assert starter is not None
+    assert isinstance(starter["revision"], int)
+    state_store.create_editable_snapshot(
+        str(starter["document_id"]),
+        expected_revision=starter["revision"],
+        reason="manual",
+        actor="user",
+        label="Contains edited private content",
+    )
     app = create_app(settings_from_config(tmp_path / "config.json"))
     with TestClient(app) as client:
         listed = client.get("/v1/jobs", headers=headers)
@@ -129,9 +153,33 @@ def test_demo_metadata_and_intentional_removal_use_public_api_contract(tmp_path,
         assert replayed.status_code == 200
         assert replayed.json() == removed.json()
         assert client.get("/v1/jobs", headers=headers).json() == {"jobs": []}
+        assert (
+            JobOsStateStore(tmp_path / "state/jobos.db").get_job_editable_document(
+                DEMO_JOB_ID, "resume"
+            )
+            is None
+        )
+        with sqlite3.connect(tmp_path / "state/jobos.db") as connection:
+            assert connection.execute(
+                "SELECT COUNT(*) FROM editable_document_snapshots"
+            ).fetchone()[0] == 0
 
     initialize_jobos(tmp_path)
     assert _repository(tmp_path).list_jobs() == ()
+    assert (
+        JobOsStateStore(tmp_path / "state/jobos.db").get_job_editable_document(
+            DEMO_JOB_ID, "resume"
+        )
+        is None
+    )
+
+    initialize_jobos(tmp_path, reset_demo_requested=True, reset_confirmed=True)
+    restored = JobOsStateStore(tmp_path / "state/jobos.db").get_job_editable_document(
+        DEMO_JOB_ID, "resume"
+    )
+    assert restored is not None
+    assert "fictional" in plain_text(restored["content"]).casefold()
+    assert "do not apply" in plain_text(restored["content"]).casefold()
 
 
 def test_removing_demo_preserves_a_different_workspace_selection(tmp_path, monkeypatch):

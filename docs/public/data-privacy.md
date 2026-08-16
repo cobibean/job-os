@@ -23,9 +23,11 @@ The accepted public composition will store:
 - credentials in the platform credential provider, with a documented restrictive
   source-development fallback.
 
-A fresh profile will contain one unmistakably synthetic demo job. No real jobs,
-people, companies, resumes, cover letters, browser history, or conversations may
-be included in source, fixtures, documentation, or launch media.
+A fresh profile will contain one unmistakably synthetic demo job and one
+publication-safe `(FAKE)` starter resume that repeatedly identifies itself as
+fictional and do-not-apply. No real jobs, people, companies, resumes, cover
+letters, browser history, or conversations may be included in source, fixtures,
+documentation, or launch media.
 
 ## Data locations
 
@@ -81,7 +83,10 @@ reconfigure those credentials after a restore. Do not export tokens into the
 backup, documentation, a support bundle, or a public issue.
 
 The fictional demo has a narrow reset command:
-`jobos-init --reset-demo --confirm-reset-demo`. It does not reset other jobs.
+`jobos-init --reset-demo --confirm-reset-demo`. Removing the demo intentionally
+also removes its editable document metadata and ordinary initialization does not
+restore either item. The explicit reset restores the one demo job and its one
+starter resume; it does not reset other jobs.
 For a completely fresh source profile, initialize a new `--data-dir`; move old
 runtime data aside instead of deleting it until its backup is verified.
 

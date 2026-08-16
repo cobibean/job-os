@@ -1,6 +1,8 @@
 import json
 import sqlite3
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from threading import Barrier
 
 import pytest
 from jobos_api.browser_policy import (
@@ -8,6 +10,7 @@ from jobos_api.browser_policy import (
     safe_browser_url,
     sanitize_browser_title,
 )
+from jobos_api.documents import VerifiedArtifact
 from jobos_api.state_store import (
     MIGRATIONS,
     SCHEMA_VERSION,
@@ -137,10 +140,48 @@ def test_initialization_applies_every_migration_once(tmp_path):
     first = store.initialize()
     second = store.initialize()
 
-    assert first.schema_version == SCHEMA_VERSION == 14
+    assert first.schema_version == SCHEMA_VERSION == 15
     assert second.schema_version == SCHEMA_VERSION
-    assert applied_versions(database) == [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]
+    assert applied_versions(database) == [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+    ]
     assert metadata_columns(database) == {"key", "value", "updated_at"}
+
+
+def test_concurrent_initialization_applies_pending_migrations_once(tmp_path):
+    database = tmp_path / "jobos.db"
+    with sqlite3.connect(database) as connection:
+        connection.execute(
+            "CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT)"
+        )
+        for migration in MIGRATIONS[:14]:
+            JobOsStateStore._apply_migration(connection, migration)
+
+    ready = Barrier(2)
+
+    def initialize() -> int:
+        ready.wait(timeout=5)
+        return JobOsStateStore(database).initialize().schema_version
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        results = list(executor.map(lambda _: initialize(), range(2)))
+
+    assert results == [SCHEMA_VERSION, SCHEMA_VERSION]
+    assert applied_versions(database) == list(range(1, SCHEMA_VERSION + 1))
 
 
 def test_initialization_upgrades_a_behind_database(tmp_path):
@@ -154,8 +195,419 @@ def test_initialization_upgrades_a_behind_database(tmp_path):
     result = JobOsStateStore(database).initialize()
 
     assert result.schema_version == SCHEMA_VERSION
-    assert applied_versions(database) == [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]
+    assert applied_versions(database) == [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+    ]
     assert metadata_columns(database) == {"key", "value", "updated_at"}
+
+
+def test_migration_15_reconciles_dirty_v14_publications_deterministically(tmp_path):
+    database = tmp_path / "jobos.db"
+    document_id = "edoc_abcdefghijklmnopqrstuvwx"
+    docx_media = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    with sqlite3.connect(database) as connection:
+        connection.execute(
+            "CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT)"
+        )
+        for migration in MIGRATIONS[:14]:
+            JobOsStateStore._apply_migration(connection, migration)
+        connection.execute(
+            """
+            INSERT INTO editable_documents(
+                document_id, job_id, document_key, document_label, schema_version,
+                revision, content_json, settings_json, comments_json, import_report_json,
+                published_revision
+            ) VALUES (?, 'job-dirty', 'resume', 'Resume', 1, 3, '{}', '{}', '[]', '{}', 3)
+            """,
+            (document_id,),
+        )
+        rows = [
+            ("art_old_docx_123456", "old-docx", 10, "source-shared", docx_media, "1" * 64),
+            ("art_old_pdf_1234567", "old-pdf", 11, "source-shared", "application/pdf", "2" * 64),
+            ("art_new_docx_123456", "new-docx", 20, "source-shared", docx_media, "3" * 64),
+            ("art_new_pdf_1234567", "new-pdf", 21, "source-shared", "application/pdf", "4" * 64),
+        ]
+        connection.executemany(
+            """
+            INSERT INTO document_artifacts(
+                artifact_id, registry_key, job_id, document_key, document_label,
+                render_sequence, source_revision, artifact_revision, media_type,
+                sha256, render_status, canonical_path, filename,
+                editable_document_id, editable_document_revision
+            ) VALUES (?, ?, 'job-dirty', 'resume', 'Resume', ?, ?, ?, ?, ?, 'succeeded',
+                '/synthetic/path', 'synthetic', ?, 3)
+            """,
+            [
+                (
+                    artifact_id,
+                    registry_key,
+                    sequence,
+                    source_revision,
+                    digest,
+                    media_type,
+                    digest,
+                    document_id,
+                )
+                for artifact_id, registry_key, sequence, source_revision, media_type, digest in rows
+            ],
+        )
+        connection.execute(
+            """
+            INSERT INTO job_document_state(
+                job_id, current_artifact_id, last_successful_artifact_id,
+                approved_artifact_id, approved_at
+            ) VALUES ('job-dirty', 'art_new_pdf_1234567', 'art_new_pdf_1234567',
+                'art_old_pdf_1234567', CURRENT_TIMESTAMP)
+            """
+        )
+
+    health = JobOsStateStore(database).initialize()
+
+    with sqlite3.connect(database) as connection:
+        associated = connection.execute(
+            """
+            SELECT artifact_id, media_type, source_revision
+            FROM document_artifacts
+            WHERE editable_document_id = ? AND editable_document_revision = 3
+            ORDER BY media_type
+            """,
+            (document_id,),
+        ).fetchall()
+        detached = connection.execute(
+            """
+            SELECT artifact_id
+            FROM document_artifacts
+            WHERE artifact_id LIKE 'art_new_%'
+                AND editable_document_id IS NULL
+                AND editable_document_revision IS NULL
+            ORDER BY artifact_id
+            """
+        ).fetchall()
+        state = connection.execute(
+            """
+            SELECT current_artifact_id, last_successful_artifact_id, approved_artifact_id
+            FROM job_document_state WHERE job_id = 'job-dirty'
+            """
+        ).fetchone()
+        published = connection.execute(
+            "SELECT published_revision FROM editable_documents WHERE document_id = ?",
+            (document_id,),
+        ).fetchone()
+
+    assert health.schema_version == 15
+    assert associated == [
+        ("art_old_pdf_1234567", "application/pdf", "source-shared"),
+        ("art_old_docx_123456", docx_media, "source-shared"),
+    ]
+    assert detached == [("art_new_docx_123456",), ("art_new_pdf_1234567",)]
+    assert state == (
+        "art_old_pdf_1234567",
+        "art_old_pdf_1234567",
+        "art_old_pdf_1234567",
+    )
+    assert published == (3,)
+
+
+def test_migration_15_preserves_valid_owner_and_clears_mixed_wrong_owner_pointers(
+    tmp_path,
+):
+    database = tmp_path / "jobos.db"
+    document_id = "edoc_abcdefghijklmnopqrstuvwx"
+    docx_media = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    with sqlite3.connect(database) as connection:
+        connection.execute(
+            "CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT)"
+        )
+        for migration in MIGRATIONS[:14]:
+            JobOsStateStore._apply_migration(connection, migration)
+        connection.execute(
+            """
+            INSERT INTO editable_documents(
+                document_id, job_id, document_key, document_label, schema_version,
+                revision, content_json, settings_json, comments_json, import_report_json,
+                published_revision
+            ) VALUES (?, 'job-owner', 'resume', 'Resume', 1, 3, '{}', '{}', '[]', '{}', 3)
+            """,
+            (document_id,),
+        )
+        rows = [
+            ("art_owner_docx_12345", "job-owner", 10, docx_media, "1" * 64),
+            ("art_owner_pdf_123456", "job-owner", 11, "application/pdf", "2" * 64),
+            ("art_wrong_docx_12345", "job-wrong", 20, docx_media, "3" * 64),
+            ("art_wrong_pdf_123456", "job-wrong", 21, "application/pdf", "4" * 64),
+        ]
+        connection.executemany(
+            """
+            INSERT INTO document_artifacts(
+                artifact_id, registry_key, job_id, document_key, document_label,
+                render_sequence, source_revision, artifact_revision, media_type,
+                sha256, render_status, canonical_path, filename,
+                editable_document_id, editable_document_revision
+            ) VALUES (?, 'legacy-' || ?, ?, 'resume', 'Resume', ?, 'source-shared', ?, ?, ?,
+                'succeeded', '/synthetic/path', 'synthetic', ?, 3)
+            """,
+            [
+                (artifact_id, artifact_id, job_id, sequence, digest, media_type, digest,
+                 document_id)
+                for artifact_id, job_id, sequence, media_type, digest in rows
+            ],
+        )
+        connection.executemany(
+            """
+            INSERT INTO job_document_state(
+                job_id, current_artifact_id, last_successful_artifact_id,
+                approved_artifact_id, approved_at
+            ) VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+            """,
+            [
+                (
+                    "job-owner",
+                    "art_owner_pdf_123456",
+                    "art_owner_pdf_123456",
+                    "art_owner_pdf_123456",
+                ),
+                (
+                    "job-wrong",
+                    "art_wrong_pdf_123456",
+                    "art_owner_docx_12345",
+                    "art_owner_pdf_123456",
+                ),
+            ],
+        )
+
+    health = JobOsStateStore(database).initialize()
+
+    with sqlite3.connect(database) as connection:
+        owner_state = connection.execute(
+            """
+            SELECT current_artifact_id, last_successful_artifact_id, approved_artifact_id
+            FROM job_document_state WHERE job_id = 'job-owner'
+            """
+        ).fetchone()
+        wrong_state = connection.execute(
+            """
+            SELECT current_artifact_id, last_successful_artifact_id,
+                approved_artifact_id, approved_at
+            FROM job_document_state WHERE job_id = 'job-wrong'
+            """
+        ).fetchone()
+        associated = connection.execute(
+            """
+            SELECT artifact_id FROM document_artifacts
+            WHERE editable_document_id = ?
+            ORDER BY artifact_id
+            """,
+            (document_id,),
+        ).fetchall()
+
+    assert health.schema_version == 15
+    assert owner_state == (
+        "art_owner_pdf_123456",
+        "art_owner_pdf_123456",
+        "art_owner_pdf_123456",
+    )
+    assert wrong_state == (None, None, None, None)
+    assert associated == [("art_owner_docx_12345",), ("art_owner_pdf_123456",)]
+
+
+@pytest.mark.parametrize(
+    ("legacy_rows", "artifact_job_id", "artifact_document_keys"),
+    [
+        (
+            [("art_only_docx_123456", 10, "source-a", "docx")],
+            "job-malformed",
+            ("resume",),
+        ),
+        (
+            [("art_only_pdf_1234567", 10, "source-a", "pdf")],
+            "job-malformed",
+            ("resume",),
+        ),
+        (
+            [
+                ("art_mismatch_docx_1", 10, "source-a", "docx"),
+                ("art_mismatch_pdf_12", 11, "source-b", "pdf"),
+            ],
+            "job-malformed",
+            ("resume", "resume"),
+        ),
+        (
+            [
+                ("art_gap_docx_1234567", 10, "source-a", "docx"),
+                ("art_gap_pdf_12345678", 12, "source-a", "pdf"),
+            ],
+            "job-malformed",
+            ("resume", "resume"),
+        ),
+        (
+            [
+                ("art_wrong_job_docx_1", 10, "source-a", "docx"),
+                ("art_wrong_job_pdf_12", 11, "source-a", "pdf"),
+            ],
+            "job-wrong-owner",
+            ("resume", "resume"),
+        ),
+        (
+            [
+                ("art_wrong_key_docx_1", 10, "source-a", "docx"),
+                ("art_wrong_key_pdf_12", 11, "source-a", "pdf"),
+            ],
+            "job-malformed",
+            ("resume", "cover_letter"),
+        ),
+    ],
+    ids=(
+        "docx-only",
+        "pdf-only",
+        "mismatched-source",
+        "nonadjacent-sequences",
+        "owner-job-mismatch",
+        "owner-document-key-mismatch",
+    ),
+)
+def test_migration_15_detaches_every_malformed_v14_publication_and_allows_republish(
+    tmp_path, legacy_rows, artifact_job_id, artifact_document_keys
+):
+    database = tmp_path / "jobos.db"
+    document_id = "edoc_abcdefghijklmnopqrstuvwx"
+    docx_media = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    media_types = {"docx": docx_media, "pdf": "application/pdf"}
+    with sqlite3.connect(database) as connection:
+        connection.execute(
+            "CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT)"
+        )
+        for migration in MIGRATIONS[:14]:
+            JobOsStateStore._apply_migration(connection, migration)
+        connection.execute(
+            """
+            INSERT INTO editable_documents(
+                document_id, job_id, document_key, document_label, schema_version,
+                revision, content_json, settings_json, comments_json, import_report_json,
+                published_revision
+            ) VALUES (?, 'job-malformed', 'resume', 'Resume', 1, 3, '{}', '{}', '[]', '{}', 3)
+            """,
+            (document_id,),
+        )
+        for index, ((artifact_id, sequence, source_revision, media), document_key) in enumerate(
+            zip(legacy_rows, artifact_document_keys, strict=True)
+        ):
+            digest = str(index + 1) * 64
+            connection.execute(
+                """
+                INSERT INTO document_artifacts(
+                    artifact_id, registry_key, job_id, document_key, document_label,
+                    render_sequence, source_revision, artifact_revision, media_type,
+                    sha256, render_status, canonical_path, filename,
+                    editable_document_id, editable_document_revision
+                ) VALUES (?, ?, ?, ?, 'Resume', ?, ?, ?, ?, ?,
+                    'succeeded', '/synthetic/path', 'synthetic', ?, 3)
+                """,
+                (
+                    artifact_id,
+                    f"legacy-{index}",
+                    artifact_job_id,
+                    document_key,
+                    sequence,
+                    source_revision,
+                    digest,
+                    media_types[media],
+                    digest,
+                    document_id,
+                ),
+            )
+        pointed_artifact = legacy_rows[0][0]
+        connection.execute(
+            """
+            INSERT INTO job_document_state(
+                job_id, current_artifact_id, last_successful_artifact_id,
+                approved_artifact_id, approved_at
+            ) VALUES ('job-malformed', ?, ?, ?, CURRENT_TIMESTAMP)
+            """,
+            (pointed_artifact, pointed_artifact, pointed_artifact),
+        )
+
+    store = JobOsStateStore(database)
+    health = store.initialize()
+
+    with sqlite3.connect(database) as connection:
+        detached = connection.execute(
+            """
+            SELECT artifact_id
+            FROM document_artifacts
+            WHERE registry_key LIKE 'legacy-%'
+                AND editable_document_id IS NULL
+                AND editable_document_revision IS NULL
+            ORDER BY artifact_id
+            """
+        ).fetchall()
+        state = connection.execute(
+            """
+            SELECT current_artifact_id, last_successful_artifact_id,
+                approved_artifact_id, approved_at
+            FROM job_document_state WHERE job_id = 'job-malformed'
+            """
+        ).fetchone()
+        published = connection.execute(
+            "SELECT published_revision FROM editable_documents WHERE document_id = ?",
+            (document_id,),
+        ).fetchone()
+        republished = store.register_editable_publication_pair(
+            "job-malformed",
+            [
+                VerifiedArtifact(
+                    job_id="job-malformed",
+                    document_key="resume",
+                    document_label="Resume",
+                    source_revision="source-republish",
+                    artifact_revision="republish-docx",
+                    media_type=docx_media,
+                    sha256="a" * 64,
+                    render_status="succeeded",
+                    render_sequence=30,
+                    canonical_path="/synthetic/republish.docx",
+                    filename="republish.docx",
+                    failure_message=None,
+                ),
+                VerifiedArtifact(
+                    job_id="job-malformed",
+                    document_key="resume",
+                    document_label="Resume",
+                    source_revision="source-republish",
+                    artifact_revision="republish-pdf",
+                    media_type="application/pdf",
+                    sha256="b" * 64,
+                    render_status="succeeded",
+                    render_sequence=31,
+                    canonical_path="/synthetic/republish.pdf",
+                    filename="republish.pdf",
+                    failure_message=None,
+                ),
+            ],
+            editable_document_id=document_id,
+            editable_document_revision=3,
+            connection=connection,
+        )
+
+    assert health.schema_version == 15
+    assert detached == sorted((row[0],) for row in legacy_rows)
+    assert state == (None, None, None, None)
+    assert published == (None,)
+    assert republished is True
+    assert len(store.editable_publication_artifacts(document_id, 3)) == 2
 
 
 def test_document_identity_migration_clears_legacy_docx_approval(tmp_path):
@@ -216,7 +668,10 @@ def test_document_identity_migration_clears_legacy_docx_approval(tmp_path):
     assert identity == ("resume", "Resume", 1)
 
 
-@pytest.mark.parametrize("versions", ([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15], [2]))
+@pytest.mark.parametrize(
+    "versions",
+    ([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16], [2]),
+)
 def test_initialization_rejects_ahead_or_incompatible_history(tmp_path, versions):
     database = tmp_path / "jobos.db"
     with sqlite3.connect(database) as connection:

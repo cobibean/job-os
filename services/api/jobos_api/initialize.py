@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from uuid import uuid4
 
+from jobos_api.job_repository import NotFound
 from jobos_api.local_config import (
     LocalConfigError,
     config_path,
@@ -19,7 +20,13 @@ from jobos_api.local_config import (
 )
 from jobos_api.sqlite_job_repository import SQLiteJobRepository
 from jobos_api.state_store import JobOsStateStore
-from jobos_api.synthetic_demo import reset_demo, seed_demo_once
+from jobos_api.synthetic_demo import (
+    DEMO_JOB_ID,
+    reset_demo,
+    reset_demo_document,
+    seed_demo_document_once,
+    seed_demo_once,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -166,8 +173,16 @@ def _initialize_jobos_locked(
     seeded_job_id: str | None = None
     if reset_demo_requested:
         seeded_job_id = reset_demo(repository, ledger_path, confirmed=reset_confirmed)
+        reset_demo_document(state_store)
     elif bool(config.get("demoEnabled", False)):
         seeded_job_id = seed_demo_once(repository, ledger_path)
+        try:
+            demo = repository.get_job(DEMO_JOB_ID)
+        except NotFound:
+            pass
+        else:
+            if demo.synthetic_demo:
+                seed_demo_document_once(state_store)
     if ledger_path.exists():
         os.chmod(ledger_path, 0o600)
     if seeded_job_id is not None:
