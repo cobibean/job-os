@@ -1,10 +1,12 @@
 import base64
 import json
+import os
 
 import httpx
+import jobos_mcp.server as server_module
 import pytest
 from jobos_mcp.jobs import JobOsMcpClient
-from jobos_mcp.server import _read_document_input, create_server
+from jobos_mcp.server import _document_import_roots, _read_document_input, create_server
 
 
 @pytest.mark.parametrize("value", ["../job", "job/other", "job\\other", "job\nother", ""])
@@ -167,6 +169,137 @@ def test_document_publish_input_is_limited_to_explicit_roots(tmp_path):
         _read_document_input(
             str(outside), roots=(allowed,), maximum=100, suffixes={".docx"}
         )
+
+
+def test_document_publish_input_rejects_relative_path_with_cwd_inside_allowed_root(
+    tmp_path, monkeypatch
+):
+    allowed = tmp_path / "allowed"
+    allowed.mkdir()
+    artifact = allowed / "letter.docx"
+    artifact.write_bytes(b"PK\x03\x04fixture")
+    monkeypatch.chdir(allowed)
+
+    with pytest.raises(ValueError, match="must be absolute"):
+        _read_document_input(
+            artifact.name, roots=(allowed,), maximum=100, suffixes={".docx"}
+        )
+
+
+def test_document_input_descriptor_read_cannot_leak_post_open_symlink_bytes(
+    tmp_path, monkeypatch
+):
+    allowed = tmp_path / "allowed"
+    nested = allowed / "nested"
+    nested.mkdir(parents=True)
+    original = b"inside document bytes"
+    outside_bytes = b"outside private bytes"
+    target = nested / "letter.docx"
+    target.write_bytes(original)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / target.name).write_bytes(outside_bytes)
+    held = allowed / "held-nested"
+    real_open = os.open
+    swapped = False
+
+    def racing_open(path, flags, mode=0o777, *, dir_fd=None):
+        nonlocal swapped
+        descriptor = real_open(path, flags, mode, dir_fd=dir_fd)
+        if path == nested.name and dir_fd is not None and not swapped:
+            swapped = True
+            nested.rename(held)
+            nested.symlink_to(outside, target_is_directory=True)
+        return descriptor
+
+    monkeypatch.setattr(server_module.os, "open", racing_open)
+    filename, content = _read_document_input(
+        str(target), roots=(allowed,), maximum=100, suffixes={".docx"}
+    )
+
+    assert swapped
+    assert filename == target.name
+    assert content == original
+    assert content != outside_bytes
+
+
+def test_document_input_rejects_same_inode_same_size_in_place_mutation(
+    tmp_path, monkeypatch
+):
+    allowed = tmp_path / "allowed"
+    allowed.mkdir()
+    target = allowed / "resume.pdf"
+    original = b"A" * 256
+    replacement = b"B" * len(original)
+    target.write_bytes(original)
+    identity = target.stat()
+    real_read = os.read
+    mutated = False
+
+    def racing_read(descriptor, size):
+        nonlocal mutated
+        chunk = real_read(descriptor, size)
+        if chunk and not mutated:
+            mutated = True
+            target.write_bytes(replacement)
+        return chunk
+
+    monkeypatch.setattr(server_module.os, "read", racing_read)
+    with pytest.raises(ValueError, match="changed during access"):
+        _read_document_input(
+            str(target), roots=(allowed,), maximum=1_024, suffixes={".pdf"}
+        )
+
+    changed = target.stat()
+    assert mutated
+    assert changed.st_ino == identity.st_ino
+    assert changed.st_size == identity.st_size
+
+
+def test_document_roots_use_explicit_local_config_and_never_cwd_or_hermes(tmp_path, monkeypatch):
+    working = tmp_path / "working"
+    working.mkdir()
+    hermes = tmp_path / ".hermes/profiles/job-hunter/cache/documents"
+    hermes.mkdir(parents=True)
+    monkeypatch.chdir(working)
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("JOBOS_CONFIG_PATH", str(tmp_path / "missing-config.json"))
+    monkeypatch.delenv("JOBOS_DOCUMENT_ROOTS", raising=False)
+
+    with pytest.raises(RuntimeError, match="JOBOS_DOCUMENT_ROOTS or a valid JobOS local config"):
+        _document_import_roots()
+
+    artifacts = tmp_path / "application-data/artifacts"
+    artifacts.mkdir(parents=True)
+    config = tmp_path / "application-data/config.json"
+    config.write_text(
+        json.dumps(
+            {
+                "schemaVersion": 1,
+                "paths": {"artifacts": "artifacts"},
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("JOBOS_CONFIG_PATH", str(config))
+    assert _document_import_roots() == (artifacts.resolve(),)
+    assert working.resolve() not in _document_import_roots()
+    assert hermes.resolve() not in _document_import_roots()
+
+
+def test_document_roots_reject_symlink_configuration(tmp_path, monkeypatch):
+    target = tmp_path / "target"
+    target.mkdir()
+    link = tmp_path / "link"
+    os.symlink(target, link)
+    monkeypatch.setenv("JOBOS_DOCUMENT_ROOTS", str(link))
+
+    with pytest.raises(RuntimeError, match="symbolic links"):
+        _document_import_roots()
+
+    monkeypatch.setenv("JOBOS_DOCUMENT_ROOTS", "relative/documents")
+    with pytest.raises(RuntimeError, match="absolute paths"):
+        _document_import_roots()
 
 
 @pytest.mark.anyio

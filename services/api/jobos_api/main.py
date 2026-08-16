@@ -5,6 +5,7 @@ from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 
 from jobos_api.app import create_app
+from jobos_api.artifact_repository import ArtifactStorageError
 from jobos_api.local_config import (
     LocalConfigError,
     config_path,
@@ -26,7 +27,10 @@ def settings_from_environment() -> Settings:
         raise LocalConfigError(
             "JOBOS_DEVICE_TOKEN and JOBOS_MCP_TOKEN must be configured together."
         )
-    state_db_path = Path(os.environ.get("JOBOS_STATE_DB_PATH", "data/jobos.db"))
+    application_data = default_data_dir()
+    state_db_path = Path(
+        os.environ.get("JOBOS_STATE_DB_PATH", application_data / "state/jobos.db")
+    )
     jobs_db = os.environ.get("JOBOS_JOBS_DB_PATH")
     job_hunter_db = os.environ.get("JOBOS_JOB_HUNTER_DB_PATH")
     artifact_roots = tuple(
@@ -34,6 +38,7 @@ def settings_from_environment() -> Settings:
         for value in os.environ.get("JOBOS_ARTIFACT_ROOTS", "").split(os.pathsep)
         if value
     )
+    local_artifact_root = os.environ.get("JOBOS_LOCAL_ARTIFACT_ROOT")
     hermes_url = os.environ.get("JOBOS_HERMES_DASHBOARD_URL")
     hermes_token = os.environ.get("JOBOS_HERMES_DASHBOARD_TOKEN")
     hermes_cwd = os.environ.get("JOBOS_HERMES_JOB_HUNTER_CWD")
@@ -46,8 +51,12 @@ def settings_from_environment() -> Settings:
         ),
         state_db_path=state_db_path,
         job_provider=os.environ.get("JOBOS_JOB_PROVIDER", "sqlite"),
-        jobs_db_path=Path(jobs_db) if jobs_db else None,
+        jobs_db_path=Path(jobs_db) if jobs_db else application_data / "jobs/jobs.db",
         job_hunter_db_path=Path(job_hunter_db) if job_hunter_db else None,
+        artifact_provider=os.environ.get("JOBOS_ARTIFACT_PROVIDER", "local"),
+        local_artifact_root=(
+            Path(local_artifact_root) if local_artifact_root else application_data / "artifacts"
+        ),
         artifact_roots=artifact_roots,
         hermes_dashboard_url=hermes_url,
         hermes_dashboard_token=hermes_token,
@@ -76,5 +85,5 @@ def _configuration_error_app(error: Exception) -> FastAPI:
 
 try:
     app = create_application()
-except (LocalConfigError, OSError, ValueError) as error:
+except (ArtifactStorageError, LocalConfigError, OSError, ValueError) as error:
     app = _configuration_error_app(error)

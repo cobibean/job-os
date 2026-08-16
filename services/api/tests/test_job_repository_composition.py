@@ -9,6 +9,7 @@ from jobos_api.app import create_app
 from jobos_api.artifact_gateway import UnavailableArtifactGateway
 from jobos_api.composition import create_job_services
 from jobos_api.job_repository import Conflict, NotFound, Unavailable, Validation
+from jobos_api.private_adapters import job_hunter as private_job_hunter
 from jobos_api.settings import Settings
 from jobos_api.sqlite_job_repository import SQLiteJobRepository
 
@@ -31,6 +32,48 @@ def test_public_default_uses_separate_local_sqlite_without_job_hunter(tmp_path):
     assert repository.database_path == tmp_path / "state" / "jobs.db"
     assert repository.database_path != configured.state_db_path
     assert "job_hunter" not in sys.modules
+
+
+def test_sqlite_jobs_can_select_the_private_artifact_gateway_independently(
+    tmp_path, monkeypatch
+):
+    gateway = object()
+    calls = []
+
+    def create_gateway(database_path, workspace_root):
+        calls.append((database_path, workspace_root))
+        return gateway
+
+    monkeypatch.setattr(
+        private_job_hunter, "create_job_hunter_artifact_gateway", create_gateway
+    )
+    configured = settings(
+        tmp_path,
+        job_provider="sqlite",
+        artifact_provider="gateway",
+        job_hunter_db_path=tmp_path / "private" / "jobs.db",
+        hermes_job_hunter_cwd=tmp_path / "private-workspace",
+    )
+
+    repository, artifact_gateway = create_job_services(configured)
+
+    assert isinstance(repository, SQLiteJobRepository)
+    assert artifact_gateway is gateway
+    assert calls == [
+        (tmp_path / "private" / "jobs.db", tmp_path / "private-workspace")
+    ]
+
+
+def test_private_artifact_gateway_validates_its_database_only_when_selected(tmp_path):
+    repository, gateway = create_job_services(settings(tmp_path, artifact_provider="local"))
+    assert isinstance(repository, SQLiteJobRepository)
+    assert isinstance(gateway, UnavailableArtifactGateway)
+
+    with pytest.raises(
+        Unavailable,
+        match="artifact gateway requires JOBOS_JOB_HUNTER_DB_PATH",
+    ):
+        create_job_services(settings(tmp_path, artifact_provider="gateway"))
 
 
 def test_explicit_jobs_path_and_public_runtime_create_mutable_jobs(tmp_path):
@@ -132,4 +175,5 @@ def test_private_installed_environment_explicitly_selects_job_hunter(tmp_path):
     )
 
     assert environment["JOBOS_JOB_PROVIDER"] == "job-hunter"
+    assert environment["JOBOS_ARTIFACT_PROVIDER"] == "gateway"
     assert environment["JOBOS_JOB_HUNTER_DB_PATH"] == str(tmp_path / "private-jobs.db")

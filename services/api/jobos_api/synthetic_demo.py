@@ -8,6 +8,12 @@ from pathlib import Path
 from typing import TypedDict, cast
 from urllib.parse import urlsplit, urlunsplit
 
+from jobos_api.editable_documents import (
+    DocumentSettings,
+    blank_content,
+    default_settings,
+    validate_content,
+)
 from jobos_api.job_repository import (
     Conflict,
     CreateJobCommand,
@@ -15,6 +21,7 @@ from jobos_api.job_repository import (
     JobRepository,
     NotFound,
 )
+from jobos_api.state_store import JobOsStateStore
 
 
 class DemoFixture(TypedDict):
@@ -55,6 +62,48 @@ def _fixture_sha256(value: DemoFixture) -> str:
 
 
 DEMO_FIXTURE_SHA256 = _fixture_sha256(DEMO_FIXTURE)
+DEMO_DOCUMENT_KEY = "resume"
+
+
+def _starter_document_content() -> dict[str, object]:
+    content = blank_content(DEMO_DOCUMENT_KEY)
+    lines = (
+        "(FAKE) FICTIONAL JOBOS DEMO CANDIDATE — DO NOT APPLY",
+        "(FAKE) Synthetic resume for learning JobOS. This is not a real person or application.",
+        "(FAKE) Imaginary Kite Systems Workshop — demonstration experience only.",
+        "(FAKE) Example Learning Lab — fictional credential; do not verify or submit.",
+        "(FAKE) Demo editing, synthetic kite telemetry, and clearly fictional examples.",
+    )
+    sections = content["content"]
+    assert isinstance(sections, list)
+    for section, line in zip(sections, lines, strict=True):
+        paragraph = section["content"][0]
+        paragraph["content"] = [{"type": "text", "text": line}]
+    validate_content(content, DocumentSettings.model_validate(default_settings()), [])
+    return content
+
+
+def seed_demo_document_once(state_store: JobOsStateStore) -> str | None:
+    existing = state_store.get_job_editable_document(DEMO_JOB_ID, DEMO_DOCUMENT_KEY)
+    if existing is not None:
+        return None
+    row = state_store.create_editable_document(
+        job_id=DEMO_JOB_ID,
+        document_key=DEMO_DOCUMENT_KEY,
+        document_label="Resume",
+        content=_starter_document_content(),
+        settings=default_settings(),
+        comments=[],
+        import_report={"source_filename": None, "imported_at": None, "issues": []},
+    )
+    return str(row["document_id"])
+
+
+def reset_demo_document(state_store: JobOsStateStore) -> str:
+    state_store.delete_job_documents(DEMO_JOB_ID)
+    document_id = seed_demo_document_once(state_store)
+    assert document_id is not None
+    return document_id
 
 
 def _command(fixture_path: Path | None = None) -> CreateJobCommand:
