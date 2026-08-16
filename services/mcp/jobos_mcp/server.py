@@ -317,7 +317,7 @@ def create_server(
     ) -> dict[str, Any]:
         """Read a bounded semantic outline for one editable job document."""
         return await client.get_document_draft(
-            job_id, REMOVED_PHASE9_FINDING_1  # gitleaks:allow
+            job_id, document_key, idempotency_key=idempotency_key  # gitleaks:allow
         )
 
     @server.tool(name="document_draft_apply", structured_output=True)
