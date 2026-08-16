@@ -42,7 +42,6 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: 26.5.0
-          cache: pnpm
       - uses: actions/setup-python@v6
         with:
           python-version: "3.11"
@@ -61,7 +60,6 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: 26.5.0
-          cache: pnpm
       - uses: actions/setup-python@v6
         with:
           python-version: "3.11"
