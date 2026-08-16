@@ -69,6 +69,40 @@ class DocumentBroker:
         )
 
 
+class ActiveTurnGateway:
+    connection_state = "online"
+
+    async def start(self):
+        return None
+
+    async def create_or_resume_conversation(self, stored_session_id):
+        return "stored-document-test", "live-document-test"
+
+    async def submit_turn(self, text, context):
+        return None
+
+    async def detach_conversation(self):
+        return None
+
+    async def stream_events(self):
+        if False:
+            yield None
+
+    async def interrupt_turn(self, turn_id):
+        return None
+
+    async def recover_active_turn(self, stored_session_id, turn_id):
+        return None
+
+    async def close(self):
+        return None
+
+
+class ActiveTurnGatewayFactory:
+    def create(self, conversation_id):
+        return ActiveTurnGateway()
+
+
 def make_app(tmp_path, broker):
     repository, artifact_gateway = adapt_job_hunter_facade(FakeJobs())
     return create_app(
@@ -80,6 +114,7 @@ def make_app(tmp_path, broker):
         capability_broker=broker,
         job_repository=repository,
         artifact_gateway=artifact_gateway,
+        agent_gateway_factory=ActiveTurnGatewayFactory(),
     )
 
 
@@ -89,7 +124,7 @@ def test_document_inspect_persists_portable_metadata_without_a_local_path(tmp_pa
     command = {
         "command": "document.inspect",
         "arguments": {"job_id": "(FAKE)-job-7", "document_key": "resume"},
-        "origin": "mcp",
+        "origin": "user",
         "idempotency_key": "(FAKE)-inspect-7",
         "timeout_ms": 10_000,
     }
@@ -110,6 +145,7 @@ def test_document_inspect_persists_portable_metadata_without_a_local_path(tmp_pa
     assert document["observed_device_id"]
     assert document["capabilities"]["protected_block_count"] == 2
     assert "path" not in str(document).lower()
+    assert broker.commands[0][0].conversation_id is None
     with sqlite3.connect(tmp_path / "jobos.db") as connection:
         observation_count = connection.execute(
             "SELECT COUNT(*) FROM document_file_observations"
@@ -128,7 +164,7 @@ def test_document_apply_requires_a_current_sha_and_updates_one_observation_per_r
             "expected_sha256": "stale",
             "operations": [{"type": "replace_block_text"}],
         },
-        "origin": "mcp",
+        "origin": "user",
         "idempotency_key": "(FAKE)-invalid-7",
     }
     valid = {
@@ -159,11 +195,46 @@ def test_document_apply_requires_a_current_sha_and_updates_one_observation_per_r
     assert replayed.status_code == 200
     assert listing.json()["documents"][0]["observed_revision"] == 8
     assert len(broker.commands) == 1
+    assert broker.commands[0][0].conversation_id is None
     with sqlite3.connect(tmp_path / "jobos.db") as connection:
         observation_count = connection.execute(
             "SELECT COUNT(*) FROM document_file_observations"
         ).fetchone()
         assert observation_count == (1,)
+
+
+def test_mcp_document_commands_require_an_explicit_active_conversation(tmp_path):
+    broker = DocumentBroker()
+    app = make_app(tmp_path, broker)
+    command = {
+        "command": "document.inspect",
+        "arguments": {"job_id": "(FAKE)-job-7", "document_key": "resume"},
+        "origin": "mcp",
+        "idempotency_key": "(FAKE)-correlated-inspect-7",
+    }
+
+    with TestClient(app) as client:
+        conversation_id = client.get("/v1/conversations", headers=headers()).json()[
+            "conversations"
+        ][0]["conversation_id"]
+        missing = client.post("/v1/browser/commands", headers=headers(), json=command)
+        started = client.post(
+            f"/v1/conversations/{conversation_id}/messages",
+            headers=headers(),
+            json={"text": "Inspect the resume", "idempotency_key": "document-turn-7"},
+        )
+        accepted = client.post(
+            "/v1/browser/commands",
+            headers=headers(),
+            json={**command, "conversation_id": conversation_id},
+        )
+
+    assert missing.status_code == 422
+    assert missing.json()["detail"] == "MCP browser commands require a conversation ID"
+    assert started.status_code == 201
+    assert accepted.status_code == 200
+    assert len(broker.commands) == 1
+    assert broker.commands[0][0].conversation_id == conversation_id
 
 
 def test_equal_document_revision_is_idempotent_or_a_visible_conflict(tmp_path):

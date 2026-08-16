@@ -14,6 +14,9 @@ from jobos_api.documents import VerifiedArtifact
 from jobos_api.state_store import (
     MIGRATIONS,
     SCHEMA_VERSION,
+    ConversationBusy,
+    ConversationLimit,
+    ConversationNotFound,
     IncompatibleSchemaError,
     JobOsStateStore,
     Migration,
@@ -140,7 +143,7 @@ def test_initialization_applies_every_migration_once(tmp_path):
     first = store.initialize()
     second = store.initialize()
 
-    assert first.schema_version == SCHEMA_VERSION == 15
+    assert first.schema_version == SCHEMA_VERSION == 18
     assert second.schema_version == SCHEMA_VERSION
     assert applied_versions(database) == [
         1,
@@ -158,6 +161,9 @@ def test_initialization_applies_every_migration_once(tmp_path):
         13,
         14,
         15,
+        16,
+        17,
+        18,
     ]
     assert metadata_columns(database) == {"key", "value", "updated_at"}
 
@@ -211,6 +217,9 @@ def test_initialization_upgrades_a_behind_database(tmp_path):
         13,
         14,
         15,
+        16,
+        17,
+        18,
     ]
     assert metadata_columns(database) == {"key", "value", "updated_at"}
 
@@ -308,7 +317,7 @@ def test_migration_15_reconciles_dirty_v14_publications_deterministically(tmp_pa
             (document_id,),
         ).fetchone()
 
-    assert health.schema_version == 15
+    assert health.schema_version == 18
     assert associated == [
         ("art_old_pdf_1234567", "application/pdf", "source-shared"),
         ("art_old_docx_123456", docx_media, "source-shared"),
@@ -361,8 +370,16 @@ def test_migration_15_preserves_valid_owner_and_clears_mixed_wrong_owner_pointer
                 'succeeded', '/synthetic/path', 'synthetic', ?, 3)
             """,
             [
-                (artifact_id, artifact_id, job_id, sequence, digest, media_type, digest,
-                 document_id)
+                (
+                    artifact_id,
+                    artifact_id,
+                    job_id,
+                    sequence,
+                    digest,
+                    media_type,
+                    digest,
+                    document_id,
+                )
                 for artifact_id, job_id, sequence, media_type, digest in rows
             ],
         )
@@ -414,7 +431,7 @@ def test_migration_15_preserves_valid_owner_and_clears_mixed_wrong_owner_pointer
             (document_id,),
         ).fetchall()
 
-    assert health.schema_version == 15
+    assert health.schema_version == 18
     assert owner_state == (
         "art_owner_pdf_123456",
         "art_owner_pdf_123456",
@@ -602,7 +619,7 @@ def test_migration_15_detaches_every_malformed_v14_publication_and_allows_republ
             connection=connection,
         )
 
-    assert health.schema_version == 15
+    assert health.schema_version == 18
     assert detached == sorted((row[0],) for row in legacy_rows)
     assert state == (None, None, None, None)
     assert published == (None,)
@@ -670,7 +687,10 @@ def test_document_identity_migration_clears_legacy_docx_approval(tmp_path):
 
 @pytest.mark.parametrize(
     "versions",
-    ([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16], [2]),
+    (
+        [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19],
+        [2],
+    ),
 )
 def test_initialization_rejects_ahead_or_incompatible_history(tmp_path, versions):
     database = tmp_path / "jobos.db"
@@ -736,7 +756,11 @@ def test_conversation_message_turn_and_context_are_atomic_and_idempotent(tmp_pat
         actor_id="device-a",
     )
 
-    assert first == replay
+    assert first["created"] is True
+    assert replay["created"] is False
+    assert {key: value for key, value in first.items() if key != "created"} == {
+        key: value for key, value in replay.items() if key != "created"
+    }
     snapshot = store.conversation_snapshot()
     assert snapshot["latest_event_id"] == 2
     assert [entry["type"] for entry in snapshot["entries"]] == ["user_message", "turn"]
@@ -1132,9 +1156,9 @@ def test_agent_focus_defaults_to_centered_chat_and_upgrades_only_the_legacy_stoc
         "center",
     ]
     assert restored_legacy.snapshot["layouts"]["agent-focus"]["collapsed"] == ["center"]
-    assert restored_custom.snapshot["layouts"]["agent-focus"] == customized["layouts"][
-        "agent-focus"
-    ]
+    assert (
+        restored_custom.snapshot["layouts"]["agent-focus"] == customized["layouts"]["agent-focus"]
+    )
 
 
 def test_browser_metadata_round_trips_without_credentials_or_session_material(tmp_path):
@@ -1386,3 +1410,290 @@ def test_browser_repair_keeps_first_fifty_valid_tabs_in_stable_order(tmp_path):
         f"tab-{index}" for index in range(50)
     ]
     assert restored.snapshot["active_browser_tab_id"] == "tab-49"
+
+
+def test_migration_16_preserves_legacy_conversation_and_recovery_state(tmp_path):
+    database = tmp_path / "legacy.db"
+    with sqlite3.connect(database) as connection:
+        connection.execute(
+            "CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT)"
+        )
+        for migration in MIGRATIONS[:15]:
+            JobOsStateStore._apply_migration(connection, migration)
+        connection.execute("""
+            UPDATE conversations SET conversation_id='conv_legacy',
+                stored_session_id='stored-legacy', isolated_turn_id='turn_legacy',
+                isolated_previous_session_id='stored-ordinary',
+                isolated_agent_session_id='stored-isolated',
+                ignored_agent_session_id='stored-ignored' WHERE singleton_id=1
+            """)
+        connection.execute("""
+            INSERT INTO conversation_turns(turn_id,message_id,text,context_json,status)
+            VALUES ('turn_legacy','msg_legacy','Legacy prompt','{}','waiting')
+            """)
+        connection.execute("""
+            INSERT INTO conversation_events(
+                event_id,turn_id,event_type,state,summary,detail_json,source_event_id
+            ) VALUES (41,'turn_legacy','status','waiting','Legacy wait','{}','legacy-event')
+            """)
+        connection.execute("""
+            INSERT INTO jobos_metadata(key,value,updated_at)
+            VALUES ('agent_recovery_turn_id','turn_legacy',CURRENT_TIMESTAMP)
+            """)
+    store = JobOsStateStore(database)
+    store.initialize()
+    scoped = store.conversation_store("conv_legacy")
+    snapshot = scoped.snapshot()
+    assert (snapshot["conversation_id"], snapshot["position"], snapshot["title"]) == (
+        "conv_legacy",
+        1,
+        "Session 1",
+    )
+    assert snapshot["entries"][0]["event_id"] == 41
+    assert scoped.turn_record("turn_legacy")["text"] == "Legacy prompt"
+    assert scoped.stored_session_id() == "stored-legacy"
+    assert scoped.recovery_turn_id() == "turn_legacy"
+    assert scoped.restore_isolated_agent_session("turn_legacy") is True
+    assert scoped.stored_session_id() == "stored-ordinary"
+    with sqlite3.connect(database) as connection:
+        connection.execute("PRAGMA foreign_keys = ON")
+        assert connection.execute("PRAGMA foreign_key_check").fetchall() == []
+
+
+@pytest.mark.parametrize("retain_earlier_event", [False, True])
+def test_migration_16_preserves_deleted_autoincrement_high_water_mark(
+    tmp_path, retain_earlier_event
+):
+    database = tmp_path / f"legacy-high-water-{retain_earlier_event}.db"
+    with sqlite3.connect(database) as connection:
+        connection.execute(
+            "CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT)"
+        )
+        for migration in MIGRATIONS[:15]:
+            JobOsStateStore._apply_migration(connection, migration)
+        connection.execute(
+            "UPDATE conversations SET conversation_id = 'conv_legacy' WHERE singleton_id = 1"
+        )
+        connection.execute(
+            """
+            INSERT INTO conversation_turns(turn_id,message_id,text,context_json,status)
+            VALUES ('turn_legacy','msg_legacy','Legacy prompt','{}','running')
+            """
+        )
+        if retain_earlier_event:
+            connection.execute(
+                """
+                INSERT INTO conversation_events(
+                    event_id,turn_id,event_type,state,summary,detail_json
+                ) VALUES (41,'turn_legacy','status','working','Earlier event','{}')
+                """
+            )
+        connection.execute(
+            """
+            INSERT INTO conversation_events(
+                event_id,turn_id,event_type,state,summary,detail_json
+            ) VALUES (100,'turn_legacy','status','working','Deleted tail','{}')
+            """
+        )
+        connection.execute("DELETE FROM conversation_events WHERE event_id = 100")
+        assert (
+            connection.execute(
+                "SELECT seq FROM sqlite_sequence WHERE name = 'conversation_events'"
+            ).fetchone()[0]
+            == 100
+        )
+
+    store = JobOsStateStore(database)
+    store.initialize()
+    event = store.conversation_store("conv_legacy").append_event(
+        turn_id="turn_legacy",
+        event_type="status",
+        state="working",
+        summary="First post-migration event",
+    )
+
+    assert event is not None and event > 100
+    with sqlite3.connect(database) as connection:
+        connection.execute("PRAGMA foreign_keys = ON")
+        assert connection.execute("PRAGMA foreign_key_check").fetchall() == []
+
+
+def test_conversation_foreign_keys_enforce_same_conversation_scope(tmp_path):
+    database = tmp_path / "scoped-foreign-keys.db"
+    store = JobOsStateStore(database)
+    store.initialize()
+    first_id = store.first_active_conversation_id()
+    second_id = str(store.create_conversation(actor_id="device-a")["conversation_id"])
+    first_turn = store.conversation_store(first_id).create_turn(
+        text="First", context={}, idempotency_key="fk-first-turn-1", actor_id="device-a"
+    )
+
+    with sqlite3.connect(database) as connection:
+        connection.execute("PRAGMA foreign_keys = ON")
+        assert connection.execute("PRAGMA foreign_key_check").fetchall() == []
+        with pytest.raises(sqlite3.IntegrityError):
+            connection.execute(
+                """
+                INSERT INTO conversation_events(
+                    conversation_id,turn_id,event_type,state,summary,detail_json
+                ) VALUES (?,?,'status','working','Wrong scope','{}')
+                """,
+                (second_id, first_turn["turn_id"]),
+            )
+        with pytest.raises(sqlite3.IntegrityError):
+            connection.execute(
+                """
+                INSERT INTO conversation_turns(
+                    turn_id,conversation_id,message_id,source_turn_id,text,context_json,status
+                ) VALUES ('turn_cross_scope',?,'msg_cross_scope',?,'Retry','{}','running')
+                """,
+                (second_id, first_turn["turn_id"]),
+            )
+
+
+def test_migration_statement_failure_rolls_back_schema_and_ledger(tmp_path):
+    database = tmp_path / "migration-rollback.db"
+    with sqlite3.connect(database) as connection:
+        connection.execute(
+            "CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT)"
+        )
+        broken = Migration(
+            version=999,
+            statements=(
+                "CREATE TABLE migration_should_rollback(value TEXT)",
+                "INSERT INTO table_that_does_not_exist(value) VALUES ('fail')",
+            ),
+        )
+        with pytest.raises(sqlite3.OperationalError):
+            JobOsStateStore._apply_migration(connection, broken)
+        assert (
+            connection.execute(
+                "SELECT 1 FROM sqlite_master WHERE name = 'migration_should_rollback'"
+            ).fetchone()
+            is None
+        )
+        assert (
+            connection.execute("SELECT 1 FROM schema_migrations WHERE version = 999").fetchone()
+            is None
+        )
+
+
+def test_conversation_scope_isolates_busy_events_idempotency_and_sessions(tmp_path):
+    store = JobOsStateStore(tmp_path / "scoped.db")
+    store.initialize()
+    first = store.conversation_store(store.first_active_conversation_id())
+    second_id = str(store.create_conversation(actor_id="device-a")["conversation_id"])
+    second = store.conversation_store(second_id)
+    first_turn = first.create_turn(
+        text="First", context={}, idempotency_key="same-key-0001", actor_id="device-a"
+    )
+    second_turn = second.create_turn(
+        text="Second", context={}, idempotency_key="same-key-0001", actor_id="device-a"
+    )
+    assert first_turn["turn_id"] != second_turn["turn_id"]
+    with pytest.raises(ConversationBusy):
+        first.create_turn(
+            text="Blocked", context={}, idempotency_key="another-key-0001", actor_id="device-a"
+        )
+    first.append_event(
+        turn_id=str(first_turn["turn_id"]),
+        event_type="activity",
+        state="working",
+        summary="Only first",
+        source_event_id="shared-source",
+    )
+    second.append_event(
+        turn_id=str(second_turn["turn_id"]),
+        event_type="activity",
+        state="working",
+        summary="Only second",
+        source_event_id="shared-source",
+    )
+    assert all(entry["summary"] != "Only second" for entry in first.events_after(0))
+    assert all(entry["summary"] != "Only first" for entry in second.events_after(0))
+    first.save_stored_session_id("ordinary-first")
+    first.begin_isolated_agent_session(str(first_turn["turn_id"]))
+    assert first.stored_session_id() is None
+    assert second.stored_session_id() is None
+    first.restore_isolated_agent_session(str(first_turn["turn_id"]))
+    assert first.stored_session_id() == "ordinary-first"
+
+
+def test_migration_claims_legacy_conversations_for_configured_device(tmp_path):
+    database = tmp_path / "owner-migration.db"
+    with sqlite3.connect(database) as connection:
+        connection.execute(
+            "CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT)"
+        )
+        for migration in MIGRATIONS[:16]:
+            JobOsStateStore._apply_migration(connection, migration)
+
+    store = JobOsStateStore(database)
+    store.initialize(owner_device_id="configured-device")
+
+    owned = store.list_active_conversations(owner_device_id="configured-device")
+    assert len(owned) == 1
+    assert owned[0]["owner_device_id"] == "configured-device"
+    assert store.list_active_conversations(owner_device_id="other-device") == []
+
+
+def test_conversation_event_collection_filters_by_durable_owner(tmp_path):
+    store = JobOsStateStore(tmp_path / "owner-events.db")
+    store.initialize(owner_device_id="device-a")
+    first_id = store.first_active_conversation_id("device-a")
+    second_id = str(store.create_conversation(actor_id="device-b")["conversation_id"])
+    store.conversation_store(first_id).append_event(
+        turn_id=None, event_type="status", state="working", summary="Only A"
+    )
+    store.conversation_store(second_id).append_event(
+        turn_id=None, event_type="status", state="working", summary="Only B"
+    )
+
+    a_events = store.all_conversation_events_after(0, owner_device_id="device-a")
+    b_events = store.all_conversation_events_after(0, owner_device_id="device-b")
+    assert [entry["event"]["summary"] for entry in a_events] == ["Only A"]
+    assert [entry["event"]["summary"] for entry in b_events] == ["Only B"]
+
+
+def test_two_owners_have_independent_positions_caps_compaction_and_final_guards(tmp_path):
+    store = JobOsStateStore(tmp_path / "cap.db")
+    store.initialize(owner_device_id="device-a")
+    a_created = [store.create_conversation(actor_id="device-a") for _ in range(4)]
+    b_created = [store.create_conversation(actor_id="device-b") for _ in range(5)]
+
+    assert [
+        item["position"] for item in store.list_active_conversations(owner_device_id="device-a")
+    ] == [1, 2, 3, 4, 5]
+    assert [
+        item["position"] for item in store.list_active_conversations(owner_device_id="device-b")
+    ] == [1, 2, 3, 4, 5]
+    assert store.first_active_conversation_id("device-a") != store.first_active_conversation_id(
+        "device-b"
+    )
+    with pytest.raises(ConversationLimit, match="Maximum 5 sessions"):
+        store.create_conversation(actor_id="device-a")
+    with pytest.raises(ConversationLimit, match="Maximum 5 sessions"):
+        store.create_conversation(actor_id="device-b")
+
+    with pytest.raises(ConversationNotFound, match="not found"):
+        store.archive_conversation(str(b_created[0]["conversation_id"]), actor_id="device-a")
+    store.archive_conversation(str(a_created[1]["conversation_id"]), actor_id="device-a")
+    assert [
+        item["position"] for item in store.list_active_conversations(owner_device_id="device-a")
+    ] == [1, 2, 3, 4]
+    assert [
+        item["title"] for item in store.list_active_conversations(owner_device_id="device-a")
+    ] == [
+        "Session 1",
+        "Session 2",
+        "Session 3",
+        "Session 4",
+    ]
+    assert store.create_conversation(actor_id="device-a")["position"] == 5
+    for item in list(store.list_active_conversations(owner_device_id="device-a"))[1:]:
+        store.archive_conversation(str(item["conversation_id"]), actor_id="device-a")
+    with pytest.raises(ConversationBusy, match="final session"):
+        store.archive_conversation(
+            store.first_active_conversation_id("device-a"), actor_id="device-a"
+        )
+    assert len(store.list_active_conversations(owner_device_id="device-b")) == 5

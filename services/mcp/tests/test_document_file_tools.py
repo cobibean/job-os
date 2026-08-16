@@ -20,9 +20,10 @@ async def test_document_file_tools_send_bounded_hash_checked_commands():
         transport=httpx.MockTransport(handler),
     )
     await client.inspect_document_file(
-        "(FAKE)-job-7", "resume", idempotency_key="(FAKE)-inspect-7"
+        "conv_document_test", "(FAKE)-job-7", "resume", idempotency_key="(FAKE)-inspect-7"
     )
     await client.apply_document_file_operations(
+        "conv_document_test",
         "(FAKE)-job-7",
         "resume",
         "a" * 64,
@@ -38,6 +39,7 @@ async def test_document_file_tools_send_bounded_hash_checked_commands():
     )
     with pytest.raises(ValueError, match="SHA-256"):
         await client.apply_document_file_operations(
+            "conv_document_test",
             "(FAKE)-job-7", "resume", "stale", [{"type": "replace_block_text"}]
         )
     await client.aclose()
@@ -51,6 +53,7 @@ async def test_document_file_tools_send_bounded_hash_checked_commands():
         "command": "document.inspect",
         "arguments": {"job_id": "(FAKE)-job-7", "document_key": "resume"},
         "origin": "mcp",
+        "conversation_id": "conv_document_test",
         "idempotency_key": "(FAKE)-inspect-7",
         "timeout_ms": 10_000,
     }

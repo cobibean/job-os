@@ -63,6 +63,9 @@ class BrowserCommandRequest(BaseModel):
     command: BrowserCommandName
     arguments: dict[str, Any] = Field(default_factory=dict)
     origin: Literal["user", "mcp"]
+    conversation_id: str | None = Field(
+        default=None, pattern=r"^conv_[A-Za-z0-9_-]{1,128}$", max_length=133
+    )
     idempotency_key: str = Field(min_length=1, max_length=128)
     timeout_ms: int = Field(default=5_000, ge=100, le=10_000)
 
@@ -103,17 +106,21 @@ class BrowserCommandRequest(BaseModel):
             "page.scroll": {"tab_id", "direction", "amount"},
             "document.inspect": {"job_id", "document_key"},
             "document.apply_operations": {
-                "job_id", "document_key", "expected_sha256", "operations"
+                "job_id",
+                "document_key",
+                "expected_sha256",
+                "operations",
             },
         }
         if set(args) - allowed[command]:
             raise ValueError("Invalid browser command arguments")
         if command not in {
-            "tabs.inspect", "tab.create", "tabs.reorder",
-            "document.inspect", "document.apply_operations",
-        } and (
-            not isinstance(args.get("tab_id"), str) or not TAB_ID.fullmatch(args["tab_id"])
-        ):
+            "tabs.inspect",
+            "tab.create",
+            "tabs.reorder",
+            "document.inspect",
+            "document.apply_operations",
+        } and (not isinstance(args.get("tab_id"), str) or not TAB_ID.fullmatch(args["tab_id"])):
             raise ValueError("Invalid browser command arguments")
         if command in {"element.click", "element.type"}:
             target = args.get("target_id")
@@ -191,8 +198,13 @@ class BrowserCommandRequest(BaseModel):
 class BrowserCommandError(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
     code: Literal[
-        "desktop_unavailable", "tab_not_found", "document_not_found", "conflict",
-        "timeout", "validation", "execution"
+        "desktop_unavailable",
+        "tab_not_found",
+        "document_not_found",
+        "conflict",
+        "timeout",
+        "validation",
+        "execution",
     ]
     message: str = Field(max_length=300)
 
@@ -236,9 +248,7 @@ class DesktopUnavailable(RuntimeError):
     pass
 
 
-def sanitize_browser_result_data(
-    value: Any, *, key: str = "", depth: int = 0
-) -> Any:
+def sanitize_browser_result_data(value: Any, *, key: str = "", depth: int = 0) -> Any:
     """Bound desktop results without stripping safe browser metadata needed by MCP."""
     if depth >= 5:
         return "[bounded]"
@@ -288,9 +298,7 @@ class CapabilityBroker:
         async with self._lock:
             desktop = self._desktops.get(device_id)
             remaining = (
-                max(0.0, self._lease_seconds - (monotonic() - desktop.lease_at))
-                if desktop
-                else 0.0
+                max(0.0, self._lease_seconds - (monotonic() - desktop.lease_at)) if desktop else 0.0
             )
             return DesktopCapabilityPresence(
                 available=remaining > 0,

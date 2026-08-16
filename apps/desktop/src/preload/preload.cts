@@ -3,7 +3,7 @@ import type { IpcRendererEvent } from 'electron'
 
 import type { DocxExternalChangeEvent, SaveDocxRequest } from '../shared/docxDocuments.js'
 
-import type { AgentStreamUpdate, BrowserBounds, BrowserJobExtraction, BrowserRestoreState, BrowserState, JobEvent, JobOsRendererBridge, JobSortMode, JobStatus, WorkspaceSnapshot } from '../shared/contracts.js'
+import type { AgentSessionStreamUpdate, BrowserBounds, BrowserJobExtraction, BrowserRestoreState, BrowserState, JobEvent, JobOsRendererBridge, JobSortMode, JobStatus, WorkspaceSnapshot } from '../shared/contracts.js'
 import type {
   ApplyEditableDocumentOperationsRequest,
   CreateEditableDocumentSnapshotRequest,
@@ -43,13 +43,15 @@ const bridge: JobOsRendererBridge = Object.freeze({
     get: () => ipcRenderer.invoke('jobos:connectivity:get')
   }),
   agent: Object.freeze({
-    get: () => ipcRenderer.invoke('jobos:agent:get'),
-    reset: () => ipcRenderer.invoke('jobos:agent:reset'),
-    send: (text: string, idempotencyKey: string) => ipcRenderer.invoke('jobos:agent:send', text, idempotencyKey),
-    cancel: (turnId: string) => ipcRenderer.invoke('jobos:agent:cancel', turnId),
-    retry: (turnId: string, idempotencyKey: string) => ipcRenderer.invoke('jobos:agent:retry', turnId, idempotencyKey),
-    subscribe: (listener: (update: AgentStreamUpdate) => void) => {
-      const wrapped = (_event: IpcRendererEvent, update: AgentStreamUpdate) => listener(update)
+    list: () => ipcRenderer.invoke('jobos:agent:list'),
+    create: () => ipcRenderer.invoke('jobos:agent:create'),
+    get: (conversationId: string) => ipcRenderer.invoke('jobos:agent:get', conversationId),
+    archive: (conversationId: string) => ipcRenderer.invoke('jobos:agent:archive', conversationId),
+    send: (conversationId: string, text: string, idempotencyKey: string) => ipcRenderer.invoke('jobos:agent:send', conversationId, text, idempotencyKey),
+    cancel: (conversationId: string, turnId: string) => ipcRenderer.invoke('jobos:agent:cancel', conversationId, turnId),
+    retry: (conversationId: string, turnId: string, idempotencyKey: string) => ipcRenderer.invoke('jobos:agent:retry', conversationId, turnId, idempotencyKey),
+    subscribe: (listener: (update: AgentSessionStreamUpdate) => void) => {
+      const wrapped = (_event: IpcRendererEvent, update: AgentSessionStreamUpdate) => listener(update)
       ipcRenderer.on('jobos:agent:event', wrapped)
       return () => ipcRenderer.removeListener('jobos:agent:event', wrapped)
     }

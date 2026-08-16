@@ -316,9 +316,7 @@ class LocalArtifactRepository:
                     expected_sha256=artifact.sha256,
                 )
             except ArtifactValidationError as error:
-                raise ArtifactStorageError(
-                    "Stored artifact failed integrity validation"
-                ) from error
+                raise ArtifactStorageError("Stored artifact failed integrity validation") from error
             if content != artifact.content:
                 raise ArtifactStorageError("Stored artifact content does not match")
             named = os.stat(
@@ -412,9 +410,7 @@ class LocalArtifactRepository:
         try:
             self._assert_attached(parent)
             os.mkdir(temporary_name, mode=0o700, dir_fd=parent.descriptor)
-            temporary_descriptor = self._open_directory(
-                temporary_name, dir_fd=parent.descriptor
-            )
+            temporary_descriptor = self._open_directory(temporary_name, dir_fd=parent.descriptor)
             temporary_identity = os.fstat(temporary_descriptor)
             os.fsync(parent.descriptor)
             temporary = _OpenedDirectory(
@@ -478,10 +474,7 @@ class LocalArtifactRepository:
                 if (
                     temporary_descriptor is not None
                     and temporary_identity is not None
-                    and (
-                        not renamed
-                        or (not completed and not preserve_renamed_for_replay)
-                    )
+                    and (not renamed or (not completed and not preserve_renamed_for_replay))
                 ):
                     self._clean_owned_temporary_directory(
                         parent.descriptor,

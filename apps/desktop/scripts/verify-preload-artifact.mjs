@@ -67,21 +67,25 @@ assert.equal(typeof bridge, 'object')
 assert.equal(Object.isFrozen(bridge.agent), true, 'bridge.agent must be frozen')
 assert.deepEqual(
   Object.keys(bridge.agent).sort(),
-  ['cancel', 'get', 'reset', 'retry', 'send', 'subscribe'],
+  ['archive', 'cancel', 'create', 'get', 'list', 'retry', 'send', 'subscribe'],
   'bridge.agent must expose only fixed methods'
 )
 
-await bridge.agent.get()
-await bridge.agent.reset()
-await bridge.agent.send('Hello', 'idempotency-0001')
-await bridge.agent.cancel('turn-1')
-await bridge.agent.retry('turn-1', 'idempotency-0002')
+await bridge.agent.list()
+await bridge.agent.create()
+await bridge.agent.get('conv_one')
+await bridge.agent.archive('conv_two')
+await bridge.agent.send('conv_one', 'Hello', 'idempotency-0001')
+await bridge.agent.cancel('conv_one', 'turn-1')
+await bridge.agent.retry('conv_two', 'turn-1', 'idempotency-0002')
 assert.deepEqual(invokeCalls, [
-  ['jobos:agent:get'],
-  ['jobos:agent:reset'],
-  ['jobos:agent:send', 'Hello', 'idempotency-0001'],
-  ['jobos:agent:cancel', 'turn-1'],
-  ['jobos:agent:retry', 'turn-1', 'idempotency-0002']
+  ['jobos:agent:list'],
+  ['jobos:agent:create'],
+  ['jobos:agent:get', 'conv_one'],
+  ['jobos:agent:archive', 'conv_two'],
+  ['jobos:agent:send', 'conv_one', 'Hello', 'idempotency-0001'],
+  ['jobos:agent:cancel', 'conv_one', 'turn-1'],
+  ['jobos:agent:retry', 'conv_two', 'turn-1', 'idempotency-0002']
 ])
 
 const received = []

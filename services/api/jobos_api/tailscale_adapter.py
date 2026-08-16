@@ -319,9 +319,7 @@ def main(arguments: list[str] | None = None) -> int:
             )
             print(f"JobOS private endpoint configured: {endpoint}")
         elif options.command == "status":
-            status = _run_tailscale(
-                [options.binary, "serve", "status", "--json"]
-            )
+            status = _run_tailscale([options.binary, "serve", "status", "--json"])
             if not verify_jobos_serve_status(
                 status,
                 https_port=options.https_port,
@@ -341,9 +339,7 @@ def main(arguments: list[str] | None = None) -> int:
             device_token = os.environ.get("JOBOS_DEVICE_TOKEN", "")
             if not device_token:
                 raise RuntimeError("JOBOS_DEVICE_TOKEN is required for provisioning")
-            node = parse_tailscale_status(
-                _run_tailscale([options.binary, "status", "--json"])
-            )
+            node = parse_tailscale_status(_run_tailscale([options.binary, "status", "--json"]))
             path = provision_remote_client(
                 node,
                 home=options.home,

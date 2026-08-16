@@ -21,9 +21,7 @@ from .editable_documents import (
 def _index(
     root: dict[str, Any],
 ) -> dict[str, tuple[dict[str, Any], dict[str, Any], list[dict[str, Any]], int]]:
-    result: dict[
-        str, tuple[dict[str, Any], dict[str, Any], list[dict[str, Any]], int]
-    ] = {}
+    result: dict[str, tuple[dict[str, Any], dict[str, Any], list[dict[str, Any]], int]] = {}
 
     def walk(node: dict[str, Any]) -> None:
         children = node.get("content", [])
@@ -168,16 +166,20 @@ def apply_operations(
             before = plain_text(node)
             if before != operation.expected_text:
                 raise ValueError(f"expected text does not match block {operation.block_id}")
-            if parent_node.get("type") in {
-                "doc",
-                "jobosSection",
-                "blockquote",
-                "bulletList",
-                "orderedList",
-                "table",
-                "tableCell",
-                "tableHeader",
-            } and len(parent) <= 1:
+            if (
+                parent_node.get("type")
+                in {
+                    "doc",
+                    "jobosSection",
+                    "blockquote",
+                    "bulletList",
+                    "orderedList",
+                    "table",
+                    "tableCell",
+                    "tableHeader",
+                }
+                and len(parent) <= 1
+            ):
                 raise ValueError("delete would empty a required container")
             if parent_node.get("type") == "listItem" and position == 0:
                 raise ValueError("a list item's leading paragraph cannot be deleted")

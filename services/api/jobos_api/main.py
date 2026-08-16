@@ -21,18 +21,14 @@ def settings_from_environment() -> Settings:
     token = os.environ.get("JOBOS_DEVICE_TOKEN", "")
     mcp_token = os.environ.get("JOBOS_MCP_TOKEN", "")
     if not token and not mcp_token:
-        configured_path = Path(
-            os.environ.get("JOBOS_CONFIG_PATH", config_path(default_data_dir()))
-        )
+        configured_path = Path(os.environ.get("JOBOS_CONFIG_PATH", config_path(default_data_dir())))
         return settings_from_config(configured_path)
     if not token or not mcp_token:
         raise LocalConfigError(
             "JOBOS_DEVICE_TOKEN and JOBOS_MCP_TOKEN must be configured together."
         )
     application_data = default_data_dir()
-    state_db_path = Path(
-        os.environ.get("JOBOS_STATE_DB_PATH", application_data / "state/jobos.db")
-    )
+    state_db_path = Path(os.environ.get("JOBOS_STATE_DB_PATH", application_data / "state/jobos.db"))
     jobs_db = os.environ.get("JOBOS_JOBS_DB_PATH")
     job_hunter_db = os.environ.get("JOBOS_JOB_HUNTER_DB_PATH")
     artifact_roots = tuple(

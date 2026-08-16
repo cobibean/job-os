@@ -254,6 +254,7 @@ export interface DiagnosticsSnapshot {
 }
 
 export type AgentConnectionState = 'online' | 'connecting' | 'offline' | 'reconnecting'
+export type AgentRecoveryState = 'ready' | 'recovering' | 'quarantined'
 export type ConversationEntryType = 'user_message' | 'turn' | 'activity' | 'assistant_message' | 'status' | 'error'
 export type ConversationEntryState = 'queued' | 'working' | 'waiting' | 'completed' | 'failed' | 'interrupted'
 
@@ -280,9 +281,24 @@ export interface AgentTurn {
 
 export interface AgentConversationSnapshot {
   conversationId: string
+  position: number
+  title: string
+  createdAt: string
   entries: ConversationEvent[]
   activeTurn: AgentTurn | null
   connection: Exclude<AgentConnectionState, 'reconnecting'>
+  recoveryState: AgentRecoveryState
+  latestEventId: number
+}
+
+export interface AgentSessionSummary {
+  conversationId: string
+  position: number
+  title: string
+  createdAt: string
+  activeTurn: AgentTurn | null
+  connection: Exclude<AgentConnectionState, 'reconnecting'>
+  recoveryState: AgentRecoveryState
   latestEventId: number
 }
 
@@ -293,9 +309,9 @@ export interface AgentTurnMutation {
   status?: string | null
 }
 
-export type AgentStreamUpdate =
-  | { kind: 'event'; event: ConversationEvent }
-  | { kind: 'connection'; state: AgentConnectionState }
+export type AgentSessionStreamUpdate =
+  | { kind: 'event'; conversationId: string; recoveryState: AgentRecoveryState; event: ConversationEvent }
+  | { kind: 'connection'; conversationId: string; state: AgentConnectionState }
 
 export interface JobOsRendererBridge {
   setup: {
@@ -318,12 +334,14 @@ export interface JobOsRendererBridge {
     get: () => Promise<ConnectivitySnapshot>
   }
   agent: {
-    get: () => Promise<AgentConversationSnapshot>
-    reset: () => Promise<AgentConversationSnapshot>
-    send: (text: string, idempotencyKey: string) => Promise<AgentTurnMutation>
-    cancel: (turnId: string) => Promise<AgentTurnMutation>
-    retry: (turnId: string, idempotencyKey: string) => Promise<AgentTurnMutation>
-    subscribe: (listener: (update: AgentStreamUpdate) => void) => () => void
+    list: () => Promise<AgentSessionSummary[]>
+    create: () => Promise<AgentConversationSnapshot>
+    get: (conversationId: string) => Promise<AgentConversationSnapshot>
+    archive: (conversationId: string) => Promise<void>
+    send: (conversationId: string, text: string, idempotencyKey: string) => Promise<AgentTurnMutation>
+    cancel: (conversationId: string, turnId: string) => Promise<AgentTurnMutation>
+    retry: (conversationId: string, turnId: string, idempotencyKey: string) => Promise<AgentTurnMutation>
+    subscribe: (listener: (update: AgentSessionStreamUpdate) => void) => () => void
   }
   jobs: {
     getState: () => Promise<JobWorkspaceSnapshot>

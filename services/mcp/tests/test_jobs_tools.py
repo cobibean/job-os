@@ -523,6 +523,16 @@ async def test_mcp_server_exposes_public_v1_parity_tools_while_retaining_job_too
         "browser_scroll",
         "activity_report",
     ]
+    correlated = [
+        tool
+        for tool in tools
+        if tool.name.startswith("browser_") or tool.name.startswith("document_")
+    ]
+    for tool in correlated:
+        conversation = tool.inputSchema["properties"]["conversation_id"]
+        assert "conversation_id" in tool.inputSchema["required"]
+        assert conversation["maxLength"] == 133
+        assert conversation["pattern"] == "^conv_[A-Za-z0-9_-]{1,128}$"
 
 
 @pytest.mark.anyio
@@ -542,6 +552,7 @@ async def test_parity_mutations_are_thin_authenticated_api_calls_with_idempotenc
         transport=httpx.MockTransport(handler),
     )
     await client.browser_command(
+        "conv_browser_test",
         "element.click",
         {"tab_id": "tab-1", "target_id": "t_3"},
         idempotency_key="click-1",

@@ -58,20 +58,12 @@ def _job_record(row: Mapping[str, Any]) -> JobRecord:
             str(row["application_url"]) if row.get("application_url") is not None else None
         ),
         full_listing_text=(
-            str(row["full_listing_text"])
-            if row.get("full_listing_text") is not None
-            else None
+            str(row["full_listing_text"]) if row.get("full_listing_text") is not None else None
         ),
-        analysis_text=(
-            str(row["analysis_text"]) if row.get("analysis_text") is not None else None
-        ),
-        listing_completeness=normalize_listing_completeness(
-            row.get("listing_completeness")
-        ),
+        analysis_text=(str(row["analysis_text"]) if row.get("analysis_text") is not None else None),
+        listing_completeness=normalize_listing_completeness(row.get("listing_completeness")),
         listing_source_url=(
-            str(row["listing_source_url"])
-            if row.get("listing_source_url") is not None
-            else None
+            str(row["listing_source_url"]) if row.get("listing_source_url") is not None else None
         ),
         listing_captured_at=(
             _timestamp(row["listing_captured_at"])
@@ -104,19 +96,13 @@ def _history_record(row: Mapping[str, Any]) -> JobHistoryRecord:
     return JobHistoryRecord(
         event_id=int(row["event_id"]),
         event_type=event_type,
-        from_status=(
-            str(row["from_status"]) if row.get("from_status") is not None else None
-        ),
+        from_status=(str(row["from_status"]) if row.get("from_status") is not None else None),
         to_status=str(row["to_status"]) if row.get("to_status") is not None else None,
         occurred_at=_timestamp(row["occurred_at"]),
         reason=str(row["reason"]) if row.get("reason") is not None else None,
         source=str(row["source"]) if row.get("source") is not None else None,
-        provenance=(
-            str(row["provenance"]) if row.get("provenance") is not None else None
-        ),
-        from_sha256=(
-            str(row["from_sha256"]) if row.get("from_sha256") is not None else None
-        ),
+        provenance=(str(row["provenance"]) if row.get("provenance") is not None else None),
+        from_sha256=(str(row["from_sha256"]) if row.get("from_sha256") is not None else None),
         to_sha256=str(row["to_sha256"]) if row.get("to_sha256") is not None else None,
     )
 
@@ -257,9 +243,7 @@ class JobHunterJobRepository:
 
     def list_history(self, job_id: str) -> Sequence[JobHistoryRecord]:
         try:
-            return tuple(
-                _history_record(row) for row in self._facade.get_lead_history(job_id)
-            )
+            return tuple(_history_record(row) for row in self._facade.get_lead_history(job_id))
         except Exception as error:
             raise _translate(error) from error
 

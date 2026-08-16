@@ -23,8 +23,7 @@ def parse_device_credentials(raw: str | None) -> tuple[DeviceCredential, ...]:
         ):
             raise ValueError
         return tuple(
-            DeviceCredential(device_id=device_id, token=token)
-            for device_id, token in value.items()
+            DeviceCredential(device_id=device_id, token=token) for device_id, token in value.items()
         )
     except (json.JSONDecodeError, ValueError):
         raise ValueError("device credential registry is invalid") from None

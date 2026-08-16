@@ -8,11 +8,16 @@ import subprocess
 import sys
 from hashlib import sha256
 from pathlib import Path
-from typing import Any
+from typing import Annotated, Any
 
 from mcp.server.fastmcp import FastMCP
+from pydantic import Field
 
 from jobos_mcp.jobs import JobOsMcpClient
+
+ConversationId = Annotated[
+    str, Field(pattern=r"^conv_[A-Za-z0-9_-]{1,128}$", max_length=133)
+]
 
 
 def local_mcp_token() -> str:
@@ -307,13 +312,18 @@ def create_server(
         return await client.update_workspace(snapshot, idempotency_key=idempotency_key)
 
     @server.tool(name="document_list", structured_output=True)
-    async def document_list(job_id: str, idempotency_key: str | None = None) -> dict[str, Any]:
+    async def document_list(
+        conversation_id: ConversationId, job_id: str, idempotency_key: str | None = None
+    ) -> dict[str, Any]:
         """List trusted registered artifacts for a job."""
         return await client.list_documents(job_id, idempotency_key=idempotency_key)
 
     @server.tool(name="document_draft_get", structured_output=True)
     async def document_draft_get(
-        job_id: str, document_key: str, idempotency_key: str | None = None
+        conversation_id: ConversationId,
+        job_id: str,
+        document_key: str,
+        idempotency_key: str | None = None,
     ) -> dict[str, Any]:
         """Read a bounded semantic outline for one editable job document."""
         return await client.get_document_draft(
@@ -322,6 +332,7 @@ def create_server(
 
     @server.tool(name="document_draft_apply", structured_output=True)
     async def document_draft_apply(
+        conversation_id: ConversationId,
         job_id: str,
         document_id: str,
         base_revision: int,
@@ -339,6 +350,7 @@ def create_server(
 
     @server.tool(name="document_draft_snapshot", structured_output=True)
     async def document_draft_snapshot(
+        conversation_id: ConversationId,
         job_id: str,
         document_id: str,
         label: str,
@@ -350,20 +362,28 @@ def create_server(
         )
 
     @server.tool(name="document_refresh", structured_output=True)
-    async def document_refresh(job_id: str, idempotency_key: str | None = None) -> dict[str, Any]:
+    async def document_refresh(
+        conversation_id: ConversationId, job_id: str, idempotency_key: str | None = None
+    ) -> dict[str, Any]:
         """Refresh a job's trusted artifact manifest."""
         return await client.refresh_documents(job_id, idempotency_key=idempotency_key)
 
     @server.tool(name="document_render", structured_output=True)
     async def document_render(
-        job_id: str, source_id: str, idempotency_key: str | None = None
+        conversation_id: ConversationId,
+        job_id: str,
+        source_id: str,
+        idempotency_key: str | None = None,
     ) -> dict[str, Any]:
         """Start the fixed PDF resume render command for a job source."""
         return await client.render_document(job_id, source_id, idempotency_key=idempotency_key)
 
     @server.tool(name="document_register", structured_output=True)
     async def document_register(
-        job_id: str, artifact_reference: str, idempotency_key: str | None = None
+        conversation_id: ConversationId,
+        job_id: str,
+        artifact_reference: str,
+        idempotency_key: str | None = None,
     ) -> dict[str, Any]:
         """Register an opaque facade artifact reference through JobOS."""
         return await client.register_document(
@@ -372,6 +392,7 @@ def create_server(
 
     @server.tool(name="document_publish", structured_output=True)
     async def document_publish(
+        conversation_id: ConversationId,
         job_id: str,
         document_key: str,
         document_label: str,
@@ -407,7 +428,10 @@ def create_server(
 
     @server.tool(name="document_approve", structured_output=True)
     async def document_approve(
-        job_id: str, artifact_id: str, idempotency_key: str | None = None
+        conversation_id: ConversationId,
+        job_id: str,
+        artifact_id: str,
+        idempotency_key: str | None = None,
     ) -> dict[str, Any]:
         """Approve one exact successful resume artifact for its job."""
         return await client.approve_document(
@@ -416,13 +440,16 @@ def create_server(
 
     @server.tool(name="document_select", structured_output=True)
     async def document_select(
-        artifact_id: str, idempotency_key: str | None = None
+        conversation_id: ConversationId,
+        artifact_id: str,
+        idempotency_key: str | None = None,
     ) -> dict[str, Any]:
         """Select a registered artifact in the shared document workspace."""
         return await client.select_document(artifact_id, idempotency_key=idempotency_key)
 
     @server.tool(name="document_file_inspect", structured_output=True)
     async def document_file_inspect(
+        conversation_id: ConversationId,
         job_id: str,
         document_key: str,
         timeout_ms: int = 10_000,
@@ -430,6 +457,7 @@ def create_server(
     ) -> dict[str, Any]:
         """Inspect the current canonical DOCX hash, capabilities, and bounded block context."""
         return await client.inspect_document_file(
+            conversation_id,
             job_id,
             document_key,
             timeout_ms=timeout_ms,
@@ -438,6 +466,7 @@ def create_server(
 
     @server.tool(name="document_file_apply", structured_output=True)
     async def document_file_apply(
+        conversation_id: ConversationId,
         job_id: str,
         document_key: str,
         expected_sha256: str,
@@ -447,6 +476,7 @@ def create_server(
     ) -> dict[str, Any]:
         """Apply typed operations to the canonical DOCX with an expected-hash conflict check."""
         return await client.apply_document_file_operations(
+            conversation_id,
             job_id,
             document_key,
             expected_sha256,
@@ -455,95 +485,143 @@ def create_server(
             idempotency_key=idempotency_key,
         )
 
-    def browser(name: str, arguments: dict[str, Any], key: str | None, timeout_ms: int = 5_000):
-        return client.browser_command(name, arguments, idempotency_key=key, timeout_ms=timeout_ms)
+    def browser(
+        conversation_id: str,
+        name: str,
+        arguments: dict[str, Any],
+        key: str | None,
+        timeout_ms: int = 5_000,
+    ):
+        return client.browser_command(
+            conversation_id, name, arguments, idempotency_key=key, timeout_ms=timeout_ms
+        )
 
     @server.tool(name="browser_tabs_inspect", structured_output=True)
-    async def browser_tabs_inspect(timeout_ms: int = 5_000) -> dict[str, Any]:
+    async def browser_tabs_inspect(
+        conversation_id: ConversationId, timeout_ms: int = 5_000
+    ) -> dict[str, Any]:
         """Inspect bounded metadata for live desktop browser tabs."""
-        return await browser("tabs.inspect", {}, None, timeout_ms)
+        return await browser(conversation_id, "tabs.inspect", {}, None, timeout_ms)
 
     @server.tool(name="browser_tab_create", structured_output=True)
     async def browser_tab_create(
-        url: str, associated_job_id: str | None = None, idempotency_key: str | None = None
+        conversation_id: ConversationId,
+        url: str,
+        associated_job_id: str | None = None,
+        idempotency_key: str | None = None,
     ) -> dict[str, Any]:
         """Create a live browser tab for an ordinary HTTP(S) URL."""
         return await browser(
+            conversation_id,
             "tab.create", {"url": url, "associated_job_id": associated_job_id}, idempotency_key
         )
 
     @server.tool(name="browser_tab_select", structured_output=True)
-    async def browser_tab_select(tab_id: str, idempotency_key: str | None = None) -> dict[str, Any]:
+    async def browser_tab_select(
+        conversation_id: ConversationId, tab_id: str, idempotency_key: str | None = None
+    ) -> dict[str, Any]:
         """Select a live browser tab."""
-        return await browser("tab.select", {"tab_id": tab_id}, idempotency_key)
+        return await browser(conversation_id, "tab.select", {"tab_id": tab_id}, idempotency_key)
 
     @server.tool(name="browser_tab_associate", structured_output=True)
     async def browser_tab_associate(
-        tab_id: str, job_id: str, idempotency_key: str | None = None
+        conversation_id: ConversationId,
+        tab_id: str,
+        job_id: str,
+        idempotency_key: str | None = None,
     ) -> dict[str, Any]:
         """Link a live browser tab to the canonical JobOS job created from it."""
         return await browser(
+            conversation_id,
             "tab.associate", {"tab_id": tab_id, "job_id": job_id}, idempotency_key
         )
 
     @server.tool(name="browser_tab_close", structured_output=True)
-    async def browser_tab_close(tab_id: str, idempotency_key: str | None = None) -> dict[str, Any]:
+    async def browser_tab_close(
+        conversation_id: ConversationId, tab_id: str, idempotency_key: str | None = None
+    ) -> dict[str, Any]:
         """Close a live browser tab."""
-        return await browser("tab.close", {"tab_id": tab_id}, idempotency_key)
+        return await browser(conversation_id, "tab.close", {"tab_id": tab_id}, idempotency_key)
 
     @server.tool(name="browser_tabs_reorder", structured_output=True)
     async def browser_tabs_reorder(
-        tab_ids: list[str], idempotency_key: str | None = None
+        conversation_id: ConversationId,
+        tab_ids: list[str],
+        idempotency_key: str | None = None,
     ) -> dict[str, Any]:
         """Replace the complete live browser tab order."""
-        return await browser("tabs.reorder", {"tab_ids": tab_ids}, idempotency_key)
+        return await browser(
+            conversation_id, "tabs.reorder", {"tab_ids": tab_ids}, idempotency_key
+        )
 
-    async def tab_command(name: str, tab_id: str, key: str | None = None):
-        return await browser(name, {"tab_id": tab_id}, key)
+    async def tab_command(
+        conversation_id: str, name: str, tab_id: str, key: str | None = None
+    ):
+        return await browser(conversation_id, name, {"tab_id": tab_id}, key)
 
     @server.tool(name="browser_navigate", structured_output=True)
     async def browser_navigate(
-        tab_id: str, url: str, idempotency_key: str | None = None
+        conversation_id: ConversationId,
+        tab_id: str,
+        url: str,
+        idempotency_key: str | None = None,
     ) -> dict[str, Any]:
         """Navigate a live tab to an ordinary HTTP(S) URL."""
-        return await browser("tab.navigate", {"tab_id": tab_id, "url": url}, idempotency_key)
+        return await browser(
+            conversation_id, "tab.navigate", {"tab_id": tab_id, "url": url}, idempotency_key
+        )
 
     @server.tool(name="browser_back", structured_output=True)
-    async def browser_back(tab_id: str, idempotency_key: str | None = None) -> dict[str, Any]:
+    async def browser_back(
+        conversation_id: ConversationId, tab_id: str, idempotency_key: str | None = None
+    ) -> dict[str, Any]:
         """Go back in a live tab."""
-        return await tab_command("tab.back", tab_id, idempotency_key)
+        return await tab_command(conversation_id, "tab.back", tab_id, idempotency_key)
 
     @server.tool(name="browser_forward", structured_output=True)
-    async def browser_forward(tab_id: str, idempotency_key: str | None = None) -> dict[str, Any]:
+    async def browser_forward(
+        conversation_id: ConversationId, tab_id: str, idempotency_key: str | None = None
+    ) -> dict[str, Any]:
         """Go forward in a live tab."""
-        return await tab_command("tab.forward", tab_id, idempotency_key)
+        return await tab_command(conversation_id, "tab.forward", tab_id, idempotency_key)
 
     @server.tool(name="browser_reload", structured_output=True)
-    async def browser_reload(tab_id: str, idempotency_key: str | None = None) -> dict[str, Any]:
+    async def browser_reload(
+        conversation_id: ConversationId, tab_id: str, idempotency_key: str | None = None
+    ) -> dict[str, Any]:
         """Reload a live tab."""
-        return await tab_command("tab.reload", tab_id, idempotency_key)
+        return await tab_command(conversation_id, "tab.reload", tab_id, idempotency_key)
 
     @server.tool(name="browser_stop", structured_output=True)
-    async def browser_stop(tab_id: str, idempotency_key: str | None = None) -> dict[str, Any]:
+    async def browser_stop(
+        conversation_id: ConversationId, tab_id: str, idempotency_key: str | None = None
+    ) -> dict[str, Any]:
         """Stop loading a live tab."""
-        return await tab_command("tab.stop", tab_id, idempotency_key)
+        return await tab_command(conversation_id, "tab.stop", tab_id, idempotency_key)
 
     @server.tool(name="browser_snapshot", structured_output=True)
-    async def browser_snapshot(tab_id: str, idempotency_key: str | None = None) -> dict[str, Any]:
+    async def browser_snapshot(
+        conversation_id: ConversationId, tab_id: str, idempotency_key: str | None = None
+    ) -> dict[str, Any]:
         """Capture a bounded semantic snapshot with opaque target IDs."""
-        return await tab_command("page.snapshot", tab_id, idempotency_key)
+        return await tab_command(conversation_id, "page.snapshot", tab_id, idempotency_key)
 
     @server.tool(name="browser_click", structured_output=True)
     async def browser_click(
-        tab_id: str, target_id: str, idempotency_key: str | None = None
+        conversation_id: ConversationId,
+        tab_id: str,
+        target_id: str,
+        idempotency_key: str | None = None,
     ) -> dict[str, Any]:
         """Click an opaque target from the latest semantic snapshot."""
         return await browser(
+            conversation_id,
             "element.click", {"tab_id": tab_id, "target_id": target_id}, idempotency_key
         )
 
     @server.tool(name="browser_type", structured_output=True)
     async def browser_type(
+        conversation_id: ConversationId,
         tab_id: str,
         target_id: str,
         text: str,
@@ -552,6 +630,7 @@ def create_server(
     ) -> dict[str, Any]:
         """Type bounded text into an opaque snapshot target."""
         return await browser(
+            conversation_id,
             "element.type",
             {"tab_id": tab_id, "target_id": target_id, "text": text, "clear": clear},
             idempotency_key,
@@ -559,10 +638,15 @@ def create_server(
 
     @server.tool(name="browser_scroll", structured_output=True)
     async def browser_scroll(
-        tab_id: str, direction: str, amount: int = 600, idempotency_key: str | None = None
+        conversation_id: ConversationId,
+        tab_id: str,
+        direction: str,
+        amount: int = 600,
+        idempotency_key: str | None = None,
     ) -> dict[str, Any]:
         """Scroll a live tab by a bounded amount."""
         return await browser(
+            conversation_id,
             "page.scroll",
             {"tab_id": tab_id, "direction": direction, "amount": amount},
             idempotency_key,

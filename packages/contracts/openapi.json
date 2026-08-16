@@ -503,6 +503,19 @@
             "title": "Command",
             "type": "string"
           },
+          "conversation_id": {
+            "anyOf": [
+              {
+                "maxLength": 133,
+                "pattern": "^conv_[A-Za-z0-9_-]{1,128}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Conversation Id"
+          },
           "idempotency_key": {
             "maxLength": 128,
             "minLength": 1,
@@ -850,6 +863,24 @@
         "title": "ConnectionResponse",
         "type": "object"
       },
+      "ConversationListResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "conversations": {
+            "items": {
+              "$ref": "#/components/schemas/ConversationSummary"
+            },
+            "maxItems": 5,
+            "title": "Conversations",
+            "type": "array"
+          }
+        },
+        "required": [
+          "conversations"
+        ],
+        "title": "ConversationListResponse",
+        "type": "object"
+      },
       "ConversationResponse": {
         "additionalProperties": false,
         "properties": {
@@ -872,6 +903,10 @@
             "title": "Conversation Id",
             "type": "string"
           },
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
           "entries": {
             "items": {
               "additionalProperties": true,
@@ -883,16 +918,98 @@
           "latest_event_id": {
             "title": "Latest Event Id",
             "type": "integer"
+          },
+          "position": {
+            "title": "Position",
+            "type": "integer"
+          },
+          "recovery_state": {
+            "enum": [
+              "ready",
+              "recovering",
+              "quarantined"
+            ],
+            "title": "Recovery State",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
           }
         },
         "required": [
           "conversation_id",
+          "title",
+          "position",
+          "created_at",
           "entries",
           "active_turn",
           "connection",
+          "recovery_state",
           "latest_event_id"
         ],
         "title": "ConversationResponse",
+        "type": "object"
+      },
+      "ConversationSummary": {
+        "additionalProperties": false,
+        "properties": {
+          "active_turn": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Active Turn"
+          },
+          "connection": {
+            "$ref": "#/components/schemas/ConnectionResponse"
+          },
+          "conversation_id": {
+            "title": "Conversation Id",
+            "type": "string"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "latest_event_id": {
+            "title": "Latest Event Id",
+            "type": "integer"
+          },
+          "position": {
+            "title": "Position",
+            "type": "integer"
+          },
+          "recovery_state": {
+            "enum": [
+              "ready",
+              "recovering",
+              "quarantined"
+            ],
+            "title": "Recovery State",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "conversation_id",
+          "title",
+          "position",
+          "active_turn",
+          "connection",
+          "recovery_state",
+          "latest_event_id",
+          "created_at"
+        ],
+        "title": "ConversationSummary",
         "type": "object"
       },
       "CreateBlankRequest": {
@@ -3429,6 +3546,17 @@
       "TurnMutationResponse": {
         "additionalProperties": false,
         "properties": {
+          "created": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created"
+          },
           "message_id": {
             "anyOf": [
               {
@@ -4330,8 +4458,109 @@
         ]
       }
     },
+    "/v1/conversations": {
+      "get": {
+        "operationId": "conversations_list_v1_conversations_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConversationListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Device authentication required"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Internal server error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Conversations List",
+        "tags": [
+          "agent"
+        ]
+      },
+      "post": {
+        "operationId": "conversation_create_v1_conversations_post",
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConversationResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Device authentication required"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Resource state conflict"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Internal server error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Conversation Create",
+        "tags": [
+          "agent"
+        ]
+      }
+    },
     "/v1/conversations/current": {
       "get": {
+        "deprecated": true,
         "operationId": "conversation_current_v1_conversations_current_get",
         "responses": {
           "200": {
@@ -4376,9 +4605,9 @@
         ]
       }
     },
-    "/v1/conversations/current/events/stream": {
+    "/v1/conversations/events/stream": {
       "get": {
-        "operationId": "conversation_stream_v1_conversations_current_events_stream_get",
+        "operationId": "conversation_stream_v1_conversations_events_stream_get",
         "parameters": [
           {
             "in": "query",
@@ -4410,11 +4639,14 @@
         "responses": {
           "200": {
             "content": {
-              "application/json": {
-                "schema": {}
+              "text/event-stream": {
+                "example": "id: 42\nevent: conversation_event\ndata: {\"conversation_id\":\"conv_example\",\"recovery_state\":\"ready\",\"event\":{\"event_id\":42}}\n\n",
+                "schema": {
+                  "type": "string"
+                }
               }
             },
-            "description": "Successful Response"
+            "description": "SSE frames with a global event ID and a data object containing conversation_id, the current recovery_state, and the scoped conversation event."
           },
           "401": {
             "content": {
@@ -4458,9 +4690,181 @@
         ]
       }
     },
-    "/v1/conversations/current/messages": {
+    "/v1/conversations/{conversation_id}": {
+      "delete": {
+        "operationId": "conversation_archive_v1_conversations__conversation_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "conversation_id",
+            "required": true,
+            "schema": {
+              "maxLength": 133,
+              "pattern": "^conv_[A-Za-z0-9_-]{1,128}$",
+              "title": "Conversation Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Device authentication required"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Resource not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Resource state conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Request validation failed"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Internal server error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Conversation Archive",
+        "tags": [
+          "agent"
+        ]
+      },
+      "get": {
+        "operationId": "conversation_get_v1_conversations__conversation_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "conversation_id",
+            "required": true,
+            "schema": {
+              "maxLength": 133,
+              "pattern": "^conv_[A-Za-z0-9_-]{1,128}$",
+              "title": "Conversation Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConversationResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Device authentication required"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Resource not found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Request validation failed"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Internal server error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Conversation Get",
+        "tags": [
+          "agent"
+        ]
+      }
+    },
+    "/v1/conversations/{conversation_id}/messages": {
       "post": {
-        "operationId": "conversation_send_v1_conversations_current_messages_post",
+        "operationId": "conversation_send_v1_conversations__conversation_id__messages_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "conversation_id",
+            "required": true,
+            "schema": {
+              "maxLength": 133,
+              "pattern": "^conv_[A-Za-z0-9_-]{1,128}$",
+              "title": "Conversation Id",
+              "type": "string"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -4534,71 +4938,28 @@
         ]
       }
     },
-    "/v1/conversations/current/reset": {
+    "/v1/conversations/{conversation_id}/turns/{turn_id}/cancel": {
       "post": {
-        "operationId": "conversation_reset_v1_conversations_current_reset_post",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ConversationResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "401": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiErrorResponse"
-                }
-              }
-            },
-            "description": "Device authentication required"
-          },
-          "409": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiErrorResponse"
-                }
-              }
-            },
-            "description": "Resource state conflict"
-          },
-          "500": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiErrorResponse"
-                }
-              }
-            },
-            "description": "Internal server error"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "Conversation Reset",
-        "tags": [
-          "agent"
-        ]
-      }
-    },
-    "/v1/conversations/current/turns/{turn_id}/cancel": {
-      "post": {
-        "operationId": "conversation_cancel_v1_conversations_current_turns__turn_id__cancel_post",
+        "operationId": "conversation_cancel_v1_conversations__conversation_id__turns__turn_id__cancel_post",
         "parameters": [
+          {
+            "in": "path",
+            "name": "conversation_id",
+            "required": true,
+            "schema": {
+              "maxLength": 133,
+              "pattern": "^conv_[A-Za-z0-9_-]{1,128}$",
+              "title": "Conversation Id",
+              "type": "string"
+            }
+          },
           {
             "in": "path",
             "name": "turn_id",
             "required": true,
             "schema": {
+              "maxLength": 133,
+              "pattern": "^turn_[A-Za-z0-9_-]{1,128}$",
               "title": "Turn Id",
               "type": "string"
             }
@@ -4667,15 +5028,28 @@
         ]
       }
     },
-    "/v1/conversations/current/turns/{turn_id}/retry": {
+    "/v1/conversations/{conversation_id}/turns/{turn_id}/retry": {
       "post": {
-        "operationId": "conversation_retry_v1_conversations_current_turns__turn_id__retry_post",
+        "operationId": "conversation_retry_v1_conversations__conversation_id__turns__turn_id__retry_post",
         "parameters": [
+          {
+            "in": "path",
+            "name": "conversation_id",
+            "required": true,
+            "schema": {
+              "maxLength": 133,
+              "pattern": "^conv_[A-Za-z0-9_-]{1,128}$",
+              "title": "Conversation Id",
+              "type": "string"
+            }
+          },
           {
             "in": "path",
             "name": "turn_id",
             "required": true,
             "schema": {
+              "maxLength": 133,
+              "pattern": "^turn_[A-Za-z0-9_-]{1,128}$",
               "title": "Turn Id",
               "type": "string"
             }

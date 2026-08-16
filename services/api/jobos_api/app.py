@@ -25,6 +25,9 @@ from fastapi import (
     WebSocket,
     WebSocketDisconnect,
 )
+from fastapi import (
+    Path as PathParameter,
+)
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 from fastapi.routing import APIRoute
@@ -32,7 +35,12 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from jobos_api import __version__
 from jobos_api.activity import ActivityReportRequest, ActivityReportResponse
-from jobos_api.agent_gateway import AgentGateway, OfflineAgentGateway
+from jobos_api.agent_gateway import (
+    AgentGateway,
+    AgentGatewayFactory,
+    OfflineAgentGateway,
+    OfflineAgentGatewayFactory,
+)
 from jobos_api.artifact_gateway import ArtifactGateway
 from jobos_api.artifact_repository import (
     DOCX_MEDIA_TYPE,
@@ -51,9 +59,9 @@ from jobos_api.capabilities import (
     DesktopUnavailable,
 )
 from jobos_api.composition import create_job_services
+from jobos_api.conversation_manager import ConversationListResponse, ConversationManager
 from jobos_api.conversations import (
     ConversationResponse,
-    ConversationService,
     RetryTurnRequest,
     SendMessageRequest,
     TurnMutationResponse,
@@ -112,7 +120,7 @@ from jobos_api.editable_documents import (
     default_settings,
     validate_content,
 )
-from jobos_api.hermes_adapter import HermesWebSocketGateway
+from jobos_api.hermes_adapter import HermesGatewayFactory
 from jobos_api.job_repository import (
     Conflict,
     CreateJobCommand,
@@ -154,6 +162,8 @@ from jobos_api.responses import (
 from jobos_api.settings import Settings
 from jobos_api.state_store import (
     ConversationBusy,
+    ConversationLimit,
+    ConversationNotFound,
     EditableDocumentConflict,
     EditablePublicationConflict,
     IdempotencyConflict,
@@ -163,6 +173,10 @@ from jobos_api.state_store import (
 from jobos_api.synthetic_demo import DEMO_JOB_ID
 from jobos_api.workspace import WorkspaceSnapshotCommand, WorkspaceSnapshotResponse
 
+ConversationId = Annotated[
+    str, PathParameter(pattern=r"^conv_[A-Za-z0-9_-]{1,128}$", max_length=133)
+]
+TurnId = Annotated[str, PathParameter(pattern=r"^turn_[A-Za-z0-9_-]{1,128}$", max_length=133)]
 P = ParamSpec("P")
 R = TypeVar("R")
 LOCAL_ARTIFACT_STORAGE_UNAVAILABLE = "Local artifact storage is unavailable"
@@ -226,6 +240,8 @@ _ENDPOINT_ERROR_ROUTES = {
             "render_job_artifact",
             "workspace_select_job",
             "conversation_cancel",
+            "conversation_get",
+            "conversation_archive",
             "conversation_retry",
         }
     ),
@@ -235,7 +251,8 @@ _ENDPOINT_ERROR_ROUTES = {
             "artifact_content",
             "artifact_download",
             "browser_command",
-            "conversation_reset",
+            "conversation_create",
+            "conversation_archive",
             "conversation_retry",
             "conversation_send",
             "editable_document_create",
@@ -356,6 +373,7 @@ def create_app(
     artifact_gateway: ArtifactGateway | None = None,
     artifact_repository: ArtifactRepository | None = None,
     agent_gateway: AgentGateway | None = None,
+    agent_gateway_factory: AgentGatewayFactory | None = None,
     capability_broker: CapabilityBroker | None = None,
     state_store: JobOsStateStore | None = None,
 ) -> FastAPI:
@@ -388,22 +406,36 @@ def create_app(
     trusted_artifact_roots = settings.resolved_artifact_roots()
     device_authenticator = DeviceAuthenticator(settings.device_credential_registry())
     bearer = HTTPBearer(auto_error=False)
-    configured_gateway = agent_gateway
-    if configured_gateway is None and all(
+    configured_gateway = agent_gateway is not None or agent_gateway_factory is not None
+    gateway_factory = agent_gateway_factory
+    if gateway_factory is None and agent_gateway is not None:
+
+        class InjectedGatewayFactory:
+            claimed = False
+
+            def create(self, conversation_id: str) -> AgentGateway:
+                if not self.claimed:
+                    self.claimed = True
+                    return agent_gateway
+                return OfflineAgentGateway()
+
+        gateway_factory = InjectedGatewayFactory()
+    if gateway_factory is None and all(
         (
             settings.hermes_dashboard_url,
             settings.hermes_dashboard_token,
             settings.hermes_job_hunter_cwd,
         )
     ):
-        configured_gateway = HermesWebSocketGateway(
+        gateway_factory = HermesGatewayFactory(
             url=str(settings.hermes_dashboard_url),
             token=str(settings.hermes_dashboard_token),
             cwd=settings.hermes_job_hunter_cwd,  # type: ignore[arg-type]
             request_timeout=settings.hermes_request_timeout,
         )
-    conversation_service = ConversationService(
-        state_store, configured_gateway or OfflineAgentGateway()
+        configured_gateway = True
+    conversation_manager = ConversationManager(
+        state_store, gateway_factory or OfflineAgentGatewayFactory()
     )
     browser_capabilities = capability_broker or CapabilityBroker()
     browser_command_locks: dict[tuple[str, str], asyncio.Lock] = {}
@@ -470,13 +502,13 @@ def create_app(
 
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
-        state_store.initialize()
+        state_store.initialize(owner_device_id=settings.device_id)
         jobs.initialize()
-        await conversation_service.start()
+        await conversation_manager.start()
         try:
             yield
         finally:
-            await conversation_service.close()
+            await conversation_manager.close()
 
     app = FastAPI(
         title="JobOS API",
@@ -608,8 +640,10 @@ def create_app(
                 request,
                 status_code=status_code,
                 code=(
-                    "artifact_provider_unavailable" if artifact_unavailable
-                    else "renderer_unavailable" if renderer_unavailable
+                    "artifact_provider_unavailable"
+                    if artifact_unavailable
+                    else "renderer_unavailable"
+                    if renderer_unavailable
                     else "repository_unavailable"
                 ),
                 message=(
@@ -622,8 +656,10 @@ def create_app(
                 retryable=True,
             )
         code = (
-            "resource_not_found" if isinstance(error, NotFound)
-            else "resource_conflict" if isinstance(error, Conflict)
+            "resource_not_found"
+            if isinstance(error, NotFound)
+            else "resource_conflict"
+            if isinstance(error, Conflict)
             else "request_validation_failed"
         )
         return error_response(
@@ -649,8 +685,20 @@ def create_app(
             state_schema=state_health.schema_version,
             transport=settings.transport,
             agent=(
-                conversation_service.gateway.connection_state
-                if configured_gateway is not None
+                (
+                    "online"
+                    if any(
+                        service.gateway.connection_state == "online"
+                        for service in conversation_manager.services
+                    )
+                    else "connecting"
+                    if any(
+                        service.gateway.connection_state == "connecting"
+                        for service in conversation_manager.services
+                    )
+                    else "offline"
+                )
+                if configured_gateway
                 else "not-configured"
             ),
             artifact_storage=("available" if artifact_storage_is_available() else "unavailable"),
@@ -865,6 +913,10 @@ def create_app(
         mcp_token: Annotated[str | None, Header(alias="X-JobOS-MCP-Token")] = None,
     ) -> BrowserCommandResponse:
         require_trusted_mcp(identity, command.origin, mcp_token)
+        if command.origin == "mcp" and command.conversation_id is None:
+            raise HTTPException(
+                status_code=422, detail="MCP browser commands require a conversation ID"
+            )
         try:
             arguments = command.validated_arguments()
         except ValueError as error:
@@ -879,26 +931,45 @@ def create_app(
                 ) from error
         if command.command.startswith("document."):
             ensure_job(arguments["job_id"])
+        request_fields: dict[str, object] = {
+            "command": command.command,
+            "arguments": arguments,
+            "origin": command.origin,
+        }
+        if command.origin == "mcp":
+            request_fields["conversation_id"] = command.conversation_id
         request_hash = hashlib.sha256(
             json.dumps(
-                {"command": command.command, "arguments": arguments, "origin": command.origin},
+                request_fields,
                 separators=(",", ":"),
                 sort_keys=True,
             ).encode()
         ).hexdigest()
         durable_command = command.command not in {
-            "tabs.inspect", "page.snapshot", "document.inspect"
+            "tabs.inspect",
+            "page.snapshot",
+            "document.inspect",
         }
-        target_device_id = (
-            state_store.active_turn_origin_device_id() or identity.device_id
-            if command.origin == "mcp"
-            else identity.device_id
-        )
+        if command.origin == "mcp":
+            try:
+                scoped_service = conversation_manager.get(str(command.conversation_id))
+            except ConversationNotFound as error:
+                raise HTTPException(status_code=404, detail="Conversation not found") from error
+            target_device_id = scoped_service.store.active_turn_origin_device_id()
+            if target_device_id is None:
+                raise HTTPException(
+                    status_code=409,
+                    detail="MCP conversation does not have an active turn",
+                )
+        else:
+            target_device_id = identity.device_id
         target = (
             f"document/{arguments['job_id']}/{arguments['document_key']}"
             if command.command.startswith("document.")
             else f"browser/{target_device_id}/{arguments.get('tab_id', 'desktop')}"
         )
+        if command.origin == "mcp":
+            target = f"conversation/{command.conversation_id}/{target}"
 
         def observe_document_result(result: BrowserCommandResponse) -> None:
             if not command.command.startswith("document.") or result.state != "completed":
@@ -908,9 +979,7 @@ def create_app(
                     arguments["job_id"],
                     result.data,
                     observed_at=(
-                        datetime.now(UTC)
-                        .isoformat(timespec="milliseconds")
-                        .replace("+00:00", "Z")
+                        datetime.now(UTC).isoformat(timespec="milliseconds").replace("+00:00", "Z")
                     ),
                     observed_device_id=target_device_id,
                 )
@@ -1041,20 +1110,61 @@ def create_app(
             api_version=__version__,
         )
 
-    @app.get("/v1/conversations/current", tags=["agent"])
-    def conversation_current(
-        _: Annotated[DeviceIdentity, Depends(authenticated_device)],
-    ) -> ConversationResponse:
-        return conversation_service.snapshot()
+    def conversation_service(conversation_id: str, identity: DeviceIdentity):
+        if not re.fullmatch(r"conv_[A-Za-z0-9_-]{1,128}", conversation_id):
+            raise HTTPException(status_code=422, detail="Invalid conversation ID")
+        try:
+            return conversation_manager.get(conversation_id, owner_device_id=identity.device_id)
+        except ConversationNotFound as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
 
-    @app.post("/v1/conversations/current/reset", tags=["agent"])
-    async def conversation_reset(
+    def validated_turn_id(turn_id: str) -> str:
+        if not re.fullmatch(r"turn_[A-Za-z0-9_-]{1,128}", turn_id):
+            raise HTTPException(status_code=422, detail="Invalid turn ID")
+        return turn_id
+
+    @app.get("/v1/conversations", tags=["agent"])
+    def conversations_list(
+        identity: Annotated[DeviceIdentity, Depends(authenticated_device)],
+    ) -> ConversationListResponse:
+        return conversation_manager.list(owner_device_id=identity.device_id)
+
+    @app.post("/v1/conversations", tags=["agent"], status_code=201)
+    async def conversation_create(
         identity: Annotated[DeviceIdentity, Depends(authenticated_device)],
     ) -> ConversationResponse:
         try:
-            return await conversation_service.reset(actor_id=identity.device_id)
+            return await conversation_manager.create(actor_id=identity.device_id)
+        except ConversationLimit as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
+
+    @app.get("/v1/conversations/current", tags=["agent"], deprecated=True)
+    def conversation_current(
+        identity: Annotated[DeviceIdentity, Depends(authenticated_device)],
+    ) -> ConversationResponse:
+        return conversation_manager.get(
+            state_store.first_active_conversation_id(identity.device_id),
+            owner_device_id=identity.device_id,
+        ).snapshot()
+
+    @app.get("/v1/conversations/{conversation_id}", tags=["agent"])
+    def conversation_get(
+        conversation_id: ConversationId,
+        identity: Annotated[DeviceIdentity, Depends(authenticated_device)],
+    ) -> ConversationResponse:
+        return conversation_service(conversation_id, identity).snapshot()
+
+    @app.delete("/v1/conversations/{conversation_id}", tags=["agent"], status_code=204)
+    async def conversation_archive(
+        conversation_id: ConversationId,
+        identity: Annotated[DeviceIdentity, Depends(authenticated_device)],
+    ) -> Response:
+        conversation_service(conversation_id, identity)
+        try:
+            await conversation_manager.archive(conversation_id, actor_id=identity.device_id)
         except ConversationBusy as error:
             raise HTTPException(status_code=409, detail=str(error)) from error
+        return Response(status_code=204)
 
     def conversation_context(identity: DeviceIdentity) -> dict[str, object]:
         selection = state_store.job_workspace_state().selected_job_id
@@ -1092,16 +1202,17 @@ def create_app(
         }
 
     @app.post(
-        "/v1/conversations/current/messages",
+        "/v1/conversations/{conversation_id}/messages",
         tags=["agent"],
         status_code=201,
     )
     async def conversation_send(
+        conversation_id: ConversationId,
         command: SendMessageRequest,
         identity: Annotated[DeviceIdentity, Depends(authenticated_device)],
     ) -> TurnMutationResponse:
         try:
-            return await conversation_service.send(
+            return await conversation_service(conversation_id, identity).send(
                 command,
                 actor_id=identity.device_id,
                 context=conversation_context(identity),
@@ -1111,28 +1222,34 @@ def create_app(
         except IdempotencyConflict as error:
             raise HTTPException(status_code=409, detail=str(error)) from error
 
-    @app.post("/v1/conversations/current/turns/{turn_id}/cancel", tags=["agent"])
+    @app.post("/v1/conversations/{conversation_id}/turns/{turn_id}/cancel", tags=["agent"])
     async def conversation_cancel(
-        turn_id: str,
-        _: Annotated[DeviceIdentity, Depends(authenticated_device)],
+        conversation_id: ConversationId,
+        turn_id: TurnId,
+        identity: Annotated[DeviceIdentity, Depends(authenticated_device)],
     ) -> TurnMutationResponse:
-        result = await conversation_service.cancel(turn_id)
+        result = await conversation_service(conversation_id, identity).cancel(
+            validated_turn_id(turn_id)
+        )
         if result is None:
             raise HTTPException(status_code=404, detail="Turn not found")
         return result
 
     @app.post(
-        "/v1/conversations/current/turns/{turn_id}/retry",
+        "/v1/conversations/{conversation_id}/turns/{turn_id}/retry",
         tags=["agent"],
         status_code=201,
     )
     async def conversation_retry(
-        turn_id: str,
+        conversation_id: ConversationId,
+        turn_id: TurnId,
         command: RetryTurnRequest,
         identity: Annotated[DeviceIdentity, Depends(authenticated_device)],
     ) -> TurnMutationResponse:
         try:
-            result = await conversation_service.retry(turn_id, command, actor_id=identity.device_id)
+            result = await conversation_service(conversation_id, identity).retry(
+                validated_turn_id(turn_id), command, actor_id=identity.device_id
+            )
         except ConversationBusy as error:
             raise HTTPException(status_code=409, detail=str(error)) from error
         except IdempotencyConflict as error:
@@ -1143,10 +1260,33 @@ def create_app(
             raise HTTPException(status_code=404, detail="Turn not found")
         return result
 
-    @app.get("/v1/conversations/current/events/stream", tags=["agent"])
+    @app.get(
+        "/v1/conversations/events/stream",
+        tags=["agent"],
+        response_class=StreamingResponse,
+        responses={
+            200: {
+                "description": (
+                    "SSE frames with a global event ID and a data object containing "
+                    "conversation_id, the current recovery_state, and the scoped "
+                    "conversation event."
+                ),
+                "content": {
+                    "text/event-stream": {
+                        "schema": {"type": "string"},
+                        "example": (
+                            'id: 42\nevent: conversation_event\ndata: {"conversation_id":'
+                            '"conv_example","recovery_state":"ready",'
+                            '"event":{"event_id":42}}\n\n'
+                        ),
+                    }
+                },
+            }
+        },
+    )
     async def conversation_stream(
         request: Request,
-        _: Annotated[DeviceIdentity, Depends(authenticated_device)],
+        identity: Annotated[DeviceIdentity, Depends(authenticated_device)],
         after: int | None = None,
         once: bool = False,
     ) -> StreamingResponse:
@@ -1158,7 +1298,11 @@ def create_app(
 
         async def event_source() -> AsyncIterator[str]:
             async for frame in conversation_event_source(
-                state_store, request, cursor=cursor, once=once
+                state_store,
+                request,
+                cursor=cursor,
+                once=once,
+                owner_device_id=identity.device_id,
             ):
                 yield frame
 
@@ -2033,6 +2177,7 @@ def create_app(
                 **command.model_dump(mode="json", exclude={"idempotency_key"}),
             },
         )
+
         def save_document(connection: sqlite3.Connection) -> dict[str, object]:
             row = state_store.save_editable_document(
                 document_id,
@@ -2239,6 +2384,7 @@ def create_app(
                 "base_revision": command.base_revision,
             },
         )
+
         def restore_snapshot(connection: sqlite3.Connection) -> dict[str, object]:
             row = state_store.restore_editable_snapshot(
                 document_id,
@@ -2285,6 +2431,7 @@ def create_app(
                 **command.model_dump(mode="json", exclude={"idempotency_key"}),
             },
         )
+
         def apply_document_operations(connection: sqlite3.Connection) -> dict[str, object]:
             current = state_store.get_editable_document(document_id, connection=connection)
             if current is None:

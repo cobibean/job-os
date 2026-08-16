@@ -18,11 +18,49 @@ TOKEN = "browser-device-token"
 REMOTE_TOKEN = "remote-browser-device-token"
 
 
-def make_app(tmp_path, *, broker=None, job_facade=None, gateway=None, settings=None):
+class ActiveTurnGateway:
+    connection_state = "online"
+
+    async def start(self):
+        return None
+
+    async def create_or_resume_conversation(self, stored_session_id):
+        return "stored-browser-test", "live-browser-test"
+
+    async def submit_turn(self, text, context):
+        return None
+
+    async def detach_conversation(self):
+        return None
+
+    async def stream_events(self):
+        if False:
+            yield None
+
+    async def interrupt_turn(self, turn_id):
+        return None
+
+    async def recover_active_turn(self, stored_session_id, turn_id):
+        return None
+
+    async def close(self):
+        return None
+
+
+class ActiveTurnGatewayFactory:
+    def create(self, conversation_id):
+        return ActiveTurnGateway()
+
+
+def make_app(
+    tmp_path, *, broker=None, job_facade=None, gateway=None, gateway_factory=None, settings=None
+):
     repository = None
     artifact_gateway = None
     if job_facade is not None:
         repository, artifact_gateway = adapt_job_hunter_facade(job_facade)
+    if gateway is None and gateway_factory is None:
+        gateway_factory = ActiveTurnGatewayFactory()
     return create_app(
         settings
         or Settings(
@@ -34,6 +72,7 @@ def make_app(tmp_path, *, broker=None, job_facade=None, gateway=None, settings=N
         job_repository=repository,
         artifact_gateway=artifact_gateway,
         agent_gateway=gateway,
+        agent_gateway_factory=gateway_factory,
     )
 
 
@@ -42,6 +81,19 @@ def auth():
         "Authorization": f"Bearer {TOKEN}",
         "X-JobOS-MCP-Token": "test-mcp-trusted-token",
     }
+
+
+def begin_active_conversation(client, *, token=TOKEN, key="browser-active-turn-1"):
+    conversation_id = client.get("/v1/conversations", headers=auth()).json()["conversations"][0][
+        "conversation_id"
+    ]
+    response = client.post(
+        f"/v1/conversations/{conversation_id}/messages",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"text": "Keep browser correlation active", "idempotency_key": key},
+    )
+    assert response.status_code == 201
+    return conversation_id
 
 
 def test_tab_association_requires_a_bounded_job_id():
@@ -85,6 +137,7 @@ def test_tab_association_rejects_unknown_jobs_before_desktop_dispatch(tmp_path):
         "idempotency_key": "associate-missing-1",
     }
     with TestClient(app) as client:
+        body["conversation_id"] = begin_active_conversation(client)
         missing = client.post("/v1/browser/commands", headers=auth(), json=body)
         body["arguments"]["job_id"] = "job-known"
         body["idempotency_key"] = "associate-known-1"
@@ -101,9 +154,7 @@ def make_remote_app(tmp_path):
         Settings(
             device_token=TOKEN,
             mcp_token="test-mcp-trusted-token",
-            device_credentials=(
-                DeviceCredential(device_id="example-macbook", token=REMOTE_TOKEN),
-            ),
+            device_credentials=(DeviceCredential(device_id="example-macbook", token=REMOTE_TOKEN),),
             state_db_path=tmp_path / "jobos.db",
         )
     )
@@ -205,10 +256,18 @@ def test_mcp_browser_command_targets_the_desktop_that_started_the_turn(tmp_path)
         device_credentials=(DeviceCredential(device_id="example-macbook", token=REMOTE_TOKEN),),
         state_db_path=tmp_path / "jobos.db",
     )
-    app = make_app(tmp_path, broker=broker, gateway=Gateway(), settings=settings)
+
+    class Factory:
+        def create(self, conversation_id):
+            return Gateway()
+
+    app = make_app(tmp_path, broker=broker, gateway_factory=Factory(), settings=settings)
     with TestClient(app) as client:
+        conversation_id = client.post(
+            "/v1/conversations", headers={"Authorization": f"Bearer {REMOTE_TOKEN}"}
+        ).json()["conversation_id"]
         turn = client.post(
-            "/v1/conversations/current/messages",
+            f"/v1/conversations/{conversation_id}/messages",
             headers={"Authorization": f"Bearer {REMOTE_TOKEN}"},
             json={"text": "Save this browser job", "idempotency_key": "macbook-turn-1"},
         )
@@ -219,6 +278,7 @@ def test_mcp_browser_command_targets_the_desktop_that_started_the_turn(tmp_path)
                 "command": "page.snapshot",
                 "arguments": {"tab_id": "macbook-tab"},
                 "origin": "mcp",
+                "conversation_id": conversation_id,
                 "idempotency_key": "macbook-snapshot-2",
             },
         )
@@ -226,6 +286,108 @@ def test_mcp_browser_command_targets_the_desktop_that_started_the_turn(tmp_path)
     assert turn.status_code == 201
     assert result.status_code == 200
     assert broker.device_id == "example-macbook"
+
+
+def test_mcp_browser_commands_are_correlated_to_one_active_conversation(tmp_path):
+    class Gateway:
+        connection_state = "online"
+
+        async def start(self):
+            return None
+
+        async def create_or_resume_conversation(self, stored_session_id):
+            return "stored-session", "live-session"
+
+        async def submit_turn(self, text, context):
+            return None
+
+        async def detach_conversation(self):
+            return None
+
+        async def stream_events(self):
+            if False:
+                yield None
+
+        async def interrupt_turn(self, turn_id):
+            return None
+
+        async def recover_active_turn(self, stored_session_id, turn_id):
+            return None
+
+        async def close(self):
+            return None
+
+    class Factory:
+        def create(self, conversation_id):
+            return Gateway()
+
+    class CapturingBroker:
+        def __init__(self):
+            self.device_ids = []
+
+        async def execute(self, command, *, device_id=None):
+            self.device_ids.append(device_id)
+            return BrowserCommandResponse(
+                command_id=f"cmd_{len(self.device_ids)}",
+                state="completed",
+                outcome="snapshot",
+                data={},
+            )
+
+    broker = CapturingBroker()
+    settings = Settings(
+        device_token=TOKEN,
+        mcp_token="test-mcp-trusted-token",
+        device_credentials=(DeviceCredential(device_id="example-macbook", token=REMOTE_TOKEN),),
+        state_db_path=tmp_path / "jobos.db",
+    )
+    with TestClient(
+        make_app(tmp_path, broker=broker, gateway_factory=Factory(), settings=settings)
+    ) as client:
+        first_id = client.get("/v1/conversations", headers=auth()).json()["conversations"][0][
+            "conversation_id"
+        ]
+        second_id = client.post(
+            "/v1/conversations", headers={"Authorization": f"Bearer {REMOTE_TOKEN}"}
+        ).json()["conversation_id"]
+        idle_id = client.post("/v1/conversations", headers=auth()).json()["conversation_id"]
+        assert (
+            client.post(
+                f"/v1/conversations/{first_id}/messages",
+                headers=auth(),
+                json={"text": "First", "idempotency_key": "correlation-first-1"},
+            ).status_code
+            == 201
+        )
+        assert (
+            client.post(
+                f"/v1/conversations/{second_id}/messages",
+                headers={"Authorization": f"Bearer {REMOTE_TOKEN}"},
+                json={"text": "Second", "idempotency_key": "correlation-second-1"},
+            ).status_code
+            == 201
+        )
+
+        def command(conversation_id=None, key="correlation-command-1"):
+            body = {
+                "command": "tabs.inspect",
+                "arguments": {},
+                "origin": "mcp",
+                "idempotency_key": key,
+            }
+            if conversation_id is not None:
+                body["conversation_id"] = conversation_id
+            return client.post("/v1/browser/commands", headers=auth(), json=body)
+
+        assert command(second_id, "correlation-second-command").status_code == 200
+        assert command(first_id, "correlation-first-command").status_code == 200
+        assert command(None, "correlation-missing-command").status_code == 422
+        assert command("conv_unknown", "correlation-wrong-command").status_code == 404
+        assert command(idle_id, "correlation-idle-command").status_code == 409
+        assert client.delete(f"/v1/conversations/{idle_id}", headers=auth()).status_code == 204
+        assert command(idle_id, "correlation-archived-command").status_code == 404
+
+    assert broker.device_ids == ["example-macbook", "primary-device"]
 
 
 def test_remote_desktop_credential_routes_direct_commands_to_that_device(tmp_path):
@@ -290,6 +452,7 @@ def test_remote_desktop_cannot_impersonate_the_trusted_mcp_client(tmp_path):
 
 def test_browser_command_fails_immediately_without_a_desktop(tmp_path):
     with TestClient(make_app(tmp_path)) as client:
+        conversation_id = begin_active_conversation(client)
         presence = client.get("/v1/desktop/capabilities", headers=auth())
         response = client.post(
             "/v1/browser/commands",
@@ -298,6 +461,7 @@ def test_browser_command_fails_immediately_without_a_desktop(tmp_path):
                 "command": "tabs.inspect",
                 "arguments": {},
                 "origin": "mcp",
+                "conversation_id": conversation_id,
                 "idempotency_key": "inspect-offline-1",
                 "timeout_ms": 500,
             },
@@ -327,6 +491,10 @@ def test_authenticated_desktop_receives_correlated_command_and_replay_is_idempot
         presence = client.get("/v1/desktop/capabilities", headers=auth()).json()
         assert presence["available"] is True
         assert 0 < presence["lease_remaining_ms"] <= 15_000
+        conversation_id = begin_active_conversation(client)
+        chronology_before = client.get("/v1/conversations/current", headers=auth()).json()[
+            "entries"
+        ]
 
         with ThreadPoolExecutor(max_workers=1) as executor:
             task = executor.submit(
@@ -337,6 +505,7 @@ def test_authenticated_desktop_receives_correlated_command_and_replay_is_idempot
                     "command": "tab.navigate",
                     "arguments": {"tab_id": "tab-1", "url": "https://example.com/jobs/1"},
                     "origin": "mcp",
+                    "conversation_id": conversation_id,
                     "idempotency_key": "navigate-1",
                     "timeout_ms": 1000,
                 },
@@ -370,6 +539,7 @@ def test_authenticated_desktop_receives_correlated_command_and_replay_is_idempot
                     "command": "tab.navigate",
                     "arguments": {"tab_id": "tab-1", "url": "https://example.com/jobs/1"},
                     "origin": "mcp",
+                    "conversation_id": conversation_id,
                     "idempotency_key": "navigate-1",
                     "timeout_ms": 1000,
                 },
@@ -384,7 +554,7 @@ def test_authenticated_desktop_receives_correlated_command_and_replay_is_idempot
     assert "phase7-secret-value" not in (tmp_path / "jobos.db").read_bytes().decode(
         "utf-8", errors="ignore"
     )
-    assert chronology == []
+    assert chronology == chronology_before
 
 
 def test_concurrent_durable_browser_retries_execute_the_desktop_once(tmp_path):
@@ -401,17 +571,19 @@ def test_concurrent_durable_browser_retries_execute_the_desktop_once(tmp_path):
 
     broker = CountingBroker()
     body = {
-        "command": "tab.select", "arguments": {"tab_id": "tab-1"},
-        "origin": "mcp", "idempotency_key": "concurrent-select-1", "timeout_ms": 1000,
+        "command": "tab.select",
+        "arguments": {"tab_id": "tab-1"},
+        "origin": "mcp",
+        "idempotency_key": "concurrent-select-1",
+        "timeout_ms": 1000,
     }
     with (
         TestClient(make_app(tmp_path, broker=broker)) as client,
         ThreadPoolExecutor(max_workers=2) as executor,
     ):
+        body["conversation_id"] = begin_active_conversation(client)
         futures = [
-            executor.submit(
-                client.post, "/v1/browser/commands", headers=auth(), json=body
-            )
+            executor.submit(client.post, "/v1/browser/commands", headers=auth(), json=body)
             for _ in range(2)
         ]
         responses = [future.result(timeout=2) for future in futures]
@@ -429,11 +601,16 @@ def test_browser_replay_does_not_inject_activity_into_agent_chat(tmp_path):
             )
 
     body = {
-        "command": "tab.select", "arguments": {"tab_id": "tab-1"},
-        "origin": "mcp", "idempotency_key": "repair-select-1", "timeout_ms": 1000,
+        "command": "tab.select",
+        "arguments": {"tab_id": "tab-1"},
+        "origin": "mcp",
+        "idempotency_key": "repair-select-1",
+        "timeout_ms": 1000,
     }
     database = tmp_path / "jobos.db"
     with TestClient(make_app(tmp_path, broker=Broker())) as client:
+        body["conversation_id"] = begin_active_conversation(client)
+        entries_before = client.get("/v1/conversations/current", headers=auth()).json()["entries"]
         first = client.post("/v1/browser/commands", headers=auth(), json=body)
         with sqlite3.connect(database) as connection:
             connection.execute(
@@ -444,7 +621,7 @@ def test_browser_replay_does_not_inject_activity_into_agent_chat(tmp_path):
         entries = client.get("/v1/conversations/current", headers=auth()).json()["entries"]
 
     assert replay.json() == first.json()
-    assert entries == []
+    assert entries == entries_before
 
 
 def test_distinct_browser_actions_may_reuse_a_key_without_injecting_chat_activity(tmp_path):
@@ -462,27 +639,37 @@ def test_distinct_browser_actions_may_reuse_a_key_without_injecting_chat_activit
             )
 
     with TestClient(make_app(tmp_path, broker=Broker())) as client:
+        conversation_id = begin_active_conversation(client)
+        entries_before = client.get("/v1/conversations/current", headers=auth()).json()["entries"]
         inspect = client.post(
             "/v1/browser/commands",
             headers=auth(),
             json={
-                "command": "tabs.inspect", "arguments": {}, "origin": "mcp",
-                "idempotency_key": "shared-key", "timeout_ms": 1000,
+                "command": "tabs.inspect",
+                "arguments": {},
+                "origin": "mcp",
+                "conversation_id": conversation_id,
+                "idempotency_key": "shared-key",
+                "timeout_ms": 1000,
             },
         )
         select = client.post(
             "/v1/browser/commands",
             headers=auth(),
             json={
-                "command": "tab.select", "arguments": {"tab_id": "tab-1"},
-                "origin": "mcp", "idempotency_key": "shared-key", "timeout_ms": 1000,
+                "command": "tab.select",
+                "arguments": {"tab_id": "tab-1"},
+                "origin": "mcp",
+                "idempotency_key": "shared-key",
+                "timeout_ms": 1000,
+                "conversation_id": conversation_id,
             },
         )
         entries = client.get("/v1/conversations/current", headers=auth()).json()["entries"]
 
     assert inspect.status_code == 200
     assert select.status_code == 200
-    assert entries == []
+    assert entries == entries_before
     with sqlite3.connect(tmp_path / "jobos.db") as connection:
         commands = {
             row[0]
@@ -495,8 +682,11 @@ def test_distinct_browser_actions_may_reuse_a_key_without_injecting_chat_activit
 
 def test_activity_report_is_idempotent_without_injecting_agent_chat_activity(tmp_path):
     body = {
-        "label": "Reviewed listing", "state": "completed", "detail": {},
-        "origin": "mcp", "idempotency_key": "activity-repair-1",
+        "label": "Reviewed listing",
+        "state": "completed",
+        "detail": {},
+        "origin": "mcp",
+        "idempotency_key": "activity-repair-1",
     }
     with TestClient(make_app(tmp_path)) as client:
         first = client.post("/v1/activity", headers=auth(), json=body)
@@ -538,6 +728,7 @@ def test_browser_command_validation_rejects_scripts_and_selector_like_targets(
         "timeout_ms": 500,
     }
     with TestClient(make_app(tmp_path)) as client:
+        body["conversation_id"] = begin_active_conversation(client)
         response = client.post("/v1/browser/commands", headers=auth(), json=body)
     assert response.status_code == 422
     assert message in str(response.json())

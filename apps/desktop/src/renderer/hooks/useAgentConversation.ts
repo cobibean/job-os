@@ -1,9 +1,6 @@
-import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react'
-
 import type {
   AgentConnectionState,
   AgentConversationSnapshot,
-  AgentStreamUpdate,
   AgentTurn,
   AgentTurnMutation,
   ConversationEvent
@@ -19,7 +16,7 @@ export interface AgentConversationState {
   error: string | null
 }
 
-type AgentConversationAction =
+export type AgentConversationAction =
   | { type: 'hydrate'; snapshot: AgentConversationSnapshot }
   | { type: 'reset'; snapshot: AgentConversationSnapshot }
   | { type: 'event'; event: ConversationEvent }
@@ -46,7 +43,7 @@ function mergeEntries(left: ConversationEvent[], right: ConversationEvent[]): Co
 
 function activeTurnAfterEvent(activeTurn: AgentTurn | null, event: ConversationEvent): AgentTurn | null {
   if (!activeTurn) {
-    if (event.type === 'turn' && event.turnId && ['queued', 'working', 'waiting'].includes(event.state)) {
+    if ((event.type === 'turn' || event.type === 'status') && event.turnId && ['queued', 'working', 'waiting'].includes(event.state)) {
       return {
         turnId: event.turnId,
         status: event.state === 'waiting' ? 'waiting' : 'running',
@@ -56,13 +53,25 @@ function activeTurnAfterEvent(activeTurn: AgentTurn | null, event: ConversationE
     return null
   }
   if (event.turnId !== activeTurn.turnId) return activeTurn
-  const terminalTurnEvent = event.type === 'assistant_message' || event.type === 'error' || event.type === 'status'
+  const terminalTurnEvent = event.type === 'turn' || event.type === 'assistant_message' || event.type === 'error' || event.type === 'status'
   if (terminalTurnEvent && (event.state === 'completed' || event.state === 'failed' || event.state === 'interrupted')) return null
   // Activity state describes one tool call, not the whole turn. Only an
   // explicit runtime status event may pause or resume the active turn.
   if (event.type === 'status' && event.state === 'waiting') return { ...activeTurn, status: 'waiting' }
   if (event.type === 'status' && event.state === 'working') return { ...activeTurn, status: 'running' }
   return activeTurn
+}
+
+function isTerminalTurnState(state: string | null | undefined): boolean {
+  return state === 'completed' || state === 'failed' || state === 'interrupted' || state === 'cancelled'
+}
+
+function hasTerminalTurnEvent(entries: ConversationEvent[], turnId: string): boolean {
+  return entries.some(event => (
+    event.turnId === turnId
+    && (event.type === 'turn' || event.type === 'assistant_message' || event.type === 'error' || event.type === 'status')
+    && isTerminalTurnState(event.state)
+  ))
 }
 
 function connectionAfterEvent(connection: AgentConnectionState, event: ConversationEvent): AgentConnectionState {
@@ -107,7 +116,8 @@ export function agentConversationReducer(state: AgentConversationState, action: 
       return { ...state, connection: action.state }
     case 'mutation':
       if (action.status === 'cancel-result') {
-        const terminal = ['completed', 'failed', 'interrupted'].includes(action.mutation.status ?? '')
+        const terminal = isTerminalTurnState(action.mutation.status)
+          || hasTerminalTurnEvent(state.entries, action.mutation.turnId)
         return {
           ...state,
           activeTurn: terminal ? null : state.activeTurn && {
@@ -118,9 +128,11 @@ export function agentConversationReducer(state: AgentConversationState, action: 
           error: null
         }
       }
+      const terminal = isTerminalTurnState(action.mutation.status)
+        || hasTerminalTurnEvent(state.entries, action.mutation.turnId)
       return {
         ...state,
-        activeTurn: { turnId: action.mutation.turnId, status: 'running', cancelRequested: false },
+        activeTurn: terminal ? null : { turnId: action.mutation.turnId, status: 'running', cancelRequested: false },
         error: null
       }
     case 'failure':
@@ -348,116 +360,4 @@ export function projectConversation(entries: ConversationEvent[]): ProjectedConv
   }
 
   return projected.sort((left, right) => left.eventId - right.eventId)
-}
-
-function identifier(prefix: string): string {
-  const random = globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`
-  return `desktop-${prefix}${random}`
-}
-
-function safeError(_error: unknown, fallback: string): string {
-  return fallback
-}
-
-export function useAgentConversation() {
-  const [state, dispatch] = useReducer(agentConversationReducer, initialAgentConversationState)
-  const [draft, setDraft] = useState('')
-  const operationRef = useRef<'send' | 'reset' | 'stop' | 'retry' | null>(null)
-  const [operation, setOperation] = useState<typeof operationRef.current>(null)
-
-  const beginOperation = useCallback((next: NonNullable<typeof operationRef.current>): boolean => {
-    if (operationRef.current !== null) return false
-    operationRef.current = next
-    setOperation(next)
-    return true
-  }, [])
-
-  const finishOperation = useCallback((completed: NonNullable<typeof operationRef.current>) => {
-    if (operationRef.current !== completed) return
-    operationRef.current = null
-    setOperation(null)
-  }, [])
-
-  useEffect(() => {
-    const bridge = window.jobos?.agent
-    if (!bridge) {
-      dispatch({ type: 'restore-failure', message: 'Agent is available in the desktop app' })
-      return
-    }
-    const unsubscribe = bridge.subscribe((update: AgentStreamUpdate) => {
-      if (update.kind === 'event') dispatch({ type: 'event', event: update.event })
-      else dispatch({ type: 'connection', state: update.state })
-    })
-    void bridge.get()
-      .then(value => dispatch({ type: 'hydrate', snapshot: value }))
-      .catch(error => dispatch({ type: 'restore-failure', message: safeError(error, 'Conversation could not be restored') }))
-    return unsubscribe
-  }, [])
-
-  const send = useCallback(async () => {
-    const text = draft.trim()
-    if (!text || state.activeTurn || !window.jobos?.agent || !beginOperation('send')) return
-    try {
-      const mutation = await window.jobos.agent.send(text, identifier('message-'))
-      dispatch({ type: 'mutation', mutation, status: 'running' })
-      setDraft('')
-    } catch (error) {
-      dispatch({ type: 'failure', message: safeError(error, 'Message could not be sent') })
-    } finally {
-      finishOperation('send')
-    }
-  }, [beginOperation, draft, finishOperation, state.activeTurn])
-
-  const reset = useCallback(async (): Promise<boolean> => {
-    if (state.activeTurn || state.restoring || !window.jobos?.agent || !beginOperation('reset')) return false
-    try {
-      const snapshot = await window.jobos.agent.reset()
-      dispatch({ type: 'reset', snapshot })
-      setDraft('')
-      return true
-    } catch (error) {
-      dispatch({ type: 'failure', message: safeError(error, 'New session could not be started') })
-      return false
-    } finally {
-      finishOperation('reset')
-    }
-  }, [beginOperation, finishOperation, state.activeTurn, state.restoring])
-
-  const stop = useCallback(async () => {
-    if (!state.activeTurn || !window.jobos?.agent || !beginOperation('stop')) return
-    try {
-      const mutation = await window.jobos.agent.cancel(state.activeTurn.turnId)
-      dispatch({ type: 'mutation', mutation, status: 'cancel-result' })
-    } catch (error) {
-      dispatch({ type: 'failure', message: safeError(error, 'Turn could not be stopped') })
-    } finally {
-      finishOperation('stop')
-    }
-  }, [beginOperation, finishOperation, state.activeTurn])
-
-  const retry = useCallback(async (turnId: string) => {
-    if (state.activeTurn || !window.jobos?.agent || !beginOperation('retry')) return
-    try {
-      const mutation = await window.jobos.agent.retry(turnId, identifier('retry-'))
-      dispatch({ type: 'mutation', mutation, status: 'running' })
-    } catch (error) {
-      dispatch({ type: 'failure', message: safeError(error, 'Turn could not be retried') })
-    } finally {
-      finishOperation('retry')
-    }
-  }, [beginOperation, finishOperation, state.activeTurn])
-
-  const items = useMemo(() => projectConversation(state.entries), [state.entries])
-  return {
-    ...state,
-    items,
-    draft,
-    setDraft,
-    operationPending: operation !== null,
-    resetting: operation === 'reset',
-    reset,
-    send,
-    stop,
-    retry
-  }
 }

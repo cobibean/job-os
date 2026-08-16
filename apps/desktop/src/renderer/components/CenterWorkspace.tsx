@@ -75,6 +75,7 @@ interface CenterWorkspaceProps {
   browserRepaired: boolean
   browserRepairReasons: BrowserRepairReason[]
   browserVisible: boolean
+  agentConversationId: string | null
   documentMutationGeneration?: number
   documentPreviewMode: DocumentPreviewMode
   jobs: JobListItem[]
@@ -115,6 +116,7 @@ export function CenterWorkspace(props: CenterWorkspaceProps) {
   }>({ status: 'idle', message: '' })
   const tabRefs = useRef(new Map<string, HTMLButtonElement>())
   const saveTurnId = useRef<string | null>(null)
+  const saveConversationId = useRef<string | null>(null)
   const saveTabId = useRef<string | null>(null)
   const saveTabUrl = useRef<string | null>(null)
   const saveInitialAssociation = useRef<string | null>(null)
@@ -133,6 +135,7 @@ export function CenterWorkspace(props: CenterWorkspaceProps) {
 
   const clearSaveCorrelation = () => {
     saveTurnId.current = null
+    saveConversationId.current = null
     saveTabId.current = null
     saveTabUrl.current = null
     saveInitialAssociation.current = null
@@ -157,7 +160,7 @@ export function CenterWorkspace(props: CenterWorkspaceProps) {
         ]>>>
         try {
           snapshots = await Promise.all([
-            window.jobos.agent.get(),
+            window.jobos.agent.get(saveConversationId.current ?? ''),
             window.jobos.browser.getState()
           ])
         } catch {
@@ -255,7 +258,7 @@ export function CenterWorkspace(props: CenterWorkspaceProps) {
     ))
     if (contextChanged) {
       const turnId = saveTurnId.current
-      if (turnId) void window.jobos?.agent.cancel(turnId)
+      if (turnId && saveConversationId.current) void window.jobos?.agent.cancel(saveConversationId.current, turnId)
       clearSaveCorrelation()
       setSaveState({ status: 'error', message: 'The browser listing changed before saving finished. Retry on the intended listing.' })
       return
@@ -272,6 +275,7 @@ export function CenterWorkspace(props: CenterWorkspaceProps) {
     if (!agent) return undefined
     return agent.subscribe(update => {
       if (update.kind !== 'event') return
+      if (update.conversationId !== saveConversationId.current) return
       const turnId = update.event.turnId
       if (!turnId || turnId !== saveTurnId.current) return
       const isTerminal = (update.event.type === 'error' && update.event.state === 'failed')
@@ -299,15 +303,17 @@ export function CenterWorkspace(props: CenterWorkspaceProps) {
   }
 
   const saveActiveJob = async () => {
-    if (!active || active.associatedJobId || saveState.status === 'saving') return
+    if (!active || active.associatedJobId || saveState.status === 'saving' || !props.agentConversationId) return
+    const conversationId = props.agentConversationId
     setSaveState({ status: 'saving', message: 'Job hunter is reading this listing…' })
     saveTabId.current = active.tabId
     saveTabUrl.current = active.url
     saveInitialAssociation.current = active.associatedJobId
+    saveConversationId.current = conversationId
     const idempotencyKey = browserSaveKey()
     saveIdempotencyKey.current = idempotencyKey
     try {
-      const turn = await window.jobos.agent.send(agentJobSavePrompt(active.tabId), idempotencyKey)
+      const turn = await window.jobos.agent.send(conversationId, agentJobSavePrompt(active.tabId), idempotencyKey)
       const currentBrowser = await window.jobos.browser.getState()
       const currentTab = currentBrowser.tabs.find(tab => tab.tabId === active.tabId)
       const trackedUrl = saveTabUrl.current ?? active.url
@@ -316,7 +322,7 @@ export function CenterWorkspace(props: CenterWorkspaceProps) {
       ))
       if (saveTabId.current !== active.tabId || !currentTab
         || currentBrowser.activeTabId !== active.tabId || !currentUrlAccepted) {
-        await window.jobos.agent.cancel(turn.turnId)
+        await window.jobos.agent.cancel(conversationId, turn.turnId)
         throw new Error('The browser listing changed before saving finished. Retry on the intended listing.')
       }
       saveTurnId.current = turn.turnId

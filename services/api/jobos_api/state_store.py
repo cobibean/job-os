@@ -22,6 +22,7 @@ from .redaction import (
     sanitize_summary,
     sanitize_user_text,
 )
+from .sqlite_connection import connect_sqlite
 
 
 class IncompatibleSchemaError(RuntimeError):
@@ -58,9 +59,7 @@ def mutation_activity_source_id(
     return f"action:{sha256(identity.encode()).hexdigest()}"
 
 
-def _conversation_detail(
-    event_type: str, detail: dict[str, object] | None
-) -> dict[str, object]:
+def _conversation_detail(event_type: str, detail: dict[str, object] | None) -> dict[str, object]:
     raw_detail = detail or {}
     safe_detail = redact_detail(raw_detail)
     assistant_text = raw_detail.get("text")
@@ -75,6 +74,17 @@ def _conversation_detail(
 
 class ConversationBusy(RuntimeError):
     """A serialized agent turn is already active."""
+
+
+class ConversationLimit(RuntimeError):
+    """The active conversation limit has been reached."""
+
+
+class ConversationNotFound(RuntimeError):
+    """The requested active conversation does not exist."""
+
+
+MAX_ACTIVE_CONVERSATIONS = 5
 
 
 @dataclass(frozen=True)
@@ -677,6 +687,156 @@ MIGRATIONS = (
             "DROP TABLE migration15_affected_publications",
         ),
     ),
+    Migration(
+        version=16,
+        statements=(
+            "CREATE TEMP TABLE migration16_event_sequence(seq INTEGER NOT NULL)",
+            """
+            INSERT INTO migration16_event_sequence(seq)
+            SELECT COALESCE(
+                (SELECT seq FROM sqlite_sequence WHERE name = 'conversation_events'), 0
+            )
+            """,
+            "ALTER TABLE conversations RENAME TO conversations_v15",
+            "ALTER TABLE conversation_turns RENAME TO conversation_turns_v15",
+            "ALTER TABLE conversation_events RENAME TO conversation_events_v15",
+            """
+            CREATE TABLE conversations (
+                conversation_id TEXT PRIMARY KEY,
+                position INTEGER NOT NULL CHECK (position >= 1),
+                title TEXT NOT NULL,
+                stored_session_id TEXT,
+                recovery_turn_id TEXT,
+                isolated_turn_id TEXT,
+                isolated_previous_session_id TEXT,
+                isolated_agent_session_id TEXT,
+                ignored_agent_session_id TEXT,
+                archived_at TEXT,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+            """,
+            """
+            INSERT INTO conversations(
+                conversation_id, position, title, stored_session_id, recovery_turn_id,
+                isolated_turn_id, isolated_previous_session_id,
+                isolated_agent_session_id, ignored_agent_session_id, created_at, updated_at
+            )
+            SELECT conversation_id, 1, 'Session 1', stored_session_id,
+                   (SELECT value FROM jobos_metadata WHERE key = 'agent_recovery_turn_id'),
+                   isolated_turn_id, isolated_previous_session_id,
+                   isolated_agent_session_id, ignored_agent_session_id, created_at, updated_at
+            FROM conversations_v15 WHERE singleton_id = 1
+            """,
+            """
+            CREATE UNIQUE INDEX conversations_active_position
+            ON conversations(position) WHERE archived_at IS NULL
+            """,
+            """
+            CREATE TABLE conversation_turns (
+                turn_id TEXT PRIMARY KEY,
+                conversation_id TEXT NOT NULL,
+                message_id TEXT NOT NULL,
+                source_turn_id TEXT,
+                text TEXT NOT NULL,
+                context_json TEXT NOT NULL,
+                status TEXT NOT NULL,
+                cancel_requested INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                CHECK (status IN (
+                    'queued', 'running', 'waiting', 'completed', 'failed', 'interrupted'
+                )),
+                FOREIGN KEY(conversation_id) REFERENCES conversations(conversation_id),
+                UNIQUE(conversation_id, turn_id),
+                FOREIGN KEY(conversation_id, source_turn_id)
+                    REFERENCES conversation_turns(conversation_id, turn_id)
+            )
+            """,
+            """
+            INSERT INTO conversation_turns(
+                turn_id, conversation_id, message_id, source_turn_id, text, context_json,
+                status, cancel_requested, created_at, updated_at
+            )
+            SELECT turn_id, (SELECT conversation_id FROM conversations_v15 WHERE singleton_id = 1),
+                   message_id, source_turn_id, text, context_json, status, cancel_requested,
+                   created_at, updated_at
+            FROM conversation_turns_v15
+            """,
+            """
+            CREATE INDEX conversation_turns_scope_status
+            ON conversation_turns(conversation_id, status, created_at)
+            """,
+            """
+            CREATE TABLE conversation_events (
+                event_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                conversation_id TEXT NOT NULL,
+                turn_id TEXT,
+                event_type TEXT NOT NULL,
+                state TEXT NOT NULL,
+                summary TEXT NOT NULL,
+                detail_json TEXT NOT NULL DEFAULT '{}',
+                source_event_id TEXT,
+                occurred_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY(conversation_id) REFERENCES conversations(conversation_id),
+                FOREIGN KEY(conversation_id, turn_id)
+                    REFERENCES conversation_turns(conversation_id, turn_id)
+            )
+            """,
+            """
+            INSERT INTO conversation_events(
+                event_id, conversation_id, turn_id, event_type, state, summary,
+                detail_json, source_event_id, occurred_at
+            )
+            SELECT event_id, (SELECT conversation_id FROM conversations_v15 WHERE singleton_id = 1),
+                   turn_id, event_type, state, summary, detail_json, source_event_id, occurred_at
+            FROM conversation_events_v15 ORDER BY event_id
+            """,
+            """
+            UPDATE sqlite_sequence
+            SET seq = MAX(
+                seq,
+                (SELECT seq FROM migration16_event_sequence),
+                COALESCE((SELECT MAX(event_id) FROM conversation_events), 0)
+            )
+            WHERE name = 'conversation_events'
+            """,
+            """
+            CREATE UNIQUE INDEX conversation_events_scope_source
+            ON conversation_events(conversation_id, source_event_id)
+            WHERE source_event_id IS NOT NULL
+            """,
+            "DELETE FROM jobos_metadata WHERE key = 'agent_recovery_turn_id'",
+            "DROP TABLE conversation_events_v15",
+            "DROP TABLE conversation_turns_v15",
+            "DROP TABLE conversations_v15",
+            "DROP TABLE migration16_event_sequence",
+        ),
+    ),
+    Migration(
+        version=17,
+        statements=(
+            """
+            ALTER TABLE conversations ADD COLUMN owner_device_id TEXT NOT NULL
+                DEFAULT '__migration_owner__'
+            """,
+            """
+            CREATE INDEX conversations_owner_active
+            ON conversations(owner_device_id, position) WHERE archived_at IS NULL
+            """,
+        ),
+    ),
+    Migration(
+        version=18,
+        statements=(
+            "DROP INDEX conversations_active_position",
+            "DROP INDEX conversations_owner_active",
+            """
+            CREATE UNIQUE INDEX conversations_owner_active_position
+            ON conversations(owner_device_id, position) WHERE archived_at IS NULL
+            """,
+        ),
+    ),
 )
 SCHEMA_VERSION = MIGRATIONS[-1].version
 
@@ -827,9 +987,7 @@ def normalize_workspace_snapshot(
     )
     browse_query = value.get("browse_query")
     canonical["browse_query"] = (
-        browse_query
-        if isinstance(browse_query, str) and len(browse_query) <= 500
-        else ""
+        browse_query if isinstance(browse_query, str) and len(browse_query) <= 500 else ""
     )
     browse_status_group = value.get("browse_status_group")
     canonical["browse_status_group"] = (
@@ -953,9 +1111,9 @@ class JobOsStateStore:
     def __init__(self, path: Path) -> None:
         self._path = path
 
-    def initialize(self) -> StateHealth:
+    def initialize(self, *, owner_device_id: str = "primary-device") -> StateHealth:
         self._path.parent.mkdir(parents=True, exist_ok=True)
-        with sqlite3.connect(self._path) as connection:
+        with connect_sqlite(self._path) as connection:
             self._ensure_migration_ledger(connection)
             try:
                 connection.execute("BEGIN IMMEDIATE")
@@ -963,6 +1121,13 @@ class JobOsStateStore:
                 self._assert_compatible(applied)
                 for migration in MIGRATIONS[len(applied) :]:
                     self._apply_migration_statements(connection, migration)
+                connection.execute(
+                    """
+                    UPDATE conversations SET owner_device_id = ?
+                    WHERE owner_device_id = '__migration_owner__'
+                    """,
+                    (owner_device_id,),
+                )
                 connection.commit()
             except Exception:
                 connection.rollback()
@@ -1013,9 +1178,7 @@ class JobOsStateStore:
             raise
 
     @staticmethod
-    def _apply_migration_statements(
-        connection: sqlite3.Connection, migration: Migration
-    ) -> None:
+    def _apply_migration_statements(connection: sqlite3.Connection, migration: Migration) -> None:
         for statement in migration.statements:
             connection.execute(statement)
         connection.execute(
@@ -1024,20 +1187,20 @@ class JobOsStateStore:
         )
 
     def health(self) -> StateHealth:
-        with sqlite3.connect(f"file:{self._path}?mode=ro", uri=True) as connection:
+        with connect_sqlite(f"file:{self._path}?mode=ro", uri=True) as connection:
             row = connection.execute("SELECT MAX(version) FROM schema_migrations").fetchone()
         version = int(row[0]) if row and row[0] is not None else 0
         return StateHealth(schema_version=version)
 
     def manual_order(self) -> list[str]:
-        with sqlite3.connect(f"file:{self._path}?mode=ro", uri=True) as connection:
+        with connect_sqlite(f"file:{self._path}?mode=ro", uri=True) as connection:
             row = connection.execute(
                 "SELECT manual_order_json FROM job_workspace WHERE workspace_id = 1"
             ).fetchone()
         return list(json.loads(row[0])) if row else []
 
     def job_workspace_state(self) -> JobWorkspaceState:
-        with sqlite3.connect(f"file:{self._path}?mode=ro", uri=True) as connection:
+        with connect_sqlite(f"file:{self._path}?mode=ro", uri=True) as connection:
             row = connection.execute(
                 """
                 SELECT selected_job_id, sort_mode, manual_order_json
@@ -1050,7 +1213,7 @@ class JobOsStateStore:
         return JobWorkspaceState(row[0], str(row[1]), list(json.loads(row[2])))
 
     def workspace_snapshot(self, device_id: str) -> WorkspaceSnapshotRecord:
-        with sqlite3.connect(f"file:{self._path}?mode=ro", uri=True) as connection:
+        with connect_sqlite(f"file:{self._path}?mode=ro", uri=True) as connection:
             connection.execute("BEGIN")
             selection_row = connection.execute(
                 "SELECT selected_job_id FROM job_workspace WHERE workspace_id = 1"
@@ -1096,7 +1259,7 @@ class JobOsStateStore:
                 sort_keys=True,
             ).encode()
         ).hexdigest()
-        with sqlite3.connect(self._path) as connection:
+        with connect_sqlite(self._path) as connection:
             connection.execute("BEGIN IMMEDIATE")
             prior = connection.execute(
                 """
@@ -1200,24 +1363,249 @@ class JobOsStateStore:
         )
 
     def stored_session_id(self) -> str | None:
-        with sqlite3.connect(f"file:{self._path}?mode=ro", uri=True) as connection:
+        """Compatibility access to the first active conversation."""
+        return self.conversation_store(self.first_active_conversation_id()).stored_session_id()
+
+    def first_active_conversation_id(
+        self, owner_device_id: str = "primary-device"
+    ) -> str:
+        conversations = self.list_active_conversations(owner_device_id=owner_device_id)
+        if not conversations:
+            raise ConversationNotFound("No active conversation exists")
+        return str(conversations[0]["conversation_id"])
+
+    def list_active_conversations(
+        self, *, owner_device_id: str | None = None
+    ) -> list[dict[str, object]]:
+        with connect_sqlite(f"file:{self._path}?mode=ro", uri=True) as connection:
+            connection.row_factory = sqlite3.Row
+            rows = connection.execute(
+                """
+                SELECT conversation_id, position, title, owner_device_id, created_at, updated_at
+                FROM conversations WHERE archived_at IS NULL
+                  AND (? IS NULL OR owner_device_id = ?) ORDER BY position
+                """,
+                (owner_device_id, owner_device_id),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def create_conversation(self, *, actor_id: str) -> dict[str, object]:
+        conversation_id = f"conv_{secrets.token_urlsafe(16)}"
+        with connect_sqlite(self._path) as connection:
+            connection.row_factory = sqlite3.Row
+            connection.execute("BEGIN IMMEDIATE")
+            count = int(
+                connection.execute(
+                    """SELECT COUNT(*) FROM conversations
+                    WHERE archived_at IS NULL AND owner_device_id = ?""",
+                    (actor_id,),
+                ).fetchone()[0]
+            )
+            if count >= MAX_ACTIVE_CONVERSATIONS:
+                connection.rollback()
+                raise ConversationLimit("Maximum 5 sessions")
+            position = count + 1
+            title = f"Session {position}"
+            connection.execute(
+                """
+                INSERT INTO conversations(
+                    conversation_id, position, title, owner_device_id
+                ) VALUES (?, ?, ?, ?)
+                """,
+                (conversation_id, position, title, actor_id),
+            )
+            connection.execute(
+                """
+                INSERT INTO job_events(
+                    event_type, origin, payload_json, actor_id, target_resource,
+                    command_name, outcome, result_json
+                ) VALUES ('conversation_created', 'user', '{}', ?, ?,
+                          'conversation.create', 'succeeded', ?)
+                """,
+                (
+                    actor_id,
+                    f"conversation/{conversation_id}",
+                    json.dumps(
+                        {"conversation_id": conversation_id, "position": position, "title": title},
+                        separators=(",", ":"),
+                        sort_keys=True,
+                    ),
+                ),
+            )
             row = connection.execute(
-                "SELECT stored_session_id FROM conversations WHERE singleton_id = 1"
+                """
+                SELECT conversation_id, position, title, created_at, updated_at
+                FROM conversations WHERE conversation_id = ?
+                """,
+                (conversation_id,),
             ).fetchone()
-        return row[0] if row else None
+            connection.commit()
+        return dict(row)
+
+    def archive_conversation(self, conversation_id: str, *, actor_id: str) -> None:
+        with connect_sqlite(self._path) as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute(
+                """
+                SELECT position, recovery_turn_id FROM conversations
+                WHERE conversation_id = ? AND owner_device_id = ? AND archived_at IS NULL
+                """,
+                (conversation_id, actor_id),
+            ).fetchone()
+            if row is None:
+                connection.rollback()
+                raise ConversationNotFound("Conversation not found")
+            count = int(
+                connection.execute(
+                    """SELECT COUNT(*) FROM conversations
+                    WHERE archived_at IS NULL AND owner_device_id = ?""",
+                    (actor_id,),
+                ).fetchone()[0]
+            )
+            if count <= 1:
+                connection.rollback()
+                raise ConversationBusy("The final session cannot be archived")
+            active = connection.execute(
+                """
+                SELECT 1 FROM conversation_turns WHERE conversation_id = ?
+                    AND status IN ('queued','running','waiting') LIMIT 1
+                """,
+                (conversation_id,),
+            ).fetchone()
+            if active or row[1]:
+                connection.rollback()
+                raise ConversationBusy(
+                    "Finish or recover active work before archiving this session"
+                )
+            position = int(row[0])
+            # Move the archived row out of the partial unique index before compaction.
+            connection.execute(
+                """
+                UPDATE conversations SET archived_at = CURRENT_TIMESTAMP,
+                    updated_at = CURRENT_TIMESTAMP WHERE conversation_id = ?
+                """,
+                (conversation_id,),
+            )
+            remaining = connection.execute(
+                """
+                SELECT conversation_id, position FROM conversations
+                WHERE archived_at IS NULL AND owner_device_id = ? AND position > ?
+                ORDER BY position
+                """,
+                (actor_id, position),
+            ).fetchall()
+            for remaining_id, old_position in remaining:
+                new_position = int(old_position) - 1
+                connection.execute(
+                    """
+                    UPDATE conversations SET position = ?, title = ?,
+                        updated_at = CURRENT_TIMESTAMP WHERE conversation_id = ?
+                    """,
+                    (new_position, f"Session {new_position}", remaining_id),
+                )
+            connection.execute(
+                """
+                INSERT INTO job_events(
+                    event_type, origin, payload_json, actor_id, target_resource,
+                    command_name, outcome, result_json
+                ) VALUES ('conversation_archived', 'user', '{}', ?, ?,
+                          'conversation.archive', 'succeeded', '{}')
+                """,
+                (actor_id, f"conversation/{conversation_id}"),
+            )
+            connection.commit()
+
+    def discard_failed_conversation(self, conversation_id: str, *, actor_id: str) -> bool:
+        """Archive an unusable newly-created service and compact active positions."""
+        with connect_sqlite(self._path) as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute(
+                """
+                SELECT position FROM conversations
+                WHERE conversation_id = ? AND owner_device_id = ? AND archived_at IS NULL
+                """,
+                (conversation_id, actor_id),
+            ).fetchone()
+            if row is None:
+                connection.rollback()
+                return False
+            position = int(row[0])
+            connection.execute(
+                """
+                UPDATE conversations SET archived_at = CURRENT_TIMESTAMP,
+                    updated_at = CURRENT_TIMESTAMP WHERE conversation_id = ?
+                """,
+                (conversation_id,),
+            )
+            remaining = connection.execute(
+                """
+                SELECT conversation_id, position FROM conversations
+                WHERE archived_at IS NULL AND owner_device_id = ? AND position > ?
+                ORDER BY position
+                """,
+                (actor_id, position),
+            ).fetchall()
+            for remaining_id, old_position in remaining:
+                new_position = int(old_position) - 1
+                connection.execute(
+                    """
+                    UPDATE conversations SET position = ?, title = ?,
+                        updated_at = CURRENT_TIMESTAMP WHERE conversation_id = ?
+                    """,
+                    (new_position, f"Session {new_position}", remaining_id),
+                )
+            connection.commit()
+        return True
+
+    def conversation_store(self, conversation_id: str):
+        from .conversation_store import ConversationStore
+
+        return ConversationStore(self._path, conversation_id)
+
+    def all_conversation_events_after(
+        self, after: int, *, owner_device_id: str | None = None
+    ) -> list[dict[str, object]]:
+        from .conversation_store import event_row
+
+        with connect_sqlite(f"file:{self._path}?mode=ro", uri=True) as connection:
+            connection.row_factory = sqlite3.Row
+            rows = connection.execute(
+                """SELECT event.*, conversation.recovery_turn_id,
+                    active.turn_id AS active_turn_id
+                FROM conversation_events AS event
+                JOIN conversations AS conversation USING (conversation_id)
+                LEFT JOIN conversation_turns AS active
+                  ON active.conversation_id = conversation.conversation_id
+                 AND active.status IN ('queued','running','waiting')
+                WHERE event.event_id > ? AND conversation.archived_at IS NULL
+                  AND (? IS NULL OR conversation.owner_device_id = ?)
+                ORDER BY event.event_id""",
+                (after, owner_device_id, owner_device_id),
+            ).fetchall()
+        return [
+            {
+                "conversation_id": str(row["conversation_id"]),
+                "recovery_state": (
+                    "recovering"
+                    if row["recovery_turn_id"] and row["active_turn_id"]
+                    else "quarantined"
+                    if row["recovery_turn_id"]
+                    else "ready"
+                ),
+                "event": event_row(row),
+            }
+            for row in rows
+        ]
 
     def save_stored_session_id(self, stored_session_id: str | None) -> None:
-        with sqlite3.connect(self._path) as connection:
-            connection.execute(
-                "UPDATE conversations SET stored_session_id = ?, updated_at = CURRENT_TIMESTAMP "
-                "WHERE singleton_id = 1",
-                (stored_session_id[:256] if stored_session_id else None,),
-            )
+        self.conversation_store(self.first_active_conversation_id()).save_stored_session_id(
+            stored_session_id
+        )
 
     def save_stored_session_id_if_current(
         self, expected_session_id: str | None, stored_session_id: str | None
     ) -> bool:
-        with sqlite3.connect(self._path) as connection:
+        with connect_sqlite(self._path) as connection:
             cursor = connection.execute(
                 "UPDATE conversations SET stored_session_id = ?, "
                 "updated_at = CURRENT_TIMESTAMP "
@@ -1227,7 +1615,7 @@ class JobOsStateStore:
         return cursor.rowcount == 1
 
     def begin_isolated_agent_session(self, turn_id: str) -> None:
-        with sqlite3.connect(self._path) as connection:
+        with connect_sqlite(self._path) as connection:
             cursor = connection.execute(
                 "UPDATE conversations SET isolated_turn_id = ?, "
                 "isolated_previous_session_id = stored_session_id, stored_session_id = NULL, "
@@ -1239,7 +1627,7 @@ class JobOsStateStore:
             raise ConversationBusy("An isolated agent session is already active")
 
     def restore_isolated_agent_session(self, turn_id: str) -> bool:
-        with sqlite3.connect(self._path) as connection:
+        with connect_sqlite(self._path) as connection:
             cursor = connection.execute(
                 "UPDATE conversations SET stored_session_id = isolated_previous_session_id, "
                 "ignored_agent_session_id = isolated_agent_session_id, "
@@ -1251,7 +1639,7 @@ class JobOsStateStore:
         return cursor.rowcount == 1
 
     def record_isolated_agent_session(self, turn_id: str, session_id: str) -> None:
-        with sqlite3.connect(self._path) as connection:
+        with connect_sqlite(self._path) as connection:
             connection.execute(
                 "UPDATE conversations SET isolated_agent_session_id = ?, "
                 "updated_at = CURRENT_TIMESTAMP "
@@ -1260,7 +1648,7 @@ class JobOsStateStore:
             )
 
     def consume_ignored_agent_session(self, session_id: str) -> bool:
-        with sqlite3.connect(self._path) as connection:
+        with connect_sqlite(self._path) as connection:
             cursor = connection.execute(
                 "UPDATE conversations SET ignored_agent_session_id = NULL, "
                 "updated_at = CURRENT_TIMESTAMP "
@@ -1272,7 +1660,7 @@ class JobOsStateStore:
     def reset_conversation(self, *, actor_id: str) -> str:
         """Rotate the current conversation and detach its Hermes session atomically."""
         conversation_id = f"conv_{secrets.token_urlsafe(16)}"
-        with sqlite3.connect(self._path) as connection:
+        with connect_sqlite(self._path) as connection:
             connection.execute("BEGIN IMMEDIATE")
             active = connection.execute(
                 "SELECT 1 FROM conversation_turns "
@@ -1329,7 +1717,7 @@ class JobOsStateStore:
         stored_session_id: str,
     ) -> bool:
         """Persist attachment identity iff this is still the active working turn."""
-        with sqlite3.connect(self._path) as connection:
+        with connect_sqlite(self._path) as connection:
             connection.execute("BEGIN IMMEDIATE")
             active = connection.execute(
                 "SELECT 1 FROM conversation_turns "
@@ -1358,14 +1746,14 @@ class JobOsStateStore:
         return True
 
     def recovery_turn_id(self) -> str | None:
-        with sqlite3.connect(f"file:{self._path}?mode=ro", uri=True) as connection:
+        with connect_sqlite(f"file:{self._path}?mode=ro", uri=True) as connection:
             row = connection.execute(
                 "SELECT value FROM jobos_metadata WHERE key = 'agent_recovery_turn_id'"
             ).fetchone()
         return row[0] if row else None
 
     def recovery_agent_session_id(self, turn_id: str) -> str | None:
-        with sqlite3.connect(f"file:{self._path}?mode=ro", uri=True) as connection:
+        with connect_sqlite(f"file:{self._path}?mode=ro", uri=True) as connection:
             row = connection.execute(
                 """
                 SELECT ignored_agent_session_id FROM conversations
@@ -1380,7 +1768,7 @@ class JobOsStateStore:
         return row[0] if row and row[0] else None
 
     def clear_recovery_turn_if_current(self, turn_id: str) -> bool:
-        with sqlite3.connect(self._path) as connection:
+        with connect_sqlite(self._path) as connection:
             cursor = connection.execute(
                 "DELETE FROM jobos_metadata WHERE key = 'agent_recovery_turn_id' AND value = ?",
                 (turn_id,),
@@ -1407,7 +1795,7 @@ class JobOsStateStore:
                 sort_keys=True,
             ).encode()
         ).hexdigest()
-        with sqlite3.connect(self._path) as connection:
+        with connect_sqlite(self._path) as connection:
             connection.execute("BEGIN IMMEDIATE")
             conversation = connection.execute(
                 "SELECT conversation_id FROM conversations WHERE singleton_id = 1"
@@ -1528,7 +1916,7 @@ class JobOsStateStore:
         source_event_id: str | None = None,
     ) -> int | None:
         safe_detail = _conversation_detail(event_type, detail)
-        with sqlite3.connect(self._path) as connection:
+        with connect_sqlite(self._path) as connection:
             try:
                 cursor = connection.execute(
                     """
@@ -1569,7 +1957,7 @@ class JobOsStateStore:
         )
         if event_id is not None:
             return event_id
-        with sqlite3.connect(f"file:{self._path}?mode=ro", uri=True) as connection:
+        with connect_sqlite(f"file:{self._path}?mode=ro", uri=True) as connection:
             row = connection.execute(
                 "SELECT event_id FROM conversation_events WHERE source_event_id = ?",
                 (source_event_id,),
@@ -1580,7 +1968,7 @@ class JobOsStateStore:
 
     def recover_active_conversation_turns(self) -> int:
         """Interrupt turns whose remote execution state cannot survive an API restart."""
-        with sqlite3.connect(self._path) as connection:
+        with connect_sqlite(self._path) as connection:
             connection.execute("BEGIN IMMEDIATE")
             active = connection.execute(
                 """
@@ -1620,7 +2008,7 @@ class JobOsStateStore:
     def update_turn_status(
         self, turn_id: str, status: str, *, cancel_requested: bool = False
     ) -> bool:
-        with sqlite3.connect(self._path) as connection:
+        with connect_sqlite(self._path) as connection:
             cursor = connection.execute(
                 """
                 UPDATE conversation_turns
@@ -1636,7 +2024,7 @@ class JobOsStateStore:
         self, turn_id: str, status: str, *, expected: tuple[str, ...]
     ) -> bool:
         placeholders = ",".join("?" for _ in expected)
-        with sqlite3.connect(self._path) as connection:
+        with connect_sqlite(self._path) as connection:
             cursor = connection.execute(
                 f"""
                 UPDATE conversation_turns
@@ -1648,7 +2036,7 @@ class JobOsStateStore:
         return cursor.rowcount == 1
 
     def request_turn_cancel(self, turn_id: str) -> bool:
-        with sqlite3.connect(self._path) as connection:
+        with connect_sqlite(self._path) as connection:
             cursor = connection.execute(
                 "UPDATE conversation_turns SET cancel_requested = 1, "
                 "updated_at = CURRENT_TIMESTAMP "
@@ -1673,7 +2061,7 @@ class JobOsStateStore:
         if status not in {"completed", "failed", "interrupted"}:
             raise ValueError("Turn settlement must be terminal")
         safe_detail = _conversation_detail(event_type, detail)
-        with sqlite3.connect(self._path) as connection:
+        with connect_sqlite(self._path) as connection:
             connection.execute("BEGIN IMMEDIATE")
             cursor = connection.execute(
                 """
@@ -1720,7 +2108,7 @@ class JobOsStateStore:
         return True
 
     def turn_record(self, turn_id: str) -> dict[str, object] | None:
-        with sqlite3.connect(f"file:{self._path}?mode=ro", uri=True) as connection:
+        with connect_sqlite(f"file:{self._path}?mode=ro", uri=True) as connection:
             connection.row_factory = sqlite3.Row
             row = connection.execute(
                 "SELECT * FROM conversation_turns WHERE turn_id = ?", (turn_id,)
@@ -1732,7 +2120,7 @@ class JobOsStateStore:
         return result
 
     def active_turn_origin_device_id(self) -> str | None:
-        with sqlite3.connect(f"file:{self._path}?mode=ro", uri=True) as connection:
+        with connect_sqlite(f"file:{self._path}?mode=ro", uri=True) as connection:
             row = connection.execute(
                 """
                 SELECT context_json FROM conversation_turns
@@ -1750,7 +2138,7 @@ class JobOsStateStore:
         return device_id if isinstance(device_id, str) and device_id else None
 
     def conversation_events_after(self, after: int) -> list[dict[str, object]]:
-        with sqlite3.connect(f"file:{self._path}?mode=ro", uri=True) as connection:
+        with connect_sqlite(f"file:{self._path}?mode=ro", uri=True) as connection:
             connection.row_factory = sqlite3.Row
             rows = connection.execute(
                 "SELECT * FROM conversation_events WHERE event_id > ? ORDER BY event_id",
@@ -1781,7 +2169,7 @@ class JobOsStateStore:
         return entries
 
     def conversation_snapshot(self) -> dict[str, object]:
-        with sqlite3.connect(f"file:{self._path}?mode=ro", uri=True) as connection:
+        with connect_sqlite(f"file:{self._path}?mode=ro", uri=True) as connection:
             conversation = connection.execute(
                 "SELECT conversation_id FROM conversations WHERE singleton_id = 1"
             ).fetchone()
@@ -1932,7 +2320,7 @@ class JobOsStateStore:
     def list_document_artifacts(
         self, job_id: str
     ) -> tuple[list[dict[str, object]], str | None, str | None, str | None]:
-        with sqlite3.connect(f"file:{self._path}?mode=ro", uri=True) as connection:
+        with connect_sqlite(f"file:{self._path}?mode=ro", uri=True) as connection:
             connection.row_factory = sqlite3.Row
             state = connection.execute(
                 "SELECT current_artifact_id, last_successful_artifact_id, approved_artifact_id "
@@ -1959,7 +2347,7 @@ class JobOsStateStore:
                 (job_id,),
             ).fetchone()
         else:
-            with sqlite3.connect(f"file:{self._path}?mode=ro", uri=True) as read_connection:
+            with connect_sqlite(f"file:{self._path}?mode=ro", uri=True) as read_connection:
                 row = read_connection.execute(
                     "SELECT COALESCE(MAX(render_sequence), 0) "
                     "FROM document_artifacts WHERE job_id = ?",
@@ -1985,7 +2373,7 @@ class JobOsStateStore:
                 (document_id, document_revision),
             ).fetchall()
         else:
-            with sqlite3.connect(f"file:{self._path}?mode=ro", uri=True) as read_connection:
+            with connect_sqlite(f"file:{self._path}?mode=ro", uri=True) as read_connection:
                 read_connection.row_factory = sqlite3.Row
                 rows = read_connection.execute(
                     """
@@ -2046,7 +2434,7 @@ class JobOsStateStore:
 
     def delete_job_documents(self, job_id: str) -> None:
         """Remove demo-owned document metadata; artifact bytes remain unregistered on disk."""
-        with sqlite3.connect(self._path) as connection:
+        with connect_sqlite(self._path) as connection:
             connection.execute("BEGIN IMMEDIATE")
             connection.execute("DELETE FROM job_document_state WHERE job_id = ?", (job_id,))
             connection.execute("DELETE FROM document_artifacts WHERE job_id = ?", (job_id,))
@@ -2062,7 +2450,7 @@ class JobOsStateStore:
             connection.execute("DELETE FROM editable_documents WHERE job_id = ?", (job_id,))
 
     def approve_document_artifact(self, job_id: str, artifact_id: str) -> None:
-        with sqlite3.connect(self._path) as connection:
+        with connect_sqlite(self._path) as connection:
             artifact = connection.execute(
                 "SELECT job_id, document_key, media_type, render_status, sha256 "
                 "FROM document_artifacts WHERE artifact_id = ?",
@@ -2099,7 +2487,7 @@ class JobOsStateStore:
         if connection is not None:
             yield connection
             return
-        with sqlite3.connect(self._path) as owned_connection:
+        with connect_sqlite(self._path) as owned_connection:
             owned_connection.row_factory = sqlite3.Row
             owned_connection.execute("BEGIN IMMEDIATE")
             yield owned_connection
@@ -2121,7 +2509,7 @@ class JobOsStateStore:
         return f"edoc_{secrets.token_urlsafe(18)}"
 
     def editable_import_source(self, job_id: str, artifact_id: str) -> dict[str, object]:
-        with sqlite3.connect(f"file:{self._path}?mode=ro", uri=True) as connection:
+        with connect_sqlite(f"file:{self._path}?mode=ro", uri=True) as connection:
             connection.row_factory = sqlite3.Row
             artifact = connection.execute(
                 "SELECT * FROM document_artifacts WHERE artifact_id = ?",
@@ -2342,7 +2730,7 @@ class JobOsStateStore:
                 "SELECT * FROM editable_documents WHERE document_id = ?", (document_id,)
             ).fetchone()
         else:
-            with sqlite3.connect(f"file:{self._path}?mode=ro", uri=True) as read_connection:
+            with connect_sqlite(f"file:{self._path}?mode=ro", uri=True) as read_connection:
                 read_connection.row_factory = sqlite3.Row
                 row = read_connection.execute(
                     "SELECT * FROM editable_documents WHERE document_id = ?", (document_id,)
@@ -2350,7 +2738,7 @@ class JobOsStateStore:
         return self._editable_document_row(row) if row else None
 
     def get_job_editable_document(self, job_id: str, document_key: str) -> dict[str, object] | None:
-        with sqlite3.connect(f"file:{self._path}?mode=ro", uri=True) as connection:
+        with connect_sqlite(f"file:{self._path}?mode=ro", uri=True) as connection:
             connection.row_factory = sqlite3.Row
             row = connection.execute(
                 "SELECT * FROM editable_documents WHERE job_id = ? AND document_key = ?",
@@ -2359,7 +2747,7 @@ class JobOsStateStore:
         return self._editable_document_row(row) if row else None
 
     def list_editable_documents(self, job_id: str) -> list[dict[str, object]]:
-        with sqlite3.connect(f"file:{self._path}?mode=ro", uri=True) as connection:
+        with connect_sqlite(f"file:{self._path}?mode=ro", uri=True) as connection:
             connection.row_factory = sqlite3.Row
             rows = connection.execute(
                 "SELECT * FROM editable_documents WHERE job_id = ? ORDER BY document_key", (job_id,)
@@ -2388,7 +2776,7 @@ class JobOsStateStore:
             capabilities_json,
             document.observed_at,
         )
-        with sqlite3.connect(self._path) as connection:
+        with connect_sqlite(self._path) as connection:
             connection.execute("BEGIN IMMEDIATE")
             current = connection.execute(
                 """
@@ -2399,9 +2787,7 @@ class JobOsStateStore:
                 (document.job_id, document.document_key),
             ).fetchone()
             if current is not None and str(current[0]) != document.document_id:
-                raise ValueError(
-                    "Document file identity changed for the same job and document key"
-                )
+                raise ValueError("Document file identity changed for the same job and document key")
             latest_on_device = connection.execute(
                 """
                 SELECT observed_revision, sha256, filename, capabilities_json
@@ -2459,7 +2845,7 @@ class JobOsStateStore:
             )
 
     def list_document_files(self, job_id: str) -> list[dict[str, object]]:
-        with sqlite3.connect(f"file:{self._path}?mode=ro", uri=True) as connection:
+        with connect_sqlite(f"file:{self._path}?mode=ro", uri=True) as connection:
             connection.row_factory = sqlite3.Row
             rows = connection.execute(
                 "SELECT * FROM document_files WHERE job_id = ? ORDER BY document_key", (job_id,)
@@ -2467,7 +2853,7 @@ class JobOsStateStore:
         return [self._document_file_row(row) for row in rows]
 
     def get_document_file(self, document_id: str) -> dict[str, object] | None:
-        with sqlite3.connect(f"file:{self._path}?mode=ro", uri=True) as connection:
+        with connect_sqlite(f"file:{self._path}?mode=ro", uri=True) as connection:
             connection.row_factory = sqlite3.Row
             row = connection.execute(
                 "SELECT * FROM document_files WHERE document_id = ?", (document_id,)
@@ -2616,7 +3002,7 @@ class JobOsStateStore:
         actor: str,
     ) -> str:
         """Persist the publication checkpoint before any external artifact side effect."""
-        with sqlite3.connect(self._path) as connection:
+        with connect_sqlite(self._path) as connection:
             connection.row_factory = sqlite3.Row
             connection.execute("BEGIN IMMEDIATE")
             row = connection.execute(
@@ -2650,7 +3036,7 @@ class JobOsStateStore:
             )
 
     def list_editable_snapshots(self, document_id: str) -> list[dict[str, object]]:
-        with sqlite3.connect(f"file:{self._path}?mode=ro", uri=True) as connection:
+        with connect_sqlite(f"file:{self._path}?mode=ro", uri=True) as connection:
             connection.row_factory = sqlite3.Row
             rows = connection.execute(
                 """
@@ -2765,7 +3151,7 @@ class JobOsStateStore:
         return self._editable_document_row(saved), snapshot_id
 
     def get_document_artifact(self, artifact_id: str) -> dict[str, object] | None:
-        with sqlite3.connect(f"file:{self._path}?mode=ro", uri=True) as connection:
+        with connect_sqlite(f"file:{self._path}?mode=ro", uri=True) as connection:
             connection.row_factory = sqlite3.Row
             row = connection.execute(
                 "SELECT * FROM document_artifacts WHERE artifact_id = ?",
@@ -2774,7 +3160,7 @@ class JobOsStateStore:
         return dict(row) if row else None
 
     def list_mutation_audit(self) -> list[dict[str, object]]:
-        with sqlite3.connect(f"file:{self._path}?mode=ro", uri=True) as connection:
+        with connect_sqlite(f"file:{self._path}?mode=ro", uri=True) as connection:
             connection.row_factory = sqlite3.Row
             rows = connection.execute(
                 """
@@ -2813,7 +3199,7 @@ class JobOsStateStore:
         job_id: str | None = None,
     ) -> tuple[dict[str, object], bool]:
         """Apply an editable-state change and settle its replay row atomically."""
-        with sqlite3.connect(self._path) as connection:
+        with connect_sqlite(self._path) as connection:
             connection.row_factory = sqlite3.Row
             connection.execute("BEGIN IMMEDIATE")
             prior = connection.execute(
@@ -2927,7 +3313,7 @@ class JobOsStateStore:
         idempotency_key: str,
         request_hash: str,
     ) -> dict[str, object] | None:
-        with sqlite3.connect(f"file:{self._path}?mode=ro", uri=True) as connection:
+        with connect_sqlite(f"file:{self._path}?mode=ro", uri=True) as connection:
             row = connection.execute(
                 """
                 SELECT request_hash, result_json FROM job_events
@@ -2955,7 +3341,7 @@ class JobOsStateStore:
         detail: dict[str, object] | None = None,
     ) -> int:
         safe_detail = redact_detail(detail or {})
-        with sqlite3.connect(self._path) as connection:
+        with connect_sqlite(self._path) as connection:
             connection.execute("BEGIN IMMEDIATE")
             prior = connection.execute(
                 """
@@ -2994,10 +3380,8 @@ class JobOsStateStore:
                 raise RuntimeError("Mutation reservation did not return an event ID")
             return int(cursor.lastrowid)
 
-    def mutation_reservation_detail(
-        self, *, event_id: int, request_hash: str
-    ) -> dict[str, object]:
-        with sqlite3.connect(f"file:{self._path}?mode=ro", uri=True) as connection:
+    def mutation_reservation_detail(self, *, event_id: int, request_hash: str) -> dict[str, object]:
+        with connect_sqlite(f"file:{self._path}?mode=ro", uri=True) as connection:
             row = connection.execute(
                 """
                 SELECT request_hash, payload_json
@@ -3021,7 +3405,7 @@ class JobOsStateStore:
         command_name: str,
         idempotency_key: str,
     ) -> None:
-        with sqlite3.connect(f"file:{self._path}?mode=ro", uri=True) as connection:
+        with connect_sqlite(f"file:{self._path}?mode=ro", uri=True) as connection:
             row = connection.execute(
                 """
                 SELECT origin, outcome, payload_json FROM job_events
@@ -3075,7 +3459,7 @@ class JobOsStateStore:
         reserved_event_id: int | None = None,
     ) -> int:
         safe_detail = redact_detail(detail)
-        with sqlite3.connect(self._path) as connection:
+        with connect_sqlite(self._path) as connection:
             if reserved_event_id is not None:
                 event_id = reserved_event_id
                 stored_result = {**result, "event_id": event_id} if inject_event_id else result
@@ -3146,7 +3530,7 @@ class JobOsStateStore:
 
     def save_job_selection(self, job_id: str | None, origin: str) -> int:
         payload = json.dumps({"selected_job_id": job_id}, separators=(",", ":"))
-        with sqlite3.connect(self._path) as connection:
+        with connect_sqlite(self._path) as connection:
             connection.execute("BEGIN IMMEDIATE")
             connection.execute(
                 """
@@ -3168,7 +3552,7 @@ class JobOsStateStore:
 
     def save_job_sort(self, sort_mode: str, origin: str) -> int:
         payload = json.dumps({"sort_mode": sort_mode}, separators=(",", ":"))
-        with sqlite3.connect(self._path) as connection:
+        with connect_sqlite(self._path) as connection:
             connection.execute("BEGIN IMMEDIATE")
             connection.execute(
                 """
@@ -3191,7 +3575,7 @@ class JobOsStateStore:
     def save_manual_order(self, job_ids: list[str], origin: str) -> int:
         payload = json.dumps({"job_ids": job_ids}, separators=(",", ":"))
         order_json = json.dumps(job_ids, separators=(",", ":"))
-        with sqlite3.connect(self._path) as connection:
+        with connect_sqlite(self._path) as connection:
             connection.execute("BEGIN IMMEDIATE")
             connection.execute(
                 """
@@ -3223,7 +3607,7 @@ class JobOsStateStore:
             {"from_status": from_status, "to_status": to_status},
             separators=(",", ":"),
         )
-        with sqlite3.connect(self._path) as connection:
+        with connect_sqlite(self._path) as connection:
             cursor = connection.execute(
                 """
                 INSERT INTO job_events(event_type, job_id, origin, payload_json)
@@ -3234,7 +3618,7 @@ class JobOsStateStore:
         return int(cursor.lastrowid)
 
     def list_job_events(self, after: int = 0) -> list[dict[str, object]]:
-        with sqlite3.connect(f"file:{self._path}?mode=ro", uri=True) as connection:
+        with connect_sqlite(f"file:{self._path}?mode=ro", uri=True) as connection:
             connection.row_factory = sqlite3.Row
             rows = connection.execute(
                 """
@@ -3271,3 +3655,85 @@ class JobOsStateStore:
                 }
             )
         return events
+
+    # Compatibility methods for internal callers that predate explicit IDs. New runtime
+    # code receives a ConversationStore from conversation_store(conversation_id).
+    def _first_conversation_store(self):
+        return self.conversation_store(self.first_active_conversation_id())
+
+    def save_stored_session_id_if_current(  # noqa: F811
+        self, expected_session_id, stored_session_id
+    ):
+        return self._first_conversation_store().save_stored_session_id_if_current(
+            expected_session_id, stored_session_id
+        )
+
+    def begin_isolated_agent_session(self, turn_id):  # noqa: F811
+        return self._first_conversation_store().begin_isolated_agent_session(turn_id)
+
+    def restore_isolated_agent_session(self, turn_id):  # noqa: F811
+        return self._first_conversation_store().restore_isolated_agent_session(turn_id)
+
+    def record_isolated_agent_session(self, turn_id, session_id):  # noqa: F811
+        return self._first_conversation_store().record_isolated_agent_session(turn_id, session_id)
+
+    def consume_ignored_agent_session(self, session_id):  # noqa: F811
+        return self._first_conversation_store().consume_ignored_agent_session(session_id)
+
+    def prepare_turn_submission(  # noqa: F811
+        self, turn_id, expected_session_id, stored_session_id
+    ):
+        return self._first_conversation_store().prepare_turn_submission(
+            turn_id, expected_session_id, stored_session_id
+        )
+
+    def recovery_turn_id(self):  # noqa: F811
+        return self._first_conversation_store().recovery_turn_id()
+
+    def recovery_agent_session_id(self, turn_id):  # noqa: F811
+        return self._first_conversation_store().recovery_agent_session_id(turn_id)
+
+    def clear_recovery_turn_if_current(self, turn_id):  # noqa: F811
+        return self._first_conversation_store().clear_recovery_turn_if_current(turn_id)
+
+    def create_conversation_turn(self, **values):  # noqa: F811
+        return self._first_conversation_store().create_turn(**values)
+
+    def append_conversation_event(self, **values):  # noqa: F811
+        return self._first_conversation_store().append_event(**values)
+
+    def ensure_conversation_event(self, **values):  # noqa: F811
+        return self._first_conversation_store().ensure_conversation_event(**values)
+
+    def recover_active_conversation_turns(self):  # noqa: F811
+        return self._first_conversation_store().recover_active_conversation_turns()
+
+    def update_turn_status(  # noqa: F811
+        self, turn_id, status, *, cancel_requested=False
+    ):
+        return self._first_conversation_store().update_turn_status(
+            turn_id, status, cancel_requested=cancel_requested
+        )
+
+    def transition_active_turn_status(self, turn_id, status, *, expected):  # noqa: F811
+        return self._first_conversation_store().transition_active_turn_status(
+            turn_id, status, expected=expected
+        )
+
+    def request_turn_cancel(self, turn_id):  # noqa: F811
+        return self._first_conversation_store().request_turn_cancel(turn_id)
+
+    def settle_active_turn(self, turn_id, status, **values):  # noqa: F811
+        return self._first_conversation_store().settle_active_turn(turn_id, status, **values)
+
+    def turn_record(self, turn_id):  # noqa: F811
+        return self._first_conversation_store().turn_record(turn_id)
+
+    def active_turn_origin_device_id(self, conversation_id):  # noqa: F811
+        return self.conversation_store(conversation_id).active_turn_origin_device_id()
+
+    def conversation_events_after(self, after):  # noqa: F811
+        return self._first_conversation_store().events_after(after)
+
+    def conversation_snapshot(self):  # noqa: F811
+        return self._first_conversation_store().snapshot()

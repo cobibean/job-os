@@ -9,6 +9,7 @@ import { BrowseWorkspace } from './components/BrowseWorkspace'
 import { DocxDocumentEditorShell } from './document-editor/DocxDocumentEditorShell'
 import { useConnectivity } from './hooks/useConnectivity'
 import { useJobs } from './hooks/useJobs'
+import { useAgentSessions } from './hooks/useAgentSessions'
 import { useWorkspace } from './hooks/useWorkspace'
 import { useTheme } from './theme/useTheme'
 import { useCallback, useEffect, useRef, useState } from 'react'
@@ -40,10 +41,10 @@ function WorkbenchApp() {
   const jobState = useJobs()
   const layoutState = useWorkspace(jobState.selectedJobId, jobState.ready)
   const theme = useTheme()
+  const agentSessions = useAgentSessions()
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [settingsPreparing, setSettingsPreparing] = useState(false)
   const [browseDetachState, setBrowseDetachState] = useState<'idle' | 'preparing' | 'ready' | 'error'>('idle')
-  const [agentModalOpen, setAgentModalOpen] = useState(false)
   const [jobListingRequest, setJobListingRequest] = useState<JobListingRequest | null>(null)
   const [documentMutationGeneration, setDocumentMutationGeneration] = useState(0)
   const [documentPreviewMode, setDocumentPreviewMode] = useState<'pdf' | 'docx'>('pdf')
@@ -64,6 +65,33 @@ function WorkbenchApp() {
   ), [])
 
   useEffect(() => setDocumentPreviewMode('pdf'), [jobState.selectedJobId])
+
+  useEffect(() => {
+    const handleAgentShortcut = (event: KeyboardEvent) => {
+      if (!document.querySelector('.agent-panel')) return
+      if (!event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) return
+      const key = event.key.toLowerCase()
+      if (key !== 'n' && !/^[1-5]$/.test(event.key)) return
+      if (settingsOpen || settingsPreparing || document.querySelector('[aria-modal="true"], dialog[open], [role="dialog"], [role="alertdialog"]')) {
+        event.preventDefault()
+        return
+      }
+      if (key === 'n') {
+        event.preventDefault()
+        void agentSessions.create().then(handled => {
+          if (handled) requestAnimationFrame(() => document.querySelector<HTMLTextAreaElement>('#agent-message')?.focus())
+        })
+        return
+      }
+      const index = Number(event.key) - 1
+      if (!agentSessions.order[index]) return
+      event.preventDefault()
+      agentSessions.selectByIndex(index)
+      requestAnimationFrame(() => document.querySelector<HTMLTextAreaElement>('#agent-message')?.focus())
+    }
+    window.addEventListener('keydown', handleAgentShortcut)
+    return () => window.removeEventListener('keydown', handleAgentShortcut)
+  }, [agentSessions.create, agentSessions.order, agentSessions.selectByIndex, settingsOpen, settingsPreparing])
 
   const showPublishedDocument = useCallback(() => {
     setDocumentMutationGeneration(generation => generation + 1)
@@ -198,7 +226,7 @@ function WorkbenchApp() {
           apiState={connectivity.state}
           contextLabel={jobState.selectedJob ? `${jobState.selectedJob.company} · ${jobState.selectedJob.title}` : 'No active job'}
           onArtifactRendered={showPublishedDocument}
-          onModalOpenChange={setAgentModalOpen}
+          sessions={agentSessions}
         />}
         center={<CenterWorkspace
           activeSurface={layoutState.workspace.activeCenterSurface}
@@ -212,7 +240,8 @@ function WorkbenchApp() {
           }}
           browserRepaired={Boolean(layoutState.workspace.repairedBrowser)}
           browserRepairReasons={layoutState.workspace.browserRepairReasons ?? []}
-          browserVisible={layoutState.hydrated && activeTopLevelWorkspace !== 'browse' && !browserTransitionPending && !activeLayout.collapsed.includes('center') && !agentModalOpen && !settingsOpen && !settingsPreparing}
+          browserVisible={layoutState.hydrated && activeTopLevelWorkspace !== 'browse' && !browserTransitionPending && !activeLayout.collapsed.includes('center') && !settingsOpen && !settingsPreparing}
+          agentConversationId={agentSessions.activeId}
           documentMutationGeneration={documentMutationGeneration}
           documentPreviewMode={documentPreviewMode}
           jobListingRequest={jobListingRequest}

@@ -308,9 +308,7 @@ def _validate_child_content(node_type: str, children: list[dict[str, Any]]) -> N
         or any(kind not in BLOCK_CONTENT for kind in child_types[1:])
     ):
         raise ValueError("list items must begin with a paragraph and may contain blocks after it")
-    if node_type == "table" and (
-        not children or any(kind != "tableRow" for kind in child_types)
-    ):
+    if node_type == "table" and (not children or any(kind != "tableRow" for kind in child_types)):
         raise ValueError("tables must contain one or more rows")
     if node_type == "tableRow" and any(
         kind not in {"tableCell", "tableHeader"} for kind in child_types
@@ -360,9 +358,7 @@ def _validate_node_attrs(node_type: str, node: dict[str, Any]) -> dict[str, Any]
         if colwidth is not None and (
             not isinstance(colwidth, list)
             or any(
-                isinstance(width, bool)
-                or not isinstance(width, (int, float))
-                or width <= 0
+                isinstance(width, bool) or not isinstance(width, (int, float)) or width <= 0
                 for width in colwidth
             )
         ):
@@ -467,9 +463,7 @@ def validate_content(
                     font_size = float(font_size[:-2])
                 _numeric_value(font_size, 8, 72, "font size")
                 line_height = attrs.get("lineHeight")
-                if isinstance(line_height, str) and not re.fullmatch(
-                    r"\d+(?:\.\d+)?", line_height
-                ):
+                if isinstance(line_height, str) and not re.fullmatch(r"\d+(?:\.\d+)?", line_height):
                     raise ValueError("invalid line height")
                 if isinstance(line_height, str):
                     line_height = float(line_height)
@@ -513,8 +507,7 @@ def validate_content(
             }:
                 raise ValueError("invalid block provenance")
             if node_type == "jobosSection" and (
-                not isinstance(attrs.get("label"), str)
-                or not 1 <= len(attrs["label"]) <= 120
+                not isinstance(attrs.get("label"), str) or not 1 <= len(attrs["label"]) <= 120
             ):
                 raise ValueError("section label is invalid")
             if node_type == "heading" and attrs.get("level") not in {1, 2, 3}:

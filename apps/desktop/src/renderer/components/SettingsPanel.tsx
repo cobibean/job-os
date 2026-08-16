@@ -24,6 +24,7 @@ export function SettingsPanel({ activeThemeId, mode, onClose, onSelectTheme }: S
     <div className="settings-overlay" onClick={onClose} role="presentation">
       <div
         aria-label="Settings"
+        aria-modal="true"
         className="settings-panel"
         onClick={event => event.stopPropagation()}
         onKeyDown={event => {
