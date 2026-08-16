@@ -8,6 +8,7 @@ import {
   lstatSync,
   mkdirSync,
   mkdtempSync,
+  realpathSync,
   readFileSync,
   readdirSync,
   readlinkSync,
@@ -552,8 +553,9 @@ function treeDigest(root) {
 }
 
 function runSmokeTests(updaterPath, verifyRoot) {
-  const testRoot = path.join(verifyRoot, 'updater-smoke')
-  mkdirSync(testRoot)
+  const testRootPath = path.join(verifyRoot, 'updater-smoke')
+  mkdirSync(testRootPath)
+  const testRoot = realpathSync(testRootPath)
   const sentinels = [path.join(testRoot, 'external-config.json'), path.join(testRoot, 'external-state.sqlite')]
   writeFileSync(sentinels[0], '{"synthetic":"config"}\n')
   writeFileSync(sentinels[1], randomBytes(257))
