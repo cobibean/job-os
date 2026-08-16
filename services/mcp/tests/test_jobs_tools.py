@@ -279,7 +279,7 @@ async def test_job_tools_use_only_the_authenticated_jobos_http_contract():
     }
     assert json.loads(requests[6].content) == {
         "description_text": "Full canonical listing text.",
-        "source": "jobhunter_agent",
+        "source": "mcp_agent",
         "provenance": "Supplied by the user",
         "origin": "mcp",
         "idempotency_key": "description-1",
