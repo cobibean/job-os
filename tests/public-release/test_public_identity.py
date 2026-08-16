@@ -43,6 +43,7 @@ PYTHON_METADATA_PATHS = {
     "services/mcp/pyproject.toml",
 }
 REQUIRED_README_PHRASES = {
+    "Connect an external agent through MCP",
     "source-first",
     "pre-release alpha",
     "local-first",
@@ -106,12 +107,13 @@ def test_root_license_notice_and_upstream_provenance_are_preserved():
 
 def test_readme_states_the_source_alpha_contract_honestly():
     readme = (REPOSITORY_ROOT / "README.md").read_text(encoding="utf-8")
-    normalized_readme = " ".join(readme.replace(">", " ").split())
+    normalized_readme = " ".join(readme.replace(">", " ").replace("**", "").split())
     missing = sorted(phrase for phrase in REQUIRED_README_PHRASES if phrase not in readme)
     assert missing == []
     assert "The source-first clean-clone path is accepted" in normalized_readme
     assert "There is no supported public JobOS binary yet" in normalized_readme
-    assert "not an announcement of public distribution" in normalized_readme
+    assert "It does not power or replace the embedded JobOS chat" in normalized_readme
+    assert "not an announcement of public distribution" not in normalized_readme
 
 
 def test_public_markdown_relative_links_resolve():

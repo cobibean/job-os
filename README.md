@@ -4,11 +4,11 @@ JobOS is a local-first desktop workbench for managing job-search workflows,
 research, documents, and agent-assisted tasks in one place.
 
 > [!IMPORTANT]
-> **Open-source preparation is in progress.** The source-first clean-clone path
-> is accepted, including local initialization and synthetic demo data. Launch
-> media, history review, publication, and any binary-distribution gates remain
-> separate. Follow the [release process](docs/public/release-process.md); this is
-> not an announcement of public distribution.
+> JobOS is open-source, pre-release alpha software. The source-first clean-clone
+> path is accepted, including local initialization and synthetic demo data, but
+> there is no supported public binary yet. Packaging, signing, notarization, and
+> binary-distribution gates remain separate; see the
+> [release process](docs/public/release-process.md).
 
 ## Release status
 
@@ -42,8 +42,8 @@ Static equivalents: [Browse list and fictional job detail](docs/media/screenshot
 | Jobs and history | Built-in mutable SQLite repository with labeled synthetic demo data; private installs may explicitly select JobHunter | Public distribution review |
 | Browser workspace | Electron-owned local capability | Local capability with truthful unavailable states |
 | Documents | SQLite/local mode supports editable create, save, snapshots, DOCX import, paired DOCX/PDF publish, restart, and download; JobHunter render/refresh remain optional | Installed-app acceptance with representative DOCX files |
-| Agent | Existing private deployments can connect an agent runtime | Clearly optional; offline/not-configured by default |
-| MCP | Thin adapter over the JobOS API | Local API/MCP path with stable capability errors |
+| Embedded chat agent | Offline/not-configured in the public source defaults; existing private deployments can connect a compatible runtime | Remains optional |
+| External agent through MCP | Authenticated stdio adapter over the local JobOS API; setup journey below | Stable local capability errors |
 
 The table is intentionally conservative. Clean-home source acceptance does not
 imply that packaging, signing, notarization, publication, or deployment passed.
@@ -59,11 +59,9 @@ Use the versions pinned by the repository:
 - uv `0.11.18` (the CI-pinned version)
 - Xcode Command Line Tools when building native macOS helpers
 
-## Clean source-verification quickstart
+## Try JobOS from source
 
-This proves that a clean checkout installs and passes the complete source gate,
-including isolated first-run initialization and the synthetic golden path. It
-does **not** prove a signed/notarized public binary or public distribution.
+Clone the repository and install its locked JavaScript and Python workspaces:
 
 ```bash
 git clone https://github.com/cobibean/job-os.git
@@ -71,30 +69,110 @@ cd job-os
 npm install --global pnpm@10.33.1
 pnpm install --frozen-lockfile
 uv sync --all-packages --frozen
-pnpm check
-pnpm contracts:check
 ```
 
-Expected result: public-tree and fixture checks, lint, generated-contract checks,
-TypeScript checks, desktop and Python tests, and the production source build
-complete successfully.
-
-### Developer commands
+Launch the source application:
 
 ```bash
-pnpm dev              # build helpers and launch the Electron developer app
+pnpm dev
+```
+
+On the first launch:
+
+1. Select **Set up JobOS**. JobOS creates a private local profile, loopback API,
+   SQLite databases, local artifact directory, and two independent local
+   credentials.
+2. Select **Restart JobOS** when setup completes. If the development command
+   exits during restart, run `pnpm dev` again.
+3. Keep JobOS open while using it or an MCP-connected agent. The source desktop
+   starts and owns the local API process, and live browser tools require the
+   desktop connection.
+
+Expected result: the workbench opens with one unmistakably fictional
+**Northstar Kites (Fictional Demo)** job and a `(FAKE)` starter resume. The
+embedded chat reports that its agent is not configured; that is the truthful
+public default.
+
+## Connect an external agent through MCP
+
+JobOS exposes a local stdio MCP server for an MCP-capable agent. This lets an
+external client operate the shared JobOS jobs, workspace, documents, activity,
+and validated browser capabilities. It does **not** power or replace the
+embedded JobOS chat, which remains offline in the public source configuration.
+
+Complete the first-run setup above and keep JobOS open. Then add a stdio MCP
+server to your agent. MCP clients use different settings files and labels, but
+many accept the following `command` and `args` shape:
+
+```json
+{
+  "mcpServers": {
+    "jobos": {
+      "command": "/bin/zsh",
+      "args": [
+        "-c",
+        "set -euo pipefail; JOBOS_REPO='/absolute/path/to/job-os'; JOBOS_CONFIG=\"$HOME/Library/Application Support/JobOS/config.json\"; JOBOS_DEVICE_ID=$(/usr/bin/plutil -extract deviceId raw \"$JOBOS_CONFIG\"); export JOBOS_CONFIG_PATH=\"$JOBOS_CONFIG\" JOBOS_DEVICE_ID; export JOBOS_DEVICE_TOKEN=\"$(\"$JOBOS_REPO/apps/desktop/build/jobos-keychain\" get com.cobibean.jobos.device-token \"$JOBOS_DEVICE_ID\")\"; export JOBOS_MCP_TOKEN=\"$(\"$JOBOS_REPO/apps/desktop/build/jobos-keychain\" get com.cobibean.jobos.mcp-token \"$JOBOS_DEVICE_ID\")\"; exec \"$JOBOS_REPO/.venv/bin/jobos-mcp\""
+      ]
+    }
+  }
+}
+```
+
+Replace `/absolute/path/to/job-os` with the absolute path to your clone. This
+launcher matches the standard macOS source setup: it reads the generated device
+ID from `~/Library/Application Support/JobOS/config.json`, obtains both local
+credentials from macOS Keychain at process start, and loads them into the
+launcher environment inherited by the MCP server. It does not write credential
+values to the repository or the MCP configuration.
+
+The exact outer JSON and the location of your MCP settings are client-specific.
+The JobOS server contract itself is:
+
+| Setting | Value |
+|---|---|
+| Transport | stdio |
+| Executable after workspace sync | `/absolute/path/to/job-os/.venv/bin/jobos-mcp` |
+| API | `http://127.0.0.1:8766` |
+| Required process environment | `JOBOS_DEVICE_TOKEN` and `JOBOS_MCP_TOKEN` |
+| Standard macOS credential provider | Keychain, keyed by the generated `deviceId` |
+
+Never print, paste, commit, screenshot, or include either credential in logs or
+issues. If your `config.json` does not report `"provider": "keychain"`, the
+Keychain launcher above does not match that profile; do not substitute raw
+credential values into the example.
+
+Restart or reconnect your MCP client, then use this read-only proof prompt:
+
+> Use the JobOS `job_list` tool. Do not modify anything. Report the company,
+> title, and whether the returned job is synthetic.
+
+A fresh profile returns **Northstar Kites (Fictional Demo)**,
+**Imaginary Kite Systems Tuner — Demo Role**, and `synthetic_demo: true`. If the
+tool is unavailable, first confirm that JobOS is still open, first-run setup
+finished, the repository path is absolute, and the MCP process starts from this
+clone. See [troubleshooting](docs/public/troubleshooting.md) for the source
+runtime checks.
+
+## Contributor verification
+
+The user journey above does not require the complete repository gate. Run these
+checks before contributing or when validating an exact source revision:
+
+```bash
 pnpm check            # lint, typecheck, test, and build
 pnpm contracts:check  # prove generated API contracts are current
 ```
 
-`pnpm dev` starts the source application. Canonical jobs use the built-in local
-SQLite repository by default; agent features remain optional and truthfully
-offline when not configured.
+Expected result: public-tree and fixture checks, lint, generated-contract checks,
+TypeScript checks, desktop and Python tests, and the production source build
+complete successfully. This source verification does not prove a signed or
+notarized public binary.
 
 ## Demo data
 
-`jobos-init` initializes a fresh local profile with exactly one clearly labeled
-synthetic demo job and one `(FAKE)`, fictional, do-not-apply starter resume.
+The first-run interface calls `jobos-init`, which initializes a fresh local
+profile with exactly one clearly labeled synthetic demo job and one `(FAKE)`,
+fictional, do-not-apply starter resume.
 Removing the demo also removes its editable document metadata and is persistent;
 JobOS will not silently re-seed either item. `jobos-init --reset-demo
 --confirm-reset-demo` is the separate, explicitly confirmed reset path for both.
