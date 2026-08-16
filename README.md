@@ -28,7 +28,7 @@ research, documents, and agent-assisted tasks in one place.
 | Desktop workbench | Runs from source on macOS | Clean first-run onboarding |
 | Jobs and history | Built-in mutable SQLite repository; private installs may explicitly select JobHunter | Clean first-run initialization and synthetic demo data |
 | Browser workspace | Electron-owned local capability | Local capability with truthful unavailable states |
-| Documents | Local editor and retained-OOXML engine exist; some artifact flows remain privately coupled | Local create, edit, save, reopen, and export |
+| Documents | SQLite/local mode supports editable create, save, snapshots, DOCX import, paired DOCX/PDF publish, restart, and download; JobHunter render/refresh remain optional | Installed-app acceptance with representative DOCX files |
 | Agent | Existing private deployments can connect an agent runtime | Clearly optional; offline/not-configured by default |
 | MCP | Thin adapter over the JobOS API | Local API/MCP path with stable capability errors |
 
@@ -81,9 +81,10 @@ Do not treat a disconnected window as completed onboarding.
 ## Demo data
 
 `jobos-init` initializes a fresh local profile with exactly one clearly labeled
-synthetic demo job. Removing that job is persistent; JobOS will not silently
-re-seed it. `jobos-init --reset-demo --confirm-reset-demo` is the separate,
-explicitly confirmed reset path.
+synthetic demo job and one `(FAKE)`, fictional, do-not-apply starter resume.
+Removing the demo also removes its editable document metadata and is persistent;
+JobOS will not silently re-seed either item. `jobos-init --reset-demo
+--confirm-reset-demo` is the separate, explicitly confirmed reset path for both.
 
 ## Data and privacy
 

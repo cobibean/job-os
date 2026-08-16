@@ -217,6 +217,7 @@ def build_service_environment(
         "JOBOS_DEVICE_ID": config.device_id,
         "JOBOS_STATE_DB_PATH": str(config.state_db_path),
         "JOBOS_JOB_PROVIDER": "job-hunter",
+        "JOBOS_ARTIFACT_PROVIDER": "gateway",
         "JOBOS_JOB_HUNTER_DB_PATH": str(config.job_hunter_db_path),
         "JOBOS_ARTIFACT_ROOTS": os.pathsep.join(map(str, config.artifact_roots)),
     }

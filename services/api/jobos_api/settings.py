@@ -47,6 +47,8 @@ class Settings(BaseModel):
     job_provider: Literal["sqlite", "job-hunter"] = "sqlite"
     jobs_db_path: Path | None = None
     job_hunter_db_path: Path | None = None
+    artifact_provider: Literal["local", "gateway"] = "local"
+    local_artifact_root: Path | None = None
     artifact_roots: tuple[Path, ...] = ()
     hermes_dashboard_url: str | None = None
     hermes_dashboard_token: str | None = Field(default=None, min_length=16, repr=False)
@@ -75,3 +77,10 @@ class Settings(BaseModel):
 
     def resolved_jobs_db_path(self) -> Path:
         return self.jobs_db_path or self.state_db_path.parent / "jobs.db"
+
+    def resolved_local_artifact_root(self) -> Path:
+        return self.local_artifact_root or self.state_db_path.parent / "artifacts"
+
+    def resolved_artifact_roots(self) -> tuple[Path, ...]:
+        roots = (self.resolved_local_artifact_root(), *self.artifact_roots)
+        return tuple(dict.fromkeys(roots))

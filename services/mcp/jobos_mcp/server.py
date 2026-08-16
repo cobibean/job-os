@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
-import re
+import stat
 import subprocess
 import sys
+from hashlib import sha256
 from pathlib import Path
 from typing import Any
 
@@ -37,13 +39,64 @@ def local_mcp_token() -> str:
 
 
 def _document_import_roots() -> tuple[Path, ...]:
-    profile = os.environ.get("HERMES_PROFILE", "job-hunter")
-    if not re.fullmatch(r"[A-Za-z0-9._-]{1,100}", profile):
-        raise RuntimeError("Hermes profile name is invalid")
-    return (
-        Path.cwd().resolve(),
-        (Path.home() / ".hermes" / "profiles" / profile / "cache" / "documents").resolve(),
+    configured_roots = tuple(
+        Path(value).expanduser()
+        for value in os.environ.get("JOBOS_DOCUMENT_ROOTS", "").split(os.pathsep)
+        if value
     )
+    if configured_roots:
+        roots = configured_roots
+    else:
+        configured_path = os.environ.get("JOBOS_CONFIG_PATH")
+        if configured_path:
+            path = Path(configured_path).expanduser()
+        else:
+            data_dir = os.environ.get("JOBOS_DATA_DIR")
+            if data_dir:
+                path = Path(data_dir).expanduser() / "config.json"
+            elif sys.platform == "darwin":
+                path = Path.home() / "Library/Application Support/JobOS/config.json"
+            else:
+                xdg_data = os.environ.get("XDG_DATA_HOME")
+                base = Path(xdg_data).expanduser() if xdg_data else Path.home() / ".local/share"
+                path = base / "JobOS/config.json"
+        try:
+            config = json.loads(path.read_text(encoding="utf-8"))
+            if (
+                not isinstance(config, dict)
+                or config.get("schemaVersion") != 1
+                or not isinstance(config.get("paths"), dict)
+            ):
+                raise ValueError
+            paths = config["paths"]
+            raw_artifacts = paths.get("artifacts")
+            if not isinstance(raw_artifacts, str) or not raw_artifacts:
+                raise ValueError
+        except (
+            FileNotFoundError,
+            OSError,
+            KeyError,
+            TypeError,
+            ValueError,
+            json.JSONDecodeError,
+        ) as error:
+            raise RuntimeError(
+                "Document publication requires JOBOS_DOCUMENT_ROOTS or a valid JobOS local config"
+            ) from error
+        artifact_root = Path(raw_artifacts).expanduser()
+        roots = (artifact_root if artifact_root.is_absolute() else path.parent / artifact_root,)
+
+    resolved: list[Path] = []
+    for root in roots:
+        if not root.is_absolute():
+            raise RuntimeError("Configured document roots must be absolute paths")
+        if root.is_symlink():
+            raise RuntimeError("Configured document roots must not be symbolic links")
+        candidate = root.resolve(strict=True)
+        if not candidate.is_dir():
+            raise RuntimeError("Configured document roots must be directories")
+        resolved.append(candidate)
+    return tuple(dict.fromkeys(resolved))
 
 
 def _read_document_input(
@@ -53,19 +106,105 @@ def _read_document_input(
     maximum: int,
     suffixes: set[str] | None = None,
 ) -> tuple[str, bytes]:
-    supplied = Path(raw_path).expanduser()
-    if supplied.is_symlink():
-        raise ValueError("Document input must not be a symbolic link")
-    candidate = supplied.resolve(strict=True)
-    if not any(candidate == root or root in candidate.parents for root in roots):
-        raise ValueError("Document input is outside the Job Hunter workspace and output cache")
-    if not candidate.is_file():
-        raise ValueError("Document input must be a regular file")
+    def stable_metadata(value: os.stat_result) -> tuple[int, int, int, int, int, int]:
+        return (
+            value.st_dev,
+            value.st_ino,
+            stat.S_IFMT(value.st_mode),
+            value.st_size,
+            value.st_mtime_ns,
+            value.st_ctime_ns,
+        )
+
+    def descriptor_bytes(descriptor: int) -> bytes:
+        chunks: list[bytes] = []
+        remaining = maximum + 1
+        while remaining:
+            chunk = os.read(descriptor, min(1024 * 1024, remaining))
+            if not chunk:
+                break
+            chunks.append(chunk)
+            remaining -= len(chunk)
+        return b"".join(chunks)
+
+    requested = Path(raw_path)
+    if not requested.is_absolute():
+        raise ValueError("Document input path must be absolute")
+    supplied = Path(os.path.abspath(requested))
+    selected: tuple[Path, tuple[str, ...], os.stat_result] | None = None
+    for root in sorted(roots, key=lambda value: len(value.parts), reverse=True):
+        expanded = root.expanduser()
+        if expanded.is_symlink():
+            raise ValueError("Configured document roots must not be symbolic links")
+        resolved = expanded.resolve(strict=True)
+        try:
+            relative = supplied.relative_to(resolved)
+        except ValueError:
+            continue
+        if relative.parts and all(part not in {"", ".", ".."} for part in relative.parts):
+            selected = resolved, relative.parts, os.stat(resolved, follow_symlinks=False)
+            break
+    if selected is None:
+        raise ValueError("Document input is outside configured document roots")
+    root, parts, expected_root = selected
+    directory_flags = os.O_RDONLY
+    if hasattr(os, "O_DIRECTORY"):
+        directory_flags |= os.O_DIRECTORY
+    if hasattr(os, "O_CLOEXEC"):
+        directory_flags |= os.O_CLOEXEC
+    nofollow = getattr(os, "O_NOFOLLOW", 0)
+    descriptors: list[int] = []
+    descriptor: int | None = None
+    try:
+        current = os.open(root, directory_flags | nofollow)
+        descriptors.append(current)
+        opened_root = os.fstat(current)
+        if (
+            not stat.S_ISDIR(opened_root.st_mode)
+            or opened_root.st_dev != expected_root.st_dev
+            or opened_root.st_ino != expected_root.st_ino
+        ):
+            raise ValueError("Configured document root changed during access")
+        for part in parts[:-1]:
+            current = os.open(part, directory_flags | nofollow, dir_fd=current)
+            descriptors.append(current)
+            if not stat.S_ISDIR(os.fstat(current).st_mode):
+                raise ValueError("Document input ancestor must be a directory")
+        descriptor = os.open(parts[-1], os.O_RDONLY | nofollow, dir_fd=current)
+        before = os.fstat(descriptor)
+        if not stat.S_ISREG(before.st_mode):
+            raise ValueError("Document input must be a regular file")
+        if before.st_size <= 0 or before.st_size > maximum:
+            raise ValueError("Document input size is invalid")
+        content = descriptor_bytes(descriptor)
+        after = os.fstat(descriptor)
+        if (
+            stable_metadata(before) != stable_metadata(after)
+            or len(content) != before.st_size
+            or len(content) > maximum
+        ):
+            raise ValueError("Document input changed during access")
+        os.lseek(descriptor, 0, os.SEEK_SET)
+        confirmation = descriptor_bytes(descriptor)
+        confirmed = os.fstat(descriptor)
+        if (
+            stable_metadata(after) != stable_metadata(confirmed)
+            or len(confirmation) != before.st_size
+            or sha256(content).digest() != sha256(confirmation).digest()
+        ):
+            raise ValueError("Document input changed during access")
+    except OSError as error:
+        raise ValueError(
+            "Document input contains a symbolic link or inaccessible component"
+        ) from error
+    finally:
+        if descriptor is not None:
+            os.close(descriptor)
+        for opened in reversed(descriptors):
+            os.close(opened)
+    candidate = root.joinpath(*parts)
     if suffixes is not None and candidate.suffix.casefold() not in suffixes:
         raise ValueError("Published artifact must be a PDF or DOCX")
-    content = candidate.read_bytes()
-    if not content or len(content) > maximum:
-        raise ValueError("Document input size is invalid")
     return candidate.name, content
 
 

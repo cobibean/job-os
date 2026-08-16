@@ -146,6 +146,25 @@ def test_missing_configuration_has_an_actionable_service_error(tmp_path, monkeyp
         settings_from_environment()
 
 
+def test_token_configured_source_defaults_use_application_data_not_cwd(tmp_path, monkeypatch):
+    monkeypatch.setattr("jobos_api.local_config.sys.platform", "darwin")
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("JOBOS_DEVICE_TOKEN", "source-default-device-token")
+    monkeypatch.setenv("JOBOS_MCP_TOKEN", "source-default-mcp-token")
+    monkeypatch.delenv("JOBOS_STATE_DB_PATH", raising=False)
+    monkeypatch.delenv("JOBOS_LOCAL_ARTIFACT_ROOT", raising=False)
+
+    configured = settings_from_environment()
+
+    assert configured.state_db_path == tmp_path / "Library/Application Support/JobOS/state/jobos.db"
+    assert configured.resolved_jobs_db_path() == (
+        tmp_path / "Library/Application Support/JobOS/jobs/jobs.db"
+    )
+    assert configured.resolved_local_artifact_root() == (
+        tmp_path / "Library/Application Support/JobOS/artifacts"
+    )
+
+
 def test_file_credentials_reject_symlinks(tmp_path):
     target = tmp_path / "outside.json"
     target.write_text('{"deviceToken":"device","mcpToken":"mcp"}', encoding="utf-8")

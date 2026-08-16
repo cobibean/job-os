@@ -44,6 +44,10 @@ class EditableDocumentConflict(RuntimeError):
         super().__init__("Editable document revision conflict")
 
 
+class EditablePublicationConflict(RuntimeError):
+    """An editable revision was already registered with a different artifact pair."""
+
+
 def mutation_activity_source_id(
     *, actor_id: str, target_resource: str, command_name: str, idempotency_key: str
 ) -> str:
@@ -405,6 +409,274 @@ MIGRATIONS = (
             "DROP TABLE document_file_observations_v13",
         ),
     ),
+    Migration(
+        version=15,
+        statements=(
+            """
+            CREATE TEMP TABLE migration15_affected_publications AS
+            SELECT editable_document_id, editable_document_revision
+            FROM document_artifacts
+            WHERE editable_document_id IS NOT NULL
+                AND editable_document_revision IS NOT NULL
+            GROUP BY editable_document_id, editable_document_revision
+            """,
+            """
+            CREATE TEMP TABLE migration15_winning_pairs AS
+            WITH candidate_pairs AS (
+                SELECT
+                    docx.editable_document_id,
+                    docx.editable_document_revision,
+                    owner.job_id,
+                    docx.artifact_id AS docx_artifact_id,
+                    pdf.artifact_id AS pdf_artifact_id,
+                    (state.approved_artifact_id IN (
+                        docx.artifact_id, pdf.artifact_id
+                    )) AS is_approved,
+                    (state.current_artifact_id IN (
+                        docx.artifact_id, pdf.artifact_id
+                    )) AS is_current,
+                    (state.last_successful_artifact_id IN (
+                        docx.artifact_id, pdf.artifact_id
+                    )) AS is_last_successful,
+                    pdf.render_sequence AS newest_sequence
+                FROM document_artifacts AS docx
+                JOIN document_artifacts AS pdf
+                    ON pdf.editable_document_id = docx.editable_document_id
+                    AND pdf.editable_document_revision =
+                        docx.editable_document_revision
+                    AND pdf.job_id = docx.job_id
+                    AND pdf.source_revision = docx.source_revision
+                    AND pdf.render_sequence = docx.render_sequence + 1
+                JOIN editable_documents AS owner
+                    ON owner.document_id = docx.editable_document_id
+                    AND docx.job_id = owner.job_id
+                    AND pdf.job_id = owner.job_id
+                    AND docx.document_key = owner.document_key
+                    AND pdf.document_key = owner.document_key
+                JOIN migration15_affected_publications AS affected
+                    ON affected.editable_document_id = docx.editable_document_id
+                    AND affected.editable_document_revision =
+                        docx.editable_document_revision
+                LEFT JOIN job_document_state AS state ON state.job_id = docx.job_id
+                WHERE docx.render_status = 'succeeded'
+                    AND pdf.render_status = 'succeeded'
+                    AND docx.media_type =
+                        'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+                    AND pdf.media_type = 'application/pdf'
+            ), ranked AS (
+                SELECT *, ROW_NUMBER() OVER (
+                    PARTITION BY editable_document_id, editable_document_revision
+                    ORDER BY
+                        is_approved DESC,
+                        is_current DESC,
+                        is_last_successful DESC,
+                        newest_sequence DESC,
+                        pdf_artifact_id DESC,
+                        docx_artifact_id DESC
+                ) AS pair_rank
+                FROM candidate_pairs
+            )
+            SELECT
+                editable_document_id,
+                editable_document_revision,
+                job_id,
+                docx_artifact_id,
+                pdf_artifact_id
+            FROM ranked
+            WHERE pair_rank = 1
+            """,
+            """
+            CREATE TEMP TABLE migration15_winning_artifacts AS
+            SELECT
+                editable_document_id,
+                editable_document_revision,
+                job_id,
+                docx_artifact_id AS artifact_id,
+                'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+                    AS media_type
+            FROM migration15_winning_pairs
+            UNION ALL
+            SELECT
+                editable_document_id,
+                editable_document_revision,
+                job_id,
+                pdf_artifact_id AS artifact_id,
+                'application/pdf' AS media_type
+            FROM migration15_winning_pairs
+            """,
+            """
+            UPDATE job_document_state
+            SET current_artifact_id = COALESCE(
+                (
+                    SELECT winner.artifact_id
+                    FROM document_artifacts AS losing
+                    JOIN migration15_winning_artifacts AS winner
+                        ON winner.editable_document_id = losing.editable_document_id
+                        AND winner.editable_document_revision =
+                            losing.editable_document_revision
+                        AND winner.media_type = losing.media_type
+                    JOIN editable_documents AS owner
+                        ON owner.document_id = losing.editable_document_id
+                    WHERE losing.artifact_id = job_document_state.current_artifact_id
+                        AND losing.job_id = owner.job_id
+                        AND winner.job_id = owner.job_id
+                        AND job_document_state.job_id = owner.job_id
+                ),
+                CASE
+                    WHEN current_artifact_id IN (
+                        SELECT artifact.artifact_id
+                        FROM document_artifacts AS artifact
+                        JOIN migration15_affected_publications AS affected
+                            ON affected.editable_document_id = artifact.editable_document_id
+                            AND affected.editable_document_revision =
+                                artifact.editable_document_revision
+                    ) THEN NULL
+                    ELSE current_artifact_id
+                END
+            ),
+            last_successful_artifact_id = COALESCE(
+                (
+                    SELECT winner.artifact_id
+                    FROM document_artifacts AS losing
+                    JOIN migration15_winning_artifacts AS winner
+                        ON winner.editable_document_id = losing.editable_document_id
+                        AND winner.editable_document_revision =
+                            losing.editable_document_revision
+                        AND winner.media_type = losing.media_type
+                    JOIN editable_documents AS owner
+                        ON owner.document_id = losing.editable_document_id
+                    WHERE losing.artifact_id =
+                        job_document_state.last_successful_artifact_id
+                        AND losing.job_id = owner.job_id
+                        AND winner.job_id = owner.job_id
+                        AND job_document_state.job_id = owner.job_id
+                ),
+                CASE
+                    WHEN last_successful_artifact_id IN (
+                        SELECT artifact.artifact_id
+                        FROM document_artifacts AS artifact
+                        JOIN migration15_affected_publications AS affected
+                            ON affected.editable_document_id = artifact.editable_document_id
+                            AND affected.editable_document_revision =
+                                artifact.editable_document_revision
+                    ) THEN NULL
+                    ELSE last_successful_artifact_id
+                END
+            ),
+            approved_artifact_id = CASE
+                WHEN approved_artifact_id IN (
+                    SELECT artifact.artifact_id
+                    FROM document_artifacts AS artifact
+                    JOIN migration15_affected_publications AS affected
+                        ON affected.editable_document_id = artifact.editable_document_id
+                        AND affected.editable_document_revision =
+                            artifact.editable_document_revision
+                    WHERE NOT EXISTS (
+                        SELECT 1
+                        FROM migration15_winning_artifacts AS winner
+                        JOIN editable_documents AS owner
+                            ON owner.document_id = winner.editable_document_id
+                        WHERE winner.artifact_id = artifact.artifact_id
+                            AND winner.job_id = owner.job_id
+                            AND job_document_state.job_id = owner.job_id
+                    )
+                ) THEN NULL
+                ELSE approved_artifact_id
+            END,
+            approved_at = CASE
+                WHEN approved_artifact_id IN (
+                    SELECT artifact.artifact_id
+                    FROM document_artifacts AS artifact
+                    JOIN migration15_affected_publications AS affected
+                        ON affected.editable_document_id = artifact.editable_document_id
+                        AND affected.editable_document_revision =
+                            artifact.editable_document_revision
+                    WHERE NOT EXISTS (
+                        SELECT 1
+                        FROM migration15_winning_artifacts AS winner
+                        JOIN editable_documents AS owner
+                            ON owner.document_id = winner.editable_document_id
+                        WHERE winner.artifact_id = artifact.artifact_id
+                            AND winner.job_id = owner.job_id
+                            AND job_document_state.job_id = owner.job_id
+                    )
+                ) THEN NULL
+                ELSE approved_at
+            END,
+            updated_at = CURRENT_TIMESTAMP
+            WHERE current_artifact_id IN (
+                    SELECT artifact.artifact_id
+                    FROM document_artifacts AS artifact
+                    JOIN migration15_affected_publications AS affected
+                        ON affected.editable_document_id = artifact.editable_document_id
+                        AND affected.editable_document_revision =
+                            artifact.editable_document_revision
+                )
+                OR last_successful_artifact_id IN (
+                    SELECT artifact.artifact_id
+                    FROM document_artifacts AS artifact
+                    JOIN migration15_affected_publications AS affected
+                        ON affected.editable_document_id = artifact.editable_document_id
+                        AND affected.editable_document_revision =
+                            artifact.editable_document_revision
+                )
+                OR approved_artifact_id IN (
+                    SELECT artifact.artifact_id
+                    FROM document_artifacts AS artifact
+                    JOIN migration15_affected_publications AS affected
+                        ON affected.editable_document_id = artifact.editable_document_id
+                        AND affected.editable_document_revision =
+                            artifact.editable_document_revision
+                )
+            """,
+            """
+            UPDATE editable_documents
+            SET published_revision = NULL,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE EXISTS (
+                SELECT 1
+                FROM migration15_affected_publications AS affected
+                WHERE affected.editable_document_id = editable_documents.document_id
+                    AND affected.editable_document_revision =
+                        editable_documents.published_revision
+            ) AND NOT EXISTS (
+                SELECT 1
+                FROM migration15_winning_artifacts AS winner
+                WHERE winner.editable_document_id = editable_documents.document_id
+                    AND winner.editable_document_revision =
+                        editable_documents.published_revision
+            )
+            """,
+            """
+            UPDATE document_artifacts
+            SET editable_document_id = NULL,
+                editable_document_revision = NULL
+            WHERE EXISTS (
+                    SELECT 1
+                    FROM migration15_affected_publications AS affected
+                    WHERE affected.editable_document_id =
+                        document_artifacts.editable_document_id
+                        AND affected.editable_document_revision =
+                            document_artifacts.editable_document_revision
+                )
+                AND artifact_id NOT IN (
+                    SELECT artifact_id FROM migration15_winning_artifacts
+                )
+            """,
+            """
+            CREATE UNIQUE INDEX document_artifacts_editable_publication_media
+            ON document_artifacts(
+                editable_document_id, editable_document_revision, media_type
+            )
+            WHERE editable_document_id IS NOT NULL
+                AND editable_document_revision IS NOT NULL
+                AND render_status = 'succeeded'
+            """,
+            "DROP TABLE migration15_winning_artifacts",
+            "DROP TABLE migration15_winning_pairs",
+            "DROP TABLE migration15_affected_publications",
+        ),
+    ),
 )
 SCHEMA_VERSION = MIGRATIONS[-1].version
 
@@ -685,10 +957,16 @@ class JobOsStateStore:
         self._path.parent.mkdir(parents=True, exist_ok=True)
         with sqlite3.connect(self._path) as connection:
             self._ensure_migration_ledger(connection)
-            applied = self._applied_versions(connection)
-            self._assert_compatible(applied)
-            for migration in MIGRATIONS[len(applied) :]:
-                self._apply_migration(connection, migration)
+            try:
+                connection.execute("BEGIN IMMEDIATE")
+                applied = self._applied_versions(connection)
+                self._assert_compatible(applied)
+                for migration in MIGRATIONS[len(applied) :]:
+                    self._apply_migration_statements(connection, migration)
+                connection.commit()
+            except Exception:
+                connection.rollback()
+                raise
         return StateHealth(schema_version=SCHEMA_VERSION)
 
     @staticmethod
@@ -728,16 +1006,22 @@ class JobOsStateStore:
     def _apply_migration(connection: sqlite3.Connection, migration: Migration) -> None:
         try:
             connection.execute("BEGIN IMMEDIATE")
-            for statement in migration.statements:
-                connection.execute(statement)
-            connection.execute(
-                "INSERT INTO schema_migrations(version) VALUES (?)",
-                (migration.version,),
-            )
+            JobOsStateStore._apply_migration_statements(connection, migration)
             connection.commit()
         except Exception:
             connection.rollback()
             raise
+
+    @staticmethod
+    def _apply_migration_statements(
+        connection: sqlite3.Connection, migration: Migration
+    ) -> None:
+        for statement in migration.statements:
+            connection.execute(statement)
+        connection.execute(
+            "INSERT INTO schema_migrations(version) VALUES (?)",
+            (migration.version,),
+        )
 
     def health(self) -> StateHealth:
         with sqlite3.connect(f"file:{self._path}?mode=ro", uri=True) as connection:
@@ -1537,13 +1821,13 @@ class JobOsStateStore:
         *,
         editable_document_id: str | None = None,
         editable_document_revision: int | None = None,
+        connection: sqlite3.Connection | None = None,
     ) -> tuple[str | None, str | None]:
         if (editable_document_id is None) != (editable_document_revision is None):
             raise ValueError("Editable document ID and revision must be supplied together")
         if any(artifact.job_id != job_id for artifact in artifacts):
             raise ValueError("Artifact job association does not match the requested job")
-        with sqlite3.connect(self._path) as connection:
-            connection.execute("BEGIN IMMEDIATE")
+        with self._editable_write_connection(connection) as connection:
             state = connection.execute(
                 "SELECT current_artifact_id, last_successful_artifact_id "
                 "FROM job_document_state WHERE job_id = ?",
@@ -1643,7 +1927,6 @@ class JobOsStateStore:
                     """,
                     (job_id, current_id, last_successful_id),
                 )
-            connection.commit()
         return current_id, last_successful_id
 
     def list_document_artifacts(
@@ -1666,6 +1949,117 @@ class JobOsStateStore:
             state["last_successful_artifact_id"] if state else None,
             state["approved_artifact_id"] if state else None,
         )
+
+    def next_document_artifact_sequence(
+        self, job_id: str, *, connection: sqlite3.Connection | None = None
+    ) -> int:
+        if connection is not None:
+            row = connection.execute(
+                "SELECT COALESCE(MAX(render_sequence), 0) FROM document_artifacts WHERE job_id = ?",
+                (job_id,),
+            ).fetchone()
+        else:
+            with sqlite3.connect(f"file:{self._path}?mode=ro", uri=True) as read_connection:
+                row = read_connection.execute(
+                    "SELECT COALESCE(MAX(render_sequence), 0) "
+                    "FROM document_artifacts WHERE job_id = ?",
+                    (job_id,),
+                ).fetchone()
+        return int(row[0]) + 1 if row else 1
+
+    def editable_publication_artifacts(
+        self,
+        document_id: str,
+        document_revision: int,
+        *,
+        connection: sqlite3.Connection | None = None,
+    ) -> list[dict[str, object]]:
+        if connection is not None:
+            rows = connection.execute(
+                """
+                SELECT * FROM document_artifacts
+                WHERE editable_document_id = ? AND editable_document_revision = ?
+                    AND render_status = 'succeeded'
+                ORDER BY render_sequence
+                """,
+                (document_id, document_revision),
+            ).fetchall()
+        else:
+            with sqlite3.connect(f"file:{self._path}?mode=ro", uri=True) as read_connection:
+                read_connection.row_factory = sqlite3.Row
+                rows = read_connection.execute(
+                    """
+                    SELECT * FROM document_artifacts
+                    WHERE editable_document_id = ? AND editable_document_revision = ?
+                        AND render_status = 'succeeded'
+                    ORDER BY render_sequence
+                    """,
+                    (document_id, document_revision),
+                ).fetchall()
+        return [dict(row) for row in rows]
+
+    def register_editable_publication_pair(
+        self,
+        job_id: str,
+        artifacts: list[VerifiedArtifact],
+        *,
+        editable_document_id: str,
+        editable_document_revision: int,
+        connection: sqlite3.Connection,
+    ) -> bool:
+        expected = {artifact.media_type: artifact.sha256 for artifact in artifacts}
+        required = {
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            "application/pdf",
+        }
+        if (
+            len(artifacts) != 2
+            or set(expected) != required
+            or any(artifact.render_status != "succeeded" for artifact in artifacts)
+        ):
+            raise ValueError("Publication requires one successful DOCX and one successful PDF")
+        prior = self.editable_publication_artifacts(
+            editable_document_id,
+            editable_document_revision,
+            connection=connection,
+        )
+        if prior:
+            registered = {str(row["media_type"]): str(row["sha256"]) for row in prior}
+            if len(prior) != 2 or registered != expected:
+                raise EditablePublicationConflict(
+                    "Editable revision already has a different local publication"
+                )
+            return False
+        try:
+            self.register_document_artifacts(
+                job_id,
+                artifacts,
+                editable_document_id=editable_document_id,
+                editable_document_revision=editable_document_revision,
+                connection=connection,
+            )
+        except sqlite3.IntegrityError as error:
+            raise EditablePublicationConflict(
+                "Editable revision already has a different local publication"
+            ) from error
+        return True
+
+    def delete_job_documents(self, job_id: str) -> None:
+        """Remove demo-owned document metadata; artifact bytes remain unregistered on disk."""
+        with sqlite3.connect(self._path) as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            connection.execute("DELETE FROM job_document_state WHERE job_id = ?", (job_id,))
+            connection.execute("DELETE FROM document_artifacts WHERE job_id = ?", (job_id,))
+            connection.execute(
+                """
+                DELETE FROM editable_document_snapshots
+                WHERE document_id IN (
+                    SELECT document_id FROM editable_documents WHERE job_id = ?
+                )
+                """,
+                (job_id,),
+            )
+            connection.execute("DELETE FROM editable_documents WHERE job_id = ?", (job_id,))
 
     def approve_document_artifact(self, job_id: str, artifact_id: str) -> None:
         with sqlite3.connect(self._path) as connection:
