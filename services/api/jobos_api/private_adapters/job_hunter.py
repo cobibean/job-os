@@ -299,19 +299,44 @@ def adapt_job_hunter_facade(facade: Any) -> tuple[JobHunterJobRepository, Artifa
     return JobHunterJobRepository(facade), JobHunterArtifactGateway(facade)
 
 
+def _create_job_hunter_facade(database_path: Path, workspace_root: Path | None) -> tuple[Any, Any]:
+    facade_module = import_module("job_hunter.facade")
+    storage_module = import_module("job_hunter.storage")
+    storage = storage_module.JobStorage(database_path, initialize=False)
+    return facade_module.JobHunterFacade(storage, workspace_root=workspace_root), storage
+
+
 def create_job_hunter_services(
     database_path: Path, workspace_root: Path | None
 ) -> tuple[JobHunterJobRepository, ArtifactGateway]:
     """Dynamically load JobHunter only after private provider selection."""
     try:
-        facade_module = import_module("job_hunter.facade")
         models_module = import_module("job_hunter.models")
-        storage_module = import_module("job_hunter.storage")
-        storage = storage_module.JobStorage(database_path, initialize=False)
-        facade = facade_module.JobHunterFacade(storage, workspace_root=workspace_root)
+        facade, storage = _create_job_hunter_facade(database_path, workspace_root)
     except Exception as error:
         raise Unavailable("The selected JobHunter provider is unavailable") from error
     return (
         JobHunterJobRepository(facade, storage, models_module.JobRecord),
         JobHunterArtifactGateway(facade),
     )
+
+
+def create_job_hunter_job_repository(
+    database_path: Path, workspace_root: Path | None
+) -> JobHunterJobRepository:
+    try:
+        models_module = import_module("job_hunter.models")
+        facade, storage = _create_job_hunter_facade(database_path, workspace_root)
+    except Exception as error:
+        raise Unavailable("The selected JobHunter provider is unavailable") from error
+    return JobHunterJobRepository(facade, storage, models_module.JobRecord)
+
+
+def create_job_hunter_artifact_gateway(
+    database_path: Path, workspace_root: Path | None
+) -> ArtifactGateway:
+    try:
+        facade, _ = _create_job_hunter_facade(database_path, workspace_root)
+    except Exception as error:
+        raise Unavailable("The selected JobHunter artifact gateway is unavailable") from error
+    return JobHunterArtifactGateway(facade)

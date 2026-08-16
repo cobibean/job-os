@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Protocol
 
-from jobos_api.job_repository import NotFound, Unavailable
+from jobos_api.job_repository import Unavailable
 
 
 class ArtifactGateway(Protocol):
@@ -27,13 +27,13 @@ class ArtifactGateway(Protocol):
 
 
 class UnavailableArtifactGateway:
-    """Truthful public default until local artifact ownership lands."""
+    """Stable errors for optional private publication and rendering capabilities."""
 
     def list_job_artifacts(self, job_id: str) -> list[dict[str, Any]]:
-        return []
+        raise Unavailable("JobHunter artifact refresh is unconfigured")
 
     def register_artifact(self, job_id: str, artifact_reference: str) -> dict[str, Any]:
-        raise NotFound(f"Unknown artifact {artifact_reference}")
+        raise Unavailable("JobHunter artifact registration is unconfigured")
 
     def publish_document_artifact(
         self,
@@ -43,9 +43,9 @@ class UnavailableArtifactGateway:
         source_path: str,
         artifact_path: str,
     ) -> dict[str, Any]:
-        raise Unavailable("Artifact publication is unavailable")
+        raise Unavailable("JobHunter artifact publication is unconfigured")
 
     def render_resume(
         self, job_id: str, source_id: str, output_options: dict[str, Any]
     ) -> dict[str, Any]:
-        raise Unavailable("Artifact rendering is unavailable")
+        raise Unavailable("JobHunter artifact rendering is unconfigured")

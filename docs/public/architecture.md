@@ -49,11 +49,18 @@ may supply compatible adapters without changing the default composition.
 ## Current transition state
 
 The public composition now uses a dedicated mutable SQLite canonical-jobs
-repository, separate from workbench state. JobHunter loads dynamically only when
-an installed private runtime explicitly selects that provider, and artifact
-publication remains a separate gateway. Operator-specific runtime defaults and
-first-run initialization/demo onboarding are still unfinished, so this must not
-be read as proof that clean-clone acceptance has passed.
+repository, separate from workbench state. Job and artifact providers are selected
+independently: a private install may keep SQLite jobs while explicitly selecting
+the JobHunter artifact gateway. JobHunter loads dynamically only for a selected
+private capability. `JobOsStateStore`
+owns editable metadata, snapshots, registry metadata, revision, and replay state;
+`SQLiteJobRepository` owns jobs; and `LocalArtifactRepository` owns bytes beneath
+the configured application-data artifact root. Editable local publication writes
+one validated DOCX/PDF pair, then registers both against the same editable
+revision. The private `ArtifactGateway` remains the optional seam for JobHunter
+publish, render, and refresh and reports an unconfigured capability when absent.
+This source behavior is not proof that packaged onboarding or clean-clone
+installed-app acceptance has passed.
 
 Canonical-job mutations commit before the related workbench selection/audit
 event. If the second local write fails, retrying converges through canonical-URL
@@ -81,7 +88,9 @@ pnpm contracts:check
 ```
 
 The MCP adapter maps those application operations and errors rather than
-reimplementing domain behavior.
+reimplementing domain behavior. MCP file publication accepts only explicit
+`JOBOS_DOCUMENT_ROOTS` or the artifact root from local `config.json`; it does not
+trust the process working directory or a Hermes profile directory.
 
 ## Document provenance
 

@@ -129,13 +129,19 @@ def settings_from_config(path: Path) -> Settings:
     if not isinstance(paths, dict):
         raise LocalConfigError("JobOS path configuration is invalid.")
     device_token, mcp_token = load_credentials(config, data_dir)
+    artifact_provider = config.get("artifactProvider", "local")
+    if artifact_provider not in {"local", "gateway"}:
+        raise LocalConfigError("JobOS artifact provider is unsupported.")
+    artifact_root = _resolved(data_dir, paths.get("artifacts"), "paths.artifacts")
     return Settings(
         device_token=device_token,
         mcp_token=mcp_token,
         device_id=str(config["deviceId"]),
         state_db_path=_resolved(data_dir, paths.get("stateDatabase"), "paths.stateDatabase"),
         jobs_db_path=_resolved(data_dir, paths.get("jobsDatabase"), "paths.jobsDatabase"),
-        artifact_roots=(_resolved(data_dir, paths.get("artifacts"), "paths.artifacts"),),
+        artifact_provider=artifact_provider,
+        local_artifact_root=artifact_root,
+        artifact_roots=(artifact_root,),
         job_provider=str(config.get("jobProvider", "sqlite")),
     )
 

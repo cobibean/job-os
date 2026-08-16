@@ -11,15 +11,24 @@ from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from jobos_api.artifact_repository import (
+    ALLOWED_MEDIA_TYPES,
+    MAX_CALLER_FILENAME_BYTES,
+    PDF_MEDIA_TYPE,
+    ArtifactRepositoryError,
+    ArtifactStorageError,
+    ArtifactValidationError,
+    OpenedDirectoryChain,
+    materialize_idempotent_file,
+    materialize_idempotent_pair,
+    open_directory_chain,
+    verify_artifact_file,
+)
+
 ARTIFACT_ID_PATTERN = re.compile(r"^art_[A-Za-z0-9_-]{16,80}$")
-PDF_MEDIA_TYPE = "application/pdf"
-DOCX_MEDIA_TYPE = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-ALLOWED_MEDIA_TYPES = {PDF_MEDIA_TYPE, DOCX_MEDIA_TYPE}
 DOCUMENT_KEYS = {"resume", "cover_letter", "references"}
 
-
-class ArtifactTrustError(ValueError):
-    """Artifact metadata or bytes failed the document trust boundary."""
+ArtifactTrustError = ArtifactValidationError
 
 
 class ArtifactNotFound(KeyError):
@@ -133,6 +142,9 @@ class ArtifactPublishRequest(BaseModel):
     def require_plain_filename(cls, value: str) -> str:
         if value in {".", ".."} or Path(value).name != value or "\0" in value:
             raise ValueError("document filenames must not contain a path")
+        safe_name = re.sub(r"[^A-Za-z0-9._-]+", "-", value).strip(".-") or "document"
+        if len(safe_name.encode("utf-8")) > MAX_CALLER_FILENAME_BYTES:
+            raise ValueError("document filename is too long for content-addressed storage")
         return value
 
     def source_bytes(self) -> bytes:
@@ -192,18 +204,17 @@ def materialize_published_document(
 ) -> tuple[Path, Path]:
     if not re.fullmatch(r"[A-Za-z0-9._-]{1,256}", job_id):
         raise ArtifactTrustError("Job ID is not safe for document publication")
-    root = workspace_root.expanduser().resolve(strict=True)
-    publication_root = (root / "resume" / "exports" / "jobos" / job_id / "imports").resolve()
-    if root not in publication_root.parents:
-        raise ArtifactTrustError("Document publication root escapes the Job Hunter workspace")
-    publication_root.mkdir(parents=True, exist_ok=True)
-    source = _materialize_content_addressed(
-        publication_root, command.source_filename, command.source_bytes()
-    )
-    artifact = _materialize_content_addressed(
-        publication_root, command.artifact_filename, command.artifact_bytes()
-    )
-    return source, artifact
+    with open_directory_chain(
+        workspace_root, "resume", "exports", "jobos", job_id, "imports"
+    ) as publication_root:
+        source, artifact = materialize_idempotent_pair(
+            publication_root,
+            (
+                _content_addressed_item(command.source_filename, command.source_bytes()),
+                _content_addressed_item(command.artifact_filename, command.artifact_bytes()),
+            ),
+        )
+        return source, artifact
 
 
 def materialize_external_import(
@@ -237,33 +248,32 @@ def materialize_external_import(
         separators=(",", ":"),
         sort_keys=True,
     ).encode("utf-8")
-    root = workspace_root.expanduser().resolve(strict=True)
-    publication_root = (root / "resume" / "exports" / "jobos" / job_id / "imports").resolve()
-    if root not in publication_root.parents:
-        raise ArtifactTrustError("Document publication root escapes the Job Hunter workspace")
-    publication_root.mkdir(parents=True, exist_ok=True)
-    manifest_path = _materialize_content_addressed(
-        publication_root, f"{document_id}-import-source.json", manifest
-    )
-    artifact_path = _materialize_content_addressed(publication_root, source_filename, source_bytes)
-    return manifest_path, artifact_path
+    with open_directory_chain(
+        workspace_root, "resume", "exports", "jobos", job_id, "imports"
+    ) as publication_root:
+        manifest_path, artifact_path = materialize_idempotent_pair(
+            publication_root,
+            (
+                _content_addressed_item(f"{document_id}-import-source.json", manifest),
+                _content_addressed_item(source_filename, source_bytes),
+            ),
+        )
+        return manifest_path, artifact_path
 
 
-def _materialize_content_addressed(root: Path, filename: str, content: bytes) -> Path:
+def _materialize_content_addressed(
+    root: OpenedDirectoryChain, filename: str, content: bytes
+) -> Path:
+    stored_name, stored_content = _content_addressed_item(filename, content)
+    return materialize_idempotent_file(root, stored_name, stored_content)
+
+
+def _content_addressed_item(filename: str, content: bytes) -> tuple[str, bytes]:
     digest = sha256(content).hexdigest()
     safe_name = re.sub(r"[^A-Za-z0-9._-]+", "-", filename).strip(".-") or "document"
-    destination = root / f"{digest[:20]}-{safe_name}"
-    try:
-        with destination.open("xb") as output:
-            output.write(content)
-    except FileExistsError:
-        if (
-            destination.is_symlink()
-            or not destination.is_file()
-            or destination.read_bytes() != content
-        ):
-            raise ArtifactTrustError("Published document destination is not trustworthy") from None
-    return destination.resolve(strict=True)
+    if len(safe_name.encode("utf-8")) > MAX_CALLER_FILENAME_BYTES:
+        raise ArtifactTrustError("Document filename is too long for content-addressed storage")
+    return f"{digest[:20]}-{safe_name}", content
 
 
 def read_source_artifact(
@@ -314,21 +324,21 @@ def read_source_artifact(
     supplied_hash = raw.get("sha256")
     if not isinstance(supplied_path, (str, Path)) or not isinstance(supplied_hash, str):
         raise ArtifactTrustError("Successful artifact metadata is incomplete")
-    candidate = Path(supplied_path).expanduser().resolve(strict=True)
-    allowed = any(candidate == root or root in candidate.parents for root in roots)
-    if not roots or not allowed:
-        raise ArtifactTrustError("Artifact resolves outside configured roots")
-    if not candidate.is_file():
-        raise ArtifactTrustError("Artifact is not a regular file")
-    content = candidate.read_bytes()
+    try:
+        candidate, content = verify_artifact_file(
+            Path(supplied_path),
+            roots=roots,
+            media_type=media_type,
+            expected_sha256=supplied_hash,
+        )
+    except ArtifactStorageError:
+        raise
+    except ArtifactRepositoryError as error:
+        message = str(error)
+        if message == "Artifact SHA-256 does not match":
+            message = "Artifact SHA-256 does not match registered metadata"
+        raise ArtifactTrustError(message) from error
     computed_hash = sha256(content).hexdigest()
-    if not re.fullmatch(r"[a-f0-9]{64}", supplied_hash) or computed_hash != supplied_hash:
-        raise ArtifactTrustError("Artifact SHA-256 does not match registered metadata")
-    if media_type == PDF_MEDIA_TYPE:
-        if candidate.suffix.casefold() != ".pdf" or not content.startswith(b"%PDF-"):
-            raise ArtifactTrustError("Artifact bytes do not match PDF metadata")
-    elif candidate.suffix.casefold() != ".docx" or not content.startswith(b"PK"):
-        raise ArtifactTrustError("Artifact bytes do not match DOCX metadata")
     return VerifiedArtifact(
         job_id=raw["job_id"],
         document_key=document_key,
