@@ -25,7 +25,8 @@
     "package:mac": "pnpm build:keychain-helper && pnpm build && electron-builder --mac dir --arm64 && node scripts/sign-and-zip-mac.mjs",
     "package:macbook-update": "node scripts/create-macbook-update.mjs",
     "start": "electron dist/main/main.js",
-    "test": "pnpm build:electron && vitest run",
+    "test": "pnpm build:electron && vitest run && pnpm test:macbook-update",
+    "test:macbook-update": "node --test scripts/create-macbook-update.test.mjs",
     "typecheck": "pnpm --filter @jobos/docx-engine build && pnpm --filter @jobos/docx-editor-core build && tsc -p tsconfig.json --noEmit && tsc -p tsconfig.electron.json --noEmit"
   },
   "dependencies": {
