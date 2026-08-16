@@ -21,9 +21,7 @@ class DeviceAuthenticator:
         device_id: str = "primary-device",
     ) -> None:
         credentials = (
-            {device_id: expected_token}
-            if isinstance(expected_token, str)
-            else dict(expected_token)
+            {device_id: expected_token} if isinstance(expected_token, str) else dict(expected_token)
         )
         if not credentials:
             raise ValueError("at least one device credential is required")

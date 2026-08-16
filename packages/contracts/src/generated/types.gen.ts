@@ -281,6 +281,10 @@ export type BrowserCommandRequest = {
      */
     command: 'tabs.inspect' | 'tab.create' | 'tab.select' | 'tab.associate' | 'tab.close' | 'tabs.reorder' | 'tab.navigate' | 'tab.back' | 'tab.forward' | 'tab.reload' | 'tab.stop' | 'page.snapshot' | 'element.click' | 'element.type' | 'page.scroll' | 'document.inspect' | 'document.apply_operations';
     /**
+     * Conversation Id
+     */
+    conversation_id?: string | null;
+    /**
      * Idempotency Key
      */
     idempotency_key: string;
@@ -447,6 +451,16 @@ export type ConnectionResponse = {
 };
 
 /**
+ * ConversationListResponse
+ */
+export type ConversationListResponse = {
+    /**
+     * Conversations
+     */
+    conversations: Array<ConversationSummary>;
+};
+
+/**
  * ConversationResponse
  */
 export type ConversationResponse = {
@@ -462,6 +476,10 @@ export type ConversationResponse = {
      */
     conversation_id: string;
     /**
+     * Created At
+     */
+    created_at: string;
+    /**
      * Entries
      */
     entries: Array<{
@@ -471,6 +489,55 @@ export type ConversationResponse = {
      * Latest Event Id
      */
     latest_event_id: number;
+    /**
+     * Position
+     */
+    position: number;
+    /**
+     * Recovery State
+     */
+    recovery_state: 'ready' | 'recovering' | 'quarantined';
+    /**
+     * Title
+     */
+    title: string;
+};
+
+/**
+ * ConversationSummary
+ */
+export type ConversationSummary = {
+    /**
+     * Active Turn
+     */
+    active_turn: {
+        [key: string]: unknown;
+    } | null;
+    connection: ConnectionResponse;
+    /**
+     * Conversation Id
+     */
+    conversation_id: string;
+    /**
+     * Created At
+     */
+    created_at: string;
+    /**
+     * Latest Event Id
+     */
+    latest_event_id: number;
+    /**
+     * Position
+     */
+    position: number;
+    /**
+     * Recovery State
+     */
+    recovery_state: 'ready' | 'recovering' | 'quarantined';
+    /**
+     * Title
+     */
+    title: string;
 };
 
 /**
@@ -1863,6 +1930,10 @@ export type StatusChangeResponse = {
  */
 export type TurnMutationResponse = {
     /**
+     * Created
+     */
+    created?: boolean | null;
+    /**
      * Message Id
      */
     message_id?: string | null;
@@ -2276,6 +2347,68 @@ export type BrowserCommandV1BrowserCommandsPostResponses = {
 
 export type BrowserCommandV1BrowserCommandsPostResponse = BrowserCommandV1BrowserCommandsPostResponses[keyof BrowserCommandV1BrowserCommandsPostResponses];
 
+export type ConversationsListV1ConversationsGetData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/v1/conversations';
+};
+
+export type ConversationsListV1ConversationsGetErrors = {
+    /**
+     * Device authentication required
+     */
+    401: ApiErrorResponse;
+    /**
+     * Internal server error
+     */
+    500: ApiErrorResponse;
+};
+
+export type ConversationsListV1ConversationsGetError = ConversationsListV1ConversationsGetErrors[keyof ConversationsListV1ConversationsGetErrors];
+
+export type ConversationsListV1ConversationsGetResponses = {
+    /**
+     * Successful Response
+     */
+    200: ConversationListResponse;
+};
+
+export type ConversationsListV1ConversationsGetResponse = ConversationsListV1ConversationsGetResponses[keyof ConversationsListV1ConversationsGetResponses];
+
+export type ConversationCreateV1ConversationsPostData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/v1/conversations';
+};
+
+export type ConversationCreateV1ConversationsPostErrors = {
+    /**
+     * Device authentication required
+     */
+    401: ApiErrorResponse;
+    /**
+     * Resource state conflict
+     */
+    409: ApiErrorResponse;
+    /**
+     * Internal server error
+     */
+    500: ApiErrorResponse;
+};
+
+export type ConversationCreateV1ConversationsPostError = ConversationCreateV1ConversationsPostErrors[keyof ConversationCreateV1ConversationsPostErrors];
+
+export type ConversationCreateV1ConversationsPostResponses = {
+    /**
+     * Successful Response
+     */
+    201: ConversationResponse;
+};
+
+export type ConversationCreateV1ConversationsPostResponse = ConversationCreateV1ConversationsPostResponses[keyof ConversationCreateV1ConversationsPostResponses];
+
 export type ConversationCurrentV1ConversationsCurrentGetData = {
     body?: never;
     path?: never;
@@ -2305,7 +2438,7 @@ export type ConversationCurrentV1ConversationsCurrentGetResponses = {
 
 export type ConversationCurrentV1ConversationsCurrentGetResponse = ConversationCurrentV1ConversationsCurrentGetResponses[keyof ConversationCurrentV1ConversationsCurrentGetResponses];
 
-export type ConversationStreamV1ConversationsCurrentEventsStreamGetData = {
+export type ConversationStreamV1ConversationsEventsStreamGetData = {
     body?: never;
     path?: never;
     query?: {
@@ -2318,10 +2451,10 @@ export type ConversationStreamV1ConversationsCurrentEventsStreamGetData = {
          */
         once?: boolean;
     };
-    url: '/v1/conversations/current/events/stream';
+    url: '/v1/conversations/events/stream';
 };
 
-export type ConversationStreamV1ConversationsCurrentEventsStreamGetErrors = {
+export type ConversationStreamV1ConversationsEventsStreamGetErrors = {
     /**
      * Device authentication required
      */
@@ -2336,98 +2469,164 @@ export type ConversationStreamV1ConversationsCurrentEventsStreamGetErrors = {
     500: ApiErrorResponse;
 };
 
-export type ConversationStreamV1ConversationsCurrentEventsStreamGetError = ConversationStreamV1ConversationsCurrentEventsStreamGetErrors[keyof ConversationStreamV1ConversationsCurrentEventsStreamGetErrors];
+export type ConversationStreamV1ConversationsEventsStreamGetError = ConversationStreamV1ConversationsEventsStreamGetErrors[keyof ConversationStreamV1ConversationsEventsStreamGetErrors];
 
-export type ConversationStreamV1ConversationsCurrentEventsStreamGetResponses = {
+export type ConversationStreamV1ConversationsEventsStreamGetResponses = {
     /**
-     * Successful Response
+     * SSE frames with a global event ID and a data object containing conversation_id, the current recovery_state, and the scoped conversation event.
      */
-    200: unknown;
+    200: string;
 };
 
-export type ConversationSendV1ConversationsCurrentMessagesPostData = {
-    body: SendMessageRequest;
-    path?: never;
-    query?: never;
-    url: '/v1/conversations/current/messages';
-};
+export type ConversationStreamV1ConversationsEventsStreamGetResponse = ConversationStreamV1ConversationsEventsStreamGetResponses[keyof ConversationStreamV1ConversationsEventsStreamGetResponses];
 
-export type ConversationSendV1ConversationsCurrentMessagesPostErrors = {
-    /**
-     * Device authentication required
-     */
-    401: ApiErrorResponse;
-    /**
-     * Resource state conflict
-     */
-    409: ApiErrorResponse;
-    /**
-     * Request validation failed
-     */
-    422: ApiErrorResponse;
-    /**
-     * Internal server error
-     */
-    500: ApiErrorResponse;
-};
-
-export type ConversationSendV1ConversationsCurrentMessagesPostError = ConversationSendV1ConversationsCurrentMessagesPostErrors[keyof ConversationSendV1ConversationsCurrentMessagesPostErrors];
-
-export type ConversationSendV1ConversationsCurrentMessagesPostResponses = {
-    /**
-     * Successful Response
-     */
-    201: TurnMutationResponse;
-};
-
-export type ConversationSendV1ConversationsCurrentMessagesPostResponse = ConversationSendV1ConversationsCurrentMessagesPostResponses[keyof ConversationSendV1ConversationsCurrentMessagesPostResponses];
-
-export type ConversationResetV1ConversationsCurrentResetPostData = {
+export type ConversationArchiveV1ConversationsConversationIdDeleteData = {
     body?: never;
-    path?: never;
+    path: {
+        /**
+         * Conversation Id
+         */
+        conversation_id: string;
+    };
     query?: never;
-    url: '/v1/conversations/current/reset';
+    url: '/v1/conversations/{conversation_id}';
 };
 
-export type ConversationResetV1ConversationsCurrentResetPostErrors = {
+export type ConversationArchiveV1ConversationsConversationIdDeleteErrors = {
     /**
      * Device authentication required
      */
     401: ApiErrorResponse;
     /**
+     * Resource not found
+     */
+    404: ApiErrorResponse;
+    /**
      * Resource state conflict
      */
     409: ApiErrorResponse;
+    /**
+     * Request validation failed
+     */
+    422: ApiErrorResponse;
     /**
      * Internal server error
      */
     500: ApiErrorResponse;
 };
 
-export type ConversationResetV1ConversationsCurrentResetPostError = ConversationResetV1ConversationsCurrentResetPostErrors[keyof ConversationResetV1ConversationsCurrentResetPostErrors];
+export type ConversationArchiveV1ConversationsConversationIdDeleteError = ConversationArchiveV1ConversationsConversationIdDeleteErrors[keyof ConversationArchiveV1ConversationsConversationIdDeleteErrors];
 
-export type ConversationResetV1ConversationsCurrentResetPostResponses = {
+export type ConversationArchiveV1ConversationsConversationIdDeleteResponses = {
+    /**
+     * Successful Response
+     */
+    204: void;
+};
+
+export type ConversationArchiveV1ConversationsConversationIdDeleteResponse = ConversationArchiveV1ConversationsConversationIdDeleteResponses[keyof ConversationArchiveV1ConversationsConversationIdDeleteResponses];
+
+export type ConversationGetV1ConversationsConversationIdGetData = {
+    body?: never;
+    path: {
+        /**
+         * Conversation Id
+         */
+        conversation_id: string;
+    };
+    query?: never;
+    url: '/v1/conversations/{conversation_id}';
+};
+
+export type ConversationGetV1ConversationsConversationIdGetErrors = {
+    /**
+     * Device authentication required
+     */
+    401: ApiErrorResponse;
+    /**
+     * Resource not found
+     */
+    404: ApiErrorResponse;
+    /**
+     * Request validation failed
+     */
+    422: ApiErrorResponse;
+    /**
+     * Internal server error
+     */
+    500: ApiErrorResponse;
+};
+
+export type ConversationGetV1ConversationsConversationIdGetError = ConversationGetV1ConversationsConversationIdGetErrors[keyof ConversationGetV1ConversationsConversationIdGetErrors];
+
+export type ConversationGetV1ConversationsConversationIdGetResponses = {
     /**
      * Successful Response
      */
     200: ConversationResponse;
 };
 
-export type ConversationResetV1ConversationsCurrentResetPostResponse = ConversationResetV1ConversationsCurrentResetPostResponses[keyof ConversationResetV1ConversationsCurrentResetPostResponses];
+export type ConversationGetV1ConversationsConversationIdGetResponse = ConversationGetV1ConversationsConversationIdGetResponses[keyof ConversationGetV1ConversationsConversationIdGetResponses];
 
-export type ConversationCancelV1ConversationsCurrentTurnsTurnIdCancelPostData = {
+export type ConversationSendV1ConversationsConversationIdMessagesPostData = {
+    body: SendMessageRequest;
+    path: {
+        /**
+         * Conversation Id
+         */
+        conversation_id: string;
+    };
+    query?: never;
+    url: '/v1/conversations/{conversation_id}/messages';
+};
+
+export type ConversationSendV1ConversationsConversationIdMessagesPostErrors = {
+    /**
+     * Device authentication required
+     */
+    401: ApiErrorResponse;
+    /**
+     * Resource state conflict
+     */
+    409: ApiErrorResponse;
+    /**
+     * Request validation failed
+     */
+    422: ApiErrorResponse;
+    /**
+     * Internal server error
+     */
+    500: ApiErrorResponse;
+};
+
+export type ConversationSendV1ConversationsConversationIdMessagesPostError = ConversationSendV1ConversationsConversationIdMessagesPostErrors[keyof ConversationSendV1ConversationsConversationIdMessagesPostErrors];
+
+export type ConversationSendV1ConversationsConversationIdMessagesPostResponses = {
+    /**
+     * Successful Response
+     */
+    201: TurnMutationResponse;
+};
+
+export type ConversationSendV1ConversationsConversationIdMessagesPostResponse = ConversationSendV1ConversationsConversationIdMessagesPostResponses[keyof ConversationSendV1ConversationsConversationIdMessagesPostResponses];
+
+export type ConversationCancelV1ConversationsConversationIdTurnsTurnIdCancelPostData = {
     body?: never;
     path: {
+        /**
+         * Conversation Id
+         */
+        conversation_id: string;
         /**
          * Turn Id
          */
         turn_id: string;
     };
     query?: never;
-    url: '/v1/conversations/current/turns/{turn_id}/cancel';
+    url: '/v1/conversations/{conversation_id}/turns/{turn_id}/cancel';
 };
 
-export type ConversationCancelV1ConversationsCurrentTurnsTurnIdCancelPostErrors = {
+export type ConversationCancelV1ConversationsConversationIdTurnsTurnIdCancelPostErrors = {
     /**
      * Device authentication required
      */
@@ -2446,30 +2645,34 @@ export type ConversationCancelV1ConversationsCurrentTurnsTurnIdCancelPostErrors 
     500: ApiErrorResponse;
 };
 
-export type ConversationCancelV1ConversationsCurrentTurnsTurnIdCancelPostError = ConversationCancelV1ConversationsCurrentTurnsTurnIdCancelPostErrors[keyof ConversationCancelV1ConversationsCurrentTurnsTurnIdCancelPostErrors];
+export type ConversationCancelV1ConversationsConversationIdTurnsTurnIdCancelPostError = ConversationCancelV1ConversationsConversationIdTurnsTurnIdCancelPostErrors[keyof ConversationCancelV1ConversationsConversationIdTurnsTurnIdCancelPostErrors];
 
-export type ConversationCancelV1ConversationsCurrentTurnsTurnIdCancelPostResponses = {
+export type ConversationCancelV1ConversationsConversationIdTurnsTurnIdCancelPostResponses = {
     /**
      * Successful Response
      */
     200: TurnMutationResponse;
 };
 
-export type ConversationCancelV1ConversationsCurrentTurnsTurnIdCancelPostResponse = ConversationCancelV1ConversationsCurrentTurnsTurnIdCancelPostResponses[keyof ConversationCancelV1ConversationsCurrentTurnsTurnIdCancelPostResponses];
+export type ConversationCancelV1ConversationsConversationIdTurnsTurnIdCancelPostResponse = ConversationCancelV1ConversationsConversationIdTurnsTurnIdCancelPostResponses[keyof ConversationCancelV1ConversationsConversationIdTurnsTurnIdCancelPostResponses];
 
-export type ConversationRetryV1ConversationsCurrentTurnsTurnIdRetryPostData = {
+export type ConversationRetryV1ConversationsConversationIdTurnsTurnIdRetryPostData = {
     body: RetryTurnRequest;
     path: {
+        /**
+         * Conversation Id
+         */
+        conversation_id: string;
         /**
          * Turn Id
          */
         turn_id: string;
     };
     query?: never;
-    url: '/v1/conversations/current/turns/{turn_id}/retry';
+    url: '/v1/conversations/{conversation_id}/turns/{turn_id}/retry';
 };
 
-export type ConversationRetryV1ConversationsCurrentTurnsTurnIdRetryPostErrors = {
+export type ConversationRetryV1ConversationsConversationIdTurnsTurnIdRetryPostErrors = {
     /**
      * Device authentication required
      */
@@ -2492,16 +2695,16 @@ export type ConversationRetryV1ConversationsCurrentTurnsTurnIdRetryPostErrors = 
     500: ApiErrorResponse;
 };
 
-export type ConversationRetryV1ConversationsCurrentTurnsTurnIdRetryPostError = ConversationRetryV1ConversationsCurrentTurnsTurnIdRetryPostErrors[keyof ConversationRetryV1ConversationsCurrentTurnsTurnIdRetryPostErrors];
+export type ConversationRetryV1ConversationsConversationIdTurnsTurnIdRetryPostError = ConversationRetryV1ConversationsConversationIdTurnsTurnIdRetryPostErrors[keyof ConversationRetryV1ConversationsConversationIdTurnsTurnIdRetryPostErrors];
 
-export type ConversationRetryV1ConversationsCurrentTurnsTurnIdRetryPostResponses = {
+export type ConversationRetryV1ConversationsConversationIdTurnsTurnIdRetryPostResponses = {
     /**
      * Successful Response
      */
     201: TurnMutationResponse;
 };
 
-export type ConversationRetryV1ConversationsCurrentTurnsTurnIdRetryPostResponse = ConversationRetryV1ConversationsCurrentTurnsTurnIdRetryPostResponses[keyof ConversationRetryV1ConversationsCurrentTurnsTurnIdRetryPostResponses];
+export type ConversationRetryV1ConversationsConversationIdTurnsTurnIdRetryPostResponse = ConversationRetryV1ConversationsConversationIdTurnsTurnIdRetryPostResponses[keyof ConversationRetryV1ConversationsConversationIdTurnsTurnIdRetryPostResponses];
 
 export type DesktopCapabilityPresenceV1DesktopCapabilitiesGetData = {
     body?: never;

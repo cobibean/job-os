@@ -10,6 +10,7 @@ class AgentContext:
     turn_id: str
     selected_job_id: str | None
     workspace: dict[str, object]
+    conversation_id: str
     selected_job: dict[str, str] | None = None
 
 
@@ -45,6 +46,17 @@ class AgentGateway(Protocol):
     async def recover_active_turn(self, stored_session_id: str, turn_id: str) -> None: ...
 
     async def close(self) -> None: ...
+
+
+class AgentGatewayFactory(Protocol):
+    """Creates one isolated gateway connection per active JobOS conversation."""
+
+    def create(self, conversation_id: str) -> AgentGateway: ...
+
+
+class OfflineAgentGatewayFactory:
+    def create(self, conversation_id: str) -> AgentGateway:
+        return OfflineAgentGateway()
 
 
 class OfflineAgentGateway:

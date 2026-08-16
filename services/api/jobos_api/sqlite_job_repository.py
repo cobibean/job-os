@@ -53,9 +53,7 @@ ALLOWED_TRANSITIONS: dict[str, frozenset[str]] = {
     "scored": frozenset(
         {"reviewed", "shortlisted", "apply_now", "maybe", "stretch", "skipped", "archived"}
     ),
-    "reviewed": frozenset(
-        {"shortlisted", "apply_now", "maybe", "stretch", "skipped", "archived"}
-    ),
+    "reviewed": frozenset({"shortlisted", "apply_now", "maybe", "stretch", "skipped", "archived"}),
     "shortlisted": frozenset({"apply_now", "maybe", "stretch", "applied"}),
     "apply_now": frozenset({"applied", "interviewing", "closed"}),
     "maybe": frozenset({"reviewed", "apply_now", "skipped", "archived"}),
@@ -184,16 +182,12 @@ class SQLiteJobRepository:
                     str(row["application_url"]) if row["application_url"] is not None else None
                 ),
                 full_listing_text=(
-                    str(row["full_listing_text"])
-                    if row["full_listing_text"] is not None
-                    else None
+                    str(row["full_listing_text"]) if row["full_listing_text"] is not None else None
                 ),
                 analysis_text=(
                     str(row["analysis_text"]) if row["analysis_text"] is not None else None
                 ),
-                listing_completeness=normalize_listing_completeness(
-                    row["listing_completeness"]
-                ),
+                listing_completeness=normalize_listing_completeness(row["listing_completeness"]),
                 listing_source_url=(
                     str(row["listing_source_url"])
                     if row["listing_source_url"] is not None
@@ -262,16 +256,12 @@ class SQLiteJobRepository:
         source_url = command.listing_source_url or canonical_url
         _validate_http_url("listing_source_url", source_url)
         captured_at = _as_utc(command.listing_captured_at or command.observed_at)
-        verified_at = (
-            _as_utc(command.listing_verified_at) if command.listing_verified_at else None
-        )
+        verified_at = _as_utc(command.listing_verified_at) if command.listing_verified_at else None
         observed_at = _as_utc(command.observed_at)
-        capture_method = _optional_text(
-            "listing_capture_method", command.listing_capture_method
+        capture_method = _optional_text("listing_capture_method", command.listing_capture_method)
+        listing_digest = (
+            command.listing_sha256 or hashlib.sha256(full_listing.encode("utf-8")).hexdigest()
         )
-        listing_digest = command.listing_sha256 or hashlib.sha256(
-            full_listing.encode("utf-8")
-        ).hexdigest()
         if len(listing_digest) != 64 or any(
             character not in "0123456789abcdefABCDEF" for character in listing_digest
         ):
@@ -341,12 +331,11 @@ class SQLiteJobRepository:
                     existing_record.listing_captured_at or existing_record.last_seen_at
                 )
                 provenance_is_not_downgraded = (
-                    existing_record.listing_verified_at is None or verified_at is not None
-                ) and (
-                    not existing_record.listing_evidence or bool(command.listing_evidence)
-                ) and (
-                    existing_record.listing_capture_method is None
-                    or capture_method is not None
+                    (existing_record.listing_verified_at is None or verified_at is not None)
+                    and (not existing_record.listing_evidence or bool(command.listing_evidence))
+                    and (
+                        existing_record.listing_capture_method is None or capture_method is not None
+                    )
                 )
                 replace_listing = (
                     captured_at >= existing_captured_at
@@ -355,9 +344,7 @@ class SQLiteJobRepository:
                     and provenance_is_not_downgraded
                 )
                 merged_digest = (
-                    listing_digest.casefold()
-                    if replace_listing
-                    else existing_record.listing_sha256
+                    listing_digest.casefold() if replace_listing else existing_record.listing_sha256
                 )
                 merged_evidence_json = (
                     evidence_json
@@ -386,11 +373,7 @@ class SQLiteJobRepository:
                         application_url if metadata_is_fresh else existing_record.application_url,
                         full_listing if replace_listing else existing_record.full_listing_text,
                         analysis if replace_listing else existing_record.analysis_text,
-                        (
-                            completeness
-                            if replace_listing
-                            else existing_record.listing_completeness
-                        ),
+                        (completeness if replace_listing else existing_record.listing_completeness),
                         source_url if replace_listing else existing_record.listing_source_url,
                         (
                             captured_at.isoformat()
@@ -601,15 +584,11 @@ class SQLiteJobRepository:
                     occurred_at=datetime.fromisoformat(str(row["occurred_at"])),
                     reason=str(row["reason"]) if row["reason"] is not None else None,
                     source=str(row["source"]) if row["source"] is not None else None,
-                    provenance=(
-                        str(row["provenance"]) if row["provenance"] is not None else None
-                    ),
+                    provenance=(str(row["provenance"]) if row["provenance"] is not None else None),
                     from_sha256=(
                         str(row["from_sha256"]) if row["from_sha256"] is not None else None
                     ),
-                    to_sha256=(
-                        str(row["to_sha256"]) if row["to_sha256"] is not None else None
-                    ),
+                    to_sha256=(str(row["to_sha256"]) if row["to_sha256"] is not None else None),
                 )
                 for row in rows
             )

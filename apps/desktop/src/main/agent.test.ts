@@ -2,186 +2,249 @@
 
 import { expect, test, vi } from 'vitest'
 
-import type { ConversationEvent } from '../shared/contracts.js'
-import {
-  AgentEventDecoder,
-  createMainAgentClient,
-  startAgentEventStream
-} from './agent.js'
+import type { AgentSessionStreamUpdate } from '../shared/contracts.js'
+import { AgentConversationRegistry, AgentEventDecoder, createMainAgentClient, createScopedMainAgentClient, startAgentEventStream } from './agent.js'
 
 const event = (eventId: number, overrides: Record<string, unknown> = {}) => ({
-  event_id: eventId,
-  turn_id: 'turn-1',
-  type: 'activity',
-  state: 'working',
-  summary: `Action ${eventId}`,
-  detail: { activity_id: `tool-${eventId}`, phase: 'start' },
-  occurred_at: '2026-07-20T10:00:00Z',
-  ...overrides
+  event_id: eventId, turn_id: 'turn_1', type: 'activity', state: 'working', summary: `Action ${eventId}`,
+  detail: { activity_id: `tool-${eventId}`, phase: 'start' }, occurred_at: '2026-08-16T10:00:00Z', ...overrides
+})
+const envelope = (conversationId: string, eventId: number, overrides: Record<string, unknown> = {}) => ({
+  conversation_id: conversationId, recovery_state: 'ready', event: event(eventId, overrides)
+})
+const apiSnapshot = (conversationId: string, position: number) => ({
+  conversation_id: conversationId, position, title: `Session ${position}`, created_at: '2026-08-16T09:00:00Z',
+  entries: [], active_turn: null, connection: { state: 'online' }, recovery_state: 'ready', latest_event_id: 0
 })
 
-function streamResponse(chunks: string[], status = 200): Response {
+function streamResponse(chunks: string[]): Response {
   const encoder = new TextEncoder()
-  return new Response(new ReadableStream({
-    start(controller) {
-      for (const chunk of chunks) controller.enqueue(encoder.encode(chunk))
-      controller.close()
-    }
-  }), { status, headers: { 'content-type': 'text/event-stream' } })
+  return new Response(new ReadableStream({ start(controller) { for (const chunk of chunks) controller.enqueue(encoder.encode(chunk)); controller.close() } }), {
+    status: 200, headers: { 'content-type': 'text/event-stream' }
+  })
 }
 
-test('the conversation decoder survives split CRLF chunks and ignores malformed frames', () => {
+test('the decoder validates scoped envelopes, survives split CRLF, and strips private routing fields', () => {
   const decoder = new AgentEventDecoder()
-  const first = decoder.push('retry: 2000\r\nid: 7\r\nevent: conversation\r\ndata: {"event_id":7,"turn_id":"turn-1","type":"assistant_message",')
-  const second = decoder.push('"state":"working","summary":"Hel","detail":{},"occurred_at":"2026-07-20T10:00:00Z"}\r\n\r\ndata: {"event_id":"bad"}\r\n\r\n')
-
-  expect(first).toEqual([])
-  expect(second).toEqual([expect.objectContaining({
-    eventId: 7,
-    turnId: 'turn-1',
-    type: 'assistant_message',
-    state: 'working',
-    summary: 'Hel'
-  })])
-})
-
-test('normalization strips Hermes routing, credentials, and unknown raw frame fields', () => {
-  const decoder = new AgentEventDecoder()
-  const payload = event(8, { detail: {
-    activity_id: 'tool-8', operation: 'Read project file', redacted: true,
-    session_id: 'live-hermes-session', authorization: 'Bearer secret', raw_frame: { token: 'secret' }
+  const payload = envelope('conv_one', 7, { detail: {
+    activity_id: 'tool-7', operation: 'Read file', session_id: 'hermes-private', authorization: 'Bearer secret'
   } })
-  const [normalized] = decoder.push(`data: ${JSON.stringify(payload)}\n\n`)
-
-  expect(normalized?.detail).toEqual({ activity_id: 'tool-8', operation: 'Read project file', redacted: true })
-  expect(JSON.stringify(normalized)).not.toMatch(/session_id|authorization|raw_frame|Bearer secret/)
+  const serialized = JSON.stringify(payload)
+  expect(decoder.push(`id: 7\r\ndata: ${serialized.slice(0, 50)}`)).toEqual([])
+  const [update] = decoder.push(`${serialized.slice(50)}\r\n\r\ndata: {"conversation_id":"../bad","event":{}}\r\n\r\n`)
+  expect(update).toEqual(expect.objectContaining({ kind: 'event', conversationId: 'conv_one', event: expect.objectContaining({ eventId: 7 }) }))
+  expect(update?.event.detail).toEqual({ activity_id: 'tool-7', operation: 'Read file' })
+  expect(update?.recoveryState).toBe('ready')
+  expect(JSON.stringify(update)).not.toMatch(/hermes-private|Bearer secret|authorization|session_id/)
 })
 
-test('normalization preserves bounded completion transcripts but not oversized deltas', () => {
+test('the decoder carries quarantine and ready recovery transitions explicitly', () => {
   const decoder = new AgentEventDecoder()
-  const text = 'x'.repeat(100_050)
-  const complete = event(9, {
-    type: 'assistant_message',
-    state: 'completed',
-    summary: text,
-    detail: { type: 'message.complete', text }
-  })
-  const delta = event(10, {
-    type: 'assistant_message',
-    state: 'working',
-    summary: text,
-    detail: { type: 'message.delta', text }
-  })
-
-  const [normalizedComplete, normalizedDelta] = decoder.push(
-    `data: ${JSON.stringify(complete)}\n\ndata: ${JSON.stringify(delta)}\n\n`
-  )
-
-  expect(normalizedComplete?.detail.text).toBe(text.slice(0, 100_001))
-  expect(normalizedDelta?.detail.text).toBe(text.slice(0, 2_000))
-  expect(normalizedComplete?.summary).toBe(text.slice(0, 2_000))
+  const quarantined = { ...envelope('conv_one', 8), recovery_state: 'quarantined' }
+  const ready = { ...envelope('conv_one', 9), recovery_state: 'ready' }
+  expect(decoder.push(`data: ${JSON.stringify(quarantined)}\n\ndata: ${JSON.stringify(ready)}\n\n`))
+    .toEqual([
+      expect.objectContaining({ conversationId: 'conv_one', recoveryState: 'quarantined' }),
+      expect.objectContaining({ conversationId: 'conv_one', recoveryState: 'ready' })
+    ])
 })
 
-test('the resumable stream starts at the snapshot cursor, reconnects at the latest cursor, and dedupes overlap', async () => {
+test('one shared stream preserves interleaved ownership and reconnects from the global cursor without duplicates', async () => {
   const urls: string[] = []
   const fetcher = vi.fn(async (input: string | URL | Request) => {
-    const url = String(input)
-    urls.push(url)
-    if (urls.length === 1) {
-      return streamResponse([
-        `id: 10\ndata: ${JSON.stringify(event(10))}\n\n`,
-        `id: 11\ndata: ${JSON.stringify(event(11))}\n\n`
-      ])
-    }
-    return streamResponse([
-      `id: 11\ndata: ${JSON.stringify(event(11))}\n\n`,
-      `id: 12\ndata: ${JSON.stringify(event(12, { state: 'completed' }))}\n\n`
-    ])
+    urls.push(String(input))
+    return urls.length === 1
+      ? streamResponse([
+          `id: 10\ndata: ${JSON.stringify(envelope('conv_one', 10))}\n\n`,
+          `id: 11\ndata: ${JSON.stringify(envelope('conv_two', 11))}\n\n`
+        ])
+      : streamResponse([
+          `id: 11\ndata: ${JSON.stringify(envelope('conv_two', 11))}\n\n`,
+          `id: 12\ndata: ${JSON.stringify(envelope('conv_one', 12, { state: 'completed' }))}\n\n`
+        ])
   })
-  const delivered: ConversationEvent[] = []
-  const states: string[] = []
+  const delivered: AgentSessionStreamUpdate[] = []
   let stop: () => void = () => undefined
-  stop = startAgentEventStream(
-    {
-      isDestroyed: () => delivered.length === 2,
-      send: (_channel, update) => {
-        if (update.kind === 'event') delivered.push(update.event)
-        else states.push(update.state)
-        if (delivered.length === 2) stop()
-      }
-    },
-    { baseUrl: 'http://jobos.test', deviceToken: 'fake-device-token' },
-    { after: 10, fetch: fetcher, wait: async () => undefined }
-  )
-
-  await vi.waitFor(() => expect(delivered.map(item => item.eventId)).toEqual([11, 12]))
+  stop = startAgentEventStream({
+    isDestroyed: () => delivered.filter(update => update.kind === 'event').length === 2,
+    send: (_channel, update) => {
+      if (update.kind === 'event') delivered.push(update)
+      if (delivered.length === 2) stop()
+    }
+  }, { baseUrl: 'http://jobos.test', deviceToken: 'secret' }, {
+    after: 10, conversationIds: ['conv_one', 'conv_two'], fetch: fetcher, wait: async () => undefined
+  })
+  await vi.waitFor(() => expect(delivered.map(update => update.kind === 'event' && [update.conversationId, update.event.eventId])).toEqual([
+    ['conv_two', 11], ['conv_one', 12]
+  ]))
+  expect(new URL(urls[0]!).pathname).toBe('/v1/conversations/events/stream')
   expect(new URL(urls[0]!).searchParams.get('after')).toBe('10')
   expect(new URL(urls[1]!).searchParams.get('after')).toBe('11')
-  expect(states).toContain('reconnecting')
 })
 
-test('startup replay from zero cannot skip an event between independent snapshots', async () => {
-  const delivered: ConversationEvent[] = []
+test('transport connection updates always carry each known conversation id', async () => {
+  const updates: AgentSessionStreamUpdate[] = []
+  const stop = startAgentEventStream({ isDestroyed: () => updates.length >= 2, send: (_channel, update) => updates.push(update) },
+    { baseUrl: 'http://jobos.test', deviceToken: 'secret' }, {
+      conversationIds: ['conv_one', 'conv_two'], fetch: vi.fn().mockRejectedValue(new Error('offline')), wait: async () => undefined
+    })
+  await vi.waitFor(() => expect(updates).toEqual(expect.arrayContaining([
+    { kind: 'connection', conversationId: 'conv_one', state: 'reconnecting' },
+    { kind: 'connection', conversationId: 'conv_two', state: 'reconnecting' }
+  ])))
+  stop()
+})
+
+test('a syntactically valid but unknown conversation envelope is not delivered', async () => {
+  const updates: AgentSessionStreamUpdate[] = []
   let stop: () => void = () => undefined
-  const fetcher = vi.fn(async (input: string | URL | Request) => {
-    expect(new URL(String(input)).searchParams.get('after')).toBe('0')
-    return streamResponse([`id: 6\ndata: ${JSON.stringify(event(6))}\n\n`])
+  stop = startAgentEventStream({
+    isDestroyed: () => updates.some(update => update.kind === 'event'),
+    send: (_channel, update) => {
+      if (update.kind === 'event') updates.push(update)
+      if (updates.length) stop()
+    }
+  }, { baseUrl: 'http://jobos.test', deviceToken: 'secret' }, {
+    conversationIds: ['conv_one'], wait: async () => undefined,
+    fetch: vi.fn(async () => streamResponse([
+      `id: 1\ndata: ${JSON.stringify(envelope('conv_unknown', 1))}\n\n`,
+      `id: 2\ndata: ${JSON.stringify(envelope('conv_one', 2))}\n\n`
+    ]))
   })
-  stop = startAgentEventStream(
-    {
-      isDestroyed: () => delivered.length === 1,
-      send: (_channel, update) => {
-        if (update.kind === 'event') delivered.push(update.event)
-        if (delivered.length === 1) stop()
-      }
-    },
-    { baseUrl: 'http://jobos.test', deviceToken: 'fake-device-token' },
-    { fetch: fetcher, wait: async () => undefined }
-  )
-
-  await vi.waitFor(() => expect(delivered.map(item => item.eventId)).toEqual([6]))
+  await vi.waitFor(() => expect(updates).toEqual([
+    expect.objectContaining({ kind: 'event', conversationId: 'conv_one', event: expect.objectContaining({ eventId: 2 }) })
+  ]))
 })
 
-test('the typed client maps generated contracts without returning credentials or raw API fields', async () => {
+test('an event emitted before create returns is buffered and delivered when the registry commits the new id', async () => {
+  const registry = new AgentConversationRegistry()
+  registry.add('conv_one')
+  const delivered: AgentSessionStreamUpdate[] = []
+  let releaseCreate!: () => void
+  const createBarrier = new Promise<void>(resolve => { releaseCreate = resolve })
+  const fetcher = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+    const request = input instanceof Request ? input : new Request(input, init)
+    if (request.method === 'POST') {
+      await createBarrier
+      return Response.json(apiSnapshot('conv_two', 2), { status: 201 })
+    }
+    return streamResponse([`data: ${JSON.stringify(envelope('conv_two', 1, { state: 'completed' }))}\n\n`])
+  })
+  const client = createScopedMainAgentClient({ baseUrl: 'http://jobos.test', deviceToken: 'secret', fetch: fetcher }, registry)
+  const stop = startAgentEventStream({
+    isDestroyed: () => false,
+    send: (_channel, update) => { if (update.kind === 'event') delivered.push(update) }
+  }, { baseUrl: 'http://jobos.test', deviceToken: 'secret' }, {
+    knownConversationIds: registry, fetch: fetcher, wait: () => new Promise(() => undefined)
+  })
+
+  const creating = client.create()
+  await vi.waitFor(() => expect(fetcher).toHaveBeenCalledTimes(2))
+  expect(delivered).toEqual([])
+  releaseCreate()
+  await expect(creating).resolves.toEqual(expect.objectContaining({ conversationId: 'conv_two' }))
+  await vi.waitFor(() => expect(delivered).toEqual([
+    expect.objectContaining({ conversationId: 'conv_two', event: expect.objectContaining({ eventId: 1 }) })
+  ]))
+  stop()
+})
+
+test('typed scoped routes validate returned identity and expose no transport secrets', async () => {
   const fetcher = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
     const request = input instanceof Request ? input : new Request(input, init)
     const url = new URL(request.url)
-    expect(request.headers.get('authorization')).toBe('Bearer fake-device-token')
-    if (url.pathname.endsWith('/messages')) {
-      return new Response(JSON.stringify({ turn_id: 'turn-2', message_id: 'message-2', status: 'running' }), { status: 201, headers: { 'content-type': 'application/json' } })
-    }
-    if (url.pathname.endsWith('/reset')) {
-      return new Response(JSON.stringify({
-        conversation_id: 'conv-fresh', entries: [], active_turn: null,
-        connection: { state: 'online' }, latest_event_id: 0
-      }), { status: 200, headers: { 'content-type': 'application/json' } })
-    }
-    return new Response(JSON.stringify({
-      conversation_id: 'conv-current',
-      entries: [event(4, { type: 'user_message', text: 'Hello', message_id: 'message-1' })],
-      active_turn: { turn_id: 'turn-1', status: 'running', cancel_requested: false },
-      connection: { state: 'online' },
-      latest_event_id: 4
-    }), { status: 200, headers: { 'content-type': 'application/json' } })
+    expect(request.headers.get('authorization')).toBe('Bearer secret')
+    if (url.pathname === '/v1/conversations' && request.method === 'GET') return Response.json({ conversations: [apiSnapshot('conv_one', 1)] })
+    if (url.pathname === '/v1/conversations' && request.method === 'POST') return Response.json(apiSnapshot('conv_two', 2), { status: 201 })
+    if (url.pathname.endsWith('/messages')) return Response.json({ turn_id: 'turn_2', status: 'running' }, { status: 201 })
+    if (request.method === 'DELETE') return new Response(null, { status: 204 })
+    return Response.json(apiSnapshot('conv_one', 1))
   })
+  const client = createMainAgentClient({ baseUrl: 'http://jobos.test', deviceToken: 'secret', fetch: fetcher })
+  expect(await client.list()).toEqual([expect.objectContaining({ conversationId: 'conv_one', position: 1 })])
+  expect(await client.create()).toEqual(expect.objectContaining({ conversationId: 'conv_two' }))
+  expect(await client.get('conv_one')).toEqual(expect.objectContaining({ conversationId: 'conv_one' }))
+  expect(await client.send('conv_one', 'Hello', 'idempotency-01')).toEqual({ turnId: 'turn_2', status: 'running' })
+  await expect(client.archive('conv_one')).resolves.toBeUndefined()
+  expect(JSON.stringify(await client.list())).not.toContain('secret')
+})
+
+test('a mismatched snapshot identity is rejected', async () => {
   const client = createMainAgentClient({
-    baseUrl: 'http://jobos.test',
-    deviceToken: 'fake-device-token',
-    fetch: fetcher
+    baseUrl: 'http://jobos.test', deviceToken: 'secret', fetch: vi.fn(async () => Response.json(apiSnapshot('conv_other', 1)))
   })
+  await expect(client.get('conv_one')).rejects.toThrow('Conversation identity mismatch')
+})
 
-  const snapshot = await client.get()
-  const sent = await client.send('Hello', 'idempotency-0001')
-  const reset = await client.reset()
-
-  expect(snapshot).toMatchObject({
-    conversationId: 'conv-current',
-    latestEventId: 4,
-    activeTurn: { turnId: 'turn-1', status: 'running' },
-    entries: [{ eventId: 4, text: 'Hello' }]
+test('a stale list and create are barrier-serialized so the created conversation remains allowed', async () => {
+  let releaseList!: () => void
+  let listStarted!: () => void
+  const started = new Promise<void>(resolve => { listStarted = resolve })
+  const barrier = new Promise<void>(resolve => { releaseList = resolve })
+  const fetcher = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+    const request = input instanceof Request ? input : new Request(input, init)
+    if (request.method === 'GET') {
+      listStarted()
+      await barrier
+      return Response.json({ conversations: [apiSnapshot('conv_one', 1)] })
+    }
+    return Response.json(apiSnapshot('conv_two', 2), { status: 201 })
   })
-  expect(sent).toEqual({ turnId: 'turn-2', messageId: 'message-2', status: 'running' })
-  expect(reset).toMatchObject({ conversationId: 'conv-fresh', entries: [], activeTurn: null })
-  expect(JSON.stringify({ snapshot, sent, reset })).not.toContain('fake-device-token')
-  expect(JSON.stringify({ snapshot, sent, reset })).not.toContain('event_id')
+  const registry = new AgentConversationRegistry()
+  const client = createScopedMainAgentClient({ baseUrl: 'http://jobos.test', deviceToken: 'secret', fetch: fetcher }, registry)
+  const list = client.list()
+  await started
+  const create = client.create()
+  expect(fetcher).toHaveBeenCalledTimes(1)
+  releaseList()
+  await Promise.all([list, create])
+  expect([...registry.values()]).toEqual(['conv_one', 'conv_two'])
+})
+
+test('a stale list and archive are barrier-serialized so an archived conversation is not re-allowed', async () => {
+  let releaseList!: () => void
+  let listStarted!: () => void
+  const started = new Promise<void>(resolve => { listStarted = resolve })
+  const barrier = new Promise<void>(resolve => { releaseList = resolve })
+  const fetcher = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+    const request = input instanceof Request ? input : new Request(input, init)
+    if (request.method === 'GET') {
+      listStarted()
+      await barrier
+      return Response.json({ conversations: [apiSnapshot('conv_one', 1), apiSnapshot('conv_two', 2)] })
+    }
+    return new Response(null, { status: 204 })
+  })
+  const registry = new AgentConversationRegistry()
+  const client = createScopedMainAgentClient({ baseUrl: 'http://jobos.test', deviceToken: 'secret', fetch: fetcher }, registry)
+  const list = client.list()
+  await started
+  const archive = client.archive('conv_two')
+  expect(fetcher).toHaveBeenCalledTimes(1)
+  releaseList()
+  await Promise.all([list, archive])
+  expect([...registry.values()]).toEqual(['conv_one'])
+})
+
+test('the SSE transport starts and retries independently while initial registry hydration is unavailable', async () => {
+  const registry = new AgentConversationRegistry()
+  const delivered: AgentSessionStreamUpdate[] = []
+  const fetcher = vi.fn()
+    .mockRejectedValueOnce(new Error('initial list and stream unavailable'))
+    .mockImplementationOnce(async () => {
+      registry.add('conv_one')
+      return streamResponse([`data: ${JSON.stringify(envelope('conv_one', 1))}\n\n`])
+    })
+  let stop: () => void = () => undefined
+  stop = startAgentEventStream({
+    isDestroyed: () => delivered.length > 0,
+    send: (_channel, update) => {
+      if (update.kind === 'event') delivered.push(update)
+      if (delivered.length) stop()
+    }
+  }, { baseUrl: 'http://jobos.test', deviceToken: 'secret' }, {
+    knownConversationIds: registry, fetch: fetcher, wait: async () => undefined
+  })
+  await vi.waitFor(() => expect(delivered).toHaveLength(1))
+  expect(fetcher).toHaveBeenCalledTimes(2)
 })

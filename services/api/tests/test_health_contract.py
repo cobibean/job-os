@@ -54,7 +54,7 @@ def test_health_reports_truthful_public_capability_states(tmp_path):
         "status": "ready",
         "service": "jobos-api",
         "version": "0.1.0",
-        "state_schema": 15,
+        "state_schema": 18,
         "transport": "local-loopback",
         "agent": "not-configured",
         "artifact_storage": "available",
@@ -203,12 +203,13 @@ def test_version_and_openapi_describe_the_shared_workspace_contract(tmp_path):
         "/v1/workspace/jobs/sort",
         "/v1/events",
         "/v1/events/stream",
+        "/v1/conversations",
         "/v1/conversations/current",
-        "/v1/conversations/current/reset",
-        "/v1/conversations/current/messages",
-        "/v1/conversations/current/turns/{turn_id}/cancel",
-        "/v1/conversations/current/turns/{turn_id}/retry",
-        "/v1/conversations/current/events/stream",
+        "/v1/conversations/events/stream",
+        "/v1/conversations/{conversation_id}",
+        "/v1/conversations/{conversation_id}/messages",
+        "/v1/conversations/{conversation_id}/turns/{turn_id}/cancel",
+        "/v1/conversations/{conversation_id}/turns/{turn_id}/retry",
         "/v1/desktop/capabilities",
         "/v1/browser/commands",
         "/v1/jobs/{job_id}/artifacts/render",
@@ -257,6 +258,15 @@ def test_version_and_openapi_describe_the_shared_workspace_contract(tmp_path):
     assert "HTTPValidationError" not in schemas
     assert "ValidationError" not in schemas
     paths = openapi.json()["paths"]
+    assert set(paths["/v1/conversations/current"]) == {"get"}
+    assert paths["/v1/conversations/current"]["get"]["deprecated"] is True
+    assert not {
+        "/v1/conversations/current/reset",
+        "/v1/conversations/current/messages",
+        "/v1/conversations/current/turns/{turn_id}/cancel",
+        "/v1/conversations/current/turns/{turn_id}/retry",
+        "/v1/conversations/current/events/stream",
+    } & paths.keys()
     assert set(paths["/v1/health"]["get"]["responses"]) == {"200", "500", "503"}
     assert set(paths["/v1/version"]["get"]["responses"]) == {"200", "500"}
     assert set(paths["/v1/device-session"]["get"]["responses"]) == {

@@ -482,6 +482,7 @@ class JobOsMcpClient:
 
     async def inspect_document_file(
         self,
+        conversation_id: str,
         job_id: str,
         document_key: str,
         *,
@@ -489,6 +490,7 @@ class JobOsMcpClient:
         timeout_ms: int = 10_000,
     ) -> dict[str, Any]:
         return await self.browser_command(
+            conversation_id,
             "document.inspect",
             {
                 "job_id": self._job_id(job_id),
@@ -500,6 +502,7 @@ class JobOsMcpClient:
 
     async def apply_document_file_operations(
         self,
+        conversation_id: str,
         job_id: str,
         document_key: str,
         expected_sha256: str,
@@ -515,6 +518,7 @@ class JobOsMcpClient:
         ):
             raise ValueError("Invalid DOCX operation list")
         return await self.browser_command(
+            conversation_id,
             "document.apply_operations",
             {
                 "job_id": self._job_id(job_id),
@@ -528,6 +532,7 @@ class JobOsMcpClient:
 
     async def browser_command(
         self,
+        conversation_id: str,
         command: str,
         arguments: dict[str, Any],
         *,
@@ -541,10 +546,19 @@ class JobOsMcpClient:
                 "command": command,
                 "arguments": arguments,
                 "origin": "mcp",
+                "conversation_id": self._conversation_id(conversation_id),
                 "idempotency_key": self._key(idempotency_key),
                 "timeout_ms": timeout_ms,
             },
         )
+
+    @staticmethod
+    def _conversation_id(value: str) -> str:
+        if not isinstance(value, str) or not re.fullmatch(
+            r"conv_[A-Za-z0-9_-]{1,128}", value
+        ):
+            raise ValueError("Invalid conversation ID")
+        return value
 
     async def report_activity(
         self,

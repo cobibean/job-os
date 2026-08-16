@@ -30,6 +30,7 @@ STATUS_GROUPS = {
 STATUS_GROUP_ORDER = ("Inbox", "Considering", "Applied", "Interviewing", "Closed", "Inactive")
 SortMode = Literal["manual", "recent", "alphabetical", "status"]
 
+
 class JobListItem(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -84,9 +85,7 @@ class BrowserJobCreateRequest(BaseModel):
     listing_sha256: str | None = Field(default=None, pattern=r"^[0-9a-fA-F]{64}$")
     listing_evidence: dict[str, object] = Field(default_factory=dict)
     origin: Literal["user", "mcp"] = "user"
-    idempotency_key: str = Field(
-        default_factory=lambda: str(uuid4()), min_length=1, max_length=128
-    )
+    idempotency_key: str = Field(default_factory=lambda: str(uuid4()), min_length=1, max_length=128)
 
     @field_validator(
         "company_name",
@@ -142,9 +141,7 @@ class DemoRemovalRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     origin: Literal["user", "mcp"]
-    idempotency_key: str = Field(
-        default_factory=lambda: str(uuid4()), min_length=1, max_length=128
-    )
+    idempotency_key: str = Field(default_factory=lambda: str(uuid4()), min_length=1, max_length=128)
 
 
 class WorkspaceJobsResponse(BaseModel):

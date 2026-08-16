@@ -1,11 +1,11 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, expect, test, vi } from 'vitest'
 
-import type { AgentStreamUpdate, JobListItem } from '../shared/contracts'
+import type { AgentSessionStreamUpdate, JobListItem } from '../shared/contracts'
 import { App } from './App'
 import { isExpectedSaveNavigation } from './components/CenterWorkspace'
 
-afterEach(cleanup)
+afterEach(() => { cleanup(); window.localStorage.clear() })
 
 test('missing configuration opens setup without starting workbench services', async () => {
   const getConnectivity = vi.fn()
@@ -98,7 +98,7 @@ test('later-phase controls stay disabled while the browser surface is recoverabl
   render(<App />)
 
   for (const name of [
-    'Start new agent session',
+    'New agent session',
     'Send message'
   ]) {
     expect((screen.getByRole('button', { name }) as HTMLButtonElement).disabled).toBe(true)
@@ -109,6 +109,102 @@ test('later-phase controls stay disabled while the browser surface is recoverabl
   expect(screen.getByText('Browser available in the desktop app')).not.toBeNull()
   expect((screen.getByRole('button', { name: 'Research' }) as HTMLButtonElement).disabled).toBe(false)
   expect((screen.getByRole('button', { name: 'Reset layout' }) as HTMLButtonElement).disabled).toBe(false)
+})
+
+test('exact Command shortcuts create and select sessions from the composer without handling missing positions', async () => {
+  let created = 1
+  const create = vi.fn(async () => {
+    created += 1
+    return {
+      conversationId: `conv-${created}`, position: created, title: `Session ${created}`, createdAt: '',
+      entries: [], activeTurn: null, connection: 'online' as const, latestEventId: 0
+    }
+  })
+  Object.defineProperty(window, 'jobos', { configurable: true, value: { agent: {
+    list: vi.fn().mockResolvedValue([{ conversationId: 'conv-1', position: 1, title: 'Session 1', createdAt: '', activeTurn: null, connection: 'online', latestEventId: 0 }]),
+    get: vi.fn().mockResolvedValue({ conversationId: 'conv-1', position: 1, title: 'Session 1', createdAt: '', entries: [], activeTurn: null, connection: 'online', latestEventId: 0 }),
+    create, archive: vi.fn(), send: vi.fn(), cancel: vi.fn(), retry: vi.fn(), subscribe: vi.fn(() => () => undefined)
+  } } })
+  render(<App />)
+  const composer = await screen.findByRole('textbox', { name: 'Message the agent' })
+  fireEvent.change(composer, { target: { value: 'keep this draft' } })
+  const createEvent = new KeyboardEvent('keydown', { bubbles: true, cancelable: true, key: 'n', metaKey: true })
+  composer.dispatchEvent(createEvent)
+  expect(createEvent.defaultPrevented).toBe(true)
+  expect(await screen.findByRole('tab', { name: 'Session 2, Idle' })).not.toBeNull()
+  expect(create).toHaveBeenCalledOnce()
+
+  const missing = new KeyboardEvent('keydown', { bubbles: true, cancelable: true, key: '5', metaKey: true })
+  composer.dispatchEvent(missing)
+  expect(missing.defaultPrevented).toBe(false)
+  const select = new KeyboardEvent('keydown', { bubbles: true, cancelable: true, key: '1', metaKey: true })
+  act(() => { composer.dispatchEvent(select) })
+  expect(select.defaultPrevented).toBe(true)
+  expect(screen.getByRole('tab', { name: 'Session 1, Idle' }).getAttribute('aria-selected')).toBe('true')
+  expect((screen.getByRole('textbox', { name: 'Message the agent' }) as HTMLTextAreaElement).value).toBe('keep this draft')
+  expect(create).toHaveBeenCalledOnce()
+})
+
+test('Command 1 through Command 5 map to visible positions and Command N announces the five-session cap', async () => {
+  const summaries = Array.from({ length: 5 }, (_, index) => ({
+    conversationId: `conv-${index + 1}`, position: index + 1, title: `Session ${index + 1}`, createdAt: '',
+    activeTurn: null, connection: 'online' as const, latestEventId: 0
+  }))
+  const create = vi.fn()
+  Object.defineProperty(window, 'jobos', { configurable: true, value: { agent: {
+    list: vi.fn().mockResolvedValue(summaries),
+    get: vi.fn((id: string) => Promise.resolve({ ...summaries.find(item => item.conversationId === id)!, entries: [] })),
+    create, archive: vi.fn(), send: vi.fn(), cancel: vi.fn(), retry: vi.fn(), subscribe: vi.fn(() => () => undefined)
+  } } })
+  render(<App />)
+  const composer = await screen.findByRole('textbox', { name: 'Message the agent' })
+  await screen.findByRole('tab', { name: 'Session 5, Idle' })
+  for (const key of ['1', '2', '3', '4', '5']) {
+    const shortcut = new KeyboardEvent('keydown', { bubbles: true, cancelable: true, key, metaKey: true })
+    act(() => { composer.dispatchEvent(shortcut) })
+    expect(shortcut.defaultPrevented).toBe(true)
+    expect(screen.getByRole('tab', { name: `Session ${key}, Idle` }).getAttribute('aria-selected')).toBe('true')
+  }
+  const capped = new KeyboardEvent('keydown', { bubbles: true, cancelable: true, key: 'n', metaKey: true })
+  act(() => { composer.dispatchEvent(capped) })
+  expect(capped.defaultPrevented).toBe(true)
+  expect(await screen.findByText('Maximum 5 sessions.')).not.toBeNull()
+  expect(create).not.toHaveBeenCalled()
+})
+
+test('Command session shortcuts are suppressed while Settings or any modal is open', async () => {
+  const summaries = [1, 2].map(position => ({
+    conversationId: `conv-${position}`, position, title: `Session ${position}`, createdAt: '',
+    activeTurn: null, connection: 'online' as const, latestEventId: 0
+  }))
+  const create = vi.fn()
+  Object.defineProperty(window, 'jobos', { configurable: true, value: { agent: {
+    list: vi.fn().mockResolvedValue(summaries),
+    get: vi.fn((id: string) => Promise.resolve({ ...summaries.find(item => item.conversationId === id)!, entries: [] })),
+    create, archive: vi.fn(), send: vi.fn(), cancel: vi.fn(), retry: vi.fn(), subscribe: vi.fn(() => () => undefined)
+  } } })
+  render(<App />)
+  fireEvent.click(await screen.findByRole('tab', { name: 'Session 2, Idle' }))
+  fireEvent.click(screen.getByRole('button', { name: 'Open settings' }))
+  const settings = await screen.findByRole('dialog', { name: 'Settings' })
+
+  for (const key of ['n', '1']) {
+    const shortcut = new KeyboardEvent('keydown', { bubbles: true, cancelable: true, key, metaKey: true })
+    settings.dispatchEvent(shortcut)
+    expect(shortcut.defaultPrevented).toBe(true)
+  }
+  expect(create).not.toHaveBeenCalled()
+  expect(screen.getByRole('tab', { name: 'Session 2, Idle', hidden: true }).getAttribute('aria-selected')).toBe('true')
+
+  fireEvent.click(screen.getByRole('button', { name: 'Close settings' }))
+  const modal = document.createElement('div')
+  modal.setAttribute('role', 'alertdialog')
+  document.body.append(modal)
+  const modalShortcut = new KeyboardEvent('keydown', { bubbles: true, cancelable: true, key: 'n', metaKey: true })
+  modal.dispatchEvent(modalShortcut)
+  expect(modalShortcut.defaultPrevented).toBe(true)
+  expect(create).not.toHaveBeenCalled()
+  modal.remove()
 })
 
 test('auth degradation is distinct from network unavailability', async () => {
@@ -218,7 +314,7 @@ test('saving dispatches job-hunter and reconciles a failure emitted before send 
   let currentTurnId = ''
   let sendCount = 0
   let browserListener: (state: typeof browserState) => void = () => undefined
-  const agentListeners: Array<(update: AgentStreamUpdate) => void> = []
+  const agentListeners: Array<(update: AgentSessionStreamUpdate) => void> = []
   const cancel = vi.fn().mockResolvedValue(undefined)
   let successfulJob: JobListItem | null = null
   const saveFromBrowser = vi.fn().mockImplementation(async () => ({
@@ -237,6 +333,23 @@ test('saving dispatches job-hunter and reconciles a failure emitted before send 
     })
     return { turnId: currentTurnId, status: saveOutcome }
   })
+  const getConversation = vi.fn().mockImplementation(async (conversationId: string) => ({
+    conversationId, position: conversationId === 'conv-2' ? 2 : 1,
+    title: conversationId === 'conv-2' ? 'Session 2' : 'Session 1', createdAt: '',
+    entries: conversationId === 'conv-1' && ['failed', 'completed', 'interrupted'].includes(saveOutcome) ? [{
+      eventId: 1,
+      turnId: currentTurnId,
+      type: saveOutcome === 'failed' ? 'error' : saveOutcome === 'interrupted' ? 'status' : 'assistant_message',
+      state: saveOutcome === 'failed' ? 'failed' : saveOutcome === 'interrupted' ? 'interrupted' : 'completed',
+      summary: saveOutcome === 'failed' ? 'Agent connection unavailable'
+        : successfulJob ? `JOBOS_SAVE_RESULT:${JSON.stringify({
+            jobId: successfulJob.jobId,
+            created: true
+          })}` : 'Could not identify a job listing',
+      detail: {}, occurredAt: ''
+    }] : [],
+    activeTurn: null, connection: 'online', latestEventId: conversationId === 'conv-1' && ['failed', 'completed', 'interrupted'].includes(saveOutcome) ? 1 : 0
+  }))
   const workspace = {
     revision: 1,
     selectedPreset: 'research' as const,
@@ -253,25 +366,15 @@ test('saving dispatches job-hunter and reconciles a failure emitted before send 
     repairedBrowser: false
   }
   Object.defineProperty(window, 'jobos', { configurable: true, value: {
-    connectivity: { get: vi.fn().mockRejectedValue(new Error('offline')) },
+    connectivity: { get: vi.fn().mockResolvedValue({ state: 'connected', apiVersion: '0.1.0', checkedAt: '', message: 'Private API authenticated' }) },
     agent: {
-      get: vi.fn().mockImplementation(async () => ({
-        conversationId: 'conv-1',
-        entries: ['failed', 'completed', 'interrupted'].includes(saveOutcome) ? [{
-          eventId: 1,
-          turnId: currentTurnId,
-          type: saveOutcome === 'failed' ? 'error' : saveOutcome === 'interrupted' ? 'status' : 'assistant_message',
-          state: saveOutcome === 'failed' ? 'failed' : saveOutcome === 'interrupted' ? 'interrupted' : 'completed',
-          summary: saveOutcome === 'failed' ? 'Agent connection unavailable'
-            : successfulJob ? `JOBOS_SAVE_RESULT:${JSON.stringify({
-                jobId: successfulJob.jobId,
-                created: true
-              })}` : 'Could not identify a job listing',
-          detail: {}, occurredAt: ''
-        }] : [],
-        activeTurn: null, connection: 'online', latestEventId: ['failed', 'completed', 'interrupted'].includes(saveOutcome) ? 1 : 0
-      })),
-      send, cancel, retry: vi.fn(), reset: vi.fn(),
+      list: vi.fn().mockResolvedValue([
+        { conversationId: 'conv-1', position: 1, title: 'Session 1', createdAt: '', activeTurn: null, connection: 'online', latestEventId: 0 },
+        { conversationId: 'conv-2', position: 2, title: 'Session 2', createdAt: '', activeTurn: null, connection: 'online', latestEventId: 0 }
+      ]),
+      create: vi.fn(), archive: vi.fn(),
+      get: getConversation,
+      send, cancel, retry: vi.fn(),
       subscribe: vi.fn(listener => { agentListeners.push(listener); return () => undefined })
     },
     jobs: {
@@ -300,8 +403,8 @@ test('saving dispatches job-hunter and reconciles a failure emitted before send 
   fireEvent.click(screen.getByRole('button', { name: 'Save this job to JobOS' }))
 
   await waitFor(() => expect(send).toHaveBeenCalledOnce())
-  expect(send.mock.calls[0]?.[0]).toContain('job-tab')
-  const savePrompt = send.mock.calls[0]?.[0] ?? ''
+  expect(send.mock.calls[0]?.[1]).toContain('job-tab')
+  const savePrompt = send.mock.calls[0]?.[1] ?? ''
   expect(savePrompt).toContain('mcp__jobos__browser_click')
   expect(savePrompt).toContain('link whose href or name matches the job slug')
   expect(savePrompt).toContain('complete job description')
@@ -321,7 +424,7 @@ test('saving dispatches job-hunter and reconciles a failure emitted before send 
   expect(savePrompt.match(/call mcp__jobos__browser_tab_associate exactly once/g)).toHaveLength(1)
   expect(savePrompt).toContain('Never call mcp__jobos__browser_navigate')
   expect(savePrompt).toContain('Do not apply or submit forms')
-  expect(send.mock.calls[0]?.[1]).toMatch(/^browser-save-/)
+  expect(send.mock.calls[0]?.[2]).toMatch(/^browser-save-/)
   expect(associate).not.toHaveBeenCalled()
   await screen.findByRole('alert')
   expect(screen.getByText('Agent connection unavailable')).not.toBeNull()
@@ -345,8 +448,8 @@ test('saving dispatches job-hunter and reconciles a failure emitted before send 
     ...browserState,
     tabs: [{ ...browserTab, url: 'https://wellfound.com/jobs/another-listing' }]
   })
-  await waitFor(() => expect(cancel).toHaveBeenCalledWith('turn-save-job-3'))
-  expect(screen.getByText('The browser listing changed before saving finished. Retry on the intended listing.')).not.toBeNull()
+  await waitFor(() => expect(cancel).toHaveBeenCalledWith('conv-1', 'turn-save-job-3'))
+  expect(await screen.findByText('The browser listing changed before saving finished. Retry on the intended listing.')).not.toBeNull()
 
   browserListener(browserState)
   await waitFor(() => expect(screen.getByRole('button', { name: 'Save this job to JobOS' }).textContent).toContain('Save job'))
@@ -354,8 +457,17 @@ test('saving dispatches job-hunter and reconciles a failure emitted before send 
   fireEvent.click(screen.getByRole('button', { name: 'Save this job to JobOS' }))
   await waitFor(() => expect(send).toHaveBeenCalledTimes(4))
   saveOutcome = 'interrupted'
+  fireEvent.click(screen.getByRole('tab', { name: 'Session 2, Idle' }))
+  const getsBeforeWrongOwner = getConversation.mock.calls.length
   act(() => {
-    agentListeners.forEach(listener => listener({ kind: 'event', event: {
+    agentListeners.forEach(listener => listener({ kind: 'event', conversationId: 'conv-2', recoveryState: 'ready', event: {
+      eventId: 2, turnId: currentTurnId, type: 'status', state: 'interrupted',
+      summary: 'Wrong owner stopped', detail: {}, occurredAt: ''
+    } }))
+  })
+  await waitFor(() => expect(getConversation).toHaveBeenCalledTimes(getsBeforeWrongOwner))
+  act(() => {
+    agentListeners.forEach(listener => listener({ kind: 'event', conversationId: 'conv-1', recoveryState: 'ready', event: {
       eventId: 2, turnId: currentTurnId, type: 'status', state: 'interrupted',
       summary: 'Turn stopped', detail: {}, occurredAt: ''
     } }))
@@ -373,6 +485,7 @@ test('saving dispatches job-hunter and reconciles a failure emitted before send 
     discoveredAt: '2026-07-22T00:00:00Z',
     lastSeenAt: '2026-07-22T00:00:00Z'
   }
+  fireEvent.click(screen.getByRole('tab', { name: 'Session 1, Interrupted' }))
   saveOutcome = 'completed'
   fireEvent.click(screen.getByRole('button', { name: 'Save this job to JobOS' }))
   await waitFor(() => expect(send).toHaveBeenCalledTimes(5))
@@ -383,6 +496,14 @@ test('saving dispatches job-hunter and reconciles a failure emitted before send 
     name: `Select Northstar Labs ${listing.title}`
   })).not.toBeNull()
   expect((screen.getByRole('button', { name: 'Save this job to JobOS' }) as HTMLButtonElement).disabled).toBe(true)
+
+  const composer = screen.getByRole('textbox', { name: 'Message the agent' })
+  fireEvent.change(composer, { target: { value: 'Continue ordinary Hermes work' } })
+  fireEvent.click(screen.getByRole('button', { name: 'Send message' }))
+  await waitFor(() => expect(send).toHaveBeenCalledTimes(6))
+  expect(send.mock.calls[5]).toEqual([
+    'conv-1', 'Continue ordinary Hermes work', expect.stringMatching(/^desktop-message-/)
+  ])
 })
 
 
@@ -637,7 +758,7 @@ test('changing selected jobs preserves one mounted durable agent conversation an
     { jobId: 'job-2', company: 'Daybreak', title: 'Platform PM', status: 'shortlisted' as const, statusGroup: 'Considering', canonicalUrl: 'https://example.com/2', discoveredAt: '', lastSeenAt: '' }
   ]
   const conversationGet = vi.fn().mockResolvedValue({
-    conversationId: 'conv-current', activeTurn: null, connection: 'online', latestEventId: 1,
+    conversationId: 'conv-current', position: 1, title: 'Session 1', createdAt: '', activeTurn: null, connection: 'online', latestEventId: 1,
     entries: [{ eventId: 1, turnId: 'turn-1', type: 'assistant_message', state: 'completed', summary: 'Persistent response', detail: { type: 'message.complete' }, occurredAt: '2026-07-20T10:00:00Z' }]
   })
   Object.defineProperty(window, 'jobos', { configurable: true, value: {
@@ -646,7 +767,10 @@ test('changing selected jobs preserves one mounted durable agent conversation an
       getState: vi.fn().mockResolvedValue({ jobs, selectedJobId: 'job-1', sortMode: 'manual', manualOrder: ['job-1', 'job-2'] }),
       list: vi.fn().mockResolvedValue(jobs), select: vi.fn().mockResolvedValue({ eventId: 2 }), reorder: vi.fn(), setSort: vi.fn(), updateStatus: vi.fn(), subscribe: vi.fn(() => () => undefined)
     },
-    agent: { get: conversationGet, send: vi.fn(), cancel: vi.fn(), retry: vi.fn(), subscribe: vi.fn(() => () => undefined) }
+    agent: {
+      list: vi.fn().mockResolvedValue([{ conversationId: 'conv-current', position: 1, title: 'Session 1', createdAt: '', activeTurn: null, connection: 'online', latestEventId: 1 }]),
+      create: vi.fn(), archive: vi.fn(), get: conversationGet, send: vi.fn(), cancel: vi.fn(), retry: vi.fn(), subscribe: vi.fn(() => () => undefined)
+    }
   } })
 
   render(<App />)
@@ -874,7 +998,7 @@ test('opening Settings detaches an active native browser surface before showing 
   rect.mockRestore()
 })
 
-test('opening New Session detaches an active native browser surface before showing the modal', async () => {
+test('creating an additive session leaves the active native browser surface attached and shows no modal', async () => {
   const tab = {
     tabId: 'listing', url: 'https://jobs.example.com/7', title: 'Listing', faviconUrl: null, associatedJobId: null,
     loading: false, canGoBack: false, canGoForward: false, error: null, crashed: false, blockedUrl: null
@@ -883,6 +1007,10 @@ test('opening New Session detaches an active native browser surface before showi
   let resolveDetach!: () => void
   const detached = new Promise<void>(resolve => { resolveDetach = resolve })
   const setBounds = vi.fn().mockImplementation(bounds => bounds.visible ? Promise.resolve() : detached)
+  const createSession = vi.fn().mockResolvedValue({
+    conversationId: 'conv-2', position: 2, title: 'Session 2', createdAt: '', entries: [],
+    activeTurn: null, connection: 'online', latestEventId: 0
+  })
   const rect = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue(
     DOMRect.fromRect({ x: 100, y: 120, width: 800, height: 500 })
   )
@@ -891,8 +1019,10 @@ test('opening New Session detaches an active native browser surface before showi
     value: {
       connectivity: { get: vi.fn().mockResolvedValue({ state: 'connected', checkedAt: '', message: 'Private API authenticated' }) },
       agent: {
-        get: vi.fn().mockResolvedValue({ conversationId: 'conv-1', entries: [], activeTurn: null, connection: 'online', latestEventId: 0 }),
-        send: vi.fn(), cancel: vi.fn(), retry: vi.fn(), reset: vi.fn(), subscribe: vi.fn().mockReturnValue(() => undefined)
+        list: vi.fn().mockResolvedValue([{ conversationId: 'conv-1', position: 1, title: 'Session 1', createdAt: '', activeTurn: null, connection: 'online', latestEventId: 0 }]),
+        create: createSession, archive: vi.fn(),
+        get: vi.fn().mockResolvedValue({ conversationId: 'conv-1', position: 1, title: 'Session 1', createdAt: '', entries: [], activeTurn: null, connection: 'online', latestEventId: 0 }),
+        send: vi.fn(), cancel: vi.fn(), retry: vi.fn(), subscribe: vi.fn().mockReturnValue(() => undefined)
       },
       workspace: {
         get: vi.fn().mockResolvedValue({
@@ -915,15 +1045,12 @@ test('opening New Session detaches an active native browser surface before showi
   await waitFor(() => expect(setBounds).toHaveBeenCalledWith(expect.objectContaining({ visible: true })))
   setBounds.mockClear()
 
-  fireEvent.click(screen.getByRole('button', { name: 'Start new agent session' }))
-  await waitFor(() => expect(setBounds).toHaveBeenCalledWith(expect.objectContaining({ visible: false })))
+  fireEvent.click(screen.getByRole('button', { name: 'New agent session' }))
+  await waitFor(() => expect(createSession).toHaveBeenCalledOnce())
+  expect(setBounds).not.toHaveBeenCalledWith(expect.objectContaining({ visible: false }))
   expect(screen.queryByRole('alertdialog')).toBeNull()
+  expect(await screen.findByRole('tab', { name: 'Session 2, Idle' })).not.toBeNull()
   resolveDetach()
-  expect(await screen.findByRole('alertdialog')).not.toBeNull()
-  setBounds.mockClear()
-
-  fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
-  await waitFor(() => expect(setBounds).toHaveBeenCalledWith(expect.objectContaining({ visible: true })))
   rect.mockRestore()
 })
 

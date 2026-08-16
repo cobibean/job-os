@@ -79,8 +79,7 @@ def _is_opaque_credential(value: str) -> bool:
     ):
         return False
     classes = sum(
-        bool(re.search(pattern, value))
-        for pattern in (r"[a-z]", r"[A-Z]", r"[0-9]", r"[_+=-]")
+        bool(re.search(pattern, value)) for pattern in (r"[a-z]", r"[A-Z]", r"[0-9]", r"[_+=-]")
     )
     if classes < 3:
         return False
@@ -166,9 +165,7 @@ def _safe_value(
         output = []
         changed = len(value) > MAX_ITEMS
         for item in list(value)[:MAX_ITEMS]:
-            safe, item_changed = _safe_value(
-                item, depth=depth + 1, protect_paths=protect_paths
-            )
+            safe, item_changed = _safe_value(item, depth=depth + 1, protect_paths=protect_paths)
             output.append(safe)
             changed = changed or item_changed
         return output, changed

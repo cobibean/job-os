@@ -40,10 +40,10 @@ _OFFICE_DOCUMENT_RELATIONSHIP = (
 _WORD_MAIN_CONTENT_TYPE = (
     "application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"
 )
-_PDF_HEADER = re.compile(br"\A%PDF-(?:1\.[0-7]|2\.0)(?:\r\n|\r|\n)")
+_PDF_HEADER = re.compile(rb"\A%PDF-(?:1\.[0-7]|2\.0)(?:\r\n|\r|\n)")
 _PDF_FINAL = re.compile(
-    br"startxref[ \t]*(?:\r\n|\r|\n)[ \t]*([0-9]{1,10})[ \t]*"
-    br"(?:\r\n|\r|\n)[ \t]*%%EOF[ \t]*(?:\r\n|\r|\n)?\Z"
+    rb"startxref[ \t]*(?:\r\n|\r|\n)[ \t]*([0-9]{1,10})[ \t]*"
+    rb"(?:\r\n|\r|\n)[ \t]*%%EOF[ \t]*(?:\r\n|\r|\n)?\Z"
 )
 
 
@@ -225,13 +225,13 @@ def _validate_pdf(content: bytes) -> None:
     position = xref_offset + 4
     entry_count = 0
     while True:
-        whitespace = re.match(br"[\x00\x09\x0a\x0c\x0d\x20]*", content[position:])
+        whitespace = re.match(rb"[\x00\x09\x0a\x0c\x0d\x20]*", content[position:])
         assert whitespace is not None
         position += whitespace.end()
         if content[position : position + 7] == b"trailer":
             position += 7
             break
-        subsection = re.match(br"([0-9]+)[ \t]+([0-9]+)(?:\r\n|\r|\n)", content[position:])
+        subsection = re.match(rb"([0-9]+)[ \t]+([0-9]+)(?:\r\n|\r|\n)", content[position:])
         if subsection is None:
             raise ArtifactValidationError("PDF cross-reference table is malformed")
         first_object = int(subsection.group(1))
@@ -242,7 +242,7 @@ def _validate_pdf(content: bytes) -> None:
         position += subsection.end()
         for index in range(count):
             entry = re.match(
-                br"([0-9]{10})[ \t]([0-9]{5})[ \t]([nf])(?:[ \t]*(?:\r\n|\r|\n))",
+                rb"([0-9]{10})[ \t]([0-9]{5})[ \t]([nf])(?:[ \t]*(?:\r\n|\r|\n))",
                 content[position:],
             )
             if entry is None:
@@ -255,9 +255,9 @@ def _validate_pdf(content: bytes) -> None:
                 xref_entries[(first_object + index, generation)] = offset
             position += entry.end()
     trailer, _ = _pdf_dictionary(content, position)
-    if re.search(br"/XRefStm\b", trailer) is not None:
+    if re.search(rb"/XRefStm\b", trailer) is not None:
         raise ArtifactValidationError("PDF cross-reference streams are not supported")
-    size = re.search(br"/Size\s+([0-9]+)\b", trailer)
+    size = re.search(rb"/Size\s+([0-9]+)\b", trailer)
     root_reference = _pdf_reference(trailer, b"Root")
     if size is None or not 1 <= int(size.group(1)) <= MAX_PDF_XREF_ENTRIES:
         raise ArtifactValidationError("PDF trailer size is invalid")
@@ -286,7 +286,7 @@ def _validate_pdf(content: bytes) -> None:
         raise ArtifactValidationError("PDF document catalog object is malformed")
     root_object = content[root_start:root_end]
     if (
-        re.search(br"/Type\s*/Catalog\b", root_object) is None
+        re.search(rb"/Type\s*/Catalog\b", root_object) is None
         or _pdf_reference(root_object, b"Pages") is None
     ):
         raise ArtifactValidationError("PDF document catalog is invalid")
@@ -326,13 +326,9 @@ def _validate_docx(content: bytes) -> None:
                 expanded += entry.file_size
                 if expanded > MAX_DOCX_EXPANDED_BYTES:
                     raise ArtifactValidationError("DOCX ZIP expansion is excessive")
-                if (
-                    (entry.file_size and entry.compress_size == 0)
-                    or (
-                        entry.compress_size
-                        and entry.file_size
-                        > entry.compress_size * MAX_DOCX_COMPRESSION_RATIO
-                    )
+                if (entry.file_size and entry.compress_size == 0) or (
+                    entry.compress_size
+                    and entry.file_size > entry.compress_size * MAX_DOCX_COMPRESSION_RATIO
                 ):
                     raise ArtifactValidationError("DOCX ZIP compression ratio is excessive")
             missing = _DOCX_REQUIRED_PARTS.keys() - names
@@ -365,9 +361,7 @@ def _validate_docx(content: bytes) -> None:
 
             word_overrides = [
                 entry
-                for entry in content_types.findall(
-                    f"{{{_CONTENT_TYPES_NAMESPACE}}}Override"
-                )
+                for entry in content_types.findall(f"{{{_CONTENT_TYPES_NAMESPACE}}}Override")
                 if entry.get("PartName") == "/word/document.xml"
             ]
             if (
@@ -399,9 +393,7 @@ def _validate_docx(content: bytes) -> None:
                 or "\\" in target
                 or normalized_target.parts != ("word", "document.xml")
             ):
-                raise ArtifactValidationError(
-                    "DOCX officeDocument relationship target is invalid"
-                )
+                raise ArtifactValidationError("DOCX officeDocument relationship target is invalid")
             corrupt = archive.testzip()
             if corrupt is not None:
                 raise ArtifactValidationError("DOCX ZIP integrity check failed")
@@ -503,9 +495,7 @@ def open_directory_chain(root: Path, *segments: str) -> OpenedDirectoryChain:
         root_descriptor = os.open(resolved_root, _open_flags(directory=True))
         descriptors.append(root_descriptor)
         opened_root = os.fstat(root_descriptor)
-        if not stat.S_ISDIR(opened_root.st_mode) or not _same_identity(
-            expected_root, opened_root
-        ):
+        if not stat.S_ISDIR(opened_root.st_mode) or not _same_identity(expected_root, opened_root):
             raise ArtifactStorageError("Configured artifact root changed during storage")
 
         current = root_descriptor
@@ -583,9 +573,7 @@ def open_contained_file(
         root_descriptor = os.open(root, _open_flags(directory=True))
         descriptors.append(root_descriptor)
         opened_root = os.fstat(root_descriptor)
-        if not stat.S_ISDIR(opened_root.st_mode) or not _same_identity(
-            expected_root, opened_root
-        ):
+        if not stat.S_ISDIR(opened_root.st_mode) or not _same_identity(expected_root, opened_root):
             raise ArtifactStorageError("Configured artifact root changed during access")
         current = root_descriptor
         for part in parts[:-1]:
@@ -680,9 +668,7 @@ def read_contained_file(
     return candidate, content
 
 
-def write_new_file_at(
-    directory_descriptor: int, filename: str, content: bytes
-) -> os.stat_result:
+def write_new_file_at(directory_descriptor: int, filename: str, content: bytes) -> os.stat_result:
     flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
     if hasattr(os, "O_NOFOLLOW"):
         flags |= os.O_NOFOLLOW
@@ -839,8 +825,7 @@ def materialize_idempotent_pair(
     if filenames[0] == filenames[1]:
         raise ArtifactValidationError("Published document pair filenames must be distinct")
     pair_material = b"\0".join(
-        filename.encode("utf-8") + b"\0" + sha256(content).digest()
-        for filename, content in files
+        filename.encode("utf-8") + b"\0" + sha256(content).digest() for filename, content in files
     )
     destination_name = f"pair-{sha256(pair_material).hexdigest()[:20]}"
     temporary_name = f".pair-{uuid4().hex}.tmp"
@@ -867,9 +852,7 @@ def materialize_idempotent_pair(
             segments=(*directory.segments, temporary_name),
         )
         for filename, content in files:
-            _, created_identity = _materialize_idempotent_file(
-                temporary, filename, content
-            )
+            _, created_identity = _materialize_idempotent_file(temporary, filename, content)
             if created_identity is not None:
                 owned_files[filename] = created_identity
             temporary.assert_attached()
@@ -915,14 +898,15 @@ def materialize_idempotent_pair(
         )
         published.assert_attached()
         for filename, content in files:
-            if read_file_at(
-                published_descriptor,
-                filename,
-                maximum=max(len(content), 1),
-            ) != content:
-                raise ArtifactStorageError(
-                    "Published document destination is not trustworthy"
+            if (
+                read_file_at(
+                    published_descriptor,
+                    filename,
+                    maximum=max(len(content), 1),
                 )
+                != content
+            ):
+                raise ArtifactStorageError("Published document destination is not trustworthy")
             published.assert_attached()
         completed = True
         return published.path / filenames[0], published.path / filenames[1]
@@ -941,10 +925,7 @@ def materialize_idempotent_pair(
                     owned_files,
                 )
         finally:
-            if (
-                published_descriptor is not None
-                and published_descriptor != temporary_descriptor
-            ):
+            if published_descriptor is not None and published_descriptor != temporary_descriptor:
                 os.close(published_descriptor)
             if temporary_descriptor is not None:
                 os.close(temporary_descriptor)

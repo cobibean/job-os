@@ -7,9 +7,7 @@ from datetime import UTC, datetime
 from types import MappingProxyType
 from typing import Literal, Protocol, cast
 
-ListingCompleteness = Literal[
-    "unknown", "unavailable", "summary_only", "partial", "complete"
-]
+ListingCompleteness = Literal["unknown", "unavailable", "summary_only", "partial", "complete"]
 LISTING_COMPLETENESS_VALUES = frozenset(
     {"unknown", "unavailable", "summary_only", "partial", "complete"}
 )

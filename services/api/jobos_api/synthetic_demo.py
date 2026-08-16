@@ -239,9 +239,7 @@ def reset_demo(
             (command.job_id, normalized_url),
         ).fetchall()
         if any(
-            str(row[0]) != command.job_id
-            or not bool(row[1])
-            or str(row[2]) != DEMO_DATASET_VERSION
+            str(row[0]) != command.job_id or not bool(row[1]) or str(row[2]) != DEMO_DATASET_VERSION
             for row in conflicts
         ):
             raise Conflict("The synthetic demo ID or URL is occupied by a non-demo job")

@@ -7,11 +7,7 @@ from pathlib import Path
 _NOT_FOUND_EXIT = 44
 _MAX_SECRET_BYTES = 4096
 _DEFAULT_HELPER = (
-    Path(__file__).resolve().parents[3]
-    / "apps"
-    / "desktop"
-    / "build"
-    / "jobos-keychain"
+    Path(__file__).resolve().parents[3] / "apps" / "desktop" / "build" / "jobos-keychain"
 )
 
 

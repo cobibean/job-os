@@ -28,9 +28,7 @@ def create_job_services(settings: Settings) -> tuple[JobRepository, ArtifactGate
         artifact_gateway: ArtifactGateway = UnavailableArtifactGateway()
     elif settings.artifact_provider == "gateway":
         if settings.job_hunter_db_path is None:
-            raise Unavailable(
-                "The JobHunter artifact gateway requires JOBOS_JOB_HUNTER_DB_PATH"
-            )
+            raise Unavailable("The JobHunter artifact gateway requires JOBOS_JOB_HUNTER_DB_PATH")
         module = import_module("jobos_api.private_adapters.job_hunter")
         artifact_gateway = module.create_job_hunter_artifact_gateway(
             settings.job_hunter_db_path,

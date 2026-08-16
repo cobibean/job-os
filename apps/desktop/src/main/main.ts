@@ -8,7 +8,7 @@ import { app, BrowserWindow, clipboard, dialog, ipcMain, session, shell, WebCont
 import type { IpcMainEvent, IpcMainInvokeEvent } from 'electron'
 
 import type { BrowserBounds, DocumentKey, JobSortMode, JobStatus, WorkspaceSnapshot } from '../shared/contracts.js'
-import { createMainAgentClient, startAgentEventStream } from './agent.js'
+import { AgentConversationRegistry, createScopedMainAgentClient, startAgentEventStream } from './agent.js'
 import { registerAgentIpc } from './agentIpc.js'
 import { createApiLifecycle } from './apiLifecycle.js'
 import { BROWSER_PARTITION, BrowserManager, remoteBrowserPreferences } from './browser.js'
@@ -43,6 +43,7 @@ const developmentOrigin = developmentUrl ? new URL(developmentUrl).origin : unde
 let browserManager: BrowserManager | null = null
 let mainWindow: BrowserWindow | null = null
 let docxDocumentsService: DocxDocumentsService | null = null
+const activeAgentConversationIds = new AgentConversationRegistry()
 let docxWorkerManager: DocxWorkerManager | null = null
 let mainDocumentsClient: ReturnType<typeof createMainDocumentsClient> | null = null
 let appIsQuitting = false
@@ -242,7 +243,7 @@ function registerConnectivityInterface(): void {
 
 function registerAgentInterface(): void {
   const config = jobsConfig()
-  const agent = config ? createMainAgentClient(config) : null
+  const agent = config ? createScopedMainAgentClient(config, activeAgentConversationIds) : null
   registerAgentIpc(ipcMain, event => {
     assertTrustedRenderer(event)
     if (!agent) throw new Error('Device credential unavailable')
@@ -586,16 +587,28 @@ async function createWindow(): Promise<BrowserWindow> {
     : () => undefined
   let stopAgentEvents: () => void = () => undefined
   if (config) {
+    const streamClient = createScopedMainAgentClient(config, activeAgentConversationIds)
     stopAgentEvents = startAgentEventStream(
       {
         isDestroyed: () => window.isDestroyed(),
         send: (channel, update) => window.webContents.send(channel, update)
       },
       config,
-      { connectedState: 'connecting' }
+      { connectedState: 'connecting', knownConversationIds: activeAgentConversationIds }
     )
-  } else {
-    window.webContents.send('jobos:agent:event', { kind: 'connection', state: 'offline' })
+    const hydrateRegistry = async () => {
+      let delay = 500
+      while (!window.isDestroyed()) {
+        try {
+          await streamClient.list()
+          return
+        } catch {
+          await new Promise(resolve => setTimeout(resolve, delay))
+          delay = Math.min(delay * 2, 8_000)
+        }
+      }
+    }
+    void hydrateRegistry()
   }
   window.once('closed', () => {
     if (pendingClose) clearTimeout(pendingClose.timer)

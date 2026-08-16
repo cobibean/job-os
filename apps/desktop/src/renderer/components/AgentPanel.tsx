@@ -1,21 +1,22 @@
-import { ArrowDown, Bot, BriefcaseBusiness, CircleAlert, LoaderCircle, MessageSquarePlus, RotateCcw, Send, Square, UserRound, WifiOff } from 'lucide-react'
+import { ArrowDown, Bot, BriefcaseBusiness, CircleAlert, LoaderCircle, RotateCcw, Send, Square, UserRound, WifiOff } from 'lucide-react'
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { createPortal } from 'react-dom'
 
 import type { ConnectivityState } from '../../shared/contracts'
-import { useAgentConversation } from '../hooks/useAgentConversation'
+import type { AgentSessionsController } from '../hooks/useAgentSessions'
+import { initialAgentConversationState } from '../hooks/useAgentConversation'
 import { AgentActivityGroup } from './AgentActivityGroup'
 import { ActivityRow } from './ActivityRow'
 import { AssistantMarkdown } from './AssistantMarkdown'
+import { AgentSessionTabs } from './AgentSessionTabs'
 
 interface AgentPanelProps {
   contextLabel: string
   apiState?: ConnectivityState
   onArtifactRendered?: () => void
-  onModalOpenChange?: (open: boolean) => void
+  sessions: AgentSessionsController
 }
 
-function ConnectionNotice({ apiState, connection }: { apiState: ConnectivityState; connection: ReturnType<typeof useAgentConversation>['connection'] }) {
+function ConnectionNotice({ apiState, connection }: { apiState: ConnectivityState; connection: typeof initialAgentConversationState.connection }) {
   if (apiState === 'disconnected' || apiState === 'degraded') {
     return <div className="agent-connection offline" role="status"><WifiOff aria-hidden="true" size={14} /> JobOS API offline</div>
   }
@@ -28,146 +29,77 @@ function ConnectionNotice({ apiState, connection }: { apiState: ConnectivityStat
   return null
 }
 
-export function AgentPanel({ contextLabel, apiState = 'connected', onArtifactRendered, onModalOpenChange }: AgentPanelProps) {
-  const conversation = useAgentConversation()
-  const [confirmingReset, setConfirmingReset] = useState(false)
-  const [preparingReset, setPreparingReset] = useState(false)
-  const scrollRef = useRef<HTMLDivElement>(null)
-  const newSessionButtonRef = useRef<HTMLButtonElement>(null)
-  const cancelResetButtonRef = useRef<HTMLButtonElement>(null)
-  const resetDialogRef = useRef<HTMLElement>(null)
-  const resetDialogWasOpen = useRef(false)
+export function AgentPanel({ contextLabel, apiState = 'connected', onArtifactRendered, sessions }: AgentPanelProps) {
+  const conversation = sessions.activeConversation ?? {
+    ...initialAgentConversationState,
+    items: [],
+    draft: '',
+    operationPending: false
+  }
+  const activeId = sessions.activeId
+  const panelRefs = useRef(new Map<string, HTMLDivElement>())
   const pinnedToBottom = useRef(true)
   const [isPinnedToBottom, setIsPinnedToBottom] = useState(true)
-  const observedEventId = useRef<number | null>(null)
+  const observedEventIds = useRef(new Map<string, number>())
   const canSend = Boolean(
     conversation.draft.trim()
     && !conversation.activeTurn
     && !conversation.restoring
     && !conversation.operationPending
-    && !confirmingReset
     && apiState === 'connected'
   )
-  const canReset = !conversation.activeTurn && !conversation.restoring && !conversation.operationPending && !preparingReset && apiState === 'connected'
-
-  useEffect(() => {
-    return () => onModalOpenChange?.(false)
-  }, [onModalOpenChange])
-
-  const openResetDialog = async () => {
-    if (!canReset) return
-    onModalOpenChange?.(true)
-    const browser = window.jobos?.browser
-    if (!browser) {
-      setConfirmingReset(true)
-      return
-    }
-    setPreparingReset(true)
-    try {
-      await browser.setBounds({ x: 0, y: 0, width: 0, height: 0, visible: false })
-      setConfirmingReset(true)
-    } catch {
-      onModalOpenChange?.(false)
-    } finally {
-      setPreparingReset(false)
-    }
-  }
-
-  const closeResetDialog = () => {
-    if (conversation.resetting) return
-    setConfirmingReset(false)
-    onModalOpenChange?.(false)
-  }
-
-  const trapResetDialogFocus = (event: globalThis.KeyboardEvent) => {
-    if (event.key !== 'Tab') return
-    const focusable = [...(resetDialogRef.current?.querySelectorAll<HTMLButtonElement>('button:not(:disabled)') ?? [])]
-    const first = focusable.at(0)
-    const last = focusable.at(-1)
-    if (!first || !last) {
-      event.preventDefault()
-      return
-    }
-    if (focusable.length === 1) {
-      event.preventDefault()
-      first.focus()
-      return
-    }
-    if (event.shiftKey && document.activeElement === first) {
-      event.preventDefault()
-      last.focus()
-    } else if (!event.shiftKey && document.activeElement === last) {
-      event.preventDefault()
-      first.focus()
-    }
-  }
-
-  useEffect(() => {
-    const appShell = document.querySelector<HTMLElement>('.app-shell')
-    if (confirmingReset) {
-      resetDialogWasOpen.current = true
-      appShell?.setAttribute('inert', '')
-      if (conversation.resetting) cancelResetButtonRef.current?.focus()
-      const handleKeyDown = (event: globalThis.KeyboardEvent) => {
-        if (event.key === 'Escape' && !conversation.resetting) {
-          event.preventDefault()
-          setConfirmingReset(false)
-          onModalOpenChange?.(false)
-          return
-        }
-        trapResetDialogFocus(event)
-      }
-      document.addEventListener('keydown', handleKeyDown)
-      return () => {
-        document.removeEventListener('keydown', handleKeyDown)
-        appShell?.removeAttribute('inert')
-      }
-    }
-    if (!resetDialogWasOpen.current) return
-    resetDialogWasOpen.current = false
-    newSessionButtonRef.current?.focus()
-  }, [confirmingReset, conversation.resetting])
 
 
   useEffect(() => {
-    if (conversation.restoring || conversation.restoredEventId === null) return
-    if (observedEventId.current === null) {
-      observedEventId.current = conversation.restoredEventId
+    let documentChanged = false
+    for (const id of sessions.order) {
+      const scoped = sessions.sessions[id]?.conversation
+      if (!scoped || scoped.restoring || scoped.restoredEventId === null) continue
+      if (!observedEventIds.current.has(id)) observedEventIds.current.set(id, scoped.restoredEventId)
+      const observed = observedEventIds.current.get(id) ?? 0
+      const latestEventId = scoped.entries.reduce((latest, entry) => Math.max(latest, entry.eventId), 0)
+      documentChanged ||= scoped.entries.some(entry => (
+        entry.eventId > observed
+        && entry.type === 'activity'
+        && entry.state === 'completed'
+        && typeof entry.detail.command === 'string'
+        && ['document.render', 'document.refresh', 'document.register', 'document.publish'].includes(entry.detail.command)
+      ))
+      observedEventIds.current.set(id, Math.max(observed, latestEventId))
     }
-    const latestEventId = conversation.entries.reduce(
-      (latest, entry) => Math.max(latest, entry.eventId),
-      0
-    )
-    const documentChanged = conversation.entries.some(entry => (
-      entry.eventId > (observedEventId.current ?? 0)
-      && entry.type === 'activity'
-      && entry.state === 'completed'
-      && typeof entry.detail.command === 'string'
-      && ['document.render', 'document.refresh', 'document.register', 'document.publish'].includes(entry.detail.command)
-    ))
-    observedEventId.current = Math.max(observedEventId.current, latestEventId)
     if (documentChanged) onArtifactRendered?.()
-  }, [conversation.entries, conversation.restoredEventId, conversation.restoring, onArtifactRendered])
+  }, [onArtifactRendered, sessions.order, sessions.sessions])
 
   const scrollToLatest = useCallback((focusTranscript = false) => {
-    const transcript = scrollRef.current
+    const transcript = activeId ? panelRefs.current.get(activeId) : undefined
     if (!transcript) return
     transcript.scrollTop = transcript.scrollHeight
     pinnedToBottom.current = true
     setIsPinnedToBottom(true)
+    if (focusTranscript && activeId) sessions.saveScroll(activeId, transcript.scrollTop, true)
     if (focusTranscript) transcript.focus({ preventScroll: true })
-  }, [])
+  }, [activeId, sessions.saveScroll])
 
   useLayoutEffect(() => {
     if (pinnedToBottom.current) scrollToLatest()
   }, [conversation.items, scrollToLatest])
 
+  useLayoutEffect(() => {
+    const transcript = activeId ? panelRefs.current.get(activeId) : undefined
+    if (!transcript || !activeId) return
+    const saved = sessions.sessions[activeId]
+    pinnedToBottom.current = saved?.pinnedToBottom ?? true
+    setIsPinnedToBottom(pinnedToBottom.current)
+    transcript.scrollTop = pinnedToBottom.current ? transcript.scrollHeight : (saved?.scrollTop ?? 0)
+  }, [activeId, sessions.saveScroll])
+
   const handleScroll = () => {
-    const transcript = scrollRef.current
+    const transcript = activeId ? panelRefs.current.get(activeId) : undefined
     if (!transcript) return
     const pinned = transcript.scrollHeight - transcript.scrollTop - transcript.clientHeight <= 64
     pinnedToBottom.current = pinned
     setIsPinnedToBottom(pinned)
+    if (activeId) sessions.saveScroll(activeId, transcript.scrollTop, pinned)
   }
 
   const handleTurnLayoutChange = useCallback(() => {
@@ -204,58 +136,27 @@ export function AgentPanel({ contextLabel, apiState = 'connected', onArtifactRen
     <aside aria-label="Agent chat" className="agent-panel panel-region">
       <div className="agent-context">
         <span title={contextLabel}><BriefcaseBusiness aria-hidden="true" size={16} strokeWidth={1.5} /> <span>{contextLabel}</span></span>
-        <button
-          aria-label="Start new agent session"
-          className="new-session-button"
-          disabled={!canReset}
-          onClick={() => void openResetDialog()}
-          ref={newSessionButtonRef}
-          title={conversation.activeTurn ? 'Finish or stop the active turn first' : 'Clear this conversation and start with fresh context'}
-          type="button"
-        >
-          <MessageSquarePlus aria-hidden="true" size={14} strokeWidth={1.6} /> New session
-        </button>
       </div>
+      <AgentSessionTabs controller={sessions} />
 
-      {confirmingReset && createPortal(
-        <div className="new-session-overlay" onClick={closeResetDialog} role="presentation">
-          <section
-            aria-labelledby="new-session-title"
-            aria-modal="true"
-            className="new-session-confirm"
-            onClick={event => event.stopPropagation()}
-            ref={resetDialogRef}
-            role="alertdialog"
-          >
-            <div>
-              <strong id="new-session-title">Start with fresh context?</strong>
-              <p>This clears the visible conversation and starts a new agent session. Your selected job stays attached.</p>
-            </div>
-            <div className="new-session-actions">
-              <button onClick={closeResetDialog} ref={cancelResetButtonRef} type="button">Cancel</button>
-              <button
-                aria-label="Confirm new session"
-                autoFocus
-                className="confirm"
-                disabled={!canReset}
-                onClick={() => void conversation.reset().then(reset => {
-                  if (!reset) return
-                  scrollToLatest()
-                  setConfirmingReset(false)
-                  onModalOpenChange?.(false)
-                })}
-                type="button"
-              >
-                {conversation.resetting && <LoaderCircle aria-hidden="true" className="spin" size={13} />}
-                {conversation.resetting ? 'Starting…' : 'New session'}
-              </button>
-            </div>
-          </section>
-        </div>,
-        document.body
-      )}
-
-      <div className="agent-body" onScroll={handleScroll} ref={scrollRef} tabIndex={-1}>
+      {(sessions.order.length ? sessions.order : ['']).map(panelId => {
+        const selected = !panelId || panelId === activeId
+        return <div
+          aria-labelledby={panelId ? `agent-session-tab-${panelId}` : undefined}
+          className="agent-body"
+          hidden={!selected}
+          id={panelId ? `agent-session-panel-${panelId}` : undefined}
+          key={panelId || 'restoring'}
+          onScroll={selected ? handleScroll : undefined}
+          ref={element => {
+            if (!panelId) return
+            if (element) panelRefs.current.set(panelId, element)
+            else panelRefs.current.delete(panelId)
+          }}
+          role={panelId ? 'tabpanel' : undefined}
+          tabIndex={selected ? -1 : undefined}
+        >
+        {selected && <>
         <ConnectionNotice apiState={apiState} connection={conversation.connection} />
         {conversation.restoring && <div className="agent-restore"><LoaderCircle aria-hidden="true" className="spin" size={17} /> Restoring conversation…</div>}
         {!conversation.restoring && conversation.items.length === 0 && !conversation.error && (
@@ -298,7 +199,7 @@ export function AgentPanel({ contextLabel, apiState = 'connected', onArtifactRen
                         <strong><CircleAlert aria-hidden="true" size={14} /> {waiting ? 'Waiting for you' : terminal.state === 'waiting' ? 'Turn paused' : terminal.state === 'interrupted' ? 'Turn interrupted' : 'Turn failed'}</strong>
                         <p>{terminal.label}</p>
                         {terminal.retryable && !conversation.activeTurn && (
-                          <button aria-label="Retry turn" className="retry-button" onClick={() => void conversation.retry(item.turnId)} type="button">
+                          <button aria-label="Retry turn" className="retry-button" onClick={() => { if (activeId) void sessions.retry(activeId, item.turnId) }} type="button">
                             <RotateCcw aria-hidden="true" size={13} /> Retry
                           </button>
                         )}
@@ -323,7 +224,7 @@ export function AgentPanel({ contextLabel, apiState = 'connected', onArtifactRen
                   <strong><CircleAlert aria-hidden="true" size={14} /> {noticeLabel}</strong>
                   <p>{item.label}</p>
                   {item.retryable && !conversation.activeTurn && (
-                    <button aria-label="Retry turn" className="retry-button" onClick={() => void conversation.retry(item.turnId ?? '')} type="button">
+                    <button aria-label="Retry turn" className="retry-button" onClick={() => { if (activeId) void sessions.retry(activeId, item.turnId ?? '') }} type="button">
                       <RotateCcw aria-hidden="true" size={13} /> Retry
                     </button>
                   )}
@@ -333,7 +234,9 @@ export function AgentPanel({ contextLabel, apiState = 'connected', onArtifactRen
           </div>
         )}
         {conversation.error && <p className="agent-inline-error" role="alert">{conversation.error}</p>}
+        </>}
       </div>
+      })}
       {!isPinnedToBottom && (
         <button aria-label="Jump to latest" className="jump-to-latest" onClick={() => scrollToLatest(true)} type="button">
           <ArrowDown aria-hidden="true" size={13} /> Jump to latest
@@ -346,17 +249,17 @@ export function AgentPanel({ contextLabel, apiState = 'connected', onArtifactRen
         </div>
       )}
 
-      <form className="composer" onSubmit={event => { event.preventDefault(); if (canSend) void conversation.send() }}>
+      <form className="composer" onSubmit={event => { event.preventDefault(); if (canSend && activeId) void sessions.send(activeId) }}>
         <label className="sr-only" htmlFor="agent-message">Message the agent</label>
         <textarea
           aria-describedby="composer-status"
           id="agent-message"
           maxLength={12_000}
-          onChange={event => conversation.setDraft(event.target.value)}
+          onChange={event => { if (activeId) sessions.setDraft(activeId, event.target.value) }}
           onKeyDown={event => {
             if (event.key === 'Enter' && !event.shiftKey && canSend) {
               event.preventDefault()
-              void conversation.send()
+              if (activeId) void sessions.send(activeId)
             }
           }}
           placeholder="Message the agent…"
@@ -369,7 +272,7 @@ export function AgentPanel({ contextLabel, apiState = 'connected', onArtifactRen
           </span>
           <div className="composer-actions">
             {conversation.activeTurn && (
-              <button aria-label="Stop agent turn" className="stop-button" onClick={() => void conversation.stop()} type="button">
+              <button aria-label="Stop agent turn" className="stop-button" onClick={() => { if (activeId) void sessions.stop(activeId) }} type="button">
                 <Square aria-hidden="true" size={13} /> Stop
               </button>
             )}
@@ -379,7 +282,7 @@ export function AgentPanel({ contextLabel, apiState = 'connected', onArtifactRen
           </div>
         </div>
       </form>
-      <p aria-atomic="true" aria-live="polite" className="sr-only">{announcement}</p>
+      <p aria-atomic="true" aria-live="polite" className="sr-only">{sessions.announcement || announcement}</p>
     </aside>
   )
 }

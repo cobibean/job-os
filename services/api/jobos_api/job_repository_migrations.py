@@ -277,6 +277,4 @@ def initialize_job_repository_database(
     except (OSError, sqlite3.Error) as error:
         raise MigrationError(f"Canonical jobs database initialization failed: {error}") from error
     except Exception as error:
-        raise MigrationError(
-            f"Canonical jobs database migration failed: {error}"
-        ) from error
+        raise MigrationError(f"Canonical jobs database migration failed: {error}") from error

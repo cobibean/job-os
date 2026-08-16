@@ -2,18 +2,21 @@ import asyncio
 import json
 import time
 
+import pytest
 from fastapi.testclient import TestClient
 from jobos_api.agent_gateway import AgentContext, GatewayEvent
 from jobos_api.app import create_app
+from jobos_api.conversation_manager import ConversationManager
 from jobos_api.conversations import (
     ConversationService,
     RetryTurnRequest,
     SendMessageRequest,
     conversation_event_source,
 )
+from jobos_api.hermes_adapter import HermesGatewayFactory
 from jobos_api.private_adapters.job_hunter import adapt_job_hunter_facade
-from jobos_api.settings import Settings
-from jobos_api.state_store import JobOsStateStore
+from jobos_api.settings import DeviceCredential, Settings
+from jobos_api.state_store import ConversationNotFound, JobOsStateStore
 
 TOKEN = "agent-contract-device-token"
 
@@ -210,7 +213,7 @@ def headers():
     return {"Authorization": f"Bearer {TOKEN}"}
 
 
-def make_client(tmp_path, gateway=None):
+def make_client(tmp_path, gateway=None, gateway_factory=None):
     repository, artifact_gateway = adapt_job_hunter_facade(FakeJobFacade())
     app = create_app(
         Settings(
@@ -221,16 +224,28 @@ def make_client(tmp_path, gateway=None):
         job_repository=repository,
         artifact_gateway=artifact_gateway,
         agent_gateway=gateway or FakeGateway(),
+        agent_gateway_factory=gateway_factory,
     )
     return TestClient(app)
 
 
 def send_message(client, text="Help me plan the next step", key="message-key-0001"):
+    conversation_id = current_id(client)
     return client.post(
-        "/v1/conversations/current/messages",
+        f"/v1/conversations/{conversation_id}/messages",
         headers=headers(),
         json={"text": text, "idempotency_key": key},
     )
+
+
+def current_id(client):
+    return client.get("/v1/conversations", headers=headers()).json()["conversations"][0][
+        "conversation_id"
+    ]
+
+
+def turn_url(client, turn_id, action):
+    return f"/v1/conversations/{current_id(client)}/turns/{turn_id}/{action}"
 
 
 def test_browser_save_turn_starts_with_fresh_model_context(tmp_path):
@@ -301,26 +316,30 @@ def test_browser_save_session_restores_after_api_restart_and_ignores_late_termin
         assert recovered_gateway.interruptions == [created.turn_id]
         assert store.stored_session_id() == "ordinary-session"
 
-        recovered_gateway._events.append(GatewayEvent(
-            event_type="reconciliation",
-            state="completed",
-            summary="late isolated-session reconciliation",
-            turn_id=None,
-            source_event_id="late-isolated-reconciliation",
-            detail={"stored_session_id": "stored-session"},
-        ))
+        recovered_gateway._events.append(
+            GatewayEvent(
+                event_type="reconciliation",
+                state="completed",
+                summary="late isolated-session reconciliation",
+                turn_id=None,
+                source_event_id="late-isolated-reconciliation",
+                detail={"stored_session_id": "stored-session"},
+            )
+        )
         await recovered._consume_gateway_events()
         assert store.stored_session_id() == "ordinary-session"
         recovered_gateway._events.clear()
 
         store.save_stored_session_id("newer-conversation-session")
-        recovered_gateway._events.append(GatewayEvent(
-            event_type="assistant_message",
-            state="completed",
-            summary="late duplicate",
-            turn_id=created.turn_id,
-            source_event_id="late-browser-save-terminal",
-        ))
+        recovered_gateway._events.append(
+            GatewayEvent(
+                event_type="assistant_message",
+                state="completed",
+                summary="late duplicate",
+                turn_id=created.turn_id,
+                source_event_id="late-browser-save-terminal",
+            )
+        )
         await recovered._consume_gateway_events()
         assert store.stored_session_id() == "newer-conversation-session"
         await recovered.close()
@@ -338,48 +357,41 @@ def test_empty_current_conversation_is_authenticated_and_stable(tmp_path):
     assert response.status_code == 200
     assert response.json() == {
         "conversation_id": response.json()["conversation_id"],
+        "title": "Session 1",
+        "position": 1,
+        "created_at": response.json()["created_at"],
         "entries": [],
         "active_turn": None,
         "connection": {"state": "online"},
+        "recovery_state": "ready",
         "latest_event_id": 0,
     }
     assert gateway.started and gateway.closed
 
 
-def test_new_session_rejects_active_work_then_rotates_and_clears_the_conversation(tmp_path):
+def test_new_session_is_additive_and_archive_rejects_active_work(tmp_path):
     gateway = FakeGateway()
     with make_client(tmp_path, gateway) as client:
         before = client.get("/v1/conversations/current", headers=headers()).json()
         created = send_message(client).json()
 
-        blocked = client.post("/v1/conversations/current/reset", headers=headers())
-        client.post(
-            f"/v1/conversations/current/turns/{created['turn_id']}/cancel",
-            headers=headers(),
+        blocked = client.delete(f"/v1/conversations/{before['conversation_id']}", headers=headers())
+        added = client.post("/v1/conversations", headers=headers())
+        client.post(turn_url(client, created["turn_id"], "cancel"), headers=headers())
+        archived = client.delete(
+            f"/v1/conversations/{before['conversation_id']}", headers=headers()
         )
-        reset = client.post("/v1/conversations/current/reset", headers=headers())
-        restored = client.get("/v1/conversations/current", headers=headers())
-        fresh_turn = send_message(client, text="Fresh context, same delivery key")
+        restored = client.get(
+            f"/v1/conversations/{added.json()['conversation_id']}", headers=headers()
+        )
 
     assert blocked.status_code == 409
-    assert blocked.json()["detail"] == (
-        "Finish or stop the active turn before starting a new session"
-    )
-    assert reset.status_code == 200
-    assert restored.json() == reset.json()
-    assert reset.json() == {
-        "conversation_id": reset.json()["conversation_id"],
-        "entries": [],
-        "active_turn": None,
-        "connection": {"state": "online"},
-        "latest_event_id": reset.json()["latest_event_id"],
-    }
-    assert reset.json()["latest_event_id"] > 0
-    assert reset.json()["conversation_id"] != before["conversation_id"]
-    assert fresh_turn.status_code == 201
-    assert fresh_turn.json()["turn_id"] != created["turn_id"]
-    assert gateway.detaches == 1
-    assert gateway.session_requests == [None, None]
+    assert blocked.json()["detail"] == "The final session cannot be archived"
+    assert added.status_code == 201
+    assert archived.status_code == 204
+    assert restored.status_code == 200
+    assert restored.json()["conversation_id"] == added.json()["conversation_id"]
+    assert restored.json()["entries"] == []
 
 
 def test_message_validation_idempotency_and_running_turn_serialization(tmp_path):
@@ -392,7 +404,11 @@ def test_message_validation_idempotency_and_running_turn_serialization(tmp_path)
 
     assert first.status_code == 201
     assert replay.status_code == 201
-    assert replay.json() == first.json()
+    assert first.json()["created"] is True
+    assert replay.json()["created"] is False
+    assert {key: value for key, value in replay.json().items() if key != "created"} == {
+        key: value for key, value in first.json().items() if key != "created"
+    }
     assert blocked.status_code == 409
     assert len(gateway.submissions) == 1
 
@@ -495,14 +511,10 @@ def test_cancel_is_idempotent_and_retry_appends_linked_turn(tmp_path):
     with make_client(tmp_path, gateway) as client:
         created = send_message(client).json()
         turn_id = created["turn_id"]
-        first_cancel = client.post(
-            f"/v1/conversations/current/turns/{turn_id}/cancel", headers=headers()
-        )
-        second_cancel = client.post(
-            f"/v1/conversations/current/turns/{turn_id}/cancel", headers=headers()
-        )
+        first_cancel = client.post(turn_url(client, turn_id, "cancel"), headers=headers())
+        second_cancel = client.post(turn_url(client, turn_id, "cancel"), headers=headers())
         retry = client.post(
-            f"/v1/conversations/current/turns/{turn_id}/retry",
+            turn_url(client, turn_id, "retry"),
             headers=headers(),
             json={"idempotency_key": "retry-key-0001"},
         )
@@ -520,8 +532,8 @@ def test_cancel_settles_locally_when_interrupt_transport_fails_and_remains_idemp
     gateway = InterruptFailureGateway()
     with make_client(tmp_path, gateway) as client:
         turn_id = send_message(client).json()["turn_id"]
-        first = client.post(f"/v1/conversations/current/turns/{turn_id}/cancel", headers=headers())
-        second = client.post(f"/v1/conversations/current/turns/{turn_id}/cancel", headers=headers())
+        first = client.post(turn_url(client, turn_id, "cancel"), headers=headers())
+        second = client.post(turn_url(client, turn_id, "cancel"), headers=headers())
         snapshot = client.get("/v1/conversations/current", headers=headers()).json()
 
     assert first.status_code == second.status_code == 200
@@ -606,7 +618,7 @@ def test_sse_event_ids_are_ordered_and_resume_after_cursor(tmp_path):
         snapshot = client.get("/v1/conversations/current", headers=headers()).json()
         first_id = snapshot["entries"][0]["event_id"]
         response = client.get(
-            "/v1/conversations/current/events/stream?once=true",
+            "/v1/conversations/events/stream?once=true",
             headers={**headers(), "Last-Event-ID": str(first_id)},
         )
 
@@ -617,6 +629,45 @@ def test_sse_event_ids_are_ordered_and_resume_after_cursor(tmp_path):
     assert ids == sorted(ids)
     assert ids and all(event_id > first_id for event_id in ids)
     assert created["turn_id"] in response.text
+
+
+def test_scoped_stream_envelope_tracks_runtime_quarantine_and_return_to_ready(tmp_path):
+    store = JobOsStateStore(tmp_path / "recovery-stream.db")
+    store.initialize(owner_device_id="device-a")
+    conversation_id = store.first_active_conversation_id("device-a")
+    scoped = store.conversation_store(conversation_id)
+    created = scoped.create_turn(
+        text="Run remote work",
+        context={},
+        idempotency_key="recovery-stream-key",
+        actor_id="device-a",
+    )
+    turn_id = str(created["turn_id"])
+    assert scoped.settle_active_turn(
+        turn_id,
+        "failed",
+        event_type="error",
+        summary="Transport lost",
+        detail={"reason": "transport_lost", "retry": True},
+        quarantine=True,
+    )
+
+    quarantined = store.all_conversation_events_after(0, owner_device_id="device-a")[-1]
+    assert quarantined["conversation_id"] == conversation_id
+    assert quarantined["recovery_state"] == "quarantined"
+    quarantine_event_id = int(quarantined["event"]["event_id"])
+
+    assert scoped.clear_recovery_turn_if_current(turn_id)
+    scoped.append_event(
+        turn_id=turn_id,
+        event_type="status",
+        state="interrupted",
+        summary="Remote recovery confirmed",
+        detail={"recovery_confirmed": True},
+    )
+    ready = store.all_conversation_events_after(quarantine_event_id, owner_device_id="device-a")
+    assert len(ready) == 1
+    assert ready[0]["recovery_state"] == "ready"
 
 
 def test_sse_polls_promptly_for_new_events_and_heartbeats_on_separate_cadence(tmp_path):
@@ -830,15 +881,21 @@ def test_new_durable_session_is_saved_before_prompt_submission_can_begin(tmp_pat
             actor_id="device-a",
             context={"selected_job_id": None, "workspace": {}},
         )
-        return store.stored_session_id(), store.turn_record(result.turn_id)
+        return (
+            store.stored_session_id(),
+            store.turn_record(result.turn_id),
+            service.snapshot().recovery_state,
+        )
 
-    accepted_id, accepted_turn = asyncio.run(scenario(acknowledge=True))
-    rejected_id, rejected_turn = asyncio.run(scenario(acknowledge=False))
+    accepted_id, accepted_turn, accepted_recovery = asyncio.run(scenario(acknowledge=True))
+    rejected_id, rejected_turn, rejected_recovery = asyncio.run(scenario(acknowledge=False))
 
     assert accepted_id == "new-durable-id"
     assert accepted_turn["status"] == "running"
+    assert accepted_recovery == "ready"
     assert rejected_id == "new-durable-id"
     assert rejected_turn["status"] == "failed"
+    assert rejected_recovery == "quarantined"
     assert JobOsStateStore(tmp_path / "rejected.db").recovery_turn_id() == rejected_turn["turn_id"]
 
 
@@ -1048,7 +1105,7 @@ def test_api_restart_recovers_stale_turn_once_and_allows_linked_retry(tmp_path):
     with make_client(tmp_path, retry_gateway) as restarted:
         recovered = restarted.get("/v1/conversations/current", headers=headers()).json()
         retry = restarted.post(
-            f"/v1/conversations/current/turns/{stale_turn_id}/retry",
+            turn_url(restarted, stale_turn_id, "retry"),
             headers=headers(),
             json={"idempotency_key": "restart-retry-key-0001"},
         )
@@ -1091,7 +1148,7 @@ def test_restart_reattaches_and_interrupts_remote_before_terminalizing_or_retryi
     with make_client(tmp_path, gateway) as client:
         snapshot = client.get("/v1/conversations/current", headers=headers()).json()
         retry = client.post(
-            f"/v1/conversations/current/turns/{created['turn_id']}/retry",
+            turn_url(client, created["turn_id"], "retry"),
             headers=headers(),
             json={"idempotency_key": "restart-confirmed-retry"},
         )
@@ -1129,16 +1186,16 @@ def test_unconfirmed_restart_cleanup_quarantines_overlap_and_stop_retries_recove
     with make_client(tmp_path, gateway) as client:
         quarantined = client.get("/v1/conversations/current", headers=headers()).json()
         overlap = send_message(client, key="must-not-overlap-quarantine")
-        recovered = client.post(
-            f"/v1/conversations/current/turns/{created['turn_id']}/cancel", headers=headers()
-        )
+        recovered = client.post(turn_url(client, created["turn_id"], "cancel"), headers=headers())
         after = client.get("/v1/conversations/current", headers=headers()).json()
 
     assert quarantined["active_turn"]["turn_id"] == created["turn_id"]
+    assert quarantined["recovery_state"] == "recovering"
     assert any(entry["detail"].get("recovery_pending") is True for entry in quarantined["entries"])
     assert overlap.status_code == 409
     assert recovered.json()["status"] == "interrupted"
     assert after["active_turn"] is None
+    assert after["recovery_state"] == "ready"
     assert gateway.recovery_attempts == 2
     assert "restart-secret" not in json.dumps({"quarantined": quarantined, "after": after})
 
@@ -1196,15 +1253,17 @@ def test_cancel_completion_race_has_one_winning_terminal_event(tmp_path):
 def test_dispatch_exception_cannot_overwrite_concurrent_interrupt(tmp_path):
     async def scenario():
         cancel_requested = asyncio.Event()
-
-        class BarrierStore(JobOsStateStore):
-            def request_turn_cancel(self, turn_id):
-                result = super().request_turn_cancel(turn_id)
-                cancel_requested.set()
-                return result
-
-        store = BarrierStore(tmp_path / "jobos.db")
+        store = JobOsStateStore(tmp_path / "jobos.db")
         store.initialize()
+        scoped_store = store.conversation_store(store.first_active_conversation_id())
+        original_request_cancel = scoped_store.request_turn_cancel
+
+        def request_turn_cancel(turn_id):
+            result = original_request_cancel(turn_id)
+            cancel_requested.set()
+            return result
+
+        scoped_store.request_turn_cancel = request_turn_cancel
         entered_submit = asyncio.Event()
         release_submit = asyncio.Event()
 
@@ -1215,7 +1274,7 @@ def test_dispatch_exception_cannot_overwrite_concurrent_interrupt(tmp_path):
                 raise ConnectionError("Authorization: Basic dispatch-secret")
 
         gateway = BarrierGateway()
-        service = ConversationService(store, gateway)
+        service = ConversationService(scoped_store, gateway)
         send_task = asyncio.create_task(
             service.send(
                 SendMessageRequest(text="Dispatch safely", idempotency_key="dispatch-cancel-race"),
@@ -1301,7 +1360,8 @@ def test_only_new_terminal_message_event_transitions_turn_status_once(tmp_path):
         ),
     ]
     transitions = []
-    original_settle = store.settle_active_turn
+    scoped_store = store.conversation_store(store.first_active_conversation_id())
+    original_settle = scoped_store.settle_active_turn
 
     def record_transition(changed_turn_id, status, **kwargs):
         changed = original_settle(changed_turn_id, status, **kwargs)
@@ -1309,9 +1369,9 @@ def test_only_new_terminal_message_event_transitions_turn_status_once(tmp_path):
             transitions.append((changed_turn_id, status))
         return changed
 
-    store.settle_active_turn = record_transition
+    scoped_store.settle_active_turn = record_transition
 
-    asyncio.run(ConversationService(store, gateway)._consume_gateway_events())
+    asyncio.run(ConversationService(scoped_store, gateway)._consume_gateway_events())
 
     assert transitions == [(turn_id, "completed")]
 
@@ -1344,7 +1404,8 @@ def test_only_new_error_event_transitions_turn_to_failed_once(tmp_path):
         ),
     ]
     transitions = []
-    original_settle = store.settle_active_turn
+    scoped_store = store.conversation_store(store.first_active_conversation_id())
+    original_settle = scoped_store.settle_active_turn
 
     def record_transition(changed_turn_id, status, **kwargs):
         changed = original_settle(changed_turn_id, status, **kwargs)
@@ -1352,9 +1413,9 @@ def test_only_new_error_event_transitions_turn_to_failed_once(tmp_path):
             transitions.append((changed_turn_id, status))
         return changed
 
-    store.settle_active_turn = record_transition
+    scoped_store.settle_active_turn = record_transition
 
-    asyncio.run(ConversationService(store, gateway)._consume_gateway_events())
+    asyncio.run(ConversationService(scoped_store, gateway)._consume_gateway_events())
 
     assert transitions == [(turn_id, "failed")]
 
@@ -1387,3 +1448,535 @@ def test_working_status_moves_waiting_turn_back_to_running_without_settling(tmp_
     snapshot = store.conversation_snapshot()
     assert snapshot["active_turn"]["status"] == "running"
     assert snapshot["entries"][-1]["state"] == "working"
+
+
+class RecordingGatewayFactory:
+    def __init__(self):
+        self.gateways = {}
+
+    def create(self, conversation_id):
+        gateway = FakeGateway()
+        self.gateways[conversation_id] = gateway
+        return gateway
+
+
+def test_manager_starts_all_services_concurrently_with_a_barrier(tmp_path):
+    async def scenario():
+        entered = 0
+        both_entered = asyncio.Event()
+        release = asyncio.Event()
+
+        class BarrierStartGateway(FakeGateway):
+            async def start(self):
+                nonlocal entered
+                entered += 1
+                if entered == 2:
+                    both_entered.set()
+                await release.wait()
+                self.started = True
+
+        class Factory:
+            def create(self, conversation_id):
+                return BarrierStartGateway()
+
+        store = JobOsStateStore(tmp_path / "manager-start-barrier.db")
+        store.initialize()
+        store.create_conversation(actor_id="device-a")
+        manager = ConversationManager(store, Factory())
+        startup = asyncio.create_task(manager.start())
+        await asyncio.wait_for(both_entered.wait(), timeout=1)
+        assert entered == 2
+        release.set()
+        await asyncio.wait_for(startup, timeout=1)
+        await manager.close()
+
+    asyncio.run(scenario())
+
+
+def test_replay_uses_transaction_flag_when_other_conversation_advances_cursor(tmp_path):
+    async def scenario():
+        store = JobOsStateStore(tmp_path / "explicit-replay.db")
+        store.initialize()
+        first_id = store.first_active_conversation_id("primary-device")
+        second_id = str(store.create_conversation(actor_id="primary-device")["conversation_id"])
+        gateway = FakeGateway()
+        service = ConversationService(store.conversation_store(first_id), gateway, first_id)
+        command = SendMessageRequest(text="Exactly once", idempotency_key="exact-replay-key")
+        first = await service.send(command, actor_id="primary-device", context={})
+        store.conversation_store(second_id).append_event(
+            turn_id=None,
+            event_type="status",
+            state="working",
+            summary="Unrelated global event",
+        )
+        replay = await service.send(command, actor_id="primary-device", context={})
+        assert first.created is True
+        assert replay.created is False
+        assert len(gateway.submissions) == 1
+
+    asyncio.run(scenario())
+
+
+def test_failed_gateway_construction_archives_row_and_releases_cap(tmp_path):
+    async def scenario():
+        store = JobOsStateStore(tmp_path / "construction-rollback.db")
+        store.initialize()
+
+        class Factory:
+            fail = True
+
+            def create(self, conversation_id):
+                if self.fail:
+                    self.fail = False
+                    raise RuntimeError("controlled construction failure")
+                return FakeGateway()
+
+        factory = Factory()
+        manager = ConversationManager(store, factory)
+        # Preserve the migrated initial service and fail only the requested addition.
+        factory.fail = False
+        await manager.start()
+        factory.fail = True
+        with pytest.raises(RuntimeError, match="controlled construction failure"):
+            await manager.create(actor_id="primary-device")
+        assert len(store.list_active_conversations()) == 1
+        recovered = await manager.create(actor_id="primary-device")
+        assert recovered.position == 2
+        assert len(manager.list(owner_device_id="primary-device").conversations) == 2
+        await manager.close()
+
+    asyncio.run(scenario())
+
+
+def test_startup_factory_failure_preserves_durable_row_and_starts_sibling(tmp_path):
+    async def scenario():
+        store = JobOsStateStore(tmp_path / "startup-construction.db")
+        store.initialize(owner_device_id="device-a")
+        broken_id = store.first_active_conversation_id("device-a")
+        sibling_id = str(store.create_conversation(actor_id="device-a")["conversation_id"])
+
+        class Factory:
+            def create(self, conversation_id):
+                if conversation_id == broken_id:
+                    raise RuntimeError("controlled startup factory failure")
+                return FakeGateway()
+
+        manager = ConversationManager(store, Factory())
+        await manager.start()
+        assert [
+            item["conversation_id"]
+            for item in store.list_active_conversations(owner_device_id="device-a")
+        ] == [broken_id, sibling_id]
+        assert manager.get(sibling_id, owner_device_id="device-a").gateway.started is True
+        listed = manager.list(owner_device_id="device-a").conversations
+        assert [item.conversation_id for item in listed] == [broken_id, sibling_id]
+        assert listed[0].connection.state == "offline"
+        assert listed[1].connection.state == "online"
+        with pytest.raises(ConversationNotFound, match="Conversation not found"):
+            manager.get(broken_id, owner_device_id="device-a")
+        await manager.close()
+
+    asyncio.run(scenario())
+
+
+def test_startup_hermes_cwd_construction_failure_preserves_row_and_starts_sibling(tmp_path):
+    async def scenario():
+        store = JobOsStateStore(tmp_path / "startup-cwd.db")
+        store.initialize(owner_device_id="device-a")
+        broken_id = store.first_active_conversation_id("device-a")
+        sibling_id = str(store.create_conversation(actor_id="device-a")["conversation_id"])
+        hermes = HermesGatewayFactory(
+            url="ws://127.0.0.1:9119/api/ws",
+            token="synthetic-token",
+            cwd=tmp_path / "missing-hermes-cwd",
+        )
+
+        class Factory:
+            def create(self, conversation_id):
+                return (
+                    hermes.create(conversation_id)
+                    if conversation_id == broken_id
+                    else FakeGateway()
+                )
+
+        manager = ConversationManager(store, Factory())
+        await manager.start()
+        assert [
+            item["conversation_id"]
+            for item in store.list_active_conversations(owner_device_id="device-a")
+        ] == [broken_id, sibling_id]
+        assert manager.get(sibling_id, owner_device_id="device-a").gateway.started is True
+        await manager.close()
+
+    asyncio.run(scenario())
+
+
+def test_event_consumer_failure_is_quarantined_and_restarted(tmp_path):
+    async def scenario():
+        store = JobOsStateStore(tmp_path / "consumer-restart.db")
+        store.initialize()
+
+        class FailingOnceGateway(FakeGateway):
+            def __init__(self):
+                super().__init__()
+                self.stream_attempts = 0
+                self.restarted = asyncio.Event()
+
+            async def stream_events(self):
+                self.stream_attempts += 1
+                if self.stream_attempts == 1:
+                    raise RuntimeError("controlled normalization failure")
+                self.restarted.set()
+                while True:
+                    await asyncio.sleep(10)
+                    if False:
+                        yield GatewayEvent(event_type="status", state="working", summary="")
+
+        gateway = FailingOnceGateway()
+        conversation_id = store.first_active_conversation_id()
+        service = ConversationService(
+            store.conversation_store(conversation_id), gateway, conversation_id
+        )
+        service._event_consumer_restart_delay = 0
+        task = asyncio.create_task(service._supervise_gateway_events())
+        await asyncio.wait_for(gateway.restarted.wait(), timeout=1)
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+        snapshot = service.snapshot()
+        assert gateway.stream_attempts == 2
+        assert snapshot.entries[-1]["detail"]["reason"] == "event_consumer_failure"
+
+    asyncio.run(scenario())
+
+
+def test_manager_start_failure_keeps_sibling_available_and_reconnect_alive(tmp_path):
+    async def scenario():
+        class Factory:
+            def __init__(self):
+                self.created = []
+
+            def create(self, conversation_id):
+                gateway = IdleReconnectingGateway() if not self.created else FakeGateway()
+                self.created.append(gateway)
+                return gateway
+
+        store = JobOsStateStore(tmp_path / "manager-start-failure.db")
+        store.initialize()
+        second_id = str(store.create_conversation(actor_id="device-a")["conversation_id"])
+        factory = Factory()
+        manager = ConversationManager(store, factory)
+        await manager.start()
+        await asyncio.sleep(0.05)
+        assert manager.get(second_id).gateway.connection_state == "online"
+        assert factory.created[0].start_attempts >= 2
+        assert factory.created[0].connection_state == "online"
+        await manager.close()
+
+    asyncio.run(scenario())
+
+
+def test_manager_submissions_overlap_at_the_gateway_boundary(tmp_path):
+    async def scenario():
+        entered = 0
+        both_entered = asyncio.Event()
+        release = asyncio.Event()
+
+        class BarrierSubmitGateway(FakeGateway):
+            async def submit_turn(self, text, context):
+                nonlocal entered
+                entered += 1
+                if entered == 2:
+                    both_entered.set()
+                await release.wait()
+                await super().submit_turn(text, context)
+
+        class Factory:
+            def __init__(self):
+                self.gateways = {}
+
+            def create(self, conversation_id):
+                gateway = BarrierSubmitGateway()
+                self.gateways[conversation_id] = gateway
+                return gateway
+
+        store = JobOsStateStore(tmp_path / "manager-submit-barrier.db")
+        store.initialize()
+        second_id = str(store.create_conversation(actor_id="device-a")["conversation_id"])
+        first_id = store.first_active_conversation_id("primary-device")
+        manager = ConversationManager(store, Factory())
+        await manager.start()
+        submissions = asyncio.gather(
+            manager.get(first_id).send(
+                SendMessageRequest(text="First", idempotency_key="barrier-first-1"),
+                actor_id="device-a",
+                context={},
+            ),
+            manager.get(second_id).send(
+                SendMessageRequest(text="Second", idempotency_key="barrier-second-1"),
+                actor_id="device-b",
+                context={},
+            ),
+        )
+        await asyncio.wait_for(both_entered.wait(), timeout=1)
+        assert entered == 2
+        release.set()
+        await asyncio.wait_for(submissions, timeout=1)
+        await manager.close()
+
+    asyncio.run(scenario())
+
+
+def test_manager_close_attempts_every_service_once_when_one_raises(tmp_path):
+    async def scenario():
+        close_counts: dict[str, int] = {}
+
+        class CloseGateway(FakeGateway):
+            def __init__(self, conversation_id):
+                super().__init__()
+                self.conversation_id = conversation_id
+
+            async def close(self):
+                close_counts[self.conversation_id] = close_counts.get(self.conversation_id, 0) + 1
+                if len(close_counts) == 1:
+                    raise RuntimeError("controlled close failure")
+
+        class Factory:
+            def create(self, conversation_id):
+                return CloseGateway(conversation_id)
+
+        store = JobOsStateStore(tmp_path / "manager-close-isolation.db")
+        store.initialize()
+        store.create_conversation(actor_id="device-a")
+        manager = ConversationManager(store, Factory())
+        await manager.start()
+        with pytest.raises(RuntimeError, match="controlled close failure"):
+            await manager.close()
+        assert sorted(close_counts.values()) == [1, 1]
+        assert manager.services == ()
+
+    asyncio.run(scenario())
+
+
+def test_conversation_openapi_constrains_paths_and_documents_scoped_sse(tmp_path):
+    with make_client(tmp_path) as client:
+        schema = client.app.openapi()
+
+    conversation = schema["paths"]["/v1/conversations/{conversation_id}"]["get"]["parameters"][0][
+        "schema"
+    ]
+    cancel_parameters = schema["paths"][
+        "/v1/conversations/{conversation_id}/turns/{turn_id}/cancel"
+    ]["post"]["parameters"]
+    stream = schema["paths"]["/v1/conversations/events/stream"]["get"]["responses"]["200"]
+
+    assert conversation["pattern"] == "^conv_[A-Za-z0-9_-]{1,128}$"
+    assert conversation["maxLength"] == 133
+    assert cancel_parameters[1]["schema"]["pattern"] == "^turn_[A-Za-z0-9_-]{1,128}$"
+    assert cancel_parameters[1]["schema"]["maxLength"] == 133
+    assert set(stream["content"]) == {"text/event-stream"}
+    assert stream["content"]["text/event-stream"]["schema"] == {"type": "string"}
+    assert "conversation_id" in stream["content"]["text/event-stream"]["example"]
+    assert "recovery_state" in stream["content"]["text/event-stream"]["example"]
+    collection_errors = schema["paths"]["/v1/conversations"]["post"]["responses"]
+    item = schema["paths"]["/v1/conversations/{conversation_id}"]
+    assert "409" in collection_errors
+    assert "404" in item["get"]["responses"]
+    assert {"404", "409"}.issubset(item["delete"]["responses"])
+
+
+def test_manager_runs_conversations_concurrently_and_shuts_each_gateway(tmp_path):
+    async def scenario():
+        store = JobOsStateStore(tmp_path / "manager.db")
+        store.initialize()
+        second = store.create_conversation(actor_id="device-a")
+        factory = RecordingGatewayFactory()
+        manager = ConversationManager(store, factory)
+        await manager.start()
+        first_id = store.first_active_conversation_id("primary-device")
+        second_id = str(second["conversation_id"])
+        first, second_service = manager.get(first_id), manager.get(second_id)
+        first_turn, second_turn = await asyncio.gather(
+            first.send(
+                SendMessageRequest(text="First concurrent", idempotency_key="parallel-first-01"),
+                actor_id="device-a",
+                context={},
+            ),
+            second_service.send(
+                SendMessageRequest(text="Second concurrent", idempotency_key="parallel-second-1"),
+                actor_id="device-a",
+                context={},
+            ),
+        )
+        assert factory.gateways[first_id].submissions[0][1].turn_id == first_turn.turn_id
+        assert factory.gateways[second_id].submissions[0][1].turn_id == second_turn.turn_id
+        factory.gateways[first_id]._events = [
+            GatewayEvent(
+                event_type="activity",
+                state="working",
+                summary="First-only event",
+                turn_id=first_turn.turn_id,
+                source_event_id="interleaved-first",
+            )
+        ]
+        factory.gateways[second_id]._events = [
+            GatewayEvent(
+                event_type="activity",
+                state="working",
+                summary="Second-only event",
+                turn_id=second_turn.turn_id,
+                source_event_id="interleaved-second",
+            )
+        ]
+        await asyncio.gather(
+            first._consume_gateway_events(), second_service._consume_gateway_events()
+        )
+        assert "Second-only event" not in json.dumps(first.snapshot().entries)
+        assert "First-only event" not in json.dumps(second_service.snapshot().entries)
+        await first.cancel(first_turn.turn_id)
+        assert factory.gateways[first_id].interruptions == [first_turn.turn_id]
+        assert factory.gateways[second_id].interruptions == []
+        assert second_service.snapshot().active_turn["turn_id"] == second_turn.turn_id
+        await manager.close()
+        return tuple(factory.gateways.values())
+
+    gateways = asyncio.run(scenario())
+    assert all(gateway.closed for gateway in gateways)
+
+
+def test_manager_recovers_each_persisted_active_turn_independently(tmp_path):
+    async def scenario():
+        store = JobOsStateStore(tmp_path / "manager-recovery.db")
+        store.initialize()
+        first_id = store.first_active_conversation_id("primary-device")
+        second_id = str(store.create_conversation(actor_id="device-a")["conversation_id"])
+        turn_ids = []
+        for conversation_id in (first_id, second_id):
+            scoped = store.conversation_store(conversation_id)
+            turn = scoped.create_turn(
+                text=f"Recover {conversation_id}",
+                context={},
+                idempotency_key=f"recover-{conversation_id}",
+                actor_id="device-a",
+            )
+            scoped.save_stored_session_id(f"stored-{conversation_id}")
+            turn_ids.append(str(turn["turn_id"]))
+        factory = RecordingGatewayFactory()
+        manager = ConversationManager(store, factory)
+        await manager.start()
+        try:
+            assert factory.gateways[first_id].interruptions == [turn_ids[0]]
+            assert factory.gateways[second_id].interruptions == [turn_ids[1]]
+            assert manager.get(first_id).snapshot().active_turn is None
+            assert manager.get(second_id).snapshot().active_turn is None
+        finally:
+            await manager.close()
+
+    asyncio.run(scenario())
+
+
+def test_api_collection_cap_archive_and_global_sse_envelopes(tmp_path):
+    factory = RecordingGatewayFactory()
+    with make_client(tmp_path, gateway_factory=factory) as client:
+        first_id = current_id(client)
+        second = client.post("/v1/conversations", headers=headers())
+        second_id = second.json()["conversation_id"]
+        first_turn = client.post(
+            f"/v1/conversations/{first_id}/messages",
+            headers=headers(),
+            json={"text": "First tab", "idempotency_key": "api-first-tab-01"},
+        )
+        second_turn = client.post(
+            f"/v1/conversations/{second_id}/messages",
+            headers=headers(),
+            json={"text": "Second tab", "idempotency_key": "api-second-tab-1"},
+        )
+        stream = client.get("/v1/conversations/events/stream?once=true", headers=headers())
+        for _ in range(3):
+            assert client.post("/v1/conversations", headers=headers()).status_code == 201
+        capped = client.post("/v1/conversations", headers=headers())
+        blocked_archive = client.delete(f"/v1/conversations/{second_id}", headers=headers())
+        client.post(
+            f"/v1/conversations/{second_id}/turns/{second_turn.json()['turn_id']}/cancel",
+            headers=headers(),
+        )
+        archived = client.delete(f"/v1/conversations/{second_id}", headers=headers())
+        listed = client.get("/v1/conversations", headers=headers()).json()["conversations"]
+
+    assert first_turn.status_code == second_turn.status_code == 201
+    assert f'"conversation_id":"{first_id}"' in stream.text
+    assert f'"conversation_id":"{second_id}"' in stream.text
+    assert capped.status_code == 409
+    assert blocked_archive.status_code == 409
+    assert archived.status_code == 204
+    assert [item["position"] for item in listed] == [1, 2, 3, 4]
+
+
+def test_conversation_routes_and_sse_enforce_authenticated_device_owner(tmp_path):
+    remote_token = "remote-device-token-value"
+    repository, artifact_gateway = adapt_job_hunter_facade(FakeJobFacade())
+    app = create_app(
+        Settings(
+            device_token=TOKEN,
+            mcp_token="test-mcp-trusted-token",
+            device_id="primary-device",
+            device_credentials=(DeviceCredential(device_id="remote-device", token=remote_token),),
+            state_db_path=tmp_path / "owned-conversations.db",
+        ),
+        job_repository=repository,
+        artifact_gateway=artifact_gateway,
+        agent_gateway_factory=RecordingGatewayFactory(),
+    )
+    remote_headers = {"Authorization": f"Bearer {remote_token}"}
+    with TestClient(app) as client:
+        primary_id = current_id(client)
+        assert client.get("/v1/conversations", headers=remote_headers).json() == {
+            "conversations": []
+        }
+        remote = client.post("/v1/conversations", headers=remote_headers)
+        remote_id = remote.json()["conversation_id"]
+        remote_final_archive = client.delete(
+            f"/v1/conversations/{remote_id}", headers=remote_headers
+        )
+        remote_turn = client.post(
+            f"/v1/conversations/{remote_id}/messages",
+            headers=remote_headers,
+            json={"text": "Remote-owned", "idempotency_key": "remote-owner-key"},
+        )
+        primary_turn = client.post(
+            f"/v1/conversations/{primary_id}/messages",
+            headers=headers(),
+            json={"text": "Primary-owned", "idempotency_key": "primary-owner-key"},
+        )
+        cross_get = client.get(f"/v1/conversations/{primary_id}", headers=remote_headers)
+        cross_send = client.post(
+            f"/v1/conversations/{primary_id}/messages",
+            headers=remote_headers,
+            json={"text": "Forbidden", "idempotency_key": "cross-owner-key"},
+        )
+        cross_cancel = client.post(
+            f"/v1/conversations/{primary_id}/turns/{primary_turn.json()['turn_id']}/cancel",
+            headers=remote_headers,
+        )
+        cross_archive = client.delete(f"/v1/conversations/{primary_id}", headers=remote_headers)
+        for _ in range(4):
+            assert client.post("/v1/conversations", headers=headers()).status_code == 201
+            assert client.post("/v1/conversations", headers=remote_headers).status_code == 201
+        primary_list = client.get("/v1/conversations", headers=headers()).json()["conversations"]
+        remote_list = client.get("/v1/conversations", headers=remote_headers).json()[
+            "conversations"
+        ]
+        primary_cap = client.post("/v1/conversations", headers=headers())
+        remote_cap = client.post("/v1/conversations", headers=remote_headers)
+        stream = client.get("/v1/conversations/events/stream?once=true", headers=remote_headers)
+
+    assert remote.status_code == remote_turn.status_code == primary_turn.status_code == 201
+    assert remote_final_archive.status_code == 409
+    assert cross_get.status_code == cross_send.status_code == 404
+    assert cross_cancel.status_code == cross_archive.status_code == 404
+    assert [item["position"] for item in primary_list] == [1, 2, 3, 4, 5]
+    assert [item["position"] for item in remote_list] == [1, 2, 3, 4, 5]
+    assert [item["title"] for item in primary_list] == [f"Session {value}" for value in range(1, 6)]
+    assert [item["title"] for item in remote_list] == [f"Session {value}" for value in range(1, 6)]
+    assert primary_cap.status_code == remote_cap.status_code == 409
+    assert f'"conversation_id":"{remote_id}"' in stream.text
+    assert f'"conversation_id":"{primary_id}"' not in stream.text

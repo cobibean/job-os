@@ -90,9 +90,7 @@ def _credential_value(value: object) -> str:
     if not isinstance(value, str):
         raise LocalConfigError("JobOS credentials are invalid. Retry setup.")
     credential = value.strip()
-    invalid_control_character = any(
-        character in credential for character in "\r\n\0"
-    )
+    invalid_control_character = any(character in credential for character in "\r\n\0")
     if not credential or len(credential) > 4096 or invalid_control_character:
         raise LocalConfigError("JobOS credentials are invalid. Retry setup.")
     return credential
@@ -143,9 +141,7 @@ def settings_from_config(path: Path) -> Settings:
         local_artifact_root=artifact_root,
         artifact_roots=(artifact_root,),
         job_provider=str(config.get("jobProvider", "sqlite")),
-        transport=(
-            "private-remote" if config.get("mode") == "remote-client" else "local-loopback"
-        ),
+        transport=("private-remote" if config.get("mode") == "remote-client" else "local-loopback"),
     )
 
 
