@@ -32,3 +32,39 @@ jobs:
         run: pnpm contracts:check
       - name: Prove stale generated contracts are rejected
         run: pnpm contracts:test-drift
+
+  clean-clone-linux:
+    name: Clean clone (Linux source subset)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 26.5.0
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+      - uses: astral-sh/setup-uv@v8.3.2
+        with:
+          version: "0.11.18"
+          enable-cache: true
+      - run: pnpm public:smoke-clean-clone
+
+  clean-clone-macos:
+    name: Clean clone (macOS complete path)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 26.5.0
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+      - uses: astral-sh/setup-uv@v8.3.2
+        with:
+          version: "0.11.18"
+          enable-cache: true
+      - run: pnpm public:smoke-clean-clone

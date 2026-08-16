@@ -262,7 +262,7 @@ class JobOsMcpClient:
             f"/v1/jobs/{self._segment(job_id, 'job ID')}/description",
             json={
                 "description_text": description_text,
-                "source": "jobhunter_agent",
+                "source": "mcp_agent",
                 "provenance": source_note,
                 "origin": "mcp",
                 "idempotency_key": self._key(idempotency_key),

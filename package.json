@@ -32,6 +32,7 @@
     "dev": "pnpm --filter @jobos/desktop dev",
     "license:check": "uv run python scripts/verify_license_inventory.py",
     "public:check": "uv run python scripts/public-release/verify-public-tree.py && uv run python scripts/public-release/verify-fixture-manifest.py",
+    "public:smoke-clean-clone": "python scripts/public-release/smoke-clean-clone.py --source . --ref HEAD",
     "lint": "pnpm --filter @jobos/contracts lint && pnpm --filter @jobos/desktop lint && uv run ruff check services scripts",
     "test": "pnpm --filter @jobos/desktop test && uv run pytest",
     "typecheck": "pnpm contracts:generate && pnpm --filter @jobos/contracts build && pnpm --filter @jobos/contracts typecheck && pnpm --filter @jobos/desktop typecheck"
