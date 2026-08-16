@@ -32,7 +32,7 @@ def test_public_composition_starts_without_private_services(tmp_path):
 
     assert response.status_code == 200
     assert response.json()["status"] == "ready"
-    assert response.json()["agent_connection"] == "offline"
+    assert response.json()["agent"] == "not-configured"
 
 
 def test_sqlite_local_editable_lifecycle_survives_restart_and_downloads_pair(
@@ -222,22 +222,32 @@ def test_private_artifact_capabilities_report_stable_unconfigured_errors(
             },
         )
 
-    assert (refreshed.status_code, refreshed.json()["detail"]) == (
-        503,
-        "JobHunter artifact refresh is unconfigured",
-    )
-    assert (rendered.status_code, rendered.json()["detail"]) == (
-        503,
-        "JobHunter artifact rendering is unconfigured",
-    )
-    assert (registered.status_code, registered.json()["detail"]) == (
-        503,
-        "JobHunter artifact registration is unconfigured",
-    )
-    assert (published.status_code, published.json()["detail"]) == (
-        503,
-        "JobHunter artifact publication is unconfigured",
-    )
+    for label, response, expected_code, expected_message in (
+        (
+            "refresh",
+            refreshed,
+            "artifact_provider_unavailable",
+            "Artifact provider is unavailable",
+        ),
+        ("render", rendered, "renderer_unavailable", "Renderer is unavailable"),
+        (
+            "register",
+            registered,
+            "artifact_provider_unavailable",
+            "Artifact provider is unavailable",
+        ),
+        (
+            "publish",
+            published,
+            "artifact_provider_unavailable",
+            "Artifact provider is unavailable",
+        ),
+    ):
+        assert response.status_code == 503
+        assert response.json()["code"] == expected_code, (label, response.json())
+        assert response.json()["message"] == expected_message, label
+        assert response.json()["retryable"] is True
+        assert response.json()["correlation_id"] == response.headers["x-correlation-id"]
 
 
 def test_artifact_refresh_maps_filesystem_failures_to_stable_503(tmp_path):

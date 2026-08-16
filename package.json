@@ -22,6 +22,7 @@
     "build": "pnpm contracts:generate && pnpm --filter @jobos/contracts build && pnpm --filter @jobos/desktop build && node scripts/verify-packaged-renderer.mjs",
     "check": "pnpm public:check && pnpm license:check && pnpm lint && pnpm typecheck && pnpm test && pnpm build",
     "contracts:check": "pnpm contracts:generate && node scripts/verify-contract-drift.mjs",
+    "contracts:test-drift": "node scripts/test-contract-drift.mjs",
     "contracts:generate": "pnpm api:export && pnpm --filter @jobos/openapi-generator generate",
     "dev": "pnpm --filter @jobos/desktop dev",
     "license:check": "uv run python scripts/verify_license_inventory.py",

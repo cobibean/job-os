@@ -3,6 +3,7 @@ import base64
 import hashlib
 import hmac
 import json
+import re
 import sqlite3
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager, contextmanager
@@ -11,12 +12,22 @@ from datetime import UTC, datetime
 from functools import wraps
 from pathlib import Path
 from threading import Lock
-from typing import Annotated, Literal, ParamSpec, TypeVar, cast
+from typing import Annotated, Any, Literal, ParamSpec, TypeVar, cast
 from urllib.parse import quote
 from uuid import uuid4
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Request, WebSocket, WebSocketDisconnect
+from fastapi import (
+    Depends,
+    FastAPI,
+    Header,
+    HTTPException,
+    Request,
+    WebSocket,
+    WebSocketDisconnect,
+)
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, Response, StreamingResponse
+from fastapi.routing import APIRoute
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from jobos_api import __version__
@@ -133,8 +144,13 @@ from jobos_api.jobs import (
     normalize_job_detail,
 )
 from jobos_api.local_artifact_repository import LocalArtifactRepository
-from jobos_api.redaction import sanitize_text
-from jobos_api.responses import DeviceSessionResponse, HealthResponse, VersionResponse
+from jobos_api.redaction import redact_detail, sanitize_text
+from jobos_api.responses import (
+    ApiErrorResponse,
+    DeviceSessionResponse,
+    HealthResponse,
+    VersionResponse,
+)
 from jobos_api.settings import Settings
 from jobos_api.state_store import (
     ConversationBusy,
@@ -150,6 +166,178 @@ from jobos_api.workspace import WorkspaceSnapshotCommand, WorkspaceSnapshotRespo
 P = ParamSpec("P")
 R = TypeVar("R")
 LOCAL_ARTIFACT_STORAGE_UNAVAILABLE = "Local artifact storage is unavailable"
+_ERROR_RESPONSE_DESCRIPTIONS = {
+    401: "Device authentication required",
+    403: "Operation is not permitted",
+    404: "Resource not found",
+    409: "Resource state conflict",
+    415: "Unsupported media type",
+    422: "Request validation failed",
+    500: "Internal server error",
+    503: "Required capability unavailable",
+}
+_PUBLIC_ROUTE_NAMES = frozenset({"health", "version"})
+_ENDPOINT_ERROR_ROUTES = {
+    403: frozenset(
+        {
+            "browser_command",
+            "editable_document_outline",
+            "editable_operations",
+            "editable_snapshot_create",
+            "job_create_from_browser",
+            "publish_job_artifact",
+            "job_remove_demo",
+            "job_update_description",
+            "job_update_status",
+            "jobs_reorder",
+            "workspace_put",
+            "workspace_select_job",
+            "workspace_sort_jobs",
+        }
+    ),
+    404: frozenset(
+        {
+            "approve_job_artifact",
+            "artifact_content",
+            "artifact_download",
+            "document_file_get",
+            "document_files_list",
+            "editable_document_create",
+            "editable_document_for_job",
+            "editable_document_get",
+            "editable_document_import",
+            "editable_document_outline",
+            "editable_document_publish",
+            "editable_document_save",
+            "editable_documents_list",
+            "editable_operations",
+            "editable_snapshot_create",
+            "editable_snapshot_list",
+            "editable_snapshot_restore",
+            "job_artifacts",
+            "job_history",
+            "job_inspect",
+            "publish_job_artifact",
+            "job_remove_demo",
+            "job_update_description",
+            "job_update_status",
+            "refresh_job_artifacts",
+            "register_job_artifact",
+            "render_job_artifact",
+            "workspace_select_job",
+            "conversation_cancel",
+            "conversation_retry",
+        }
+    ),
+    409: frozenset(
+        {
+            "approve_job_artifact",
+            "artifact_content",
+            "artifact_download",
+            "browser_command",
+            "conversation_reset",
+            "conversation_retry",
+            "conversation_send",
+            "editable_document_create",
+            "editable_document_import",
+            "editable_document_publish",
+            "editable_document_save",
+            "editable_operations",
+            "editable_snapshot_create",
+            "editable_snapshot_restore",
+            "job_create_from_browser",
+            "publish_job_artifact",
+            "job_remove_demo",
+            "job_update_description",
+            "job_update_status",
+            "jobs_reorder",
+            "refresh_job_artifacts",
+            "register_job_artifact",
+            "render_job_artifact",
+            "report_activity",
+            "workspace_put",
+            "workspace_select_job",
+            "workspace_sort_jobs",
+        }
+    ),
+    415: frozenset({"artifact_content"}),
+    503: frozenset(
+        {
+            "approve_job_artifact",
+            "artifact_content",
+            "artifact_download",
+            "browser_command",
+            "document_files_list",
+            "editable_document_create",
+            "editable_document_import",
+            "editable_document_publish",
+            "editable_documents_list",
+            "editable_document_outline",
+            "editable_document_for_job",
+            "health",
+            "job_artifacts",
+            "job_create_from_browser",
+            "job_history",
+            "job_inspect",
+            "publish_job_artifact",
+            "job_remove_demo",
+            "job_update_description",
+            "job_update_status",
+            "jobs_list",
+            "jobs_reorder",
+            "refresh_job_artifacts",
+            "register_job_artifact",
+            "render_job_artifact",
+            "workspace_select_job",
+        }
+    ),
+}
+
+
+def _configure_openapi_error_responses(app: FastAPI) -> None:
+    """Attach precise envelope responses without repeating them on every route."""
+    for route in app.routes:
+        if not isinstance(route, APIRoute):
+            continue
+        statuses = {500}
+        if route.name not in _PUBLIC_ROUTE_NAMES:
+            statuses.add(401)
+        statuses.update(
+            status
+            for status, route_names in _ENDPOINT_ERROR_ROUTES.items()
+            if route.name in route_names
+        )
+        for status in statuses:
+            route.responses.setdefault(
+                status,
+                {
+                    "model": ApiErrorResponse,
+                    "description": _ERROR_RESPONSE_DESCRIPTIONS[status],
+                },
+            )
+
+    default_openapi = app.openapi
+
+    def envelope_openapi() -> dict[str, Any]:
+        schema = default_openapi()
+        for path_item in schema.get("paths", {}).values():
+            for operation in path_item.values():
+                for status, response in operation.get("responses", {}).items():
+                    if int(status) < 400:
+                        continue
+                    if status == "422":
+                        response["description"] = _ERROR_RESPONSE_DESCRIPTIONS[422]
+                    response["content"] = {
+                        "application/json": {
+                            "schema": {"$ref": "#/components/schemas/ApiErrorResponse"}
+                        }
+                    }
+        schemas = schema.get("components", {}).get("schemas", {})
+        schemas.pop("HTTPValidationError", None)
+        schemas.pop("ValidationError", None)
+        return schema
+
+    app.openapi = envelope_openapi  # type: ignore[method-assign]
 
 
 @dataclass(frozen=True, slots=True)
@@ -172,6 +360,9 @@ def create_app(
     state_store: JobOsStateStore | None = None,
 ) -> FastAPI:
     state_store = state_store or JobOsStateStore(settings.state_db_path)
+    artifact_gateway_configured = (
+        artifact_gateway is not None or settings.artifact_provider == "gateway"
+    )
     if job_repository is None or artifact_gateway is None:
         composed_jobs, composed_artifacts = create_job_services(settings)
         job_repository = job_repository or composed_jobs
@@ -181,6 +372,19 @@ def create_app(
     local_artifacts = artifact_repository or LocalArtifactRepository(
         settings.resolved_local_artifact_root()
     )
+
+    def artifact_storage_is_available() -> bool:
+        try:
+            return local_artifacts.is_available() is True
+        except (AttributeError, RuntimeError, OSError):
+            return False
+
+    def artifact_gateway_is_available() -> bool:
+        try:
+            return artifacts.is_available() is True
+        except (AttributeError, RuntimeError, OSError):
+            return False
+
     trusted_artifact_roots = settings.resolved_artifact_roots()
     device_authenticator = DeviceAuthenticator(settings.device_credential_registry())
     bearer = HTTPBearer(auto_error=False)
@@ -280,9 +484,113 @@ def create_app(
         lifespan=lifespan,
     )
 
+    def correlation_id(request: Request) -> str:
+        supplied = request.headers.get("x-correlation-id", "")
+        if re.fullmatch(r"[A-Za-z0-9_-]{8,64}", supplied):
+            return supplied
+        existing = getattr(request.state, "correlation_id", None)
+        if isinstance(existing, str):
+            return existing
+        generated = uuid4().hex
+        request.state.correlation_id = generated
+        return generated
+
+    def error_response(
+        request: Request,
+        *,
+        status_code: int,
+        code: str,
+        message: str,
+        retryable: bool | None = None,
+        detail: object | None = None,
+        headers: dict[str, str] | None = None,
+    ) -> JSONResponse:
+        safe_message = sanitize_text(message)[:500] or "Request failed"
+        safe_detail: object | None = None
+        if isinstance(detail, str):
+            safe_detail = sanitize_text(detail)[:500]
+        elif isinstance(detail, dict):
+            safe_detail = redact_detail(detail)
+        payload = ApiErrorResponse(
+            error_schema="jobos-error-v1",
+            code=code,
+            message=safe_message,
+            retryable=(status_code in {408, 425, 429, 502, 503, 504})
+            if retryable is None
+            else retryable,
+            correlation_id=correlation_id(request),
+            detail=safe_detail,
+        )
+        response_headers = dict(headers or {})
+        response_headers["X-Correlation-ID"] = payload.correlation_id
+        return JSONResponse(
+            status_code=status_code,
+            content=payload.model_dump(mode="json"),
+            headers=response_headers,
+        )
+
+    @app.middleware("http")
+    async def attach_correlation_id(request: Request, call_next):
+        request.state.correlation_id = correlation_id(request)
+        response = await call_next(request)
+        response.headers["X-Correlation-ID"] = request.state.correlation_id
+        return response
+
+    @app.exception_handler(HTTPException)
+    async def http_error_handler(request: Request, error: HTTPException) -> JSONResponse:
+        detail = error.detail
+        code = f"http_{error.status_code}"
+        message = "Request failed"
+        retryable: bool | None = None
+        if isinstance(detail, str):
+            message = detail
+        elif isinstance(detail, dict):
+            candidate_code = detail.get("code")
+            candidate_message = detail.get("message")
+            candidate_retryable = detail.get("retryable")
+            if isinstance(candidate_code, str) and re.fullmatch(
+                r"[a-z][a-z0-9_]{0,63}", candidate_code
+            ):
+                code = candidate_code[:64]
+            if isinstance(candidate_message, str):
+                message = candidate_message
+            if isinstance(candidate_retryable, bool):
+                retryable = candidate_retryable
+        return error_response(
+            request,
+            status_code=error.status_code,
+            code=code,
+            message=message,
+            retryable=retryable,
+            detail=detail,
+            headers=error.headers,
+        )
+
+    @app.exception_handler(RequestValidationError)
+    async def request_validation_error_handler(
+        request: Request, _: RequestValidationError
+    ) -> JSONResponse:
+        return error_response(
+            request,
+            status_code=422,
+            code="request_validation_failed",
+            message="Request validation failed",
+            retryable=False,
+        )
+
+    @app.exception_handler(Exception)
+    async def unexpected_error_handler(request: Request, _: Exception) -> JSONResponse:
+        return error_response(
+            request,
+            status_code=500,
+            code="internal_error",
+            message="JobOS could not complete the request",
+            retryable=False,
+        )
+
     @app.exception_handler(JobRepositoryError)
     async def job_repository_error_handler(
-        _: Request, error: JobRepositoryError
+        request: Request, error: JobRepositoryError
     ) -> JSONResponse:
         status_code = 503
         if isinstance(error, NotFound):
@@ -293,9 +601,45 @@ def create_app(
             status_code = 422
         elif isinstance(error, Unavailable):
             status_code = 503
-        return JSONResponse(status_code=status_code, content={"detail": str(error)})
+        if isinstance(error, Unavailable):
+            artifact_unavailable = str(error) == "Artifact provider is unavailable"
+            renderer_unavailable = str(error) == "Renderer is unavailable"
+            return error_response(
+                request,
+                status_code=status_code,
+                code=(
+                    "artifact_provider_unavailable" if artifact_unavailable
+                    else "renderer_unavailable" if renderer_unavailable
+                    else "repository_unavailable"
+                ),
+                message=(
+                    "Artifact provider is unavailable"
+                    if artifact_unavailable
+                    else "Renderer is unavailable"
+                    if renderer_unavailable
+                    else "Job data service is unavailable"
+                ),
+                retryable=True,
+            )
+        code = (
+            "resource_not_found" if isinstance(error, NotFound)
+            else "resource_conflict" if isinstance(error, Conflict)
+            else "request_validation_failed"
+        )
+        return error_response(
+            request,
+            status_code=status_code,
+            code=code,
+            message=str(error),
+            retryable=False,
+            detail=str(error),
+        )
 
-    @app.get("/v1/health", tags=["system"])
+    @app.get(
+        "/v1/health",
+        tags=["system"],
+        responses={503: {"model": ApiErrorResponse}},
+    )
     def health() -> HealthResponse:
         state_health = state_store.health()
         return HealthResponse(
@@ -303,12 +647,27 @@ def create_app(
             service="jobos-api",
             version=__version__,
             state_schema=state_health.schema_version,
-            agent_connection=conversation_service.gateway.connection_state,
+            transport=settings.transport,
+            agent=(
+                conversation_service.gateway.connection_state
+                if configured_gateway is not None
+                else "not-configured"
+            ),
+            artifact_storage=("available" if artifact_storage_is_available() else "unavailable"),
+            artifact_gateway=(
+                "available"
+                if artifact_gateway_is_available()
+                else "unavailable"
+                if artifact_gateway_configured
+                else "not-configured"
+            ),
         )
 
     @app.get("/v1/version", tags=["system"])
     def version() -> VersionResponse:
-        return VersionResponse(api_version=__version__, contract="jobos-v1-phase7-parity")
+        return VersionResponse(
+            api_version=__version__, contract="jobos-api-v1", error_schema="jobos-error-v1"
+        )
 
     def authenticated_device(
         credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer)],
@@ -496,7 +855,9 @@ def create_app(
     @app.post(
         "/v1/browser/commands",
         tags=["browser"],
-        responses={403: {"description": "Trusted MCP credential required"}},
+        responses={
+            403: {"model": ApiErrorResponse, "description": "Trusted MCP credential required"}
+        },
     )
     async def browser_command(
         command: BrowserCommandRequest,
@@ -669,12 +1030,14 @@ def create_app(
         return DocumentFileRecord.model_validate(value)
 
     @app.get("/v1/device-session", tags=["system"])
-    def device_session(
-        _: Annotated[DeviceIdentity, Depends(authenticated_device)],
+    async def device_session(
+        identity: Annotated[DeviceIdentity, Depends(authenticated_device)],
     ) -> DeviceSessionResponse:
+        presence = await browser_capabilities.presence(identity.device_id)
         return DeviceSessionResponse(
             authenticated=True,
-            transport="private-tailscale",
+            transport=settings.transport,
+            desktop="connected" if presence.available else "disconnected",
             api_version=__version__,
         )
 
@@ -835,7 +1198,9 @@ def create_app(
     @app.post(
         "/v1/jobs",
         tags=["jobs"],
-        responses={403: {"description": "Trusted MCP credential required"}},
+        responses={
+            403: {"model": ApiErrorResponse, "description": "Trusted MCP credential required"}
+        },
     )
     @serialized_mutation_route
     def job_create_from_browser(
@@ -908,7 +1273,9 @@ def create_app(
     @app.put(
         "/v1/jobs/order",
         tags=["jobs"],
-        responses={403: {"description": "Trusted MCP credential required"}},
+        responses={
+            403: {"model": ApiErrorResponse, "description": "Trusted MCP credential required"}
+        },
     )
     @serialized_mutation_route
     def jobs_reorder(
@@ -990,7 +1357,9 @@ def create_app(
     @app.put(
         "/v1/workspace",
         tags=["workspace"],
-        responses={403: {"description": "Trusted MCP credential required"}},
+        responses={
+            403: {"model": ApiErrorResponse, "description": "Trusted MCP credential required"}
+        },
     )
     def workspace_put(
         command: WorkspaceSnapshotCommand,
@@ -1040,7 +1409,9 @@ def create_app(
     @app.put(
         "/v1/workspace/jobs/selection",
         tags=["workspace"],
-        responses={403: {"description": "Trusted MCP credential required"}},
+        responses={
+            403: {"model": ApiErrorResponse, "description": "Trusted MCP credential required"}
+        },
     )
     @serialized_mutation_route
     def workspace_select_job(
@@ -1085,7 +1456,9 @@ def create_app(
     @app.put(
         "/v1/workspace/jobs/sort",
         tags=["workspace"],
-        responses={403: {"description": "Trusted MCP credential required"}},
+        responses={
+            403: {"model": ApiErrorResponse, "description": "Trusted MCP credential required"}
+        },
     )
     @serialized_mutation_route
     def workspace_sort_jobs(
@@ -1148,9 +1521,12 @@ def create_app(
         "/v1/jobs/{job_id}/demo",
         tags=["jobs"],
         responses={
-            403: {"description": "Trusted MCP credential required"},
-            404: {"description": "Demo job not found"},
-            409: {"description": "The selected job is not the fictional demo"},
+            403: {"model": ApiErrorResponse, "description": "Trusted MCP credential required"},
+            404: {"model": ApiErrorResponse, "description": "Demo job not found"},
+            409: {
+                "model": ApiErrorResponse,
+                "description": "The selected job is not the fictional demo",
+            },
         },
     )
     @serialized_mutation_route
@@ -1209,7 +1585,9 @@ def create_app(
     @app.put(
         "/v1/jobs/{job_id}/description",
         tags=["jobs"],
-        responses={403: {"description": "Trusted MCP credential required"}},
+        responses={
+            403: {"model": ApiErrorResponse, "description": "Trusted MCP credential required"}
+        },
     )
     @serialized_mutation_route
     def job_update_description(
@@ -1279,7 +1657,9 @@ def create_app(
     @app.put(
         "/v1/jobs/{job_id}/status",
         tags=["jobs"],
-        responses={403: {"description": "Trusted MCP credential required"}},
+        responses={
+            403: {"model": ApiErrorResponse, "description": "Trusted MCP credential required"}
+        },
     )
     @serialized_mutation_route
     def job_update_status(
@@ -2415,11 +2795,8 @@ def create_app(
     ) -> JobArtifactsResponse:
         require_trusted_mcp(identity, command.origin, mcp_token)
         ensure_job(job_id)
-        if settings.hermes_job_hunter_cwd is None:
-            raise HTTPException(
-                status_code=503,
-                detail="JobHunter artifact publication is unconfigured",
-            )
+        if not artifact_gateway_is_available() or settings.hermes_job_hunter_cwd is None:
+            raise Unavailable("Artifact provider is unavailable")
         source_bytes = command.source_bytes()
         artifact_bytes = command.artifact_bytes()
         request_hash = mutation_hash(
@@ -2612,4 +2989,5 @@ def create_app(
 
         return StreamingResponse(event_source(), media_type="text/event-stream")
 
+    _configure_openapi_error_responses(app)
     return app

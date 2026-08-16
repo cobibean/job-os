@@ -13,7 +13,11 @@ test('connectivity is healthy only after the Mini API authenticates the device',
         status: 'ready',
         service: 'jobos-api',
         version: '0.1.0',
-        state_schema: 2
+        state_schema: 2,
+        transport: 'local-loopback',
+        agent: 'not-configured',
+        artifact_storage: 'available',
+        artifact_gateway: 'not-configured'
       })
     }
     if (
@@ -22,7 +26,8 @@ test('connectivity is healthy only after the Mini API authenticates the device',
     ) {
       return Response.json({
         authenticated: true,
-        transport: 'private-tailscale',
+        transport: 'local-loopback',
+        desktop: 'disconnected',
         api_version: '0.1.0'
       })
     }
@@ -43,7 +48,12 @@ test('connectivity is healthy only after the Mini API authenticates the device',
   expect(connected).toMatchObject({
     state: 'connected',
     apiVersion: '0.1.0',
-    message: 'Private API authenticated'
+    transport: 'local-loopback',
+    agent: 'not-configured',
+    desktop: 'disconnected',
+    artifactStorage: 'available',
+    artifactGateway: 'not-configured',
+    message: 'Local loopback API authenticated'
   })
   expect(JSON.stringify(connected)).not.toContain('integration-device-token')
   expect(rejected).toMatchObject({
@@ -73,7 +83,11 @@ test('a malformed authenticated response is distinct from network unavailability
         status: 'ready',
         service: 'jobos-api',
         version: '0.1.0',
-        state_schema: 2
+        state_schema: 2,
+        transport: 'local-loopback',
+        agent: 'offline',
+        artifact_storage: 'available',
+        artifact_gateway: 'unavailable'
       })
     }
     return Response.json({})

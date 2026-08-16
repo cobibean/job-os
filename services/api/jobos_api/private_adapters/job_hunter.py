@@ -268,6 +268,15 @@ class JobHunterArtifactGateway:
     def __init__(self, facade: Any) -> None:
         self._facade = facade
 
+    def is_available(self) -> bool:
+        readiness = getattr(self._facade, "is_available", None)
+        if callable(readiness):
+            try:
+                return readiness() is True
+            except Exception:
+                return False
+        return False
+
     def list_job_artifacts(self, job_id: str) -> list[dict[str, Any]]:
         return list(self._facade.list_job_artifacts(job_id))
 

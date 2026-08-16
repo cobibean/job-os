@@ -50,6 +50,7 @@ class Settings(BaseModel):
     artifact_provider: Literal["local", "gateway"] = "local"
     local_artifact_root: Path | None = None
     artifact_roots: tuple[Path, ...] = ()
+    transport: Literal["local-loopback", "private-remote"] = "local-loopback"
     hermes_dashboard_url: str | None = None
     hermes_dashboard_token: str | None = Field(default=None, min_length=16, repr=False)
     hermes_job_hunter_cwd: Path | None = None
