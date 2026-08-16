@@ -5,7 +5,8 @@ import os
 import httpx
 import jobos_mcp.server as server_module
 import pytest
-from jobos_mcp.jobs import JobOsMcpClient
+from jobos_api.redaction import sanitize_text
+from jobos_mcp.jobs import JobOsMcpClient, JobOsMcpError, _safe_error_message
 from jobos_mcp.server import _document_import_roots, _read_document_input, create_server
 
 
@@ -20,6 +21,184 @@ def test_mcp_path_segments_are_url_encoded_and_document_keys_are_allowlisted():
     assert JobOsMcpClient._document_key("references") == "references"
     with pytest.raises(ValueError, match="document key"):
         JobOsMcpClient._document_key("resume/../../secrets")
+
+
+@pytest.mark.anyio
+async def test_mcp_maps_versioned_api_errors_to_bounded_safe_errors():
+    async def handler(_: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            503,
+            json={
+                "error_schema": "jobos-error-v1",
+                "code": "desktop_unavailable",
+                "message": "Open JobOS and retry.",
+                "retryable": True,
+                "correlation_id": "corr_test_123",
+                "detail": "/Users/example/private.db",
+            },
+        )
+
+    client = JobOsMcpClient(
+        base_url="http://jobos.test",
+        device_token="test-device-token",
+        mcp_token="test-mcp-trusted-token",
+        transport=httpx.MockTransport(handler),
+    )
+    with pytest.raises(JobOsMcpError) as raised:
+        await client.list_jobs()
+    await client.aclose()
+
+    assert raised.value.code == "desktop_unavailable"
+    assert raised.value.retryable is True
+    assert raised.value.correlation_id == "corr_test_123"
+    assert str(raised.value) == (
+        "desktop_unavailable: Open JobOS and retry. (retryable=true, correlation_id=corr_test_123)"
+    )
+    assert "/Users" not in str(raised.value)
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    ("payload", "expected_code", "expected_message"),
+    [
+        (
+            {
+                "error_schema": "jobos-error-v1",
+                "code": "repository_unavailable",
+                "message": (
+                    "Database failed at /var/lib/jobos/private/state.db "
+                    "with token=private-secret-value"
+                ),
+                "retryable": True,
+                "correlation_id": "corr_safe_123",
+                "detail": {"path": "/opt/jobos/secret.json"},
+            },
+            "repository_unavailable",
+            "Database failed at [protected path] with [redacted]",
+        ),
+        (
+            {
+                "code": "unsafe_internal_code",
+                "message": "Leaked /srv/jobos/private/error.log",
+                "retryable": False,
+                "correlation_id": "corr_unsafe_123",
+            },
+            "http_503",
+            "JobOS API request failed",
+        ),
+        (
+            {
+                "error_schema": "jobos-error-v1",
+                "code": "repository_unavailable",
+                "message": (
+                    "Rejected eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9."
+                    "eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvYm9zIFVzZXIifQ."
+                    "SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c"
+                ),
+                "retryable": True,
+                "correlation_id": "corr_jwt_123",
+            },
+            "repository_unavailable",
+            "Rejected [redacted]",
+        ),
+        (
+            {
+                "error_schema": "jobos-error-v1",
+                "code": "repository_unavailable",
+                "message": "Rejected bQ7_vR2fG9mK4pL8sN1xC6zW3dH0jT5uY-aE2iO7qP9 at /tmp",
+                "retryable": True,
+                "correlation_id": "corr_opaque_123",
+            },
+            "repository_unavailable",
+            "Rejected [redacted] at [protected path]",
+        ),
+    ],
+)
+async def test_mcp_requires_the_versioned_envelope_and_sanitizes_messages(
+    payload, expected_code, expected_message
+):
+    async def handler(_: httpx.Request) -> httpx.Response:
+        return httpx.Response(503, json=payload)
+
+    client = JobOsMcpClient(
+        base_url="http://jobos.test",
+        device_token="test-device-token",
+        mcp_token="test-mcp-trusted-token",
+        transport=httpx.MockTransport(handler),
+    )
+    with pytest.raises(JobOsMcpError) as raised:
+        await client.list_jobs()
+    await client.aclose()
+
+    assert raised.value.code == expected_code
+    assert raised.value.message == expected_message
+    assert "/var/" not in str(raised.value)
+    assert "/opt/" not in str(raised.value)
+    assert "/srv/" not in str(raised.value)
+    assert "private-secret-value" not in str(raised.value)
+
+
+def test_mcp_error_sanitizer_preserves_urls_prose_and_ordinary_identifiers():
+    safe = (
+        "See https://example.com/jobs/job_01ARZ3NDEKTSV4RRFFQ69G5FAV and/or retry "
+        "with 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+    )
+
+    assert _safe_error_message(safe) == safe
+
+
+@pytest.mark.parametrize(
+    ("category", "raw", "expected"),
+    [
+        ("authorization_code", "authorization_code=short-secret", "[redacted]"),
+        ("relative ssh path", ".ssh/id_rsa", "[protected path]"),
+        ("relative Hermes path", ".hermes/auth.json", "[protected path]"),
+        (
+            "signed URL",
+            "https://files.example.com/resume.pdf?X-Amz-Signature=short-secret",
+            "[protected signed URL]",
+        ),
+        ("authorization header", "Authorization: Bearer header-secret", "[redacted]"),
+        ("standard token", "token=standard-secret", "[redacted]"),
+        (
+            "JWT",
+            "Rejected eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9."
+            "eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvYm9zIFVzZXIifQ."
+            "SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c",
+            "Rejected [redacted]",
+        ),
+        (
+            "opaque token",
+            "Rejected bQ7_vR2fG9mK4pL8sN1xC6zW3dH0jT5uY-aE2iO7qP9",
+            "Rejected [redacted]",
+        ),
+        (
+            "arbitrary absolute path",
+            "Failure at /custom/private/data.db",
+            "Failure at [protected path]",
+        ),
+        (
+            "absolute path with spaces",
+            "Failure at /custom/Jane Doe/JobOS/private.db; retry later",
+            "Failure at [protected path]; retry later",
+        ),
+        (
+            "absolute path with spaces and trailing prose",
+            "Failure at /custom/Jane Doe/JobOS/private.db but safe connector prose follows",
+            "Failure at [protected path] but safe connector prose follows",
+        ),
+        (
+            "absolute path with a multi-word final component",
+            "Failure at /custom/Jane Doe/Resume Final Draft.pdf; retry later",
+            "Failure at [protected path]; retry later",
+        ),
+    ],
+)
+def test_mcp_error_sanitizer_has_api_parity_for_every_sensitive_category(
+    category, raw, expected
+):
+    assert _safe_error_message(raw) == expected, category
+    assert sanitize_text(raw) == expected, category
 
 
 @pytest.mark.anyio
@@ -166,9 +345,7 @@ def test_document_publish_input_is_limited_to_explicit_roots(tmp_path):
     )
     assert (filename, content) == ("letter.docx", b"PK\x03\x04fixture")
     with pytest.raises(ValueError, match="outside"):
-        _read_document_input(
-            str(outside), roots=(allowed,), maximum=100, suffixes={".docx"}
-        )
+        _read_document_input(str(outside), roots=(allowed,), maximum=100, suffixes={".docx"})
 
 
 def test_document_publish_input_rejects_relative_path_with_cwd_inside_allowed_root(
@@ -181,14 +358,10 @@ def test_document_publish_input_rejects_relative_path_with_cwd_inside_allowed_ro
     monkeypatch.chdir(allowed)
 
     with pytest.raises(ValueError, match="must be absolute"):
-        _read_document_input(
-            artifact.name, roots=(allowed,), maximum=100, suffixes={".docx"}
-        )
+        _read_document_input(artifact.name, roots=(allowed,), maximum=100, suffixes={".docx"})
 
 
-def test_document_input_descriptor_read_cannot_leak_post_open_symlink_bytes(
-    tmp_path, monkeypatch
-):
+def test_document_input_descriptor_read_cannot_leak_post_open_symlink_bytes(tmp_path, monkeypatch):
     allowed = tmp_path / "allowed"
     nested = allowed / "nested"
     nested.mkdir(parents=True)
@@ -223,9 +396,7 @@ def test_document_input_descriptor_read_cannot_leak_post_open_symlink_bytes(
     assert content != outside_bytes
 
 
-def test_document_input_rejects_same_inode_same_size_in_place_mutation(
-    tmp_path, monkeypatch
-):
+def test_document_input_rejects_same_inode_same_size_in_place_mutation(tmp_path, monkeypatch):
     allowed = tmp_path / "allowed"
     allowed.mkdir()
     target = allowed / "resume.pdf"
@@ -246,9 +417,7 @@ def test_document_input_rejects_same_inode_same_size_in_place_mutation(
 
     monkeypatch.setattr(server_module.os, "read", racing_read)
     with pytest.raises(ValueError, match="changed during access"):
-        _read_document_input(
-            str(target), roots=(allowed,), maximum=1_024, suffixes={".pdf"}
-        )
+        _read_document_input(str(target), roots=(allowed,), maximum=1_024, suffixes={".pdf"})
 
     changed = target.stat()
     assert mutated
@@ -303,7 +472,7 @@ def test_document_roots_reject_symlink_configuration(tmp_path, monkeypatch):
 
 
 @pytest.mark.anyio
-async def test_mcp_server_exposes_phase_seven_parity_tools_while_retaining_job_tools():
+async def test_mcp_server_exposes_public_v1_parity_tools_while_retaining_job_tools():
     client = JobOsMcpClient(
         base_url="http://jobos.test",
         device_token="test-device-token",
@@ -378,9 +547,7 @@ async def test_parity_mutations_are_thin_authenticated_api_calls_with_idempotenc
         idempotency_key="click-1",
     )
     await client.render_document("job-1", "resume-main", idempotency_key="render-1")
-    await client.approve_document(
-        "job-1", "art_1234567890abcdef", idempotency_key="approve-1"
-    )
+    await client.approve_document("job-1", "art_1234567890abcdef", idempotency_key="approve-1")
     await client.report_activity("Reviewed listing", "completed", idempotency_key="activity-1")
     await client.aclose()
 
@@ -405,27 +572,36 @@ async def test_document_select_reads_workspace_silently_then_emits_one_shared_mu
     async def handler(request: httpx.Request) -> httpx.Response:
         requests.append(request)
         if request.url.path == "/v1/workspace":
-            return httpx.Response(200, json={
-                "revision": 3,
-                "selected_preset": "research",
-                "layouts": {
-                    name: {
-                        "order": ["jobs", "center", "agent"],
-                        "widths": {"jobs": 280, "center": 720, "agent": 360},
-                        "collapsed": [],
-                    }
-                    for name in ("research", "review", "agent-focus")
+            return httpx.Response(
+                200,
+                json={
+                    "revision": 3,
+                    "selected_preset": "research",
+                    "layouts": {
+                        name: {
+                            "order": ["jobs", "center", "agent"],
+                            "widths": {"jobs": 280, "center": 720, "agent": 360},
+                            "collapsed": [],
+                        }
+                        for name in ("research", "review", "agent-focus")
+                    },
+                    "selected_job_id": "job-1",
+                    "active_center_surface": "browser",
+                    "browser_tabs": [],
+                    "active_browser_tab_id": None,
+                    "active_artifact_id": None,
+                    "active_artifact_page": 1,
+                    "active_artifact_zoom": 1.0,
+                    "repaired_presets": [],
+                    "repaired_browser": False,
+                    "browser_repair_reasons": ["dropped_tabs"],
                 },
-                "selected_job_id": "job-1", "active_center_surface": "browser",
-                "browser_tabs": [], "active_browser_tab_id": None,
-                "active_artifact_id": None, "active_artifact_page": 1, "active_artifact_zoom": 1.0,
-                "repaired_presets": [], "repaired_browser": False,
-                "browser_repair_reasons": ["dropped_tabs"],
-            })
+            )
         if request.method == "GET":
-            return httpx.Response(200, json={"artifacts": [
-                {"artifact_id": "art_1234567890abcdef", "job_id": "job-1"}
-            ]})
+            return httpx.Response(
+                200,
+                json={"artifacts": [{"artifact_id": "art_1234567890abcdef", "job_id": "job-1"}]},
+            )
         return httpx.Response(200, json={"revision": 4, "active_center_surface": "document"})
 
     client = JobOsMcpClient(
@@ -465,7 +641,6 @@ async def test_document_select_reads_workspace_silently_then_emits_one_shared_mu
         "origin": "mcp",
         "idempotency_key": "select-document-1",
     }
-
 
 
 @pytest.mark.anyio
@@ -512,9 +687,7 @@ async def test_document_draft_tools_are_bounded_owned_authenticated_api_calls():
         mcp_token="test-mcp-trusted-token",
         transport=httpx.MockTransport(handler),
     )
-    outline = await client.get_document_draft(
-        "job-1", "references", idempotency_key="draft-get-1"
-    )
+    outline = await client.get_document_draft("job-1", "references", idempotency_key="draft-get-1")
     await client.apply_document_draft(
         "job-1",
         document_id,

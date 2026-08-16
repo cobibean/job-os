@@ -34,6 +34,10 @@ Panel pointer geometry, live resize bounds, focus, scroll position in JobOS chro
 
 ## Failure and approval rules
 
+- Public contract identifiers are `jobos-api-v1` and `jobos-error-v1`; they do not encode an implementation phase or deployment operator.
+- Transport is reported as `local-loopback` or `private-remote`. Remote transport is optional and never a public startup requirement.
+- Agent state is `not-configured`, `online`, `connecting`, or `offline`; desktop state is `connected` or `disconnected`; renderer and local artifact-storage state is `available` or `unavailable`. Local artifact storage is available only after an exclusive probe file can be written, file-synced, safely removed without replacing existing data, and the directory sync completes. The optional artifact gateway is reported separately as `not-configured`, `available`, or `unavailable`; a supplied facade must explicitly report itself available, so configuration alone never implies readiness.
+- API failures use the bounded `jobos-error-v1` fields `code`, `message`, `retryable`, and `correlation_id`. MCP requires that schema, independently redacts the bounded message, preserves the safe code/retry/correlation values, and discards legacy or internal detail.
 - One configured device may hold the short in-memory desktop lease. Commands fail immediately with `desktop_unavailable`; there is no offline queue.
 - Every command has a server-generated command ID, caller idempotency key, origin, and a bounded deadline. Safe terminal error codes are `desktop_unavailable`, `tab_not_found`, `timeout`, `validation`, and `execution`.
 - Semantic snapshots contain bounded visible text and at most 100 interactive elements. Targets are opaque IDs issued by JobOS; callers cannot supply selectors or scripts.

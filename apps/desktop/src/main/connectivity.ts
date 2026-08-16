@@ -36,6 +36,10 @@ function isHealthResponse(value: unknown): value is {
   service: 'jobos-api'
   version: string
   state_schema: number
+  transport: 'local-loopback' | 'private-remote'
+  agent: 'not-configured' | 'online' | 'connecting' | 'offline'
+  artifact_storage: 'available' | 'unavailable'
+  artifact_gateway: 'not-configured' | 'available' | 'unavailable'
 } {
   return isRecord(value)
     && value.status === 'ready'
@@ -44,16 +48,22 @@ function isHealthResponse(value: unknown): value is {
     && value.version.length > 0
     && Number.isInteger(value.state_schema)
     && Number(value.state_schema) >= 1
+    && (value.transport === 'local-loopback' || value.transport === 'private-remote')
+    && ['not-configured', 'online', 'connecting', 'offline'].includes(String(value.agent))
+    && (value.artifact_storage === 'available' || value.artifact_storage === 'unavailable')
+    && ['not-configured', 'available', 'unavailable'].includes(String(value.artifact_gateway))
 }
 
 function isDeviceSessionResponse(value: unknown): value is {
   authenticated: true
-  transport: 'private-tailscale'
+  transport: 'local-loopback' | 'private-remote'
+  desktop: 'connected' | 'disconnected'
   api_version: string
 } {
   return isRecord(value)
     && value.authenticated === true
-    && value.transport === 'private-tailscale'
+    && (value.transport === 'local-loopback' || value.transport === 'private-remote')
+    && (value.desktop === 'connected' || value.desktop === 'disconnected')
     && typeof value.api_version === 'string'
     && value.api_version.length > 0
 }
@@ -99,8 +109,15 @@ export async function probeConnectivity(config: ConnectivityConfig): Promise<Con
     return {
       state: 'connected',
       apiVersion: deviceSession.data.api_version,
+      transport: deviceSession.data.transport,
+      agent: health.data.agent,
+      desktop: deviceSession.data.desktop,
+      artifactStorage: health.data.artifact_storage,
+      artifactGateway: health.data.artifact_gateway,
       checkedAt,
-      message: 'Private API authenticated'
+      message: deviceSession.data.transport === 'local-loopback'
+        ? 'Local loopback API authenticated'
+        : 'Private remote API authenticated'
     }
   } catch {
     return {

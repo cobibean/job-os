@@ -110,6 +110,51 @@ def test_public_text_sanitizer_redacts_credentials_and_preserves_normal_prose():
     assert "sk-live-super-secret-value" not in sanitized
 
 
+def test_public_text_sanitizer_redacts_arbitrary_posix_paths_without_mangling_urls():
+    for path in (
+        "/tmp",
+        "/private.db",
+        "/tmp/jobos/private.db",
+        "/var/lib/jobos/state.sqlite3",
+        "/opt/jobos/config/runtime.json",
+        "/srv/jobos/artifacts/resume.pdf",
+        "/mnt/custom-volume/jobos/internal.log",
+    ):
+        sanitized = sanitize_text(f"Operation failed at {path}; retry later")
+        assert path not in sanitized
+        assert "[protected path]" in sanitized
+
+    public = (
+        "See https://example.com/docs/public/errors and compare the API design "
+        "and/or retry guidance."
+    )
+    assert sanitize_text(public) == public
+
+
+def test_public_text_sanitizer_redacts_bounded_unlabeled_credentials_conservatively():
+    jwt = (
+        "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9."
+        "eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvYm9zIFVzZXIifQ."
+        "SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c"
+    )
+    opaque = "bQ7_vR2fG9mK4pL8sN1xC6zW3dH0jT5uY-aE2iO7qP9"
+
+    assert sanitize_text(f"JWT failed: {jwt}") == "JWT failed: [redacted]"
+    assert sanitize_text(f"Credential failed: {opaque}") == "Credential failed: [redacted]"
+
+    ordinary_values = (
+        "550e8400-e29b-41d4-a716-446655440000",
+        "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        "job_01ARZ3NDEKTSV4RRFFQ69G5FAV",
+    )
+    for value in ordinary_values:
+        assert sanitize_text(f"Identifier {value}") == f"Identifier {value}"
+
+    job_url = "https://example.com/jobs/job_01ARZ3NDEKTSV4RRFFQ69G5FAV"
+    assert sanitize_text(job_url) == job_url
+
+
 def test_public_text_sanitizer_redacts_standalone_token_shapes_without_prefix_prose():
     raw_token = "sk-proj-abcdefghijklmnopqrstuvwxyz123456"
 

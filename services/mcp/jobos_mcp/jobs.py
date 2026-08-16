@@ -2,11 +2,113 @@ from __future__ import annotations
 
 import base64
 import re
+from math import log2
 from typing import Any
 from urllib.parse import quote
 from uuid import uuid4
 
 import httpx
+
+_ABSOLUTE_PATH = re.compile(
+    r"(?:"
+    r"(?<![A-Za-z0-9_:/])/(?!/)(?:"
+    r"[^\r\n,;:()\[\]{}<>\"']*?\.[A-Za-z0-9]{1,16}(?=\s|[,;:()\[\]{}<>\"']|$)"
+    r"|[^\r\n,;:()\[\]{}<>\"']+"
+    r")"
+    r"|[A-Za-z]:\\(?:[^\r\n,;:]*?\.[A-Za-z0-9]{1,16}(?=\s|[,;:]|$)|[^\r\n,;:]+)"
+    r")"
+)
+_JWT = re.compile(
+    r"(?<![A-Za-z0-9_-])eyJ[A-Za-z0-9_-]{5,253}\."
+    r"[A-Za-z0-9_-]{5,2048}\.[A-Za-z0-9_-]{16,512}(?![A-Za-z0-9_-])"
+)
+_OPAQUE_CREDENTIAL_CANDIDATE = re.compile(
+    r"(?<![A-Za-z0-9_+=-])[A-Za-z0-9_+=-]{32,256}(?![A-Za-z0-9_+=-])"
+)
+_SENSITIVE_VALUE = re.compile(
+    r"(?:"
+    r"(?:authorization|proxy-authorization|cookie|set-cookie)\s*:\s*[^\r\n]+"
+    r"|bearer\s+\S+"
+    r"|(?:token|api[_-]?key|password|secret|credential|authorization[_-]?code)"
+    r"\s*[:=]\s*\S+"
+    r")",
+    re.IGNORECASE,
+)
+_STANDALONE_CREDENTIAL = re.compile(
+    r"(?<![A-Za-z0-9])(?:"
+    r"Basic\s+[A-Za-z0-9+/]{4,}={0,2}"
+    r"|sk-(?:proj-)?[A-Za-z0-9_-]{16,}"
+    r"|gh[pousr]_[A-Za-z0-9]{20,}"
+    r"|AKIA[0-9A-Z]{16}"
+    r"|xox[baprs]-[A-Za-z0-9-]{16,}"
+    r")(?![A-Za-z0-9])",
+    re.IGNORECASE,
+)
+_SIGNED_URL = re.compile(
+    r"[?&](?:x-amz-signature|signature|signed|sig|token|api[_-]?key)=[^&#]+",
+    re.IGNORECASE,
+)
+_CREDENTIAL_PATH = re.compile(r"(?:^|/)(?:\.hermes|\.ssh|mcp-tokens|auth\.json|\.env)(?:/|$)")
+
+
+def _is_opaque_credential(value: str) -> bool:
+    if re.fullmatch(r"[a-fA-F0-9]{32,256}", value):
+        return False
+    if re.fullmatch(
+        r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-"
+        r"[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}",
+        value,
+    ):
+        return False
+    classes = sum(
+        bool(re.search(pattern, value))
+        for pattern in (r"[a-z]", r"[A-Z]", r"[0-9]", r"[_+=-]")
+    )
+    if classes < 3:
+        return False
+    counts = {character: value.count(character) for character in set(value)}
+    entropy = -sum((count / len(value)) * log2(count / len(value)) for count in counts.values())
+    return entropy >= 4.25
+
+
+def _redact_opaque_credentials(value: str) -> str:
+    return _OPAQUE_CREDENTIAL_CANDIDATE.sub(
+        lambda match: "[redacted]"
+        if _is_opaque_credential(match.group(0))
+        else match.group(0),
+        value,
+    )
+
+
+def _safe_error_message(value: object) -> str:
+    if not isinstance(value, str) or not value or len(value) > 500:
+        return "JobOS API request failed"
+    sanitized = _SENSITIVE_VALUE.sub("[redacted]", value)
+    sanitized = _STANDALONE_CREDENTIAL.sub("[redacted]", sanitized)
+    sanitized = _JWT.sub("[redacted]", sanitized)
+    sanitized = _redact_opaque_credentials(sanitized)
+    sanitized = _ABSOLUTE_PATH.sub("[protected path]", sanitized)
+    if _SIGNED_URL.search(sanitized):
+        sanitized = "[protected signed URL]"
+    if _CREDENTIAL_PATH.search(sanitized):
+        sanitized = "[protected path]"
+    return sanitized if sanitized.strip() else "JobOS API request failed"
+
+
+class JobOsMcpError(RuntimeError):
+    """Bounded public API failure suitable for MCP tool output."""
+
+    def __init__(
+        self, *, code: str, message: str, retryable: bool, correlation_id: str
+    ) -> None:
+        self.code = code
+        self.message = message
+        self.retryable = retryable
+        self.correlation_id = correlation_id
+        super().__init__(
+            f"{code}: {message} (retryable={str(retryable).lower()}, "
+            f"correlation_id={correlation_id})"
+        )
 
 
 class JobOsMcpClient:
@@ -465,6 +567,46 @@ class JobOsMcpClient:
         )
 
     async def _request(self, method: str, path: str, **kwargs: Any) -> dict[str, Any]:
-        response = await self._client.request(method, path, **kwargs)
-        response.raise_for_status()
+        try:
+            response = await self._client.request(method, path, **kwargs)
+        except httpx.HTTPError as error:
+            raise JobOsMcpError(
+                code="api_unreachable",
+                message="JobOS API is unavailable",
+                retryable=True,
+                correlation_id="unavailable",
+            ) from error
+        if response.is_error:
+            try:
+                payload = response.json()
+            except ValueError:
+                payload = {}
+            valid_envelope = (
+                isinstance(payload, dict) and payload.get("error_schema") == "jobos-error-v1"
+            )
+            code = payload.get("code") if valid_envelope else None
+            message = payload.get("message") if valid_envelope else None
+            retryable = payload.get("retryable") if valid_envelope else None
+            correlation_id = payload.get("correlation_id") if valid_envelope else None
+            if not isinstance(code, str) or not re.fullmatch(r"[a-z][a-z0-9_]{0,63}", code):
+                code = f"http_{response.status_code}"
+            message = _safe_error_message(message)
+            if not isinstance(retryable, bool):
+                retryable = response.status_code in {408, 425, 429, 502, 503, 504}
+            if (
+                not isinstance(correlation_id, str)
+                or not re.fullmatch(r"[A-Za-z0-9_-]{8,64}", correlation_id)
+            ):
+                header_id = response.headers.get("x-correlation-id", "")
+                correlation_id = (
+                    header_id
+                    if re.fullmatch(r"[A-Za-z0-9_-]{8,64}", header_id)
+                    else "unavailable"
+                )
+            raise JobOsMcpError(
+                code=code,
+                message=message,
+                retryable=retryable,
+                correlation_id=correlation_id,
+            )
         return dict(response.json())

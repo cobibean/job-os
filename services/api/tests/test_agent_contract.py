@@ -15,7 +15,7 @@ from jobos_api.private_adapters.job_hunter import adapt_job_hunter_facade
 from jobos_api.settings import Settings
 from jobos_api.state_store import JobOsStateStore
 
-TOKEN = "phase-six-device-token"
+TOKEN = "agent-contract-device-token"
 
 
 class FakeJobFacade:
@@ -34,6 +34,9 @@ class FakeJobFacade:
                 "status": "reviewed",
             },
         ]
+
+    def is_available(self):
+        return True
 
     def list_jobs(self):
         return self.jobs

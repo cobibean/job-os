@@ -54,6 +54,52 @@ class LocalArtifactRepository:
     def root(self) -> Path:
         return self._root
 
+    def is_available(self) -> bool:
+        directory_descriptor: int | None = None
+        probe_descriptor: int | None = None
+        probe_name = f".availability-{uuid4().hex}.tmp"
+        operation_succeeded = False
+        cleanup_succeeded = True
+        try:
+            self._ensure_root()
+            directory_descriptor = self._open_directory(self._root)
+            flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+            if hasattr(os, "O_NOFOLLOW"):
+                flags |= os.O_NOFOLLOW
+            if hasattr(os, "O_CLOEXEC"):
+                flags |= os.O_CLOEXEC
+            probe_descriptor = os.open(
+                probe_name,
+                flags,
+                0o600,
+                dir_fd=directory_descriptor,
+            )
+            os.unlink(probe_name, dir_fd=directory_descriptor)
+            if os.write(probe_descriptor, b"1") != 1:
+                raise OSError("Artifact availability probe write made no progress")
+            os.fsync(probe_descriptor)
+            os.fsync(directory_descriptor)
+            operation_succeeded = True
+        except (ArtifactStorageError, OSError):
+            operation_succeeded = False
+        finally:
+            if probe_descriptor is not None:
+                try:
+                    os.close(probe_descriptor)
+                except OSError:
+                    cleanup_succeeded = False
+            if directory_descriptor is not None:
+                try:
+                    os.fsync(directory_descriptor)
+                except OSError:
+                    cleanup_succeeded = False
+                finally:
+                    try:
+                        os.close(directory_descriptor)
+                    except OSError:
+                        cleanup_succeeded = False
+        return operation_succeeded and cleanup_succeeded
+
     def _ensure_root(self) -> None:
         self._root = resolve_repository_root(self._root, create=True)
         fsync_directory(self._root.parent)

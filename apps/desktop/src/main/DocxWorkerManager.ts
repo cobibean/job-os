@@ -12,6 +12,7 @@ const dirname = path.dirname(fileURLToPath(import.meta.url))
 export class DocxWorkerManager {
   private window: BrowserWindowType | null = null
   private ready: Promise<void> | null = null
+  private available = false
   private readonly pending = new Map<string, {
     resolve: (value: DocxWorkerResult) => void
     reject: (error: Error) => void
@@ -38,6 +39,10 @@ export class DocxWorkerManager {
     })
   }
 
+  isAvailable(): boolean {
+    return this.available && this.window !== null && !this.window.isDestroyed()
+  }
+
   dispose(): void {
     this.ipcMain.removeListener('jobos:docx-worker:response', this.onResponse)
     for (const item of this.pending.values()) { clearTimeout(item.timer); item.reject(new Error('DOCX worker closed')) }
@@ -45,6 +50,7 @@ export class DocxWorkerManager {
     this.window?.destroy()
     this.window = null
     this.ready = null
+    this.available = false
   }
 
   private ensureReady(): Promise<void> {
@@ -54,6 +60,7 @@ export class DocxWorkerManager {
       const failLoad = (error: Error) => {
         if (loadSettled) return
         loadSettled = true
+        this.available = false
         if (this.window === worker) this.ready = null
         reject(error)
       }
@@ -72,6 +79,7 @@ export class DocxWorkerManager {
       worker.webContents.once('did-finish-load', () => {
         if (loadSettled) return
         loadSettled = true
+        this.available = true
         resolve()
       })
       worker.webContents.once('did-fail-load', (_event, code, description) => {
@@ -79,10 +87,12 @@ export class DocxWorkerManager {
         if (!worker.isDestroyed()) worker.destroy()
       })
       worker.webContents.once('render-process-gone', (_event, details) => {
+        if (this.window === worker) this.available = false
         failLoad(new Error(`DOCX worker renderer stopped: ${details.reason}`))
         if (!worker.isDestroyed()) worker.destroy()
       })
       worker.once('closed', () => {
+        if (this.window === worker) this.available = false
         failLoad(new Error('DOCX worker closed before it finished loading'))
         if (this.window === worker) {
           this.window = null
