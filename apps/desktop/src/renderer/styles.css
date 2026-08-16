@@ -1278,6 +1278,7 @@ button:focus-visible {
 
 /* OOXML-retaining DOCX editor */
 .docx-document-editor { grid-template-rows: auto auto auto minmax(0, 1fr) auto; }
+.docx-editor-banners:empty { min-height: 0; }
 .docx-document-editor .document-editor-title { min-width: 0; }
 .docx-document-editor .document-editor-title small { max-width: 340px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-muted); }
 .docx-editor-toolbar {

@@ -31,6 +31,8 @@
     "contracts:generate": "pnpm api:export && pnpm --filter @jobos/openapi-generator generate",
     "dev": "pnpm --filter @jobos/desktop dev",
     "license:check": "uv run python scripts/verify_license_inventory.py",
+    "media:capture": "pnpm build && node docs/media/source/capture-media.mjs",
+    "media:verify": "node docs/media/source/verify-media.mjs",
     "public:check": "uv run python scripts/public-release/verify-public-tree.py && uv run python scripts/public-release/verify-fixture-manifest.py",
     "public:smoke-clean-clone": "python scripts/public-release/smoke-clean-clone.py --source . --ref HEAD",
     "lint": "pnpm --filter @jobos/contracts lint && pnpm --filter @jobos/desktop lint && uv run ruff check services scripts",

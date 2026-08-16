@@ -4,11 +4,11 @@ JobOS is a local-first desktop workbench for managing job-search workflows,
 research, documents, and agent-assisted tasks in one place.
 
 > [!IMPORTANT]
-> **Open-source preparation is in progress.** This repository now has its public
-> license and contribution surface, but the current application still contains
-> operator-specific runtime assumptions. It is not yet the accepted clean-clone
-> public alpha. Follow the [release process](docs/public/release-process.md) for
-> the gates that must turn green before a public release.
+> **Open-source preparation is in progress.** The source-first clean-clone path
+> is accepted, including local initialization and synthetic demo data. Launch
+> media, history review, publication, and any binary-distribution gates remain
+> separate. Follow the [release process](docs/public/release-process.md); this is
+> not an announcement of public distribution.
 
 ## Release status
 
@@ -16,24 +16,37 @@ research, documents, and agent-assisted tasks in one place.
 - **Distribution:** source-first. There is no supported public JobOS binary yet.
 - **Desktop:** macOS is the current desktop target. Linux runs backend and source
   quality checks in CI. Windows is not currently supported.
-- **Privacy direction:** local-first. Public mode is being built to run without a
-  private network, private data, or a second repository.
+- **Privacy:** local-first public defaults run without a private network, private
+  data, or a second repository; integrations remain explicit and optional.
 
-<!-- Public media placeholder: add only independently reviewed synthetic screenshots. -->
+## Synthetic product preview
+
+![JobOS Review workbench with the fictional Northstar Kites Demo job selected](docs/media/screenshots/jobos-hero-1440x1024.png)
+
+The preview uses only fictional starter data and a checksum-pinned `(FAKE)` DOCX fixture. The optional agent and artifact-refresh integrations remain unavailable unless explicitly configured.
+
+<details>
+<summary>Watch the 10-second synthetic walkthrough</summary>
+
+![Silent JobOS walkthrough moving from Review to Browse, back to Review, and into the saved fake cover-letter editor](docs/media/jobos-demo.gif)
+
+</details>
+
+Static equivalents: [Browse list and fictional job detail](docs/media/screenshots/jobos-browse-detail-1440x1024.png) · [Saved retained-OOXML editor with fake document](docs/media/screenshots/jobos-ooxml-editor-saved-1440x1024.png) · [capture provenance and privacy checks](docs/media/README.md)
 
 ## What is available today
 
 | Capability | Current source status | Public-alpha target |
 |---|---|---|
-| Desktop workbench | Runs from source on macOS | Clean first-run onboarding |
-| Jobs and history | Built-in mutable SQLite repository; private installs may explicitly select JobHunter | Clean first-run initialization and synthetic demo data |
+| Desktop workbench | Runs from source on macOS with accepted clean first-run initialization | Installed-app distribution remains a separate gate |
+| Jobs and history | Built-in mutable SQLite repository with labeled synthetic demo data; private installs may explicitly select JobHunter | Public distribution review |
 | Browser workspace | Electron-owned local capability | Local capability with truthful unavailable states |
 | Documents | SQLite/local mode supports editable create, save, snapshots, DOCX import, paired DOCX/PDF publish, restart, and download; JobHunter render/refresh remain optional | Installed-app acceptance with representative DOCX files |
 | Agent | Existing private deployments can connect an agent runtime | Clearly optional; offline/not-configured by default |
 | MCP | Thin adapter over the JobOS API | Local API/MCP path with stable capability errors |
 
-The table is intentionally conservative. A feature is not marked public-ready
-until it passes the clean-home acceptance path.
+The table is intentionally conservative. Clean-home source acceptance does not
+imply that packaging, signing, notarization, publication, or deployment passed.
 
 ## Prerequisites
 
@@ -48,8 +61,9 @@ Use the versions pinned by the repository:
 
 ## Clean source-verification quickstart
 
-This currently proves that a clean checkout installs and passes the complete
-source gate. It does **not** yet prove public first-run product onboarding.
+This proves that a clean checkout installs and passes the complete source gate,
+including isolated first-run initialization and the synthetic golden path. It
+does **not** prove a signed/notarized public binary or public distribution.
 
 ```bash
 git clone https://github.com/cobibean/job-os.git
@@ -61,10 +75,9 @@ pnpm check
 pnpm contracts:check
 ```
 
-Expected result: lint, generated-contract checks, TypeScript checks, desktop and
-Python tests, and the production source build complete successfully. One
-remaining Phase 0 public-boundary test stays a strict expected failure until
-the legacy private transport label is replaced in Phase 6.
+Expected result: public-tree and fixture checks, lint, generated-contract checks,
+TypeScript checks, desktop and Python tests, and the production source build
+complete successfully.
 
 ### Developer commands
 
@@ -74,9 +87,9 @@ pnpm check            # lint, typecheck, test, and build
 pnpm contracts:check  # prove generated API contracts are current
 ```
 
-`pnpm dev` currently exposes the existing source application. Canonical jobs use
-the built-in local SQLite repository by default; agent features remain optional.
-Do not treat a disconnected window as completed onboarding.
+`pnpm dev` starts the source application. Canonical jobs use the built-in local
+SQLite repository by default; agent features remain optional and truthfully
+offline when not configured.
 
 ## Demo data
 
