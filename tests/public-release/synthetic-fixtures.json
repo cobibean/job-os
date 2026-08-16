@@ -103,14 +103,6 @@
       }
     },
     {
-      "path": "docs/design/references/jobos-v1-locked-direction.png",
-      "sha256": "79d8716f89c43ce339e673825dde239871206cf28eaa247e417353b1dc84ce19",
-      "classification": "project-asset",
-      "publication": "keep",
-      "source": "JobOS-owned product architecture artwork",
-      "purpose": "Historical product-direction reference"
-    },
-    {
       "path": "packages/docx-engine/tests/fixtures/(FAKE)-cover-letter.docx",
       "sha256": "e6cbea4e5185250e63f369ce0b1c7491c81547d4f2eb1783d7018a959b1ca04e",
       "classification": "synthetic",

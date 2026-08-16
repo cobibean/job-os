@@ -165,7 +165,7 @@ export function JobNavigator(props: JobNavigatorProps) {
       <div aria-live="polite" className={`navigator-feedback${props.error ? ' error' : ''}`}>{props.error ?? props.feedback ?? ''}</div>
       <div className="profile-row">
         <span className="profile-avatar"><UserRound aria-hidden="true" size={18} strokeWidth={1.4} /></span>
-        <span className="profile-copy"><strong>Jacobi Lange</strong><small>Personal workspace</small></span>
+        <span className="profile-copy"><strong>Local user</strong><small>Personal workspace</small></span>
       </div>
     </aside>
   )

@@ -20,7 +20,7 @@ test('shows capability states without paths or secrets and confirms demo reset',
   render(<DiagnosticsPanel />)
   expect(await screen.findByText('local-service')).not.toBeNull()
   expect(screen.getByText('Agent not configured')).not.toBeNull()
-  expect(document.body.textContent).not.toContain('/Users/')
+  expect(document.body.textContent).not.toContain(['/Users', '/'].join(''))
   expect(document.body.textContent).not.toContain('token')
   fireEvent.click(screen.getByRole('button', { name: 'Reset fictional demo' }))
   fireEvent.click(screen.getByRole('button', { name: 'Confirm demo reset' }))

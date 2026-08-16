@@ -46,6 +46,15 @@ public source contract and must not be imported or required by public startup.
 The public core defines focused interfaces and stable errors; private deployments
 may supply compatible adapters without changing the default composition.
 
+## Stable macOS identifiers
+
+The desktop bundle, LaunchAgent, and Keychain service identifiers predate the
+source-first release work. They remain stable so existing local installations
+can update without losing macOS identity or stored credentials. These identifiers
+are public compatibility strings, not operator configuration or secrets. Runtime
+locations, hosts, devices, and optional integrations still come from validated
+profile configuration.
+
 ## Current transition state
 
 The public composition now uses a dedicated mutable SQLite canonical-jobs
