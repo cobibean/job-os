@@ -72,8 +72,8 @@ describe('OOXML-retaining DOCX editor', () => {
 
     expect(await screen.findByRole('button', { name: /Back to Review/ })).not.toBeNull()
     expect(screen.getByRole('toolbar', { name: 'DOCX formatting' })).not.toBeNull()
-    expect(screen.getByText('(FAKE)-polished-resume.docx')).not.toBeNull()
-    expect(screen.getByText('/tmp/(FAKE)-polished-resume.docx')).not.toBeNull()
+    expect(screen.getAllByText('(FAKE)-polished-resume.docx')).toHaveLength(2)
+    expect(screen.queryByText('/tmp/(FAKE)-polished-resume.docx')).toBeNull()
     expect(screen.getByRole('button', { name: /Checkpoint/ })).not.toBeNull()
     expect(screen.getByRole('button', { name: /Save a Copy/ })).not.toBeNull()
     await waitFor(() => expect(document.querySelector('.ProseMirror')).not.toBeNull())
@@ -153,7 +153,7 @@ describe('OOXML-retaining DOCX editor', () => {
     })
     await act(async () => { resolveInitial(opened); await Promise.resolve() })
 
-    expect(await screen.findByText('(FAKE)-newer-initial.docx')).not.toBeNull()
+    expect(await screen.findAllByText('(FAKE)-newer-initial.docx')).toHaveLength(2)
     expect(screen.queryByText('(FAKE)-polished-resume.docx')).toBeNull()
     expect(bridge.reload).toHaveBeenCalledTimes(2)
   })
@@ -195,11 +195,11 @@ describe('OOXML-retaining DOCX editor', () => {
       modifiedAtMs: newer.binding.modifiedAtMs
     })
 
-    expect(await screen.findByText('(FAKE)-newest.docx')).not.toBeNull()
+    expect(await screen.findAllByText('(FAKE)-newest.docx')).toHaveLength(2)
     await act(async () => { resolveOlder(older); await Promise.resolve() })
     await waitFor(() => {
       expect(screen.queryByText('(FAKE)-older.docx')).toBeNull()
-      expect(screen.getByText('(FAKE)-newest.docx')).not.toBeNull()
+      expect(screen.getAllByText('(FAKE)-newest.docx')).toHaveLength(2)
     })
   })
 
@@ -246,7 +246,7 @@ describe('OOXML-retaining DOCX editor', () => {
     await act(async () => { resolveRestore(restored); await Promise.resolve() })
     await waitFor(() => {
       expect(screen.queryByText('(FAKE)-restored-older.docx')).toBeNull()
-      expect(screen.getByText('(FAKE)-polished-resume.docx')).not.toBeNull()
+      expect(screen.getAllByText('(FAKE)-polished-resume.docx')).toHaveLength(2)
       expect(screen.getByText('This file changed outside JobOS.')).not.toBeNull()
     })
   })

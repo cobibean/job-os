@@ -174,6 +174,20 @@ afterEach(() => {
 })
 
 describe('trusted document workspace', () => {
+  it('keeps local documents usable when the optional artifact refresh is unavailable', async () => {
+    const local = state([artifact()])
+    installDocuments({
+      list: vi.fn(async () => local),
+      refresh: vi.fn(async () => { throw new Error('Document request failed (503)') })
+    })
+
+    render(<DocumentWorkspace hydrated job={job} onViewChange={vi.fn()} restoredArtifactId={null} restoredPage={1} restoredZoom={1} />)
+
+    expect(await screen.findByText('Local documents loaded; optional artifact refresh is unavailable')).not.toBeNull()
+    expect(screen.getByText('Newest successful revision · render-2 · source source-2')).not.toBeNull()
+    expect(screen.queryByText(/Document request failed/)).toBeNull()
+  })
+
   it('labels each document action as an editor entry point', async () => {
     installDocuments()
     render(<DocumentWorkspace hydrated job={job} onViewChange={vi.fn()} restoredArtifactId={null} restoredPage={1} restoredZoom={1} />)

@@ -344,17 +344,19 @@ function DocxSession({ externalMutation, initial, jobLabel, onExit, onPrepareClo
         <span className="docx-capability-note">{binding.capabilities.protectedBlockCount ? `${binding.capabilities.protectedBlockCount} complex item(s) protected` : 'Full editable text path'} · {context.blocks.length} blocks</span>
         <label>Zoom <input max="150" min="60" onChange={event => setZoom(Number(event.target.value))} type="range" value={zoom} /></label>
       </div>
-      {autosave.state === 'conflict' ? (
-        <div className="docx-conflict-banner" role="alert"><strong>This file changed outside JobOS.</strong><span>Your unsaved version is still here.</span><button disabled={sourceActionPending} onClick={() => { void reloadExternal() }} type="button">Reload External Version</button><button disabled={sourceActionPending} onClick={() => { void saveMineAs() }} type="button">Save Mine As…</button></div>
-      ) : null}
-      {notice ? <div className="docx-editor-notice" role="status">{notice}<button aria-label="Dismiss notice" onClick={() => setNotice(null)}>×</button></div> : null}
+      <div className="docx-editor-banners">
+        {autosave.state === 'conflict' ? (
+          <div className="docx-conflict-banner" role="alert"><strong>This file changed outside JobOS.</strong><span>Your unsaved version is still here.</span><button disabled={sourceActionPending} onClick={() => { void reloadExternal() }} type="button">Reload External Version</button><button disabled={sourceActionPending} onClick={() => { void saveMineAs() }} type="button">Save Mine As…</button></div>
+        ) : null}
+        {notice ? <div className="docx-editor-notice" role="status">{notice}<button aria-label="Dismiss notice" onClick={() => setNotice(null)}>×</button></div> : null}
+      </div>
       <div className="document-editor-main docx-editor-main">
         <section className="jobos-docx-canvas" style={{ '--docx-zoom': zoom / 100 } as React.CSSProperties}>
           <article className="jobos-docx-page" style={pageStyle}><EditorContent editor={editor} /></article>
         </section>
         <aside className="docx-recovery-panel"><h2>Recovery</h2><p>Baseline, autosave, and manual copies are kept locally.</p>{recoveries.slice(0, 8).map(entry => <button disabled={sourceActionPending} key={entry.recoveryId} onClick={() => { void restore(entry) }} type="button"><strong>{entry.reason}</strong><span>{new Date(entry.createdAt).toLocaleString()}</span></button>)}</aside>
       </div>
-      <footer className="document-status-bar"><span>{binding.canonicalPath}</span><span>Page 1 of {pageCount}</span><span>{Math.round(binding.byteLength / 1024)} KB · {zoom}%</span></footer>
+      <footer className="document-status-bar"><span>{displayDocxFilename(binding)}</span><span>Page 1 of {pageCount}</span><span>{Math.round(binding.byteLength / 1024)} KB · {zoom}%</span></footer>
       {exitBlocked ? <div className="document-exit-dialog" role="alertdialog" aria-modal="true" aria-labelledby="docx-exit-title"><div><Save size={22} /><h2 id="docx-exit-title">This DOCX is not safely saved</h2><p>Stay to resolve the save, save your version as a copy, or reload the canonical file and discard these unsaved edits.</p><div><button onClick={() => setExitBlocked(false)}>Stay</button><button onClick={() => { void saveMineAs() }}>Save Mine As…</button><button className="danger" onClick={() => { void reloadExternal() }}>Reload and discard mine</button></div></div></div> : null}
     </main>
   )
