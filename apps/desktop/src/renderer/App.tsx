@@ -49,9 +49,11 @@ function WorkbenchApp() {
   const [documentMutationGeneration, setDocumentMutationGeneration] = useState(0)
   const [documentPreviewMode, setDocumentPreviewMode] = useState<'pdf' | 'docx'>('pdf')
   const [editingDocument, setEditingDocument] = useState<DocxOpenResult | null>(null)
+  const [panelReorderActive, setPanelReorderActive] = useState(false)
   const nextJobListingRequestId = useRef(0)
   const latestNavigatorSelection = useRef(0)
   const browseTransitionGeneration = useRef(0)
+  const panelReorderGeneration = useRef(0)
   const navigatorSelectionQueue = useRef<Promise<unknown>>(Promise.resolve())
   const prepareClose = useRef<() => Promise<boolean>>(async () => true)
   const activePreset = layoutState.workspace.selectedPreset
@@ -59,6 +61,28 @@ function WorkbenchApp() {
   const activeLayout = layoutState.workspace.layouts[activePreset]
   const browseVisible = activeTopLevelWorkspace === 'browse' && browseDetachState === 'ready'
   const browserTransitionPending = browseDetachState === 'preparing'
+  const nativeBrowserVisible = layoutState.hydrated && activeTopLevelWorkspace !== 'browse' && !browserTransitionPending && !activeLayout.collapsed.includes('center') && !settingsOpen && !settingsPreparing
+
+  const changePanelReorderInteraction = useCallback(async (active: boolean) => {
+    if (!active) {
+      panelReorderGeneration.current += 1
+      setPanelReorderActive(false)
+      return true
+    }
+    const generation = panelReorderGeneration.current + 1
+    panelReorderGeneration.current = generation
+    setPanelReorderActive(true)
+    if (nativeBrowserVisible && window.jobos?.browser) {
+      try {
+        await window.jobos.browser.setBounds({ x: 0, y: 0, width: 0, height: 0, visible: false })
+      } catch {
+        if (generation === panelReorderGeneration.current) setPanelReorderActive(false)
+        return false
+      }
+    }
+    if (generation !== panelReorderGeneration.current) return false
+    return true
+  }, [nativeBrowserVisible])
 
   useEffect(() => window.jobos?.lifecycle?.subscribePrepareClose(
     () => prepareClose.current()
@@ -240,7 +264,7 @@ function WorkbenchApp() {
           }}
           browserRepaired={Boolean(layoutState.workspace.repairedBrowser)}
           browserRepairReasons={layoutState.workspace.browserRepairReasons ?? []}
-          browserVisible={layoutState.hydrated && activeTopLevelWorkspace !== 'browse' && !browserTransitionPending && !activeLayout.collapsed.includes('center') && !settingsOpen && !settingsPreparing}
+          browserVisible={nativeBrowserVisible && !panelReorderActive}
           agentConversationId={agentSessions.activeId}
           documentMutationGeneration={documentMutationGeneration}
           documentPreviewMode={documentPreviewMode}
@@ -278,6 +302,7 @@ function WorkbenchApp() {
         />}
         onCollapse={layoutState.collapse}
         onMove={layoutState.move}
+        onReorderInteractionChange={changePanelReorderInteraction}
         onResize={layoutState.resize}
         workspace={layoutState.workspace}
       />

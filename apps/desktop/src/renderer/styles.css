@@ -270,7 +270,7 @@ button:focus-visible {
 .panel-control { width: 22px; height: 22px; display: grid; place-items: center; padding: 0; border: 0; border-radius: 3px; color: var(--muted); background: transparent; cursor: pointer; }
 .panel-control:hover:not(:disabled) { color: var(--text); background: var(--surface-hover); }
 .panel-control:disabled { opacity: var(--disabled-opacity); cursor: default; }
-.drag-control { cursor: grab; }
+.drag-control { cursor: grab; touch-action: none; }
 
 .panel-resize-handle {
   position: absolute;

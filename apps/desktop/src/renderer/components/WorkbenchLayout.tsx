@@ -1,5 +1,5 @@
 import { ArrowLeft, ArrowRight, GripVertical, PanelLeftClose } from 'lucide-react'
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 import type { PanelId, WorkspaceSnapshot } from '../workspaceLayout'
 import { panelNames } from '../workspaceLayout'
@@ -7,6 +7,7 @@ import { panelNames } from '../workspaceLayout'
 interface WorkbenchLayoutProps {
   workspace: WorkspaceSnapshot
   onCollapse: (panel: PanelId, collapsed: boolean) => void
+  onReorderInteractionChange?: (active: boolean) => boolean | void | Promise<boolean | void>
   onMove: (panel: PanelId, targetIndex: number) => void
   onResize: (before: PanelId, after: PanelId, delta: number) => void
   jobs: React.ReactNode
@@ -17,10 +18,116 @@ interface WorkbenchLayoutProps {
 export function WorkbenchLayout(props: WorkbenchLayoutProps) {
   const [insertionTarget, setInsertionTarget] = useState<PanelId | null>(null)
   const collapseControls = useRef<Partial<Record<PanelId, HTMLButtonElement | null>>>({})
+  const panelElements = useRef<Partial<Record<PanelId, HTMLElement | null>>>({})
   const recoveryControls = useRef<Partial<Record<PanelId, HTMLButtonElement | null>>>({})
+  const reorderPointer = useRef<{
+    pointerId: number
+    source: PanelId
+    target: PanelId | null
+    clientX: number
+    clientY: number
+    ready: boolean
+  } | null>(null)
+  const reorderReleaseCleanup = useRef<(() => void) | null>(null)
   const layout = props.workspace.layouts[props.workspace.selectedPreset]
   const content: Record<PanelId, React.ReactNode> = { jobs: props.jobs, center: props.center, agent: props.agent }
   const visibleOrder = layout.order.filter(panel => !layout.collapsed.includes(panel))
+
+  useEffect(() => () => {
+    reorderPointer.current = null
+    reorderReleaseCleanup.current?.()
+    reorderReleaseCleanup.current = null
+    setInsertionTarget(null)
+    void props.onReorderInteractionChange?.(false)
+  }, [props.onReorderInteractionChange])
+
+  const targetAt = (clientX: number, clientY: number) => visibleOrder.find(panelId => {
+    const rect = panelElements.current[panelId]?.getBoundingClientRect()
+    return Boolean(
+      rect
+      && clientX >= rect.left
+      && clientX <= rect.right
+      && clientY >= rect.top
+      && clientY <= rect.bottom
+    )
+  }) ?? null
+
+  const updateReorderTarget = (clientX: number, clientY: number) => {
+    const gesture = reorderPointer.current
+    if (!gesture) return
+    gesture.clientX = clientX
+    gesture.clientY = clientY
+    if (!gesture.ready) return
+    gesture.target = targetAt(clientX, clientY)
+    setInsertionTarget(gesture.target)
+  }
+
+  const finishReorderInteraction = (commit: boolean) => {
+    const gesture = reorderPointer.current
+    reorderPointer.current = null
+    reorderReleaseCleanup.current?.()
+    reorderReleaseCleanup.current = null
+    setInsertionTarget(null)
+    if (commit && gesture?.ready && gesture.target && gesture.target !== gesture.source) {
+      props.onMove(gesture.source, layout.order.indexOf(gesture.target))
+    }
+    void props.onReorderInteractionChange?.(false)
+  }
+
+  const prepareReorderInteraction = (event: React.PointerEvent<HTMLButtonElement>, source: PanelId) => {
+    if (event.button !== 0) return
+    event.preventDefault()
+    reorderReleaseCleanup.current?.()
+    const pointerId = event.pointerId
+    const gesture = {
+      pointerId,
+      source,
+      target: null,
+      clientX: event.clientX,
+      clientY: event.clientY,
+      ready: false
+    }
+    reorderPointer.current = gesture
+    event.currentTarget.setPointerCapture?.(pointerId)
+    const move = (pointerEvent: PointerEvent) => {
+      if (pointerEvent.pointerId === pointerId) updateReorderTarget(pointerEvent.clientX, pointerEvent.clientY)
+    }
+    const release = (pointerEvent: PointerEvent) => {
+      if (pointerEvent.pointerId !== pointerId) return
+      updateReorderTarget(pointerEvent.clientX, pointerEvent.clientY)
+      finishReorderInteraction(true)
+    }
+    const cancel = (pointerEvent: PointerEvent) => {
+      if (pointerEvent.pointerId === pointerId) finishReorderInteraction(false)
+    }
+    const cancelWithKeyboard = (keyboardEvent: KeyboardEvent) => {
+      if (keyboardEvent.key === 'Escape' && reorderPointer.current === gesture) {
+        keyboardEvent.preventDefault()
+        finishReorderInteraction(false)
+      }
+    }
+    window.addEventListener('pointermove', move)
+    window.addEventListener('pointerup', release)
+    window.addEventListener('pointercancel', cancel)
+    window.addEventListener('keydown', cancelWithKeyboard)
+    reorderReleaseCleanup.current = () => {
+      window.removeEventListener('pointermove', move)
+      window.removeEventListener('pointerup', release)
+      window.removeEventListener('pointercancel', cancel)
+      window.removeEventListener('keydown', cancelWithKeyboard)
+    }
+    void Promise.resolve(props.onReorderInteractionChange?.(true)).then(approved => {
+      if (reorderPointer.current !== gesture) return
+      if (approved === false) {
+        finishReorderInteraction(false)
+        return
+      }
+      gesture.ready = true
+      updateReorderTarget(gesture.clientX, gesture.clientY)
+    }).catch(() => {
+      if (reorderPointer.current === gesture) finishReorderInteraction(false)
+    })
+  }
 
   const panel = (panelId: PanelId) => {
     const index = layout.order.indexOf(panelId)
@@ -33,13 +140,7 @@ export function WorkbenchLayout(props: WorkbenchLayoutProps) {
         hidden={layout.collapsed.includes(panelId)}
         id={`workbench-panel-${panelId}`}
         key={panelId}
-        onDragOver={event => { event.preventDefault(); setInsertionTarget(panelId) }}
-        onDrop={event => {
-          event.preventDefault()
-          const source = event.dataTransfer.getData('application/x-jobos-panel') as PanelId
-          if (source && source !== panelId) props.onMove(source, index)
-          setInsertionTarget(null)
-        }}
+        ref={element => { panelElements.current[panelId] = element }}
         style={{ flexBasis: `${layout.widths[panelId]}px` }}
       >
         {previous ? (
@@ -60,11 +161,7 @@ export function WorkbenchLayout(props: WorkbenchLayoutProps) {
               <button
                 aria-label={`Reorder ${panelNames[panelId]}`}
                 className="panel-control drag-control"
-                draggable
-                onDragStart={event => {
-                  event.dataTransfer.effectAllowed = 'move'
-                  event.dataTransfer.setData('application/x-jobos-panel', panelId)
-                }}
+                onPointerDown={event => prepareReorderInteraction(event, panelId)}
                 title={`Drag to reorder ${panelNames[panelId]}`}
                 type="button"
               ><GripVertical aria-hidden="true" size={14} /></button>
@@ -116,9 +213,7 @@ export function WorkbenchLayout(props: WorkbenchLayoutProps) {
           ))}
         </nav>
       ) : null}
-      <div className="workbench" onDragLeave={event => {
-        if (!event.currentTarget.contains(event.relatedTarget as Node)) setInsertionTarget(null)
-      }}>
+      <div className="workbench">
         {layout.order.map(panel)}
       </div>
     </div>
