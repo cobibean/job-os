@@ -24,11 +24,16 @@ export function WorkbenchLayout(props: WorkbenchLayoutProps) {
     pointerId: number
     source: PanelId
     target: PanelId | null
+    startX: number
+    startY: number
     clientX: number
     clientY: number
+    moved: boolean
     ready: boolean
+    suppressClickAfterDrag: boolean
   } | null>(null)
   const reorderReleaseCleanup = useRef<(() => void) | null>(null)
+  const suppressedArrangeClick = useRef<PanelId | null>(null)
   const layout = props.workspace.layouts[props.workspace.selectedPreset]
   const content: Record<PanelId, React.ReactNode> = { jobs: props.jobs, center: props.center, agent: props.agent }
   const visibleOrder = layout.order.filter(panel => !layout.collapsed.includes(panel))
@@ -57,7 +62,10 @@ export function WorkbenchLayout(props: WorkbenchLayoutProps) {
     if (!gesture) return
     gesture.clientX = clientX
     gesture.clientY = clientY
-    if (!gesture.ready) return
+    if (!gesture.moved) {
+      gesture.moved = Math.hypot(clientX - gesture.startX, clientY - gesture.startY) >= 4
+    }
+    if (!gesture.ready || !gesture.moved) return
     gesture.target = targetAt(clientX, clientY)
     setInsertionTarget(gesture.target)
   }
@@ -68,23 +76,32 @@ export function WorkbenchLayout(props: WorkbenchLayoutProps) {
     reorderReleaseCleanup.current?.()
     reorderReleaseCleanup.current = null
     setInsertionTarget(null)
-    if (commit && gesture?.ready && gesture.target && gesture.target !== gesture.source) {
+    if (commit && gesture?.moved && gesture.suppressClickAfterDrag) suppressedArrangeClick.current = gesture.source
+    if (commit && gesture?.ready && gesture.moved && gesture.target && gesture.target !== gesture.source) {
       props.onMove(gesture.source, layout.order.indexOf(gesture.target))
     }
     void props.onReorderInteractionChange?.(false)
   }
 
-  const prepareReorderInteraction = (event: React.PointerEvent<HTMLButtonElement>, source: PanelId) => {
+  const prepareReorderInteraction = (
+    event: React.PointerEvent<HTMLElement>,
+    source: PanelId,
+    options: { preserveClick?: boolean } = {}
+  ) => {
     if (event.button !== 0) return
-    event.preventDefault()
+    if (!options.preserveClick) event.preventDefault()
     reorderReleaseCleanup.current?.()
     const pointerId = event.pointerId
     const gesture = {
       pointerId,
       source,
       target: null,
+      startX: event.clientX,
+      startY: event.clientY,
       clientX: event.clientX,
       clientY: event.clientY,
+      moved: false,
+      suppressClickAfterDrag: Boolean(options.preserveClick),
       ready: false
     }
     reorderPointer.current = gesture
@@ -149,7 +166,17 @@ export function WorkbenchLayout(props: WorkbenchLayoutProps) {
         <div aria-label={`${panelNames[panelId]} layout controls`} className="panel-layout-controls">
           <span className="sr-only">{panelNames[panelId]}</span>
           <details className="panel-arrange-menu">
-            <summary aria-label={`Arrange ${panelNames[panelId]}`} className="panel-control" title={`Arrange ${panelNames[panelId]}`}><GripVertical aria-hidden="true" size={14} /></summary>
+            <summary
+              aria-label={`Arrange ${panelNames[panelId]}`}
+              className="panel-control drag-control"
+              onClick={event => {
+                if (suppressedArrangeClick.current !== panelId) return
+                event.preventDefault()
+                suppressedArrangeClick.current = null
+              }}
+              onPointerDown={event => prepareReorderInteraction(event, panelId, { preserveClick: true })}
+              title={`Drag to reorder ${panelNames[panelId]}; click for move controls`}
+            ><GripVertical aria-hidden="true" size={14} /></summary>
             <span className="panel-arrange-actions" role="toolbar" aria-label={`Arrange ${panelNames[panelId]}`}>
               <button
                 aria-label={`Move ${panelNames[panelId]} left`}
@@ -158,13 +185,7 @@ export function WorkbenchLayout(props: WorkbenchLayoutProps) {
                 onClick={() => props.onMove(panelId, index - 1)}
                 type="button"
               ><ArrowLeft aria-hidden="true" size={13} /></button>
-              <button
-                aria-label={`Reorder ${panelNames[panelId]}`}
-                className="panel-control drag-control"
-                onPointerDown={event => prepareReorderInteraction(event, panelId)}
-                title={`Drag to reorder ${panelNames[panelId]}`}
-                type="button"
-              ><GripVertical aria-hidden="true" size={14} /></button>
+
               <button
                 aria-label={`Move ${panelNames[panelId]} right`}
                 className="panel-control"

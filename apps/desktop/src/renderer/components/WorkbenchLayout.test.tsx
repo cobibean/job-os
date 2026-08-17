@@ -32,11 +32,70 @@ function layout(onMove = vi.fn(), onReorderInteractionChange = vi.fn()) {
   )
 }
 
+test('the visible arrange grip directly reorders a panel', async () => {
+  mockPanelBounds()
+  const onMove = vi.fn()
+  const view = render(layout(onMove))
+  const visibleGrip = view.container.querySelector('summary[aria-label="Arrange Agent chat"]')
+
+  expect(visibleGrip).not.toBeNull()
+  expect(visibleGrip?.tagName).toBe('SUMMARY')
+  fireEvent.pointerDown(visibleGrip as HTMLElement, {
+    button: 0,
+    clientX: 250,
+    clientY: 150,
+    pointerId: 1
+  })
+  await act(async () => undefined)
+  fireEvent.pointerMove(window, { clientX: 150, clientY: 150, pointerId: 1 })
+  fireEvent.pointerUp(window, { clientX: 150, clientY: 150, pointerId: 1 })
+
+  expect(onMove).toHaveBeenCalledWith('agent', 1)
+})
+
+test('clicking the visible arrange grip still opens its move controls', () => {
+  const view = render(layout())
+  const visibleGrip = view.container.querySelector('summary[aria-label="Arrange Agent chat"]')
+  const menu = visibleGrip?.closest('details')
+
+  expect(menu?.open).toBe(false)
+  fireEvent.pointerDown(visibleGrip as HTMLElement, {
+    button: 0,
+    clientX: 250,
+    clientY: 150,
+    pointerId: 1
+  })
+  fireEvent.pointerUp(window, { clientX: 250, clientY: 150, pointerId: 1 })
+  fireEvent.click(visibleGrip as HTMLElement)
+
+  expect(menu?.open).toBe(true)
+})
+
+test('a canceled drag does not swallow the next arrange click', async () => {
+  mockPanelBounds()
+  const view = render(layout())
+  const visibleGrip = view.container.querySelector('summary[aria-label="Arrange Agent chat"]')
+  const menu = visibleGrip?.closest('details')
+
+  fireEvent.pointerDown(visibleGrip as HTMLElement, {
+    button: 0,
+    clientX: 250,
+    clientY: 150,
+    pointerId: 1
+  })
+  await act(async () => undefined)
+  fireEvent.pointerMove(window, { clientX: 150, clientY: 150, pointerId: 1 })
+  fireEvent.pointerCancel(window, { clientX: 150, clientY: 150, pointerId: 1 })
+  fireEvent.click(visibleGrip as HTMLElement)
+
+  expect(menu?.open).toBe(true)
+})
+
 test('unmounting during a reorder releases the native-surface interaction state', () => {
   const onReorderInteractionChange = vi.fn()
   const view = render(layout(vi.fn(), onReorderInteractionChange))
 
-  fireEvent.pointerDown(screen.getByRole('button', { name: 'Reorder Agent chat' }), {
+  fireEvent.pointerDown(screen.getByTitle('Drag to reorder Agent chat; click for move controls'), {
     clientX: 250,
     clientY: 150,
     pointerId: 1
@@ -52,7 +111,7 @@ test('releasing outside the panels cancels the reorder', async () => {
   const onMove = vi.fn()
   render(layout(onMove))
 
-  fireEvent.pointerDown(screen.getByRole('button', { name: 'Reorder Agent chat' }), {
+  fireEvent.pointerDown(screen.getByTitle('Drag to reorder Agent chat; click for move controls'), {
     button: 0,
     clientX: 250,
     clientY: 150,
@@ -71,7 +130,7 @@ test('changing the interaction callback mid-gesture clears the insertion target'
   const firstInteraction = vi.fn()
   const view = render(layout(vi.fn(), firstInteraction))
 
-  fireEvent.pointerDown(screen.getByRole('button', { name: 'Reorder Agent chat' }), {
+  fireEvent.pointerDown(screen.getByTitle('Drag to reorder Agent chat; click for move controls'), {
     button: 0,
     clientX: 250,
     clientY: 150,
@@ -93,7 +152,7 @@ test('Escape cancels an active pointer reorder', async () => {
   const onReorderInteractionChange = vi.fn()
   render(layout(onMove, onReorderInteractionChange))
 
-  fireEvent.pointerDown(screen.getByRole('button', { name: 'Reorder Agent chat' }), {
+  fireEvent.pointerDown(screen.getByTitle('Drag to reorder Agent chat; click for move controls'), {
     button: 0,
     clientX: 250,
     clientY: 150,
@@ -123,7 +182,7 @@ test('a stale approval cannot affect a newer gesture that reuses the pointer id'
     return new Promise<boolean>(resolve => { resolveFirst = resolve })
   })
   render(layout(onMove, onReorderInteractionChange))
-  const control = screen.getByRole('button', { name: 'Reorder Agent chat' })
+  const control = screen.getByTitle('Drag to reorder Agent chat; click for move controls')
 
   fireEvent.pointerDown(control, { button: 0, clientX: 250, clientY: 150, pointerId: 1 })
   fireEvent.pointerUp(window, { clientX: 250, clientY: 150, pointerId: 1 })

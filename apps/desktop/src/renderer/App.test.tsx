@@ -1241,7 +1241,7 @@ test('drag reordering shows an insertion preview before changing presentation on
     return DOMRect.fromRect({ x, y: 0, width: 100, height: 500 })
   })
   render(<App />)
-  const source = screen.getByRole('button', { name: 'Reorder Agent chat' })
+  const source = screen.getByTitle('Drag to reorder Agent chat; click for move controls')
   const target = screen.getByTestId('panel-jobs')
 
   fireEvent.pointerDown(source, { button: 0, clientX: 250, pointerId: 1 })
@@ -1295,7 +1295,7 @@ test('panel reordering detaches the native browser so the center panel can recei
   await waitFor(() => expect(setBounds).toHaveBeenCalledWith(expect.objectContaining({ visible: true })))
   setBounds.mockClear()
   detachResolvers.length = 0
-  const source = screen.getByRole('button', { name: 'Reorder Agent chat' })
+  const source = screen.getByTitle('Drag to reorder Agent chat; click for move controls')
   const target = screen.getByTestId('panel-center')
 
   fireEvent.pointerDown(source, { button: 0, clientX: 250, pointerId: 1 })
