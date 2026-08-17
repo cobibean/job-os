@@ -82,7 +82,7 @@ There is no `electron-updater` dependency, auto-update provider configuration, o
 
 This is appropriate for a trusted private demo boundary. It is not Developer ID signing or Apple notarization.
 
-### 3. Outer operator updater
+### 3. Outer local updater
 
 `apps/desktop/scripts/create-macbook-update.mjs` is the real user-facing packaging authority. It requires:
 
@@ -127,7 +127,7 @@ Its smoke suite covers fresh installation, replacement, rollback, interrupted ex
 
 This matters because JobOS can run in at least two compositions:
 
-- a private MacBook desktop connected to the Mac mini API; or
+- a desktop connected to a separately managed remote API host; or
 - the local-first public architecture, where the API is part of the product system.
 
 A future updater must model desktop and service compatibility explicitly rather than implying that one app replacement upgrades every component.
@@ -313,7 +313,7 @@ The release model must distinguish:
 
 - **desktop-only update:** safe when the connected API and state schema remain compatible;
 - **coordinated desktop + local service update:** required when the public binary owns a managed local API;
-- **host-first private update:** Mac mini service changes activate before a remote MacBook desktop when the old desktop remains compatible;
+- **host-first remote update:** remote service changes activate before a desktop client when the old desktop remains compatible;
 - **protocol migration:** required when an old client cannot authenticate, stage, activate, or roll back the new component set.
 
 The Update Center should block installation when compatibility evidence says the connected service is too old or too new, and explain which component must update first.
