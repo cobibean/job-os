@@ -795,6 +795,48 @@ def test_conversation_events_restore_in_monotonic_order_from_fresh_store(tmp_pat
     assert restored["entries"][1]["context"]["selected_job_id"] is None
 
 
+def test_terminal_agent_continuation_does_not_replace_active_user_turn(tmp_path):
+    store = JobOsStateStore(tmp_path / "jobos.db")
+    store.initialize()
+    active = store.create_conversation_turn(
+        text="A newer follow-up",
+        context={"selected_job_id": None, "workspace": {}},
+        idempotency_key="active-user-before-continuation",
+        actor_id="device-a",
+    )
+    conversation = store.conversation_store(store.first_active_conversation_id())
+
+    assert conversation.record_agent_continuation(
+        turn_id="turn_agent_continuation_1234",
+        status="completed",
+        event_type="assistant_message",
+        summary="Background work finished",
+        detail={
+            "type": "message.complete",
+            "text": "Background work finished",
+            "agent_continuation": True,
+        },
+    )
+    snapshot = conversation.conversation_snapshot()
+
+    entries = snapshot["entries"]
+    assert isinstance(entries, list)
+    continuation_entries = [
+        entry
+        for entry in entries
+        if isinstance(entry, dict)
+        and entry["turn_id"] == "turn_agent_continuation_1234"
+    ]
+    assert [entry["type"] for entry in continuation_entries] == [
+        "turn",
+        "assistant_message",
+    ]
+    assert not any(entry["type"] == "user_message" for entry in continuation_entries)
+    active_turn = snapshot["active_turn"]
+    assert isinstance(active_turn, dict)
+    assert active_turn["turn_id"] == active["turn_id"]
+
+
 def test_completed_assistant_text_uses_transcript_bound_while_summary_stays_concise(tmp_path):
     database = tmp_path / "jobos.db"
     store = JobOsStateStore(database)

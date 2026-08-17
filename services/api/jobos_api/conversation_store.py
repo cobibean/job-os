@@ -2,6 +2,7 @@
 # ruff: noqa: E501
 
 import json
+import re
 import secrets
 import sqlite3
 from hashlib import sha256
@@ -272,6 +273,70 @@ class ConversationStore:
         return {**result, "created": True}
 
     create_conversation_turn = create_turn
+
+    def record_agent_continuation(
+        self,
+        *,
+        turn_id: str,
+        status: str,
+        event_type: str,
+        summary: str,
+        detail: dict[str, object],
+        source_event_id: str | None = None,
+    ) -> bool:
+        """Atomically append one terminal assistant-only continuation."""
+        if not re.fullmatch(r"turn_[A-Za-z0-9_-]{8,200}", turn_id):
+            raise ValueError("Invalid continuation turn id")
+        if status not in {"completed", "failed", "interrupted"}:
+            raise ValueError("Continuation must be terminal")
+        safe_detail = _conversation_detail(event_type, detail)
+        message_id = f"msg_{secrets.token_urlsafe(16)}"
+        context = {"agent_continuation": True}
+        with connect_sqlite(self._path) as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            self._require_active(connection)
+            if connection.execute(
+                "SELECT 1 FROM conversation_turns WHERE turn_id = ? AND conversation_id = ?",
+                (turn_id, self.conversation_id),
+            ).fetchone():
+                connection.rollback()
+                return False
+            connection.execute(
+                "INSERT INTO conversation_turns(turn_id, conversation_id, message_id, source_turn_id, text, context_json, status) VALUES (?, ?, ?, NULL, '', ?, ?)",
+                (
+                    turn_id,
+                    self.conversation_id,
+                    message_id,
+                    json.dumps(context, separators=(",", ":"), sort_keys=True),
+                    status,
+                ),
+            )
+            connection.execute(
+                "INSERT INTO conversation_events(conversation_id, turn_id, event_type, state, summary, detail_json) VALUES (?, ?, 'turn', 'working', 'Agent completed background work', ?)",
+                (
+                    self.conversation_id,
+                    turn_id,
+                    json.dumps(
+                        {"context": context, "source_turn_id": None},
+                        separators=(",", ":"),
+                        sort_keys=True,
+                    ),
+                ),
+            )
+            connection.execute(
+                "INSERT INTO conversation_events(conversation_id, turn_id, event_type, state, summary, detail_json, source_event_id) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (
+                    self.conversation_id,
+                    turn_id,
+                    event_type[:50],
+                    status,
+                    sanitize_summary(summary),
+                    json.dumps(safe_detail, separators=(",", ":"), sort_keys=True),
+                    source_event_id[:256] if source_event_id else None,
+                ),
+            )
+            connection.commit()
+        return True
 
     def append_event(
         self,
