@@ -1233,20 +1233,91 @@ test('pointer resizing tracks movement and every panel has a recovery affordance
   }
 })
 
-test('drag reordering shows an insertion preview before changing presentation only', () => {
+test('drag reordering shows an insertion preview before changing presentation only', async () => {
   Object.defineProperty(window, 'jobos', { configurable: true, value: undefined })
+  const rect = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+    const panel = this.getAttribute('data-testid')
+    const x = panel === 'panel-jobs' ? 0 : panel === 'panel-center' ? 100 : panel === 'panel-agent' ? 200 : 0
+    return DOMRect.fromRect({ x, y: 0, width: 100, height: 500 })
+  })
   render(<App />)
   const source = screen.getByRole('button', { name: 'Reorder Agent chat' })
   const target = screen.getByTestId('panel-jobs')
-  const transfer = { getData: vi.fn().mockReturnValue('agent'), setData: vi.fn(), effectAllowed: '' }
 
-  fireEvent.dragStart(source, { dataTransfer: transfer })
-  fireEvent.dragOver(target, { dataTransfer: transfer })
+  fireEvent.pointerDown(source, { button: 0, clientX: 250, pointerId: 1 })
+  await act(async () => undefined)
+  fireEvent.pointerMove(window, { clientX: 50, pointerId: 1 })
   expect(target.classList.contains('insertion-target')).toBe(true)
-  fireEvent.drop(target, { dataTransfer: transfer })
+  fireEvent.pointerUp(window, { clientX: 50, pointerId: 1 })
 
   expect(panelDomOrder()).toEqual(['agent', 'jobs', 'center'])
   expect(target.classList.contains('insertion-target')).toBe(false)
+  rect.mockRestore()
+})
+
+test('panel reordering detaches the native browser so the center panel can receive the drop', async () => {
+  const tab = {
+    tabId: 'listing', url: 'https://jobs.example.com/7', title: 'Listing', faviconUrl: null, associatedJobId: null,
+    loading: false, canGoBack: false, canGoForward: false, error: null, crashed: false, blockedUrl: null
+  }
+  const browserState = { tabs: [tab], activeTabId: tab.tabId, download: null, notice: null }
+  const detachResolvers: Array<() => void> = []
+  const setBounds = vi.fn().mockImplementation(bounds => bounds.visible
+    ? Promise.resolve()
+    : new Promise<void>(resolve => detachResolvers.push(resolve)))
+  const rect = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+    const panel = this.getAttribute('data-testid')
+    if (panel) {
+      const x = panel === 'panel-jobs' ? 0 : panel === 'panel-center' ? 100 : 200
+      return DOMRect.fromRect({ x, y: 0, width: 100, height: 500 })
+    }
+    return DOMRect.fromRect({ x: 100, y: 120, width: 800, height: 500 })
+  })
+  Object.defineProperty(window, 'jobos', { configurable: true, value: {
+    connectivity: { get: vi.fn().mockResolvedValue({ state: 'connected', checkedAt: '', message: 'Private API authenticated' }) },
+    workspace: {
+      get: vi.fn().mockResolvedValue({
+        ...restoredWorkspace(3), selectedPreset: 'research', activeCenterSurface: 'browser',
+        browserTabs: [{ tabId: tab.tabId, url: tab.url, title: tab.title, faviconUrl: null, associatedJobId: null }],
+        activeBrowserTabId: tab.tabId, repairedBrowser: false
+      }),
+      save: vi.fn().mockImplementation(snapshot => Promise.resolve({ ...snapshot, revision: snapshot.revision + 1 }))
+    },
+    browser: {
+      restore: vi.fn().mockResolvedValue(browserState), getState: vi.fn(), subscribe: vi.fn().mockReturnValue(() => undefined), setBounds,
+      create: vi.fn(), select: vi.fn(), close: vi.fn(), reorder: vi.fn(), navigate: vi.fn(), back: vi.fn(), forward: vi.fn(),
+      reload: vi.fn(), stop: vi.fn(), associate: vi.fn(), copyBlockedUrl: vi.fn()
+    }
+  } })
+
+  render(<App />)
+  await screen.findByRole('tab', { name: 'Select Listing' })
+  await waitFor(() => expect(setBounds).toHaveBeenCalledWith(expect.objectContaining({ visible: true })))
+  setBounds.mockClear()
+  detachResolvers.length = 0
+  const source = screen.getByRole('button', { name: 'Reorder Agent chat' })
+  const target = screen.getByTestId('panel-center')
+
+  fireEvent.pointerDown(source, { button: 0, clientX: 250, pointerId: 1 })
+  await waitFor(() => expect(setBounds).toHaveBeenCalledWith(expect.objectContaining({ visible: false })))
+  fireEvent.pointerMove(window, { clientX: 150, pointerId: 1 })
+  expect(target.classList.contains('insertion-target')).toBe(false)
+  expect(panelDomOrder()).toEqual(['jobs', 'center', 'agent'])
+  await act(async () => detachResolvers.shift()?.())
+  await waitFor(() => expect(target.classList.contains('insertion-target')).toBe(true))
+  fireEvent.pointerUp(window, { clientX: 150, pointerId: 1 })
+
+  expect(panelDomOrder()).toEqual(['jobs', 'agent', 'center'])
+  await waitFor(() => expect(setBounds).toHaveBeenCalledWith(expect.objectContaining({ visible: true })))
+
+  setBounds.mockClear()
+  detachResolvers.length = 0
+  fireEvent.pointerDown(source, { button: 0, clientX: 150, pointerId: 2 })
+  await waitFor(() => expect(setBounds).toHaveBeenCalledWith(expect.objectContaining({ visible: false })))
+  fireEvent.pointerUp(window, { clientX: 150, pointerId: 2 })
+  await act(async () => detachResolvers.shift()?.())
+  await waitFor(() => expect(setBounds).toHaveBeenCalledWith(expect.objectContaining({ visible: true })))
+  rect.mockRestore()
 })
 
 test('a delayed Browse action survives hydration and Reset Layout leaves Browse state intact', async () => {
