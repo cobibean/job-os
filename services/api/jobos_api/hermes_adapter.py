@@ -1,4 +1,5 @@
 import asyncio
+import hashlib
 import ipaddress
 import json
 import re
@@ -152,6 +153,7 @@ class HermesWebSocketGateway:
         self._session_isolation_event = asyncio.Event()
         self._attaching_session = False
         self._pending_session_info: dict[str, tuple[bool, GatewayEvent | None]] = {}
+        self._pending_continuation_frames: list[dict[str, object]] = []
         self._activity = ActivityNormalizer()
         self._closed = False
         self._start_lock = asyncio.Lock()
@@ -298,6 +300,8 @@ class HermesWebSocketGateway:
                 self._record_session_verification(True)
             pending = self._pending_session_info.get(live)
             self._pending_session_info.clear()
+            pending_continuations = self._pending_continuation_frames
+            self._pending_continuation_frames = []
             self._attaching_session = False
             if pending is not None:
                 verified, reconciliation = pending
@@ -305,10 +309,15 @@ class HermesWebSocketGateway:
                 if self._session_isolation_state == "verified" and reconciliation is not None:
                     self._apply_reconciled_stored_session(reconciliation)
                     await self._events.put(reconciliation)
+            for pending_frame in pending_continuations:
+                event = self.normalize_frame(pending_frame)
+                if event is not None:
+                    await self._events.put(event)
             return self._stored_session_id, live
         except Exception:
             self._attaching_session = False
             self._pending_session_info.clear()
+            self._pending_continuation_frames = []
             raise
 
     def _begin_session_attachment(self) -> None:
@@ -318,6 +327,7 @@ class HermesWebSocketGateway:
         self._session_isolation_event = asyncio.Event()
         self._attaching_session = True
         self._pending_session_info.clear()
+        self._pending_continuation_frames = []
 
     def _reset_live_session(self) -> None:
         if self._session_isolation_state == "unverified":
@@ -328,6 +338,7 @@ class HermesWebSocketGateway:
         self._session_isolation_event = asyncio.Event()
         self._attaching_session = False
         self._pending_session_info.clear()
+        self._pending_continuation_frames = []
 
     def _record_session_verification(self, verified: bool) -> None:
         if self._session_isolation_state in {"failed", "verified"}:
@@ -588,6 +599,13 @@ class HermesWebSocketGateway:
         session_id = frame.get("session_id")
         if frame_type == "session.info":
             return self._normalize_session_info(frame, session_id)
+        if (
+            self._live_session_id is None
+            and self._attaching_session
+            and frame.get("display_kind") == "async_delegation_complete"
+        ):
+            self._pending_continuation_frames.append(dict(raw_frame))
+            return None
         if self._live_session_id is None or session_id != self._live_session_id:
             return None
         supported_types = {
@@ -613,6 +631,46 @@ class HermesWebSocketGateway:
         }
         if frame_type not in supported_types:
             return None
+        continuation_id = frame.get("continuation_id")
+        if frame.get("display_kind") == "async_delegation_complete":
+            if not isinstance(continuation_id, str) or not re.fullmatch(
+                r"[A-Za-z0-9_-]{8,200}", continuation_id
+            ):
+                return None
+            if frame_type not in {"message.complete", "error"}:
+                return None
+            continuation_digest = hashlib.sha256(continuation_id.encode()).hexdigest()[:32]
+            turn_id = f"turn_cont_{continuation_digest}"
+            source_event_id = f"async_delegation:{continuation_digest}:terminal"
+            safe_detail = redact_detail(frame)
+            safe_detail["agent_continuation"] = True
+            if frame_type == "error":
+                return GatewayEvent(
+                    event_type="error",
+                    state="failed",
+                    summary=safe_error_summary(safe_detail.get("message") or "Hermes error"),
+                    detail={**safe_detail, "actionable": True},
+                    turn_id=turn_id,
+                    source_event_id=source_event_id,
+                )
+            safe_text = sanitize_assistant_text(
+                str(frame.get("text") or frame.get("delta") or "")
+            )
+            safe_detail["text"] = safe_text
+            status = str(frame.get("status", ""))
+            return GatewayEvent(
+                event_type="assistant_message",
+                state={
+                    "complete": "completed",
+                    "completed": "completed",
+                    "interrupted": "interrupted",
+                    "error": "failed",
+                }.get(status, "completed"),
+                summary=safe_text[:1000],
+                detail=safe_detail,
+                turn_id=turn_id,
+                source_event_id=source_event_id,
+            )
         if frame_type != "session.info" and self._active_turn_id is None:
             # A resumed Hermes session can keep emitting after JobOS restarts, but
             # without an active JobOS turn those events have no safe transcript

@@ -4,7 +4,7 @@ from urllib.parse import parse_qs, urlsplit
 
 import pytest
 from jobos_api.agent_gateway import AgentContext, GatewayEvent
-from jobos_api.conversations import ConversationService, SendMessageRequest
+from jobos_api.conversations import ConversationService, RetryTurnRequest, SendMessageRequest
 from jobos_api.hermes_adapter import HermesWebSocketGateway, _prompt_with_context
 from jobos_api.state_store import JobOsStateStore
 
@@ -448,6 +448,111 @@ def test_two_serialized_service_prompts_reuse_one_verified_live_attachment(tmp_p
         assert "raw-runtime-secret" not in serialized
         assert "raw-tool-metadata" not in serialized
         assert TOKEN not in repr(gateway)
+
+    asyncio.run(scenario())
+
+
+def test_service_records_late_continuation_without_disturbing_active_user_turn(tmp_path):
+    async def scenario():
+        socket = FakeWebSocket(
+            lambda request: [
+                result(
+                    request,
+                    {
+                        "stored_session_id": "stored-1",
+                        "session_id": "live-1",
+                        "info": {"profile_name": "job-hunter", "cwd": str(tmp_path)},
+                    },
+                )
+            ]
+        )
+        gateway = HermesWebSocketGateway(
+            url="ws://127.0.0.1:9119/api/ws",
+            token=TOKEN,
+            cwd=tmp_path,
+            request_timeout=1,
+            connector=FakeConnector(socket),
+        )
+        store = JobOsStateStore(tmp_path / "jobos.db")
+        store.initialize()
+        await gateway.start()
+        await gateway.create_or_resume_conversation(None)
+        service = ConversationService(store, gateway)
+        await service.start()
+        active = store.create_conversation_turn(
+            text="A newer follow-up",
+            context={"selected_job_id": None, "workspace": {}},
+            idempotency_key="active-during-late-continuation",
+            actor_id="device-a",
+        )
+        gateway._active_turn_id = str(active["turn_id"])
+        snapshot = store.conversation_snapshot()
+        gateway_active_turn_id = None
+        try:
+            socket.incoming.put_nowait(
+                json.dumps(
+                    event(
+                        "message.start",
+                        "live-1",
+                        {
+                            "display_kind": "async_delegation_complete",
+                            "continuation_id": "delegation-service-1234",
+                        },
+                    )
+                )
+            )
+            socket.incoming.put_nowait(
+                json.dumps(
+                    event(
+                        "message.complete",
+                        "live-1",
+                        {
+                            "status": "complete",
+                            "text": "Background work finished",
+                            "display_kind": "async_delegation_complete",
+                            "continuation_id": "delegation-service-1234",
+                        },
+                    )
+                )
+            )
+            for _ in range(50):
+                snapshot = store.conversation_snapshot()
+                entries = snapshot["entries"]
+                assert isinstance(entries, list)
+                if any(
+                    isinstance(entry, dict)
+                    and entry["type"] == "assistant_message"
+                    and entry["summary"] == "Background work finished"
+                    for entry in entries
+                ):
+                    break
+                await asyncio.sleep(0.01)
+            gateway_active_turn_id = gateway._active_turn_id
+        finally:
+            await service.close()
+
+        entries = snapshot["entries"]
+        assert isinstance(entries, list)
+        typed_entries = [entry for entry in entries if isinstance(entry, dict)]
+        continuation = [
+            entry
+            for entry in typed_entries
+            if entry["type"] == "turn"
+            and entry["context"].get("agent_continuation") is True
+        ]
+        assert len(continuation) == 1
+        continuation_id = continuation[0]["turn_id"]
+        assert any(
+            entry["turn_id"] == continuation_id
+            and entry["type"] == "assistant_message"
+            and entry["state"] == "completed"
+            for entry in typed_entries
+        )
+        assert sum(entry["type"] == "user_message" for entry in typed_entries) == 1
+        active_turn = snapshot["active_turn"]
+        assert isinstance(active_turn, dict)
+        assert active_turn["turn_id"] == active["turn_id"]
+        assert gateway_active_turn_id == active["turn_id"]
 
     asyncio.run(scenario())
 
@@ -907,6 +1012,115 @@ def test_turn_events_without_an_active_jobos_turn_are_dropped(tmp_path):
     assert orphan_delta is None
     assert orphan_tool is None
     assert orphan_status is None
+
+
+def test_async_delegation_completion_stays_separate_from_a_new_user_turn(tmp_path):
+    gateway = HermesWebSocketGateway(url="ws://127.0.0.1:9119/api/ws", token=TOKEN, cwd=tmp_path)
+    gateway._live_session_id = "live-1"
+    gateway._active_turn_id = "turn-new-user"
+
+    assert gateway.normalize_frame(
+        event(
+            "message.start",
+            "live-1",
+            {
+                "display_kind": "async_delegation_complete",
+                "continuation_id": "delegation-unit-1234",
+            },
+        )
+    ) is None
+    assert gateway.normalize_frame(
+        event(
+            "message.delta",
+            "live-1",
+            {
+                "text": "Background",
+                "display_kind": "async_delegation_complete",
+                "continuation_id": "delegation-unit-1234",
+            },
+        )
+    ) is None
+    user_completion = gateway.normalize_frame(
+        event(
+            "message.complete",
+            "live-1",
+            {"status": "complete", "text": "New user turn done"},
+        )
+    )
+    continuation = gateway.normalize_frame(
+        event(
+            "message.complete",
+            "live-1",
+            {
+                "status": "complete",
+                "text": "Background done",
+                "display_kind": "async_delegation_complete",
+                "continuation_id": "delegation-unit-1234",
+            },
+        )
+    )
+
+    assert continuation is not None
+    assert continuation.turn_id is not None
+    assert continuation.turn_id != "turn-new-user"
+    assert continuation.detail["agent_continuation"] is True
+    assert continuation.source_event_id is not None
+    assert continuation.summary == "Background done"
+    assert user_completion is not None
+    assert user_completion.turn_id == "turn-new-user"
+    assert user_completion.summary == "New user turn done"
+
+
+def test_async_delegation_completion_is_buffered_during_session_attachment(tmp_path):
+    gateway = HermesWebSocketGateway(url="ws://127.0.0.1:9119/api/ws", token=TOKEN, cwd=tmp_path)
+    gateway._begin_session_attachment()
+    frame = event(
+        "message.complete",
+        "live-after-resume",
+        {
+            "status": "complete",
+            "text": "Recovered background result",
+            "display_kind": "async_delegation_complete",
+            "continuation_id": "delegation-resume-1234",
+        },
+    )
+
+    assert gateway.normalize_frame(frame) is None
+    assert gateway._pending_continuation_frames == [frame]
+
+    gateway._live_session_id = "live-after-resume"
+    gateway._attaching_session = False
+    recovered = gateway.normalize_frame(gateway._pending_continuation_frames.pop())
+
+    assert recovered is not None
+    assert recovered.summary == "Recovered background result"
+    assert recovered.detail["agent_continuation"] is True
+
+
+def test_failed_agent_continuation_cannot_retry_as_an_empty_user_turn(tmp_path):
+    async def scenario():
+        store = JobOsStateStore(tmp_path / "jobos.db")
+        store.initialize()
+        conversation = store.conversation_store(store.first_active_conversation_id())
+        conversation.record_agent_continuation(
+            turn_id="turn_failed_continuation_1234",
+            status="failed",
+            event_type="error",
+            summary="Background continuation failed",
+            detail={"agent_continuation": True, "message": "failed"},
+        )
+        gateway = HermesWebSocketGateway(
+            url="ws://127.0.0.1:9119/api/ws", token=TOKEN, cwd=tmp_path
+        )
+        service = ConversationService(store, gateway)
+        with pytest.raises(ValueError, match="cannot be retried"):
+            await service.retry(
+                "turn_failed_continuation_1234",
+                RetryTurnRequest(idempotency_key="retry-background-continuation"),
+                actor_id="device-a",
+            )
+
+    asyncio.run(scenario())
 
 
 def test_real_status_and_error_fields_are_read_from_payload(tmp_path):

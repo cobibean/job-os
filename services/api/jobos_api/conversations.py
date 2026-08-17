@@ -260,6 +260,9 @@ class ConversationService:
             return None
         if source["status"] not in {"failed", "interrupted"}:
             raise ValueError("Only failed or interrupted turns can be retried")
+        source_context = source.get("context")
+        if isinstance(source_context, dict) and source_context.get("agent_continuation") is True:
+            raise ValueError("Background continuation turns cannot be retried directly")
         created = self.store.create_conversation_turn(
             text=str(source["text"]),
             context=source["context"],
@@ -436,6 +439,19 @@ class ConversationService:
                 continue
             turn_id = event.turn_id
             if turn_id and self.store.turn_record(turn_id) is None:
+                if (
+                    event.detail.get("agent_continuation") is True
+                    and event.state in {"completed", "failed", "interrupted"}
+                    and event.event_type in {"assistant_message", "error"}
+                ):
+                    self.store.record_agent_continuation(
+                        turn_id=turn_id,
+                        status=event.state,
+                        event_type=event.event_type,
+                        summary=event.summary,
+                        detail={**event.detail, "activity_id": event.activity_id},
+                        source_event_id=event.source_event_id,
+                    )
                 continue
             is_terminal = bool(
                 turn_id
