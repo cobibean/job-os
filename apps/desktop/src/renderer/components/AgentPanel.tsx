@@ -38,6 +38,7 @@ export function AgentPanel({ contextLabel, apiState = 'connected', onArtifactRen
   }
   const activeId = sessions.activeId
   const panelRefs = useRef(new Map<string, HTMLDivElement>())
+  const lastScrollTops = useRef(new Map<string, number>())
   const pinnedToBottom = useRef(true)
   const [isPinnedToBottom, setIsPinnedToBottom] = useState(true)
   const observedEventIds = useRef(new Map<string, number>())
@@ -74,6 +75,7 @@ export function AgentPanel({ contextLabel, apiState = 'connected', onArtifactRen
     const transcript = activeId ? panelRefs.current.get(activeId) : undefined
     if (!transcript) return
     transcript.scrollTop = transcript.scrollHeight
+    if (activeId) lastScrollTops.current.set(activeId, transcript.scrollTop)
     pinnedToBottom.current = true
     setIsPinnedToBottom(true)
     if (focusTranscript && activeId) sessions.saveScroll(activeId, transcript.scrollTop, true)
@@ -91,15 +93,20 @@ export function AgentPanel({ contextLabel, apiState = 'connected', onArtifactRen
     pinnedToBottom.current = saved?.pinnedToBottom ?? true
     setIsPinnedToBottom(pinnedToBottom.current)
     transcript.scrollTop = pinnedToBottom.current ? transcript.scrollHeight : (saved?.scrollTop ?? 0)
+    lastScrollTops.current.set(activeId, transcript.scrollTop)
   }, [activeId, sessions.saveScroll])
 
   const handleScroll = () => {
     const transcript = activeId ? panelRefs.current.get(activeId) : undefined
-    if (!transcript) return
-    const pinned = transcript.scrollHeight - transcript.scrollTop - transcript.clientHeight <= 64
+    if (!transcript || !activeId) return
+    const previousScrollTop = lastScrollTops.current.get(activeId) ?? transcript.scrollTop
+    const movedUp = transcript.scrollTop < previousScrollTop
+    const distanceFromBottom = transcript.scrollHeight - transcript.scrollTop - transcript.clientHeight
+    const pinned = !movedUp && (pinnedToBottom.current ? distanceFromBottom <= 64 : distanceFromBottom <= 1)
+    lastScrollTops.current.set(activeId, transcript.scrollTop)
     pinnedToBottom.current = pinned
     setIsPinnedToBottom(pinned)
-    if (activeId) sessions.saveScroll(activeId, transcript.scrollTop, pinned)
+    sessions.saveScroll(activeId, transcript.scrollTop, pinned)
   }
 
   const handleTurnLayoutChange = useCallback(() => {
