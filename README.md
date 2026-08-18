@@ -3,9 +3,9 @@
 Job searching is usually split across job boards, browser tabs, spreadsheets,
 AI chats, resumes, and cover letters. Each switch makes context easier to lose.
 
-**JobOS is an open-source, local-first desktop workspace that keeps job tracking,
-browsing, documents, and human-agent collaboration together in one persistent
-place.**
+**JobOS is an open-source, local-first desktop workspace that keeps job
+discovery, a persistent browser, document editing, and human-agent collaboration
+together in one place.**
 
 ## Why JobOS exists
 
@@ -22,11 +22,18 @@ so the user can guide the work, review the real result, and remain in control.
 
 In a configured JobOS workspace, a user can:
 
-1. Save a promising role and open its live listing in the built-in browser.
-2. Ask a connected agent to tailor a resume or cover letter for that role.
-3. Watch the agent's activity and review the real document beside the listing.
-4. Edit directly or request another revision, then export the approved DOCX/PDF.
-5. Reopen JobOS later with the jobs, tabs, documents, conversation, and layout
+1. Use the built-in browser to sign in to job sites, search for roles, and keep
+   those sessions and tabs available between visits.
+2. Find a promising listing and save it to the JobOS workspace without leaving
+   the browser.
+3. Ask a connected agent to inspect the listing and tailor a resume or cover
+   letter for the role.
+4. Watch the agent's activity, review the real document beside the listing, and
+   make small adjustments in the built-in DOCX editor.
+5. Export the approved DOCX/PDF to the computer.
+6. Return to the same browser session, complete the application, upload the
+   tailored file, and submit it manually—all without leaving JobOS.
+7. Reopen JobOS later with the jobs, tabs, documents, conversation, and layout
    still where they left them.
 
 The agent is optional. Local job tracking, browsing, and document work remain
@@ -51,9 +58,9 @@ Static equivalents: [Browse list and fictional job detail](docs/media/screenshot
 
 ## What makes JobOS different
 
-- **One continuous workspace:** opportunities, browsing, documents, and agent
-  collaboration live together instead of being scattered across disconnected
-  tools.
+- **One continuous application workflow:** search in a persistent browser, save
+  the role, tailor and edit the documents, then return to the listing to apply
+  without moving between disconnected tools.
 - **Human and agent share the same state:** both work with the same jobs,
   browser context, documents, and history rather than parallel copies.
 - **The user stays in control:** agent activity is visible, consequential actions
