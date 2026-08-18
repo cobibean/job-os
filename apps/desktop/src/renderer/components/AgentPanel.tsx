@@ -9,6 +9,34 @@ import { ActivityRow } from './ActivityRow'
 import { AssistantMarkdown } from './AssistantMarkdown'
 import { AgentSessionTabs } from './AgentSessionTabs'
 
+function formatElapsedTime(elapsedMilliseconds: number): string {
+  const totalSeconds = Math.max(0, Math.floor(elapsedMilliseconds / 1_000))
+  const seconds = totalSeconds % 60
+  const totalMinutes = Math.floor(totalSeconds / 60)
+  const minutes = totalMinutes % 60
+  const hours = Math.floor(totalMinutes / 60)
+  return hours > 0
+    ? `${hours}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`
+    : `${minutes}:${String(seconds).padStart(2, '0')}`
+}
+
+function parseEventTimestamp(value: string): number {
+  const sqliteUtc = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}(?:\.\d+)?$/.test(value)
+  return Date.parse(sqliteUtc ? `${value.replace(' ', 'T')}Z` : value)
+}
+
+function AgentElapsedTime({ startedAt }: { startedAt: number }) {
+  const [now, setNow] = useState(() => Date.now())
+
+  useEffect(() => {
+    setNow(Date.now())
+    const timer = window.setInterval(() => setNow(Date.now()), 1_000)
+    return () => window.clearInterval(timer)
+  }, [startedAt])
+
+  return <time aria-label="Elapsed agent time">{formatElapsedTime(now - startedAt)}</time>
+}
+
 interface AgentPanelProps {
   contextLabel: string
   apiState?: ConnectivityState
@@ -42,6 +70,7 @@ export function AgentPanel({ contextLabel, apiState = 'connected', onArtifactRen
   const pinnedToBottom = useRef(true)
   const [isPinnedToBottom, setIsPinnedToBottom] = useState(true)
   const observedEventIds = useRef(new Map<string, number>())
+  const activeTurnStarts = useRef(new Map<string, { turnId: string; startedAt: number }>())
   const canSend = Boolean(
     conversation.draft.trim()
     && !conversation.activeTurn
@@ -116,6 +145,19 @@ export function AgentPanel({ contextLabel, apiState = 'connected', onArtifactRen
   const activePresentation = conversation.activeTurn
     ? conversation.items.find(item => item.kind === 'agent-turn' && item.turnId === conversation.activeTurn?.turnId)
     : undefined
+  let activeTurnStartedAt: number | null = null
+  if (activeId && conversation.activeTurn) {
+    const eventStart = conversation.entries
+      .filter(entry => entry.turnId === conversation.activeTurn?.turnId)
+      .map(entry => parseEventTimestamp(entry.occurredAt))
+      .filter(Number.isFinite)
+      .reduce<number | null>((earliest, timestamp) => earliest === null ? timestamp : Math.min(earliest, timestamp), null)
+    const remembered = activeTurnStarts.current.get(activeId)
+    activeTurnStartedAt = remembered?.turnId === conversation.activeTurn.turnId
+      ? Math.min(remembered.startedAt, eventStart ?? remembered.startedAt)
+      : (eventStart ?? Date.now())
+    activeTurnStarts.current.set(activeId, { turnId: conversation.activeTurn.turnId, startedAt: activeTurnStartedAt })
+  }
   const activeActionCount = activePresentation?.kind === 'agent-turn' ? activePresentation.activities.length : 0
   const latestTurn = [...conversation.items].reverse().find(item => item.kind === 'agent-turn')
   const activeStatus = conversation.activeTurn?.cancelRequested
@@ -252,7 +294,8 @@ export function AgentPanel({ contextLabel, apiState = 'connected', onArtifactRen
       {conversation.activeTurn && (
         <div aria-label="Agent turn status" className="agent-turn-status">
           {conversation.activeTurn.status === 'running' && !conversation.activeTurn.cancelRequested && <LoaderCircle aria-hidden="true" className="spin" size={13} />}
-          {activeStatus}
+          <span>{activeStatus}</span>
+          {activeTurnStartedAt !== null && <><span aria-hidden="true">·</span><AgentElapsedTime startedAt={activeTurnStartedAt} /></>}
         </div>
       )}
 

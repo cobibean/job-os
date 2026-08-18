@@ -5,7 +5,7 @@ import type { AgentConversationSnapshot, AgentSessionStreamUpdate, AgentSessionS
 import { useAgentSessions } from '../hooks/useAgentSessions'
 import { AgentPanel } from './AgentPanel'
 
-afterEach(() => { cleanup(); window.localStorage.clear() })
+afterEach(() => { cleanup(); window.localStorage.clear(); vi.restoreAllMocks() })
 
 const summary = (position: number, activeTurn: AgentSessionSummary['activeTurn'] = null): AgentSessionSummary => ({
   conversationId: `conv_${position}`, position, title: `Session ${position}`, createdAt: '2026-08-16T10:00:00Z',
@@ -45,6 +45,23 @@ function deferred<T>() {
   let resolve!: (value: T) => void
   const promise = new Promise<T>(next => { resolve = next })
   return { promise, resolve }
+}
+
+function installClock(isoTime: string) {
+  let now = Date.parse(isoTime)
+  let tick: () => void = () => undefined
+  vi.spyOn(Date, 'now').mockImplementation(() => now)
+  vi.spyOn(window, 'setInterval').mockImplementation(callback => {
+    tick = callback as () => void
+    return 1 as unknown as ReturnType<typeof window.setInterval>
+  })
+  vi.spyOn(window, 'clearInterval').mockImplementation(() => undefined)
+  return {
+    advance(milliseconds: number) {
+      now += milliseconds
+      act(() => tick())
+    }
+  }
 }
 
 test('renders accessible tabs and creates a fresh additive session without a reset modal', async () => {
@@ -153,6 +170,50 @@ test('a small upward scroll stays detached across session switching and streamed
     event: event(3, { type: 'assistant_message', state: 'completed', summary: 'Newest answer', detail: { type: 'message.complete', text: 'Newest answer' } })
   }))
   expect(scrollTop).toBe(650)
+})
+
+test('a new agent turn timer starts at zero and counts upward', async () => {
+  const clock = installClock('2026-08-16T10:00:00Z')
+  install()
+  await act(async () => { render(<Harness />); await Promise.resolve() })
+  const composer = screen.getByRole('textbox', { name: 'Message the agent' })
+  fireEvent.change(composer, { target: { value: 'Start the work' } })
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Send message' })); await Promise.resolve() })
+
+  expect(screen.getByLabelText('Elapsed agent time').textContent).toBe('0:00')
+  clock.advance(1_000)
+  expect(screen.getByLabelText('Elapsed agent time').textContent).toBe('0:01')
+})
+
+test('each active session shows its own elapsed timer until that turn completes', async () => {
+  const clock = installClock('2026-08-16T10:01:05Z')
+  const firstTurn = { turnId: 'turn-1', status: 'running' as const, cancelRequested: false }
+  const secondTurn = { turnId: 'turn-2', status: 'running' as const, cancelRequested: false }
+  // SQLite CURRENT_TIMESTAMP is UTC without a timezone suffix. The renderer
+  // must not accidentally interpret these persisted values as local time.
+  const firstStart = event(1, { type: 'turn', state: 'working', occurredAt: '2026-08-16 10:00:00' })
+  const secondStart = event(2, { turnId: 'turn-2', type: 'turn', state: 'working', occurredAt: '2026-08-16 10:01:00' })
+  const { emit } = install(
+    [summary(1, firstTurn), summary(2, secondTurn)],
+    [snapshot(1, [firstStart], firstTurn), snapshot(2, [secondStart], secondTurn)]
+  )
+
+  await act(async () => { render(<Harness />); await Promise.resolve() })
+  expect(screen.getByLabelText('Elapsed agent time').textContent).toBe('1:05')
+
+  fireEvent.click(screen.getByRole('tab', { name: 'Session 2, Working' }))
+  expect(screen.getByLabelText('Elapsed agent time').textContent).toBe('0:05')
+  clock.advance(2_000)
+  expect(screen.getByLabelText('Elapsed agent time').textContent).toBe('0:07')
+
+  act(() => emit({
+    kind: 'event', conversationId: 'conv_2', recoveryState: 'ready',
+    event: event(3, {
+      turnId: 'turn-2', type: 'assistant_message', state: 'completed', occurredAt: '2026-08-16T10:01:07Z',
+      summary: 'Done', detail: { type: 'message.complete', text: 'Done' }
+    })
+  }))
+  expect(screen.queryByLabelText('Elapsed agent time')).toBeNull()
 })
 
 test('close stays disabled across the pending send response gap', async () => {
