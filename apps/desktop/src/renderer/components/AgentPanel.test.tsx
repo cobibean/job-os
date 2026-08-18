@@ -112,6 +112,40 @@ test('two session panel DOM nodes restore their distinct real scroll positions a
   expect(secondScrollTop).toBe(900)
 })
 
+test('a small upward scroll detaches from live bottom-following immediately', async () => {
+  const initialAnswer = event(1, {
+    type: 'assistant_message', state: 'completed', summary: 'Initial answer',
+    detail: { type: 'message.complete', text: 'Initial answer' }
+  })
+  const { emit } = install([summary(1)], [snapshot(1, [initialAnswer])])
+  render(<Harness />)
+  const panel = await screen.findByRole('tabpanel')
+  let scrollHeight = 1_000
+  let scrollTop = 0
+  Object.defineProperties(panel, {
+    clientHeight: { configurable: true, get: () => 300 },
+    scrollHeight: { configurable: true, get: () => scrollHeight },
+    scrollTop: { configurable: true, get: () => scrollTop, set: value => { scrollTop = Number(value) } }
+  })
+
+  act(() => emit({
+    kind: 'event', conversationId: 'conv_1', recoveryState: 'ready',
+    event: event(2, { type: 'assistant_message', state: 'completed', summary: 'Followed answer', detail: { type: 'message.complete', text: 'Followed answer' } })
+  }))
+  expect(scrollTop).toBe(1_000)
+
+  scrollTop = 950
+  fireEvent.scroll(panel)
+  expect(screen.getByRole('button', { name: 'Jump to latest' })).not.toBeNull()
+
+  scrollHeight = 1_200
+  act(() => emit({
+    kind: 'event', conversationId: 'conv_1', recoveryState: 'ready',
+    event: event(3, { type: 'assistant_message', state: 'completed', summary: 'Newest answer', detail: { type: 'message.complete', text: 'Newest answer' } })
+  }))
+  expect(scrollTop).toBe(950)
+})
+
 test('close stays disabled across the pending send response gap', async () => {
   const response = deferred<{ turnId: string; status: string }>()
   const { agent } = install([summary(1), summary(2)])
