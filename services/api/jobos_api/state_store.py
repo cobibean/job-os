@@ -2209,6 +2209,7 @@ class JobOsStateStore:
         *,
         editable_document_id: str | None = None,
         editable_document_revision: int | None = None,
+        invalidated_registry_keys: frozenset[str] = frozenset(),
         connection: sqlite3.Connection | None = None,
     ) -> tuple[str | None, str | None]:
         if (editable_document_id is None) != (editable_document_revision is None):
@@ -2216,6 +2217,20 @@ class JobOsStateStore:
         if any(artifact.job_id != job_id for artifact in artifacts):
             raise ValueError("Artifact job association does not match the requested job")
         with self._editable_write_connection(connection) as connection:
+            for registry_key in invalidated_registry_keys:
+                connection.execute(
+                    """
+                    UPDATE job_document_state
+                    SET approved_artifact_id = NULL,
+                        approved_at = NULL,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE job_id = ? AND approved_artifact_id = (
+                        SELECT artifact_id FROM document_artifacts
+                        WHERE job_id = ? AND registry_key = ?
+                    )
+                    """,
+                    (job_id, job_id, registry_key),
+                )
             state = connection.execute(
                 "SELECT current_artifact_id, last_successful_artifact_id "
                 "FROM job_document_state WHERE job_id = ?",

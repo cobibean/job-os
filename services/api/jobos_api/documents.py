@@ -71,6 +71,12 @@ class VerifiedArtifact:
         return sha256(material.encode("utf-8")).hexdigest()
 
 
+@dataclass(frozen=True)
+class VerifiedArtifactBatch:
+    artifacts: list[VerifiedArtifact]
+    superseded_registry_keys: frozenset[str]
+
+
 class ArtifactRecord(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -360,13 +366,117 @@ def verify_source_artifact(raw: dict[str, Any], roots: tuple[Path, ...]) -> Veri
 
 
 def verify_facade_artifacts(
-    raw_artifacts: list[dict[str, Any]], roots: tuple[Path, ...]
-) -> list[VerifiedArtifact]:
-    verified = [verify_source_artifact(raw, roots) for raw in raw_artifacts]
+    raw_artifacts: list[dict[str, Any]],
+    roots: tuple[Path, ...],
+    *,
+    expected_job_id: str,
+) -> VerifiedArtifactBatch:
+    metadata = [_validated_artifact_metadata(raw, expected_job_id) for raw in raw_artifacts]
+    current_artifacts, superseded = _discard_superseded_mutable_path_rows(raw_artifacts, metadata)
+    verified = [verify_source_artifact(raw, roots) for raw in current_artifacts]
     sequences = [artifact.render_sequence for artifact in verified]
     if len(sequences) != len(set(sequences)):
         raise ArtifactTrustError("Facade artifact render sequences must be unique")
-    return verified
+    return VerifiedArtifactBatch(
+        artifacts=verified,
+        superseded_registry_keys=frozenset(artifact.registry_key for artifact in superseded),
+    )
+
+
+def _validated_artifact_metadata(
+    raw: dict[str, Any], expected_job_id: str
+) -> VerifiedArtifact:
+    required = ("job_id", "source_revision", "artifact_revision", "media_type", "render_status")
+    if any(not isinstance(raw.get(key), str) or not raw[key] for key in required):
+        raise ArtifactTrustError("Artifact metadata is incomplete")
+    if raw["job_id"] != expected_job_id:
+        raise ArtifactTrustError("Artifact job association does not match the requested job")
+    status = raw["render_status"]
+    if status not in {"succeeded", "failed", "rendering"}:
+        raise ArtifactTrustError("Artifact render status is invalid")
+    media_type = raw["media_type"]
+    if media_type not in ALLOWED_MEDIA_TYPES:
+        raise ArtifactTrustError("Artifact media type is not allowlisted")
+    document_key = raw.get("document_key", "resume")
+    document_label = raw.get("document_label", "Resume")
+    if document_key not in DOCUMENT_KEYS:
+        raise ArtifactTrustError("Artifact document key is invalid")
+    if not isinstance(document_label, str) or not 1 <= len(document_label.strip()) <= 80:
+        raise ArtifactTrustError("Artifact document label is invalid")
+    render_sequence = raw.get("render_sequence")
+    if (
+        not isinstance(render_sequence, int)
+        or isinstance(render_sequence, bool)
+        or render_sequence < 0
+    ):
+        raise ArtifactTrustError("Artifact render sequence is missing or invalid")
+    supplied_path = raw.get("path")
+    supplied_hash = raw.get("sha256")
+    if status == "succeeded" and (
+        not isinstance(supplied_path, (str, Path))
+        or not isinstance(supplied_hash, str)
+        or re.fullmatch(r"[0-9a-f]{64}", supplied_hash) is None
+    ):
+        raise ArtifactTrustError("Successful artifact metadata is incomplete")
+    successful_path = supplied_path if isinstance(supplied_path, (str, Path)) else None
+    successful_hash = supplied_hash if isinstance(supplied_hash, str) else ""
+    successful_filename = Path(successful_path).name if successful_path is not None else None
+    return VerifiedArtifact(
+        job_id=raw["job_id"],
+        document_key=document_key,
+        document_label=document_label.strip(),
+        source_revision=raw["source_revision"],
+        artifact_revision=raw["artifact_revision"],
+        media_type=media_type,
+        sha256=successful_hash if status == "succeeded" else "",
+        render_status=status,
+        render_sequence=render_sequence,
+        canonical_path=str(successful_path) if successful_path is not None else None,
+        filename=successful_filename,
+        failure_message=(
+            str(raw.get("failure_message"))[:500] if raw.get("failure_message") else None
+        ),
+    )
+
+
+def _discard_superseded_mutable_path_rows(
+    raw_artifacts: list[dict[str, Any]],
+    metadata: list[VerifiedArtifact],
+) -> tuple[list[dict[str, Any]], list[VerifiedArtifact]]:
+    """Ignore stale revisions when a provider reused one output path.
+
+    A trusted producer should publish immutable artifact paths. Older private
+    providers instead appended new checksum metadata while reusing the same
+    PDF/DOCX paths, so the historical rows can no longer pass integrity checks.
+    Keep only the highest-sequence row for a path when its checksums conflict;
+    identical immutable revisions and non-success rows retain their history.
+    """
+    conflicting_paths: set[str] = set()
+    rows_by_path: dict[str, list[tuple[int, str]]] = {}
+    for raw, artifact in zip(raw_artifacts, metadata, strict=True):
+        path = raw.get("path")
+        if artifact.render_status != "succeeded":
+            continue
+        path_key = str(path)
+        rows_by_path.setdefault(path_key, []).append(
+            (artifact.render_sequence, artifact.sha256)
+        )
+
+    newest_sequence_by_path: dict[str, int] = {}
+    for path, rows in rows_by_path.items():
+        if len({digest for _, digest in rows}) > 1:
+            conflicting_paths.add(path)
+            newest_sequence_by_path[path] = max(sequence for sequence, _ in rows)
+
+    kept: list[dict[str, Any]] = []
+    superseded: list[VerifiedArtifact] = []
+    for raw, artifact in zip(raw_artifacts, metadata, strict=True):
+        path = str(raw.get("path"))
+        if path in conflicting_paths and artifact.render_sequence != newest_sequence_by_path[path]:
+            superseded.append(artifact)
+        else:
+            kept.append(raw)
+    return kept, superseded
 
 
 def artifact_record(
