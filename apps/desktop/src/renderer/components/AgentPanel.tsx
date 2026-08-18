@@ -101,7 +101,8 @@ export function AgentPanel({ contextLabel, apiState = 'connected', onArtifactRen
     if (!transcript || !activeId) return
     const previousScrollTop = lastScrollTops.current.get(activeId) ?? transcript.scrollTop
     const movedUp = transcript.scrollTop < previousScrollTop
-    const pinned = !movedUp && transcript.scrollHeight - transcript.scrollTop - transcript.clientHeight <= 64
+    const distanceFromBottom = transcript.scrollHeight - transcript.scrollTop - transcript.clientHeight
+    const pinned = !movedUp && (pinnedToBottom.current ? distanceFromBottom <= 64 : distanceFromBottom <= 1)
     lastScrollTops.current.set(activeId, transcript.scrollTop)
     pinnedToBottom.current = pinned
     setIsPinnedToBottom(pinned)
