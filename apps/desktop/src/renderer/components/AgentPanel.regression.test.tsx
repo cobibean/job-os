@@ -148,7 +148,9 @@ test('shows stopping rather than completed activity state while cancellation is 
   expect(group.classList.contains('stopping')).toBe(true)
   expect(group.querySelector('.activity-group-state .lucide-pause')).not.toBeNull()
   expect(group.querySelector('.activity-group-state .lucide-check')).toBeNull()
-  expect(screen.getByLabelText('Agent turn status').textContent).toBe('Stopping agent…')
+  const turnStatus = screen.getByLabelText('Agent turn status')
+  expect(turnStatus.querySelector('span')?.textContent).toBe('Stopping agent…')
+  expect(screen.getByLabelText('Elapsed agent time')).not.toBeNull()
 })
 
 test('drops ownerless activity and never marks an inactive unfinished group complete', async () => {
@@ -208,7 +210,9 @@ test('keeps a waiting turn open without showing working activity state', async (
   expect(group.classList.contains('waiting')).toBe(true)
   expect(group.classList.contains('working')).toBe(false)
   expect(group.querySelector('.activity-group-state .spin')).toBeNull()
-  expect(screen.getByLabelText('Agent turn status').textContent).toBe('Agent waiting for you')
+  const turnStatus = screen.getByLabelText('Agent turn status')
+  expect(turnStatus.querySelector('span')?.textContent).toBe('Agent waiting for you')
+  expect(screen.getByLabelText('Elapsed agent time')).not.toBeNull()
 })
 
 test('collapses untouched activity once when the turn completes', async () => {
