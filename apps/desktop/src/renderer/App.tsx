@@ -6,6 +6,7 @@ import { StatusBar } from './components/StatusBar'
 import { WorkbenchLayout } from './components/WorkbenchLayout'
 import { WorkspaceBar } from './components/WorkspaceBar'
 import { BrowseWorkspace } from './components/BrowseWorkspace'
+import { useAgentAvatarPreference } from './agent-avatar/useAgentAvatarPreference'
 import { DocxDocumentEditorShell } from './document-editor/DocxDocumentEditorShell'
 import { useConnectivity } from './hooks/useConnectivity'
 import { useJobs } from './hooks/useJobs'
@@ -41,6 +42,7 @@ function WorkbenchApp() {
   const jobState = useJobs()
   const layoutState = useWorkspace(jobState.selectedJobId, jobState.ready)
   const theme = useTheme()
+  const agentAvatar = useAgentAvatarPreference()
   const agentSessions = useAgentSessions()
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [settingsPreparing, setSettingsPreparing] = useState(false)
@@ -247,6 +249,7 @@ function WorkbenchApp() {
       ) : (
       <WorkbenchLayout
         agent={<AgentPanel
+          avatarId={agentAvatar.avatarId}
           apiState={connectivity.state}
           contextLabel={jobState.selectedJob ? `${jobState.selectedJob.company} · ${jobState.selectedJob.title}` : 'No active job'}
           onArtifactRendered={showPublishedDocument}
@@ -336,9 +339,11 @@ function WorkbenchApp() {
       <StatusBar apiVersion={connectivity.apiVersion} message={connectivity.message} onOpenSettings={() => { void openSettings() }} state={connectivity.state} />
       {settingsOpen ? (
         <SettingsPanel
+          activeAgentAvatarId={agentAvatar.avatarId}
           activeThemeId={theme.themeId}
           mode={theme.mode}
           onClose={() => setSettingsOpen(false)}
+          onSelectAgentAvatar={agentAvatar.selectAvatar}
           onSelectTheme={theme.selectTheme}
         />
       ) : null}

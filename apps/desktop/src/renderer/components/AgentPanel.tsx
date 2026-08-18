@@ -1,7 +1,9 @@
-import { ArrowDown, Bot, BriefcaseBusiness, CircleAlert, LoaderCircle, RotateCcw, Send, Square, UserRound, WifiOff } from 'lucide-react'
+import { ArrowDown, BriefcaseBusiness, CircleAlert, LoaderCircle, RotateCcw, Send, Square, UserRound, WifiOff } from 'lucide-react'
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 
 import type { ConnectivityState } from '../../shared/contracts'
+import { AgentAvatar } from '../agent-avatar/AgentAvatar'
+import type { AgentAvatarId } from '../agent-avatar/agentAvatars'
 import type { AgentSessionsController } from '../hooks/useAgentSessions'
 import { initialAgentConversationState } from '../hooks/useAgentConversation'
 import { AgentActivityGroup } from './AgentActivityGroup'
@@ -38,6 +40,7 @@ function AgentElapsedTime({ startedAt }: { startedAt: number }) {
 }
 
 interface AgentPanelProps {
+  avatarId: AgentAvatarId
   contextLabel: string
   apiState?: ConnectivityState
   onArtifactRendered?: () => void
@@ -57,7 +60,7 @@ function ConnectionNotice({ apiState, connection }: { apiState: ConnectivityStat
   return null
 }
 
-export function AgentPanel({ contextLabel, apiState = 'connected', onArtifactRendered, sessions }: AgentPanelProps) {
+export function AgentPanel({ avatarId, contextLabel, apiState = 'connected', onArtifactRendered, sessions }: AgentPanelProps) {
   const conversation = sessions.activeConversation ?? {
     ...initialAgentConversationState,
     items: [],
@@ -210,7 +213,7 @@ export function AgentPanel({ contextLabel, apiState = 'connected', onArtifactRen
         {conversation.restoring && <div className="agent-restore"><LoaderCircle aria-hidden="true" className="spin" size={17} /> Restoring conversation…</div>}
         {!conversation.restoring && conversation.items.length === 0 && !conversation.error && (
           <section className="agent-empty">
-            <span className="agent-avatar"><Bot aria-hidden="true" size={22} strokeWidth={1.45} /></span>
+            <AgentAvatar avatarId={avatarId} size="empty" />
             <h2>Fresh conversation</h2>
             <p>Ask the agent to research, tailor, or review. The selected job is included automatically.</p>
           </section>
@@ -229,9 +232,19 @@ export function AgentPanel({ contextLabel, apiState = 'connected', onArtifactRen
                 const active = item.turnId === conversation.activeTurn?.turnId
                 const terminal = item.terminal
                 const waiting = terminal?.state === 'waiting' && active
+                const stopping = active && Boolean(conversation.activeTurn?.cancelRequested)
                 const assistant = item.assistant
-                const streaming = Boolean(assistant && assistant.state === 'working' && active && !terminal)
+                const streaming = Boolean(assistant && assistant.state === 'working' && active && !terminal && !stopping)
                 const visualState = terminal?.state ?? (assistant?.state === 'working' && !streaming ? 'completed' : assistant?.state)
+                const avatarState = stopping
+                  ? 'stopping'
+                  : waiting
+                    ? 'waiting'
+                    : streaming
+                      ? 'working'
+                      : visualState === 'failed' || visualState === 'interrupted'
+                        ? 'error'
+                        : 'complete'
                 return (
                   <section className={`agent-turn ${item.state}`} data-testid="agent-turn" key={item.id}>
                     {item.activities.length > 0 && (
@@ -256,7 +269,7 @@ export function AgentPanel({ contextLabel, apiState = 'connected', onArtifactRen
                     )}
                     {assistant && assistant.text && (
                       <article className={`message assistant-message ${visualState}`}>
-                        <header><Bot aria-hidden="true" size={16} /> Agent {streaming && <span>Streaming</span>}</header>
+                        <header><AgentAvatar avatarId={avatarId} size="message" state={avatarState} /> Agent {streaming && <span>Streaming</span>}</header>
                         <AssistantMarkdown>{assistant.text}</AssistantMarkdown>
                       </article>
                     )}

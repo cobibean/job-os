@@ -866,7 +866,12 @@ button:focus-visible {
   .agent-session-state-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 }
 .agent-empty { min-height: 100%; max-width: 250px; justify-content: center; gap: 9px; margin: 0 auto; }
-.agent-avatar { width: 44px; height: 44px; display: grid; place-items: center; border: 1px solid var(--border-strong); border-radius: 50%; color: var(--muted); }
+.agent-avatar { flex: 0 0 auto; display: inline-grid; place-items: center; overflow: hidden; border-radius: 50%; background: var(--surface-inset); }
+.agent-avatar-artwork { width: 100%; height: 100%; display: grid; place-items: center; }
+.agent-avatar img { width: 100%; height: 100%; display: block; object-fit: contain; user-select: none; }
+.agent-avatar-message { width: 24px; height: 24px; margin: -4px 0; }
+.agent-avatar-empty { width: 76px; height: 76px; border: 1px solid var(--border-strong); box-shadow: 0 10px 30px var(--shadow-color-soft); }
+.agent-avatar-settings { width: 58px; height: 58px; border: 1px solid var(--border-soft); }
 
 .agent-body { min-height: 0; overflow: auto; overscroll-behavior: contain; scrollbar-gutter: stable; }
 .agent-restore { height: 100%; display: flex; align-items: center; justify-content: center; gap: 9px; color: var(--muted); font-size: var(--text-sm); }
@@ -1041,10 +1046,12 @@ button:focus-visible {
 .settings-header .icon-button:hover { color: var(--text); background: var(--surface-hover); }
 
 .settings-section { padding: 14px 18px 18px; }
+.settings-section-divided { border-top: 1px solid var(--border-soft); }
 .settings-section-title { margin: 0 0 4px; color: var(--text); font-size: var(--text-sm); font-weight: var(--weight-bold); }
 .settings-section-hint { margin: 0 0 12px; color: var(--muted); font-size: var(--text-xs); line-height: 1.5; }
 
 .theme-grid { display: grid; gap: 7px; }
+.agent-avatar-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
 
 .theme-option {
   display: grid;
@@ -1081,6 +1088,30 @@ button:focus-visible {
 .theme-copy small { overflow: hidden; color: var(--muted); font-size: var(--text-xs); text-overflow: ellipsis; white-space: nowrap; }
 
 .theme-check { color: var(--accent); }
+
+.agent-avatar-option {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-md);
+  color: var(--text);
+  background: var(--surface);
+  text-align: left;
+  cursor: pointer;
+  transition: border-color var(--motion-fast), background var(--motion-fast);
+}
+.agent-avatar-option > .agent-avatar { grid-column: 1 / -1; justify-self: center; }
+.agent-avatar-option > strong { overflow: hidden; font-size: var(--text-sm); font-weight: var(--weight-medium); text-overflow: ellipsis; white-space: nowrap; }
+.agent-avatar-option:hover { border-color: var(--border-strong); background: var(--surface-hover); }
+.agent-avatar-option.selected { border-color: var(--accent-border-strong); background: var(--accent-tint); }
+.agent-avatar-option .theme-check { align-self: start; margin-top: 2px; }
+@media (max-width: 1120px) {
+  .agent-avatar-grid { grid-template-columns: 1fr; }
+}
 
 /* Immersive JobOS document editor */
 .document-editor-shell {
