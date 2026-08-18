@@ -1,19 +1,30 @@
 import { Check, X } from 'lucide-react'
 import { useEffect, useRef } from 'react'
 
+import { AgentAvatar } from '../agent-avatar/AgentAvatar'
+import { AGENT_AVATARS, type AgentAvatarId } from '../agent-avatar/agentAvatars'
 import { THEMES, type ThemeMode } from '../theme/themes'
 import { DiagnosticsPanel } from '../diagnostics/DiagnosticsPanel'
 
 interface SettingsPanelProps {
+  activeAgentAvatarId: AgentAvatarId
   activeThemeId: string
   mode: ThemeMode
   onClose: () => void
+  onSelectAgentAvatar: (avatarId: AgentAvatarId) => void
   onSelectTheme: (themeId: string) => void
 }
 
 const SWATCH_TOKENS = ['bg', 'surface-raised', 'accent', 'text'] as const
 
-export function SettingsPanel({ activeThemeId, mode, onClose, onSelectTheme }: SettingsPanelProps) {
+export function SettingsPanel({
+  activeAgentAvatarId,
+  activeThemeId,
+  mode,
+  onClose,
+  onSelectAgentAvatar,
+  onSelectTheme
+}: SettingsPanelProps) {
   const dialogRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -68,6 +79,32 @@ export function SettingsPanel({ activeThemeId, mode, onClose, onSelectTheme }: S
                     <strong>{theme.label}</strong>
                     <small>{theme.description}</small>
                   </span>
+                  {selected ? <Check aria-hidden="true" className="theme-check" size={15} strokeWidth={2} /> : null}
+                </button>
+              )
+            })}
+          </div>
+        </section>
+
+        <section aria-labelledby="settings-agent-avatar-heading" className="settings-section settings-section-divided">
+          <h2 className="settings-section-title" id="settings-agent-avatar-heading">Agent icon</h2>
+          <p className="settings-section-hint">
+            Choose the character shown throughout Agent Chat.
+          </p>
+          <div className="agent-avatar-grid" role="radiogroup" aria-labelledby="settings-agent-avatar-heading">
+            {AGENT_AVATARS.map(avatar => {
+              const selected = avatar.id === activeAgentAvatarId
+              return (
+                <button
+                  aria-checked={selected}
+                  className={`agent-avatar-option${selected ? ' selected' : ''}`}
+                  key={avatar.id}
+                  onClick={() => onSelectAgentAvatar(avatar.id)}
+                  role="radio"
+                  type="button"
+                >
+                  <AgentAvatar avatarId={avatar.id} size="settings" />
+                  <strong>{avatar.label}</strong>
                   {selected ? <Check aria-hidden="true" className="theme-check" size={15} strokeWidth={2} /> : null}
                 </button>
               )

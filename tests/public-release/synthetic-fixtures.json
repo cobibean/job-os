@@ -19,6 +19,14 @@
       "purpose": "Application icon source image"
     },
     {
+      "path": "apps/desktop/src/renderer/agent-avatar/assets/ninja.webp",
+      "sha256": "fdda11fba43840e786f8b21ebe1e591536a71d45d4b650b9cbd0ce93e97c988c",
+      "classification": "project-asset",
+      "publication": "keep",
+      "source": "Cobi-created JobOS agent avatar artwork",
+      "purpose": "Selectable Ninja avatar in Agent Chat"
+    },
+    {
       "path": "apps/desktop/src/main/document-import/fixtures/cover-letter-header-footer.docx",
       "sha256": "88b35120b228bacc9ac5b9eba759b5cb1a0dff5c87a73a6e6b5dad0f32ceab7f",
       "classification": "synthetic",

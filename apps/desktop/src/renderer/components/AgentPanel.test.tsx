@@ -38,7 +38,7 @@ function install(summaries = [summary(1)], snapshots = summaries.map(item => sna
 
 function Harness() {
   const sessions = useAgentSessions()
-  return <AgentPanel apiState="connected" contextLabel="Northstar · Staff PM" sessions={sessions} />
+  return <AgentPanel avatarId="ninja" apiState="connected" contextLabel="Northstar · Staff PM" sessions={sessions} />
 }
 
 function deferred<T>() {

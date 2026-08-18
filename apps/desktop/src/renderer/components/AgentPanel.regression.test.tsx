@@ -47,7 +47,7 @@ function installAgent(
 
 function Harness(props: { contextLabel: string; apiState?: 'connected' | 'disconnected' | 'degraded'; onArtifactRendered?: () => void }) {
   const sessions = useAgentSessions()
-  return <AgentPanel {...props} sessions={sessions} />
+  return <AgentPanel avatarId="ninja" {...props} sessions={sessions} />
 }
 
 test('groups a completed turn, starts collapsed, and keeps the final answer last', async () => {
@@ -137,9 +137,12 @@ test('keeps an active turn expanded with a persistent working status and respect
 
 test('shows stopping rather than completed activity state while cancellation is pending', async () => {
   installAgent({
-    conversationId: 'conv-current', connection: 'online', latestEventId: 1,
+    conversationId: 'conv-current', connection: 'online', latestEventId: 2,
     activeTurn: { turnId: 'turn-1', status: 'running', cancelRequested: true },
-    entries: [event(1)]
+    entries: [
+      event(1),
+      event(2, { type: 'assistant_message', state: 'working', summary: 'Still drafting', detail: { type: 'message.delta' } })
+    ]
   })
   render(<Harness apiState="connected" contextLabel="Northstar" />)
 
@@ -151,6 +154,8 @@ test('shows stopping rather than completed activity state while cancellation is 
   const turnStatus = screen.getByLabelText('Agent turn status')
   expect(turnStatus.querySelector('span')?.textContent).toBe('Stopping agent…')
   expect(screen.getByLabelText('Elapsed agent time')).not.toBeNull()
+  expect(screen.getByText('Still drafting').closest('.assistant-message')?.querySelector('[data-agent-avatar-state="stopping"]')).not.toBeNull()
+  expect(screen.queryByText('Streaming')).toBeNull()
 })
 
 test('drops ownerless activity and never marks an inactive unfinished group complete', async () => {
@@ -195,12 +200,13 @@ test.each([
 
 test('keeps a waiting turn open without showing working activity state', async () => {
   installAgent({
-    conversationId: 'conv-current', connection: 'online', latestEventId: 3,
+    conversationId: 'conv-current', connection: 'online', latestEventId: 4,
     activeTurn: { turnId: 'turn-1', status: 'waiting', cancelRequested: false },
     entries: [
       event(1),
-      event(2, { type: 'status', state: 'waiting', summary: 'Choose a direction', detail: { actionable: true } }),
-      event(3)
+      event(2, { type: 'assistant_message', state: 'working', summary: 'I need your choice', detail: { type: 'message.delta' } }),
+      event(3),
+      event(4, { type: 'status', state: 'waiting', summary: 'Choose a direction', detail: { actionable: true } })
     ]
   })
   render(<Harness apiState="connected" contextLabel="Northstar" />)
@@ -213,6 +219,8 @@ test('keeps a waiting turn open without showing working activity state', async (
   const turnStatus = screen.getByLabelText('Agent turn status')
   expect(turnStatus.querySelector('span')?.textContent).toBe('Agent waiting for you')
   expect(screen.getByLabelText('Elapsed agent time')).not.toBeNull()
+  expect(screen.getByText('I need your choice').closest('.assistant-message')?.querySelector('[data-agent-avatar-state="waiting"]')).not.toBeNull()
+  expect(screen.queryByText('Streaming')).toBeNull()
 })
 
 test('collapses untouched activity once when the turn completes', async () => {

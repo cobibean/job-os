@@ -13,9 +13,11 @@ function ThemeHarness() {
       <span data-testid="active-mode">{theme.mode}</span>
       <button onClick={theme.toggleMode} type="button">toggle mode</button>
       <SettingsPanel
+        activeAgentAvatarId="ninja"
         activeThemeId={theme.themeId}
         mode={theme.mode}
         onClose={() => {}}
+        onSelectAgentAvatar={() => {}}
         onSelectTheme={theme.selectTheme}
       />
     </div>
