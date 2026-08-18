@@ -2793,8 +2793,14 @@ def create_app(
             return JobArtifactsResponse.model_validate(replay)
         try:
             raw_artifacts = artifacts.list_job_artifacts(job_id)
-            verified = verify_facade_artifacts(raw_artifacts, trusted_artifact_roots)
-            state_store.register_document_artifacts(job_id, verified)
+            verified = verify_facade_artifacts(
+                raw_artifacts, trusted_artifact_roots, expected_job_id=job_id
+            )
+            state_store.register_document_artifacts(
+                job_id,
+                verified.artifacts,
+                invalidated_registry_keys=verified.superseded_registry_keys,
+            )
         except (ArtifactStorageError, OSError) as error:
             raise HTTPException(
                 status_code=503, detail=LOCAL_ARTIFACT_STORAGE_UNAVAILABLE

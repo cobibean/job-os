@@ -1779,6 +1779,123 @@ def test_failed_or_cross_job_artifact_cannot_be_approved(tmp_path):
     assert cross_job.status_code == 409
 
 
+def test_refresh_uses_latest_checksum_when_provider_reuses_an_artifact_path(tmp_path):
+    facade = FakeJobHunterFacade()
+    facade.jobs = facade.jobs[:1]
+    pdf = tmp_path / "resume.pdf"
+    pdf.write_bytes(build_minimal_pdf("(FAKE) pre-fix resume"))
+    stale = artifact_metadata(pdf, source="source-old", revision="render-old", sequence=1)
+    pdf.write_bytes(build_minimal_pdf("(FAKE) corrected resume"))
+    corrected = artifact_metadata(
+        pdf, source="source-corrected", revision="render-corrected", sequence=2
+    )
+    facade.artifacts["job-0"] = [stale, corrected]
+
+    with make_client(tmp_path, facade) as client:
+        response = client.post(
+            "/v1/jobs/job-0/artifacts/refresh", headers=auth_headers()
+        )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert len(body["artifacts"]) == 1
+    assert body["artifacts"][0]["artifact_revision"] == "render-corrected"
+    assert body["artifacts"][0]["source_revision"] == "source-corrected"
+    assert body["artifacts"][0]["is_current"] is True
+
+
+def test_refresh_clears_approval_for_superseded_mutable_path_bytes(tmp_path):
+    facade = FakeJobHunterFacade()
+    facade.jobs = facade.jobs[:1]
+    pdf = tmp_path / "resume.pdf"
+    pdf.write_bytes(build_minimal_pdf("(FAKE) approved pre-fix resume"))
+    stale = artifact_metadata(pdf, source="source-old", revision="render-old", sequence=1)
+    facade.artifacts["job-0"] = [stale]
+
+    with make_client(tmp_path, facade) as client:
+        initial = client.post(
+            "/v1/jobs/job-0/artifacts/refresh", headers=auth_headers()
+        ).json()
+        approved_id = initial["last_successful_artifact_id"]
+        approved = client.post(
+            f"/v1/jobs/job-0/artifacts/{approved_id}/approve",
+            headers=auth_headers(),
+            json={"origin": "user", "idempotency_key": "approve-pre-fix-resume"},
+        )
+        pdf.write_bytes(build_minimal_pdf("(FAKE) corrected resume"))
+        facade.artifacts["job-0"].append(
+            artifact_metadata(
+                pdf,
+                source="source-corrected",
+                revision="render-corrected",
+                sequence=2,
+            )
+        )
+        refreshed = client.post(
+            "/v1/jobs/job-0/artifacts/refresh", headers=auth_headers()
+        )
+
+    assert approved.status_code == 200
+    assert refreshed.status_code == 200
+    body = refreshed.json()
+    assert body["approved_artifact_id"] is None
+    old = next(item for item in body["artifacts"] if item["artifact_id"] == approved_id)
+    corrected = next(
+        item for item in body["artifacts"] if item["artifact_revision"] == "render-corrected"
+    )
+    assert old["is_approved"] is False
+    assert corrected["is_current"] is True
+
+
+@pytest.mark.parametrize("hidden_damage", ["malformed", "cross-job"])
+def test_refresh_does_not_hide_invalid_metadata_behind_path_supersession(
+    tmp_path, hidden_damage
+):
+    facade = FakeJobHunterFacade()
+    facade.jobs = facade.jobs[:1]
+    pdf = tmp_path / "resume.pdf"
+    pdf.write_bytes(build_minimal_pdf("(FAKE) pre-fix resume"))
+    stale = artifact_metadata(pdf, source="source-old", revision="render-old", sequence=1)
+    if hidden_damage == "malformed":
+        stale["render_sequence"] = -1
+    else:
+        stale["job_id"] = "job-other"
+    pdf.write_bytes(build_minimal_pdf("(FAKE) corrected resume"))
+    corrected = artifact_metadata(
+        pdf, source="source-corrected", revision="render-corrected", sequence=2
+    )
+    facade.artifacts["job-0"] = [stale, corrected]
+
+    with make_client(tmp_path, facade) as client:
+        response = client.post(
+            "/v1/jobs/job-0/artifacts/refresh", headers=auth_headers()
+        )
+        listed = client.get("/v1/jobs/job-0/artifacts", headers=auth_headers())
+
+    assert response.status_code == 422
+    assert listed.json()["artifacts"] == []
+
+
+def test_refresh_still_rejects_a_lone_artifact_with_stale_checksum(tmp_path):
+    facade = FakeJobHunterFacade()
+    facade.jobs = facade.jobs[:1]
+    pdf = tmp_path / "resume.pdf"
+    pdf.write_bytes(build_minimal_pdf("(FAKE) registered resume"))
+    stale = artifact_metadata(pdf)
+    pdf.write_bytes(build_minimal_pdf("(FAKE) unregistered replacement"))
+    facade.artifacts["job-0"] = [stale]
+
+    with make_client(tmp_path, facade) as client:
+        response = client.post(
+            "/v1/jobs/job-0/artifacts/refresh", headers=auth_headers()
+        )
+
+    assert (response.status_code, response.json()["detail"]) == (
+        503,
+        "Local artifact storage is unavailable",
+    )
+
+
 def test_failed_render_stays_in_audit_without_injecting_chat_activity(tmp_path):
     class FailedRenderFacade(FakeJobHunterFacade):
         def render_resume(self, job_id, source_id, output_options):
