@@ -1,29 +1,44 @@
 # JobOS
 
-JobOS is a local-first desktop workbench for managing job-search workflows,
-research, documents, and agent-assisted tasks in one place.
+Job searching is usually split across job boards, browser tabs, spreadsheets,
+AI chats, resumes, and cover letters. Each switch makes context easier to lose.
 
-> [!IMPORTANT]
-> JobOS is open-source, pre-release alpha software. The source-first clean-clone
-> path is accepted, including local initialization and synthetic demo data, but
-> there is no supported public binary yet. Packaging, signing, notarization, and
-> binary-distribution gates remain separate; see the
-> [release process](docs/public/release-process.md).
+**JobOS is an open-source, local-first desktop workspace that keeps job tracking,
+browsing, documents, and human-agent collaboration together in one persistent
+place.**
 
-## Release status
+## Why JobOS exists
 
-- **Maturity:** pre-release alpha; interfaces and storage may change.
-- **Distribution:** source-first. There is no supported public JobOS binary yet.
-- **Desktop:** macOS is the current desktop target. Linux runs backend and source
-  quality checks in CI. Windows is not currently supported.
-- **Privacy:** local-first public defaults run without a private network, private
-  data, or a second repository; integrations remain explicit and optional.
+AI agents can research companies, compare opportunities, and help tailor an
+application. But a chat window alone is a poor place to manage a months-long job
+search: the person cannot easily see what the agent sees, inspect what changed,
+or return to the same working context later.
 
-## Synthetic product preview
+JobOS turns that disconnected process into a shared workbench. Jobs, live web
+pages, documents, conversation, and agent activity stay visible and connected,
+so the user can guide the work, review the real result, and remain in control.
+
+## An example journey
+
+In a configured JobOS workspace, a user can:
+
+1. Save a promising role and open its live listing in the built-in browser.
+2. Ask a connected agent to tailor a resume or cover letter for that role.
+3. Watch the agent's activity and review the real document beside the listing.
+4. Edit directly or request another revision, then export the approved DOCX/PDF.
+5. Reopen JobOS later with the jobs, tabs, documents, conversation, and layout
+   still where they left them.
+
+The agent is optional. Local job tracking, browsing, and document work remain
+usable when no compatible agent runtime is configured.
+
+## See JobOS in action
 
 ![JobOS Review workbench with the fictional Northstar Kites Demo job selected](docs/media/screenshots/jobos-hero-1440x1024.png)
 
-The preview uses only fictional starter data and a checksum-pinned `(FAKE)` DOCX fixture. The optional agent and artifact-refresh integrations remain unavailable unless explicitly configured.
+The preview uses only fictional starter data and a checksum-pinned `(FAKE)` DOCX
+fixture. Optional agent and artifact-refresh integrations remain unavailable
+unless explicitly configured.
 
 <details>
 <summary>Watch the 10-second synthetic walkthrough</summary>
@@ -34,7 +49,37 @@ The preview uses only fictional starter data and a checksum-pinned `(FAKE)` DOCX
 
 Static equivalents: [Browse list and fictional job detail](docs/media/screenshots/jobos-browse-detail-1440x1024.png) · [Saved retained-OOXML editor with fake document](docs/media/screenshots/jobos-ooxml-editor-saved-1440x1024.png) · [capture provenance and privacy checks](docs/media/README.md)
 
-## What is available today
+## What makes JobOS different
+
+- **One continuous workspace:** opportunities, browsing, documents, and agent
+  collaboration live together instead of being scattered across disconnected
+  tools.
+- **Human and agent share the same state:** both work with the same jobs,
+  browser context, documents, and history rather than parallel copies.
+- **The user stays in control:** agent activity is visible, consequential actions
+  can require approval, and JobOS does not automatically submit applications.
+- **Local-first and private by default:** the public setup uses local storage and
+  loopback services without requiring a hosted backend or private network.
+- **Built for continuity:** selected jobs, browser tabs, document state,
+  conversation, and workspace layout survive restarts.
+
+> [!IMPORTANT]
+> JobOS is open-source, pre-release alpha software. The source-first clean-clone
+> path is accepted, including local initialization and synthetic demo data, but
+> there is no supported public binary yet. It currently runs from source on
+> macOS. See the [release process](docs/public/release-process.md).
+
+## Current alpha status
+
+- **Maturity:** pre-release alpha; interfaces and storage may change.
+- **Distribution:** source-first. There is no supported public JobOS binary yet.
+- **Desktop:** macOS is the current desktop target. Linux runs backend and source
+  quality checks in CI. Windows is not currently supported.
+- **Privacy:** local-first public defaults run without a private network, private
+  data, or a second repository; integrations remain explicit and optional.
+
+<details>
+<summary>View the current source capabilities and public-alpha targets</summary>
 
 | Capability | Current source status | Public-alpha target |
 |---|---|---|
@@ -45,10 +90,14 @@ Static equivalents: [Browse list and fictional job detail](docs/media/screenshot
 | Embedded chat agent | Offline/not-configured in the public source defaults; existing private deployments can connect a compatible runtime | Remains optional |
 | External agent through MCP | Authenticated stdio adapter over the local JobOS API; setup journey below | Stable local capability errors |
 
-The table is intentionally conservative. Clean-home source acceptance does not
+This table is intentionally conservative. Clean-home source acceptance does not
 imply that packaging, signing, notarization, publication, or deployment passed.
 
-## Prerequisites
+</details>
+
+## Run JobOS from source
+
+### Prerequisites
 
 Use the versions pinned by the repository:
 
@@ -58,8 +107,6 @@ Use the versions pinned by the repository:
 - Python `3.11` (the workspace requires `>=3.11,<3.12`)
 - uv `0.11.18` (the CI-pinned version)
 - Xcode Command Line Tools when building native macOS helpers
-
-## Try JobOS from source
 
 Clone the repository and install its locked JavaScript and Python workspaces:
 
@@ -93,7 +140,9 @@ Expected result: the workbench opens with one unmistakably fictional
 embedded chat reports that its agent is not configured; that is the truthful
 public default.
 
-## Connect an external agent through MCP
+## For developers
+
+### Connect an external agent through MCP
 
 JobOS exposes a local stdio MCP server for an MCP-capable agent. This lets an
 external client operate the shared JobOS jobs, workspace, documents, activity,
@@ -153,10 +202,10 @@ finished, the repository path is absolute, and the MCP process starts from this
 clone. See [troubleshooting](docs/public/troubleshooting.md) for the source
 runtime checks.
 
-## Contributor verification
+### Contributor verification
 
-The user journey above does not require the complete repository gate. Run these
-checks before contributing or when validating an exact source revision:
+The example journey above does not require the complete repository gate. Run
+these checks before contributing or when validating an exact source revision:
 
 ```bash
 pnpm check            # lint, typecheck, test, and build
@@ -168,7 +217,7 @@ TypeScript checks, desktop and Python tests, and the production source build
 complete successfully. This source verification does not prove a signed or
 notarized public binary.
 
-## Demo data
+### Demo data
 
 The first-run interface calls `jobos-init`, which initializes a fresh local
 profile with exactly one clearly labeled synthetic demo job and one `(FAKE)`,
@@ -177,7 +226,7 @@ Removing the demo also removes its editable document metadata and is persistent;
 JobOS will not silently re-seed either item. `jobos-init --reset-demo
 --confirm-reset-demo` is the separate, explicitly confirmed reset path for both.
 
-## Data and privacy
+### Data and privacy
 
 Run `uv run jobos-init` for the default platform data directory, or pass
 `--data-dir` for an isolated source/test profile. The generated `config.json`
@@ -196,7 +245,7 @@ not intentionally remove the separate runtime data. See
 [data and privacy](docs/public/data-privacy.md) for the conservative move-aside
 procedure and the future public contract.
 
-## Architecture
+### Architecture
 
 JobOS is a pnpm and uv monorepo:
 
@@ -214,13 +263,13 @@ behind explicit adapters. JobHunter remains a separate private adapter implement
 public JobOS may define compatible interfaces but must not require or distribute
 that private package. Read the [architecture overview](docs/public/architecture.md).
 
-## Package visibility versus source licensing
+### Package visibility versus source licensing
 
 Workspace packages remain marked `"private": true` to prevent accidental npm
 publication. That field controls package-registry publishing only—it does not
 make a Git repository private and does not replace the Apache-2.0 license.
 
-## Documentation
+### Documentation
 
 - [Architecture](docs/public/architecture.md)
 - [Product contract](docs/public/product-contract.md)
