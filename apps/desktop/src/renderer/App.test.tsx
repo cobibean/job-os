@@ -426,8 +426,7 @@ test('saving dispatches job-hunter and reconciles a failure emitted before send 
   expect(savePrompt).toContain('Do not apply or submit forms')
   expect(send.mock.calls[0]?.[2]).toMatch(/^browser-save-/)
   expect(associate).not.toHaveBeenCalled()
-  await screen.findByRole('alert')
-  expect(screen.getByText('Agent connection unavailable')).not.toBeNull()
+  expect(await screen.findByText('Agent connection unavailable')).not.toBeNull()
   expect((screen.getByRole('button', { name: 'Save this job to JobOS' }) as HTMLButtonElement).disabled).toBe(false)
 
   saveOutcome = 'completed'

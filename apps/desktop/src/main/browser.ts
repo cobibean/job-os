@@ -50,6 +50,15 @@ export function remoteBrowserPreferences(): WebPreferences {
   }
 }
 
+export function remoteBrowserViewOptions(
+  options?: WebContentsViewConstructorOptions
+): WebContentsViewConstructorOptions {
+  const webPreferences = { ...options?.webPreferences, ...remoteBrowserPreferences() }
+  return options?.webContents
+    ? { webContents: options.webContents, webPreferences }
+    : { webPreferences }
+}
+
 export function normalizeBrowserInput(input: string): string {
   const value = input.trim()
   if (!value) return DEFAULT_BROWSER_URL

@@ -11,7 +11,7 @@ import type { BrowserBounds, DocumentKey, JobSortMode, JobStatus, WorkspaceSnaps
 import { AgentConversationRegistry, createScopedMainAgentClient, startAgentEventStream } from './agent.js'
 import { registerAgentIpc } from './agentIpc.js'
 import { createApiLifecycle } from './apiLifecycle.js'
-import { BROWSER_PARTITION, BrowserManager, remoteBrowserPreferences } from './browser.js'
+import { BROWSER_PARTITION, BrowserManager, remoteBrowserViewOptions } from './browser.js'
 import { canonicalListingUrl, safeApplicationUrl, validatedBrowserJobExtraction } from './browserJobExtraction.js'
 import { registerBrowserRestoreHandler } from './browserIpc.js'
 import { startDesktopCapabilityClient } from './capabilityClient.js'
@@ -553,10 +553,7 @@ async function createWindow(): Promise<BrowserWindow> {
   browserManager = new BrowserManager({
     window,
     browserSession,
-    createView: options => new WebContentsView({
-      webContents: options?.webContents,
-      webPreferences: { ...options?.webPreferences, ...remoteBrowserPreferences() }
-    }),
+    createView: options => new WebContentsView(remoteBrowserViewOptions(options)),
     dialog,
     clipboard,
     downloadsPath: app.getPath('downloads')
