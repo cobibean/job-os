@@ -8,7 +8,7 @@ import { readFileSync } from 'node:fs'
 import type { BrowserWindow, BrowserWindowConstructorOptions, Dialog, Session, WebContents, WebContentsView, WebContentsViewConstructorOptions } from 'electron'
 import { vi } from 'vitest'
 
-import { BrowserManager, DEFAULT_BROWSER_URL, isOrdinaryWebUrl, normalizeBrowserInput, remoteBrowserPreferences, safeBlockedExternalUrl } from './browser.js'
+import { BrowserManager, DEFAULT_BROWSER_URL, isOrdinaryWebUrl, normalizeBrowserInput, remoteBrowserPreferences, remoteBrowserViewOptions, safeBlockedExternalUrl } from './browser.js'
 import {
   BROWSER_PERSISTENCE_LIMITS,
   BROWSER_SAFE_TITLE_FALLBACK,
@@ -51,6 +51,20 @@ test('remote browser content has no Node, preload, webview, or privileged render
     webviewTag: false
   })
   expect(preferences).not.toHaveProperty('preload')
+})
+
+test('ordinary tabs omit webContents while popup tabs preserve their live WebContents', () => {
+  const ordinary = remoteBrowserViewOptions()
+  expect(ordinary).not.toHaveProperty('webContents')
+  expect(ordinary.webPreferences).toMatchObject(remoteBrowserPreferences())
+
+  const popupContents = {} as WebContents
+  const popup = remoteBrowserViewOptions({
+    webContents: popupContents,
+    webPreferences: { partition: 'popup-partition', devTools: true }
+  })
+  expect(popup.webContents).toBe(popupContents)
+  expect(popup.webPreferences).toMatchObject(remoteBrowserPreferences())
 })
 
 test('persisted browser URLs remove credentials, auth parameters, and fragments', () => {
