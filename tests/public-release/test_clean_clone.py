@@ -342,7 +342,12 @@ async def test_clean_home_golden_path(clean_runtime) -> None:
             )
             assert updated_description["job"]["description"] == values["description"]
             workspace = await call(
-                mcp, "workspace_inspect", {"idempotency_key": "clean-workspace-read-1"}
+                mcp,
+                "workspace_inspect",
+                {
+                    "conversation_id": conversation_id,
+                    "idempotency_key": "clean-workspace-read-1",
+                },
             )
             for response_only in ("repaired_presets", "repaired_browser", "browser_repair_reasons"):
                 workspace.pop(response_only, None)
@@ -350,7 +355,11 @@ async def test_clean_home_golden_path(clean_runtime) -> None:
             persisted_workspace = await call(
                 mcp,
                 "workspace_update",
-                {"snapshot": workspace, "idempotency_key": "clean-workspace-write-1"},
+                {
+                    "conversation_id": conversation_id,
+                    "snapshot": workspace,
+                    "idempotency_key": "clean-workspace-write-1",
+                },
             )
             workspace_revision = persisted_workspace["revision"]
 
