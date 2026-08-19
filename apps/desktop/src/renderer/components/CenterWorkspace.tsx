@@ -3,7 +3,6 @@ import { createPortal } from 'react-dom'
 import { ArrowLeft, ArrowRight, BriefcaseBusiness, Check, Download, Globe2, LoaderCircle, Plus, RefreshCw, Search, Square, X } from 'lucide-react'
 
 import type { BrowserRestoreState, JobListItem } from '../../shared/contracts'
-import { BROWSER_PERSISTENCE_LIMITS } from '../../shared/browserPersistence'
 import type { DocxOpenResult } from '../../shared/docxDocuments'
 import { useBrowser } from '../hooks/useBrowser'
 import { browserRepairMessage, type BrowserRepairReason } from '../workspaceLayout'
@@ -375,7 +374,6 @@ export function CenterWorkspace(props: CenterWorkspaceProps) {
   }
 
   const activeIndex = browser.state.tabs.findIndex(tab => tab.tabId === browser.state.activeTabId)
-  const browserAtTabLimit = browser.state.tabs.length >= BROWSER_PERSISTENCE_LIMITS.tabs
   const tooltipTrigger = (text: string) => ({
     'aria-describedby': 'browser-control-tooltip',
     onBlur: () => setTooltip(null),
@@ -424,15 +422,7 @@ export function CenterWorkspace(props: CenterWorkspaceProps) {
           <button aria-label={`Move ${active.title} right`} className="tab-order" data-tooltip={`Move ${active.title} right`} disabled={activeIndex === browser.state.tabs.length - 1} onClick={() => moveTab(active.tabId, 1)} type="button" {...tooltipTrigger(`Move ${active.title} right`)}><ArrowRight aria-hidden="true" size={11} /></button>
           <button aria-label={`Close ${active.title}`} className="tab-close" data-tooltip={`Close ${active.title}`} onClick={() => browser.close(active.tabId)} type="button" {...tooltipTrigger(`Close ${active.title}`)}><X aria-hidden="true" size={13} /></button>
         </div> : null}
-        <button
-          aria-label="Open a new tab"
-          className="icon-button browser-tab-add"
-          data-tooltip={browserAtTabLimit ? `Maximum ${BROWSER_PERSISTENCE_LIMITS.tabs} tabs` : 'Open a new tab'}
-          disabled={!browser.bridgeAvailable || browserAtTabLimit}
-          onClick={() => browser.create()}
-          type="button"
-          {...tooltipTrigger(browserAtTabLimit ? `Maximum ${BROWSER_PERSISTENCE_LIMITS.tabs} tabs` : 'Open a new tab')}
-        ><Plus aria-hidden="true" size={16} /></button>
+        <button aria-label="Open a new tab" className="icon-button browser-tab-add" data-tooltip="Open a new tab" disabled={!browser.bridgeAvailable} onClick={() => browser.create()} type="button" {...tooltipTrigger('Open a new tab')}><Plus aria-hidden="true" size={16} /></button>
       </div>
 
       <div className="browser-toolbar">
