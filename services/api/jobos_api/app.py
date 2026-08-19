@@ -95,7 +95,6 @@ from jobos_api.documents import (
     VerifiedArtifact,
     artifact_record,
     content_headers,
-    materialize_published_document,
     read_source_artifact,
     verify_facade_artifacts,
     verify_source_artifact,
@@ -3041,10 +3040,10 @@ def create_app(
     ) -> JobArtifactsResponse:
         require_trusted_mcp(identity, command.origin, mcp_token)
         ensure_job(job_id)
-        if not artifact_gateway_is_available() or settings.hermes_job_hunter_cwd is None:
-            raise Unavailable("Artifact provider is unavailable")
         source_bytes = command.source_bytes()
         artifact_bytes = command.artifact_bytes()
+        source_revision = hashlib.sha256(source_bytes).hexdigest()
+        artifact_revision = hashlib.sha256(artifact_bytes).hexdigest()
         request_hash = mutation_hash(
             "document.publish",
             {
@@ -3052,9 +3051,9 @@ def create_app(
                 "document_key": command.document_key,
                 "document_label": command.document_label,
                 "source_filename": command.source_filename,
-                "source_sha256": hashlib.sha256(source_bytes).hexdigest(),
+                "source_sha256": source_revision,
                 "artifact_filename": command.artifact_filename,
-                "artifact_sha256": hashlib.sha256(artifact_bytes).hexdigest(),
+                "artifact_sha256": artifact_revision,
                 "origin": command.origin,
             },
         )
@@ -3071,19 +3070,38 @@ def create_app(
         if replay is not None:
             return JobArtifactsResponse.model_validate(replay)
         try:
-            source_path, artifact_path = materialize_published_document(
-                command,
+            suffix = Path(command.artifact_filename).suffix.casefold()
+            media_type = {
+                ".pdf": PDF_MEDIA_TYPE,
+                ".docx": DOCX_MEDIA_TYPE,
+            }.get(suffix)
+            if media_type is None:
+                raise ArtifactValidationError("Published artifact must be a PDF or DOCX")
+            stored = local_artifacts.store_agent_publication(
                 job_id=job_id,
-                workspace_root=settings.hermes_job_hunter_cwd,
+                document_key=command.document_key,
+                source_revision=source_revision,
+                artifact=ArtifactWrite(
+                    filename=command.artifact_filename,
+                    media_type=media_type,
+                    content=artifact_bytes,
+                    sha256=artifact_revision,
+                ),
             )
-            raw = artifacts.publish_document_artifact(
-                job_id,
-                command.document_key,
-                command.document_label,
-                str(source_path),
-                str(artifact_path),
+            verified = VerifiedArtifact(
+                job_id=job_id,
+                document_key=command.document_key,
+                document_label=command.document_label,
+                source_revision=source_revision,
+                artifact_revision=artifact_revision,
+                media_type=media_type,
+                sha256=artifact_revision,
+                render_status="succeeded",
+                render_sequence=state_store.next_document_artifact_sequence(job_id),
+                canonical_path=str(stored.canonical_path),
+                filename=stored.filename,
+                failure_message=None,
             )
-            verified = verify_source_artifact(raw, trusted_artifact_roots)
             state_store.register_document_artifacts(job_id, [verified])
         except KeyError as error:
             raise HTTPException(status_code=404, detail="Job not found") from error
@@ -3108,7 +3126,7 @@ def create_app(
             idempotency_key=command.idempotency_key,
             request_hash=request_hash,
             result=result.model_dump(mode="json"),
-            label=f"Published {command.document_label} {artifact_path.suffix[1:].upper()}",
+            label=f"Published {command.document_label} {suffix[1:].upper()}",
             job_id=job_id,
             detail={"artifact_id": published.artifact_id, "document_key": command.document_key},
         )

@@ -43,65 +43,147 @@ def local_mcp_token() -> str:
     raise RuntimeError("JOBOS_MCP_TOKEN is required")
 
 
-def _document_import_roots() -> tuple[Path, ...]:
-    configured_roots = tuple(
-        Path(value).expanduser()
-        for value in os.environ.get("JOBOS_DOCUMENT_ROOTS", "").split(os.pathsep)
-        if value
-    )
-    if configured_roots:
-        roots = configured_roots
-    else:
-        configured_path = os.environ.get("JOBOS_CONFIG_PATH")
-        if configured_path:
-            path = Path(configured_path).expanduser()
-        else:
-            data_dir = os.environ.get("JOBOS_DATA_DIR")
-            if data_dir:
-                path = Path(data_dir).expanduser() / "config.json"
-            elif sys.platform == "darwin":
-                path = Path.home() / "Library/Application Support/JobOS/config.json"
-            else:
-                xdg_data = os.environ.get("XDG_DATA_HOME")
-                base = Path(xdg_data).expanduser() if xdg_data else Path.home() / ".local/share"
-                path = base / "JobOS/config.json"
-        try:
-            config = json.loads(path.read_text(encoding="utf-8"))
-            if (
-                not isinstance(config, dict)
-                or config.get("schemaVersion") != 1
-                or not isinstance(config.get("paths"), dict)
-            ):
-                raise ValueError
-            paths = config["paths"]
-            raw_artifacts = paths.get("artifacts")
-            if not isinstance(raw_artifacts, str) or not raw_artifacts:
-                raise ValueError
-        except (
-            FileNotFoundError,
-            OSError,
-            KeyError,
-            TypeError,
-            ValueError,
-            json.JSONDecodeError,
-        ) as error:
-            raise RuntimeError(
-                "Document publication requires JOBOS_DOCUMENT_ROOTS or a valid JobOS local config"
-            ) from error
-        artifact_root = Path(raw_artifacts).expanduser()
-        roots = (artifact_root if artifact_root.is_absolute() else path.parent / artifact_root,)
+def _local_config_path() -> Path:
+    configured_path = os.environ.get("JOBOS_CONFIG_PATH")
+    if configured_path:
+        return Path(configured_path).expanduser()
+    data_dir = os.environ.get("JOBOS_DATA_DIR")
+    if data_dir:
+        return Path(data_dir).expanduser() / "config.json"
+    if sys.platform == "darwin":
+        return Path.home() / "Library/Application Support/JobOS/config.json"
+    xdg_data = os.environ.get("XDG_DATA_HOME")
+    base = Path(xdg_data).expanduser() if xdg_data else Path.home() / ".local/share"
+    return base / "JobOS/config.json"
 
-    resolved: list[Path] = []
-    for root in roots:
-        if not root.is_absolute():
-            raise RuntimeError("Configured document roots must be absolute paths")
-        if root.is_symlink():
-            raise RuntimeError("Configured document roots must not be symbolic links")
-        candidate = root.resolve(strict=True)
-        if not candidate.is_dir():
-            raise RuntimeError("Configured document roots must be directories")
-        resolved.append(candidate)
-    return tuple(dict.fromkeys(resolved))
+
+def _document_artifact_root() -> Path:
+    path = _local_config_path()
+    try:
+        config = json.loads(path.read_text(encoding="utf-8"))
+        if (
+            not isinstance(config, dict)
+            or config.get("schemaVersion") != 1
+            or not isinstance(config.get("paths"), dict)
+        ):
+            raise ValueError
+        raw_artifacts = config["paths"].get("artifacts")
+        if not isinstance(raw_artifacts, str) or not raw_artifacts:
+            raise ValueError
+    except (
+        FileNotFoundError,
+        OSError,
+        KeyError,
+        TypeError,
+        ValueError,
+        json.JSONDecodeError,
+    ) as error:
+        raise RuntimeError(
+            "Document publication requires a valid JobOS local config"
+        ) from error
+
+    artifact_root = Path(raw_artifacts).expanduser()
+    root = artifact_root if artifact_root.is_absolute() else path.parent / artifact_root
+    if root.is_symlink():
+        raise RuntimeError("The JobOS artifact root must not use symbolic links")
+    try:
+        resolved = root.resolve(strict=True)
+    except OSError as error:
+        raise RuntimeError("The JobOS artifact root is unavailable") from error
+    if not resolved.is_dir():
+        raise RuntimeError("The JobOS artifact root must be a directory")
+    return resolved
+
+
+def _publication_workspace_path(conversation_id: str, job_id: str, artifact_root: Path) -> Path:
+    if not conversation_id or len(conversation_id) > 133:
+        raise ValueError("Invalid conversation ID")
+    if not job_id or len(job_id) > 256:
+        raise ValueError("Invalid job ID")
+    conversation_key = sha256(conversation_id.encode("utf-8")).hexdigest()[:24]
+    job_key = sha256(job_id.encode("utf-8")).hexdigest()[:24]
+    return artifact_root / "publication-inbox" / conversation_key / job_key
+
+
+def _prepare_private_directory_chain(root: Path, parts: tuple[str, ...]) -> None:
+    directory_flags = os.O_RDONLY
+    if hasattr(os, "O_DIRECTORY"):
+        directory_flags |= os.O_DIRECTORY
+    if hasattr(os, "O_CLOEXEC"):
+        directory_flags |= os.O_CLOEXEC
+    directory_flags |= getattr(os, "O_NOFOLLOW", 0)
+    descriptors: list[int] = []
+    try:
+        current = os.open(root, directory_flags)
+        descriptors.append(current)
+        for part in parts:
+            try:
+                os.mkdir(part, mode=0o700, dir_fd=current)
+                os.fsync(current)
+            except FileExistsError:
+                pass
+            child = os.open(part, directory_flags, dir_fd=current)
+            descriptors.append(child)
+            metadata = os.fstat(child)
+            named = os.stat(part, dir_fd=current, follow_symlinks=False)
+            if (
+                not stat.S_ISDIR(metadata.st_mode)
+                or metadata.st_dev != named.st_dev
+                or metadata.st_ino != named.st_ino
+            ):
+                raise RuntimeError("The JobOS publication inbox changed during preparation")
+            os.fchmod(child, 0o700)
+            current = child
+    except OSError as error:
+        raise RuntimeError(
+            "JobOS publication inbox directories must not use symbolic links"
+        ) from error
+    finally:
+        for descriptor in reversed(descriptors):
+            os.close(descriptor)
+
+
+def _prepare_document_publication_workspace(
+    conversation_id: str, job_id: str, *, artifact_root: Path | None = None
+) -> Path:
+    root = artifact_root or _document_artifact_root()
+    if root.is_symlink():
+        raise RuntimeError("The JobOS artifact root must not use symbolic links")
+    resolved_root = root.resolve(strict=True)
+    if not resolved_root.is_dir():
+        raise RuntimeError("The JobOS artifact root must be a directory")
+    workspace = _publication_workspace_path(conversation_id, job_id, resolved_root)
+    _prepare_private_directory_chain(
+        resolved_root, workspace.relative_to(resolved_root).parts
+    )
+    return workspace
+
+
+def _existing_document_publication_workspace(
+    conversation_id: str, job_id: str, *, artifact_root: Path | None = None
+) -> Path:
+    root = artifact_root or _document_artifact_root()
+    if root.is_symlink():
+        raise RuntimeError("The JobOS artifact root must not use symbolic links")
+    resolved_root = root.resolve(strict=True)
+    workspace = _publication_workspace_path(conversation_id, job_id, resolved_root)
+    current = resolved_root
+    for part in workspace.relative_to(resolved_root).parts:
+        current = current / part
+        if current.is_symlink():
+            raise RuntimeError(
+                "JobOS publication inbox directories must not use symbolic links"
+            )
+        try:
+            metadata = os.stat(current, follow_symlinks=False)
+        except OSError as error:
+            raise ValueError(
+                "Publication inbox is not prepared. Call document_publication_prepare "
+                "before creating or publishing documents."
+            ) from error
+        if not stat.S_ISDIR(metadata.st_mode):
+            raise RuntimeError("The JobOS publication inbox must contain only directories")
+    return workspace
 
 
 def _read_document_input(
@@ -213,12 +295,47 @@ def _read_document_input(
     return candidate.name, content
 
 
+def _read_publication_input(
+    raw_path: str,
+    *,
+    conversation_id: str,
+    job_id: str,
+    artifact_root: Path,
+    maximum: int,
+    suffixes: set[str] | None = None,
+) -> tuple[str, bytes]:
+    workspace = _existing_document_publication_workspace(
+        conversation_id, job_id, artifact_root=artifact_root
+    )
+    requested = Path(raw_path)
+    if not requested.is_absolute():
+        raise ValueError("Document input path must be absolute")
+    supplied = Path(os.path.abspath(requested))
+    try:
+        relative = supplied.relative_to(workspace)
+    except ValueError as error:
+        raise ValueError("Document input is outside the prepared publication inbox") from error
+    if not relative.parts or any(part in {"", ".", ".."} for part in relative.parts):
+        raise ValueError("Document input is outside the prepared publication inbox")
+    # Read from a descriptor chain anchored at the app-owned artifact root, not from
+    # the previously checked workspace path. A renamed or symlink-swapped inbox can
+    # therefore never redirect this read outside JobOS storage.
+    return _read_document_input(
+        str(supplied), roots=(artifact_root,), maximum=maximum, suffixes=suffixes
+    )
+
+
 def create_server(
-    client: JobOsMcpClient, *, document_roots: tuple[Path, ...] | None = None
+    client: JobOsMcpClient, *, artifact_root: Path | None = None
 ) -> FastMCP:
     server = FastMCP(
         "JobOS Jobs",
-        instructions="Operate JobOS jobs only through the shared authenticated application API.",
+        instructions=(
+            "Operate JobOS only through the authenticated application API. "
+            "Before creating resume or cover-letter files, call "
+            "document_publication_prepare and write every source/PDF/DOCX into its returned "
+            "publication_directory. Publish each promised format, then verify with document_list."
+        ),
     )
 
     @server.tool(name="job_list", structured_output=True)
@@ -409,6 +526,34 @@ def create_server(
             job_id, artifact_reference, idempotency_key=idempotency_key
         )
 
+    @server.tool(name="document_publication_prepare", structured_output=True)
+    async def document_publication_prepare(
+        conversation_id: ConversationId,
+        job_id: str,
+    ) -> dict[str, Any]:
+        """Prepare JobOS's only supported publication inbox for this session and job.
+
+        Call this before generating a resume or cover letter. Write the source file and
+        every promised PDF/DOCX directly into publication_directory. Do not use a
+        workspace, repository, temporary folder, or agent-profile cache for publication.
+        """
+        client.scope_conversation(conversation_id)
+        workspace = _prepare_document_publication_workspace(
+            conversation_id, job_id, artifact_root=artifact_root
+        )
+        return {
+            "ready": True,
+            "job_id": job_id,
+            "publication_directory": str(workspace),
+            "accepted_artifact_formats": ["pdf", "docx"],
+            "source_maximum_bytes": 2_000_000,
+            "artifact_maximum_bytes": 20_000_000,
+            "next_step": (
+                "Write the source and finished artifacts into publication_directory, "
+                "call document_publish once per format, then confirm them with document_list."
+            ),
+        }
+
     @server.tool(name="document_publish", structured_output=True)
     async def document_publish(
         conversation_id: ConversationId,
@@ -419,22 +564,38 @@ def create_server(
         artifact_path: str,
         idempotency_key: str | None = None,
     ) -> dict[str, Any]:
-        """Publish one finished PDF/DOCX into JobOS.
+        """Publish one finished PDF/DOCX from JobOS's prepared publication inbox.
 
-        Call once per promised format, use the same source file for paired PDF/DOCX,
-        then confirm every format with document_list before claiming completion.
+        First call document_publication_prepare. Call this once per promised format,
+        use the same source file for paired PDF/DOCX, then confirm every format with
+        document_list before claiming completion. Other filesystem paths are never read.
         """
         client.scope_conversation(conversation_id)
-        roots = document_roots or _document_import_roots()
-        source_filename, source_bytes = _read_document_input(
-            source_path, roots=roots, maximum=2_000_000
-        )
-        artifact_filename, artifact_bytes = _read_document_input(
-            artifact_path,
-            roots=roots,
-            maximum=20_000_000,
-            suffixes={".pdf", ".docx"},
-        )
+        resolved_artifact_root = artifact_root or _document_artifact_root()
+        try:
+            source_filename, source_bytes = _read_publication_input(
+                source_path,
+                conversation_id=conversation_id,
+                job_id=job_id,
+                artifact_root=resolved_artifact_root,
+                maximum=2_000_000,
+            )
+            artifact_filename, artifact_bytes = _read_publication_input(
+                artifact_path,
+                conversation_id=conversation_id,
+                job_id=job_id,
+                artifact_root=resolved_artifact_root,
+                maximum=20_000_000,
+                suffixes={".pdf", ".docx"},
+            )
+        except ValueError as error:
+            if "outside" in str(error):
+                raise ValueError(
+                    "Document is outside this job's JobOS publication inbox. Call "
+                    "document_publication_prepare, write the source and artifact into its "
+                    "publication_directory, and retry."
+                ) from error
+            raise
         return await client.publish_document(
             job_id,
             document_key,

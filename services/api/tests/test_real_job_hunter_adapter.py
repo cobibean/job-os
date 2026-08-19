@@ -20,7 +20,7 @@ from job_hunter.facade import JobHunterFacade
 from job_hunter.storage import JobStorage
 
 
-def test_real_job_hunter_adapter_reports_ready_publishes_and_reads_back(tmp_path):
+def test_real_job_hunter_adapter_reports_ready_while_jobos_owns_publication(tmp_path):
     workspace = tmp_path / "job-hunter"
     workspace.mkdir()
     database_path = workspace / "data" / "jobs.db"
@@ -76,11 +76,18 @@ def test_real_job_hunter_adapter_reports_ready_publishes_and_reads_back(tmp_path
             f"/v1/jobs/{job_id}/artifacts",
             headers={"Authorization": headers["Authorization"]},
         )
+        artifact_id = listed.json()["artifacts"][0]["artifact_id"]
+        downloaded = client.get(
+            f"/v1/artifacts/{artifact_id}/download",
+            headers={"Authorization": headers["Authorization"]},
+        )
 
     assert health.status_code == 200
     assert health.json()["artifact_gateway"] == "available"
     assert published.status_code == 200
     assert listed.status_code == 200
+    assert downloaded.status_code == 200
+    assert downloaded.content == artifact
     assert published.json()["artifacts"][0]["sha256"] == hashlib.sha256(artifact).hexdigest()
     assert listed.json()["artifacts"][0]["sha256"] == hashlib.sha256(artifact).hexdigest()
     assert [
@@ -93,8 +100,7 @@ def test_real_job_hunter_adapter_reports_ready_publishes_and_reads_back(tmp_path
         workspace_root=workspace,
     )
     persisted = reopened.list_job_artifacts(job_id)
-    assert len(persisted) == 1
-    assert persisted[0]["source_sha256"] == hashlib.sha256(source).hexdigest()
-    assert persisted[0]["sha256"] == hashlib.sha256(artifact).hexdigest()
-    assert (workspace / persisted[0]["source_path"]).read_bytes() == source
-    assert (workspace / persisted[0]["path"]).read_bytes() == artifact
+    assert persisted == []
+    stored = list((tmp_path / "jobos" / "artifacts" / "agent-publications").rglob("*.pdf"))
+    assert len(stored) == 1
+    assert stored[0].read_bytes() == artifact

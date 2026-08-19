@@ -68,9 +68,11 @@ Application Support directory. Back up every configured location before changing
 anything. The narrow fictional-demo reset is `jobos-init --reset-demo
 --confirm-reset-demo`; it restores only the demo job and its starter document.
 
-MCP document publication reads files only below `JOBOS_DOCUMENT_ROOTS` when set,
-or below the artifact root in the active local config. It deliberately does not
-fall back to the launch directory or a Hermes profile cache.
+MCP document publication uses a JobOS-owned, session-and-job-scoped inbox. Agents
+must call `document_publication_prepare` before generating files, write the source
+and finished PDF/DOCX files into the returned directory, publish each format, and
+confirm the result with `document_list`. JobOS does not trust the launch directory,
+an agent workspace, a Hermes profile cache, or operator-defined document roots.
 
 ## Filing a useful bug
 
