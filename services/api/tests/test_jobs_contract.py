@@ -14,7 +14,7 @@ from jobos_api.app import create_app
 from jobos_api.documents import ArtifactPublishRequest
 from jobos_api.editable_documents import blank_content, default_settings
 from jobos_api.private_adapters.job_hunter import adapt_job_hunter_facade
-from jobos_api.settings import Settings
+from jobos_api.settings import DeviceCredential, Settings
 from jobos_api.state_store import JobOsStateStore, mutation_activity_source_id
 
 TITLE_POLICY_FIXTURES = json.loads(
@@ -834,6 +834,81 @@ def test_mcp_job_and_artifact_calls_fail_closed_when_the_conversation_owns_anoth
     assert mismatched_read.json()["code"] == "conversation_job_mismatch"
     assert mismatched_mutation.status_code == 409
     assert owned_read.status_code == 200
+
+
+def test_trusted_local_mcp_scopes_publication_to_a_remote_device_conversation(
+    tmp_path, minimal_docx
+):
+    facade = FakeJobHunterFacade()
+    facade.jobs = facade.jobs[:1]
+    repository, artifact_gateway = adapt_job_hunter_facade(facade)
+    app = create_app(
+        Settings(
+            device_id="primary-device",
+            device_token="test-device-token",
+            mcp_token="test-mcp-trusted-token",
+            device_credentials=(
+                DeviceCredential(
+                    device_id="remote-device",
+                    token="remote-device-token",
+                ),
+            ),
+            state_db_path=tmp_path / "jobos.db",
+            artifact_roots=(tmp_path,),
+            hermes_job_hunter_cwd=tmp_path,
+        ),
+        job_repository=repository,
+        artifact_gateway=artifact_gateway,
+    )
+    remote_headers = {"Authorization": "Bearer remote-device-token"}
+    source = b"# Remote-device resume"
+    payload = {
+        "document_key": "resume",
+        "document_label": "Resume",
+        "source_filename": "resume.md",
+        "source_base64": base64.b64encode(source).decode("ascii"),
+        "artifact_filename": "resume.docx",
+        "artifact_base64": base64.b64encode(minimal_docx("remote resume")).decode("ascii"),
+        "origin": "mcp",
+        "idempotency_key": "remote-conversation-publish",
+    }
+
+    with TestClient(app, raise_server_exceptions=False) as client:
+        conversation = client.post("/v1/conversations", headers=remote_headers)
+        conversation_id = conversation.json()["conversation_id"]
+        selected = client.put(
+            f"/v1/conversations/{conversation_id}/workspace/job",
+            headers=remote_headers,
+            json={"job_id": "job-0", "origin": "user"},
+        )
+        published = client.post(
+            f"/v1/jobs/job-0/artifacts/publish?conversation_id={conversation_id}",
+            headers=auth_headers(),
+            json=payload,
+        )
+        listed = client.get(
+            f"/v1/jobs/job-0/artifacts?conversation_id={conversation_id}",
+            headers=auth_headers(),
+        )
+        missing = client.get(
+            "/v1/jobs/job-0/artifacts?conversation_id=conv_missing",
+            headers=auth_headers(),
+        )
+        remote_mcp_attempt = client.get(
+            f"/v1/jobs/job-0/artifacts?conversation_id={conversation_id}",
+            headers={**remote_headers, "X-JobOS-MCP-Token": "test-mcp-trusted-token"},
+        )
+
+    assert conversation.status_code == 201
+    assert selected.status_code == 200
+    assert published.status_code == 200
+    assert published.json()["artifacts"][0]["job_id"] == "job-0"
+    assert listed.status_code == 200
+    assert len(listed.json()["artifacts"]) == 1
+    assert missing.status_code == 404
+    assert missing.json()["code"] == "conversation_not_found"
+    assert remote_mcp_attempt.status_code == 403
+    assert remote_mcp_attempt.json()["code"] == "mcp_local_device_required"
 
 
 def test_inspect_and_history_expose_normalized_facade_records(tmp_path):
