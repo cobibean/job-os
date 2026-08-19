@@ -316,7 +316,7 @@ async def test_clean_home_golden_path(clean_runtime) -> None:
                     "idempotency_key": "clean-select-1",
                 },
             )
-            assert selected["event_id"]
+            assert selected["job_context"]["selected_job_id"] == job_id
             updated_status = await call(
                 mcp,
                 "job_update_status",
