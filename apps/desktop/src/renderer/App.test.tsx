@@ -772,7 +772,7 @@ test('filtering the list never clears the active job context', async () => {
   fireEvent.change(screen.getByRole('textbox', { name: 'Filter jobs' }), { target: { value: 'Apollo' } })
 
   await waitFor(() => expect(screen.queryByRole('button', { name: 'Select Northstar Product Manager' })).toBeNull())
-  expect(screen.getByText('Northstar · Product Manager')).not.toBeNull()
+  expect(await screen.findByText('Northstar · Product Manager')).not.toBeNull()
 })
 
 test('changing selected jobs preserves one mounted durable agent conversation and draft', async () => {

@@ -308,13 +308,20 @@ async def test_clean_home_golden_path(clean_runtime) -> None:
             )
             assert inspected["job_id"] == job_id
             selected = await call(
-                mcp, "job_select", {"job_id": job_id, "idempotency_key": "clean-select-1"}
+                mcp,
+                "job_select",
+                {
+                    "conversation_id": conversation_id,
+                    "job_id": job_id,
+                    "idempotency_key": "clean-select-1",
+                },
             )
             assert selected["event_id"]
             updated_status = await call(
                 mcp,
                 "job_update_status",
                 {
+                    "conversation_id": conversation_id,
                     "job_id": job_id,
                     "target_status": "reviewed",
                     "reason": "Synthetic review",
@@ -326,6 +333,7 @@ async def test_clean_home_golden_path(clean_runtime) -> None:
                 mcp,
                 "job_update_description",
                 {
+                    "conversation_id": conversation_id,
                     "job_id": job_id,
                     "description_text": values["description"],
                     "source_note": "Synthetic clean-clone fixture",
