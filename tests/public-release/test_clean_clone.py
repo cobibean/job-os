@@ -530,7 +530,12 @@ async def test_clean_home_golden_path(clean_runtime) -> None:
             )
             assert inspected["description"] == values["description"]
             workspace = await call(
-                mcp, "workspace_inspect", {"idempotency_key": "clean-workspace-read-2"}
+                mcp,
+                "workspace_inspect",
+                {
+                    "conversation_id": conversation_id,
+                    "idempotency_key": "clean-workspace-read-2",
+                },
             )
             assert workspace["revision"] == workspace_revision
             assert workspace["browse_query"] == values["workspaceQuery"]
