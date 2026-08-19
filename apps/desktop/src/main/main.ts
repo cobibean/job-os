@@ -553,7 +553,10 @@ async function createWindow(): Promise<BrowserWindow> {
   browserManager = new BrowserManager({
     window,
     browserSession,
-    createView: () => new WebContentsView({ webPreferences: remoteBrowserPreferences() }),
+    createView: options => new WebContentsView({
+      webContents: options?.webContents,
+      webPreferences: { ...options?.webPreferences, ...remoteBrowserPreferences() }
+    }),
     dialog,
     clipboard,
     downloadsPath: app.getPath('downloads')

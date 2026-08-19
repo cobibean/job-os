@@ -6,9 +6,11 @@ import type {
   Clipboard,
   Dialog,
   DownloadItem,
+  LoadURLOptions,
   Session,
   WebContents,
   WebContentsView,
+  WebContentsViewConstructorOptions,
   WebPreferences
 } from 'electron'
 
@@ -102,7 +104,7 @@ interface SemanticTarget {
 interface BrowserManagerOptions {
   window: BrowserWindow
   browserSession: Session
-  createView: () => WebContentsView
+  createView: (options?: WebContentsViewConstructorOptions) => WebContentsView
   dialog: Pick<Dialog, 'showSaveDialog'>
   downloadsPath: string
   clipboard: Pick<Clipboard, 'writeText'>
@@ -111,7 +113,7 @@ interface BrowserManagerOptions {
 export class BrowserManager {
   readonly #window: BrowserWindow
   readonly #session: Session
-  readonly #createView: () => WebContentsView
+  readonly #createView: (options?: WebContentsViewConstructorOptions) => WebContentsView
   readonly #dialog: Pick<Dialog, 'showSaveDialog'>
   readonly #downloadsPath: string
   readonly #clipboard: Pick<Clipboard, 'writeText'>
@@ -522,6 +524,11 @@ export class BrowserManager {
 
   #createTab(restored: BrowserTabMetadata): Promise<void> {
     const view = this.#createView()
+    this.#registerTab(restored, view)
+    return view.webContents.loadURL(restored.url).then(() => undefined, () => undefined)
+  }
+
+  #registerTab(restored: BrowserTabMetadata, view: WebContentsView): ManagedTab {
     const state: BrowserTab = {
       ...restored,
       loading: false,
@@ -538,7 +545,7 @@ export class BrowserManager {
     this.#tabs.set(state.tabId, managed)
     this.#order.push(state.tabId)
     this.#wireTab(managed)
-    return view.webContents.loadURL(state.url).then(() => undefined, () => undefined)
+    return managed
   }
 
   #wireTab(tab: ManagedTab): void {
@@ -603,10 +610,51 @@ export class BrowserManager {
     }
     contents.on('will-navigate', handleCancellableNavigation)
     contents.on('will-redirect', handleCancellableNavigation)
-    contents.setWindowOpenHandler(({ url }) => {
-      if (isOrdinaryWebUrl(url)) void this.create(url, tab.state.associatedJobId)
-      else blockExternalProtocol(url)
-      return { action: 'deny' }
+    contents.setWindowOpenHandler(details => {
+      if (!isOrdinaryWebUrl(details.url)) {
+        blockExternalProtocol(details.url)
+        return { action: 'deny' }
+      }
+      if (this.#order.length >= BROWSER_PERSISTENCE_LIMITS.tabs) {
+        this.#notice = `Tab limit reached (${BROWSER_PERSISTENCE_LIMITS.tabs}). Close a tab before opening another.`
+        this.#emit()
+        return { action: 'deny' }
+      }
+      return {
+        action: 'allow',
+        outlivesOpener: true,
+        createWindow: options => {
+          const popupOptions = options as typeof options & { webContents?: WebContents }
+          const view = this.#createView({
+            webContents: popupOptions.webContents,
+            webPreferences: popupOptions.webPreferences
+          })
+          const tabId = randomUUID()
+          this.#registerTab({
+            tabId,
+            url: normalizeBrowserInput(details.url),
+            title: 'New tab',
+            faviconUrl: null,
+            associatedJobId: tab.state.associatedJobId
+          }, view)
+          this.#hasExplicitAction = true
+          this.#activeTabId = tabId
+          this.#syncAttachedView()
+          this.#emit()
+          if (!popupOptions.webContents) {
+            const loadOptions: LoadURLOptions = { httpReferrer: details.referrer }
+            if (details.postBody) {
+              const contentType = details.postBody.boundary
+                ? `${details.postBody.contentType}; boundary=${details.postBody.boundary}`
+                : details.postBody.contentType
+              loadOptions.extraHeaders = `Content-Type: ${contentType}`
+              loadOptions.postData = details.postBody.data
+            }
+            void view.webContents.loadURL(details.url, loadOptions).catch(() => undefined)
+          }
+          return view.webContents
+        }
+      }
     })
   }
 

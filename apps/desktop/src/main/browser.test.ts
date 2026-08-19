@@ -5,7 +5,7 @@ import { expect, test } from 'vitest'
 import { EventEmitter } from 'node:events'
 import { readFileSync } from 'node:fs'
 
-import type { BrowserWindow, Dialog, Session, WebContents, WebContentsView } from 'electron'
+import type { BrowserWindow, BrowserWindowConstructorOptions, Dialog, Session, WebContents, WebContentsView, WebContentsViewConstructorOptions } from 'electron'
 import { vi } from 'vitest'
 
 import { BrowserManager, DEFAULT_BROWSER_URL, isOrdinaryWebUrl, normalizeBrowserInput, remoteBrowserPreferences, safeBlockedExternalUrl } from './browser.js'
@@ -76,6 +76,102 @@ test('desktop title persistence matches the shared conservative redaction fixtur
   for (const fixture of browserTitlePolicyFixtures) {
     expect(sanitizeBrowserTitleForPersistence(fixture.title), fixture.title).toBe(fixture.expected)
   }
+})
+
+test('new-window handoff preserves Chromium request context instead of replaying only the URL', async () => {
+  const views: WebContentsView[] = []
+  const createView = vi.fn((options?: WebContentsViewConstructorOptions) => {
+    const events = new EventEmitter()
+    let url = ''
+    const contents = options?.webContents ?? Object.assign(events, {
+      navigationHistory: { canGoBack: () => false, canGoForward: () => false, goBack: vi.fn(), goForward: vi.fn() },
+      loadURL: vi.fn(async (next: string) => { url = next }),
+      getURL: () => url,
+      setWindowOpenHandler: vi.fn(),
+      isDestroyed: () => false,
+      close: vi.fn(),
+      reload: vi.fn(),
+      stop: vi.fn()
+    })
+    const view = { webContents: contents, setBounds: vi.fn() } as unknown as WebContentsView
+    views.push(view)
+    return view
+  })
+  const manager = new BrowserManager({
+    window: {
+      contentView: { addChildView: vi.fn(), removeChildView: vi.fn() },
+      webContents: { send: vi.fn() },
+      isDestroyed: () => false
+    } as unknown as BrowserWindow,
+    browserSession: Object.assign(new EventEmitter(), {
+      setPermissionCheckHandler: vi.fn(), setPermissionRequestHandler: vi.fn()
+    }) as unknown as Session,
+    createView,
+    dialog: { showSaveDialog: vi.fn() } as unknown as Pick<Dialog, 'showSaveDialog'>,
+    clipboard: { writeText: vi.fn() },
+    downloadsPath: '/tmp'
+  })
+
+  await manager.restore({
+    tabs: [{ tabId: 'linkedin', url: 'https://www.linkedin.com/jobs/view/123', title: 'LinkedIn job', faviconUrl: null, associatedJobId: 'job-123' }],
+    activeTabId: 'linkedin'
+  })
+  const opener = views[0]
+  const openHandler = (opener?.webContents.setWindowOpenHandler as ReturnType<typeof vi.fn>).mock.calls[0]?.[0]
+  if (!openHandler) throw new Error('Window-open policy was not installed')
+
+  const response = openHandler({
+    url: 'https://www.linkedin.com/redir/redirect?url=https%3A%2F%2Fjobs.example.com%2Fapply',
+    frameName: '_blank',
+    features: '',
+    disposition: 'foreground-tab',
+    referrer: { url: 'https://www.linkedin.com/jobs/view/123', policy: 'strict-origin-when-cross-origin' }
+  })
+
+  expect(response.action).toBe('allow')
+  expect(response.outlivesOpener).toBe(true)
+  expect(response.createWindow).toBeTypeOf('function')
+  const pendingPopupContents = {
+    navigationHistory: { canGoBack: () => false, canGoForward: () => false, goBack: vi.fn(), goForward: vi.fn() },
+    loadURL: vi.fn(), getURL: () => '', setWindowOpenHandler: vi.fn(), isDestroyed: () => false,
+    close: vi.fn(), reload: vi.fn(), stop: vi.fn(), on: vi.fn()
+  } as unknown as WebContents
+  const childContents = response.createWindow?.({
+    webContents: pendingPopupContents,
+    webPreferences: { partition: 'persist:jobos-browser-v1' }
+  } as BrowserWindowConstructorOptions)
+  expect(childContents).toBe(pendingPopupContents)
+  expect(createView).toHaveBeenLastCalledWith({
+    webContents: pendingPopupContents,
+    webPreferences: expect.objectContaining({ partition: 'persist:jobos-browser-v1' })
+  })
+  expect(views[1]?.webContents.loadURL).not.toHaveBeenCalled()
+  expect(manager.getState().tabs.at(-1)).toMatchObject({
+    url: 'https://www.linkedin.com/redir/redirect?url=https%3A%2F%2Fjobs.example.com%2Fapply',
+    associatedJobId: 'job-123'
+  })
+
+  const postData = [{ bytes: Buffer.from('applicationId=123') }]
+  const backgroundResponse = openHandler({
+    url: 'https://www.linkedin.com/redir/redirect?url=https%3A%2F%2Fjobs.example.com%2Fapply-later',
+    frameName: '_blank',
+    features: '',
+    disposition: 'background-tab',
+    referrer: { url: 'https://www.linkedin.com/jobs/view/123', policy: 'strict-origin-when-cross-origin' },
+    postBody: { contentType: 'application/x-www-form-urlencoded', data: postData }
+  })
+  expect(backgroundResponse.outlivesOpener).toBe(true)
+  backgroundResponse.createWindow?.({
+    webPreferences: { partition: 'persist:jobos-browser-v1' }
+  } as BrowserWindowConstructorOptions)
+  expect(views[2]?.webContents.loadURL).toHaveBeenCalledWith(
+    'https://www.linkedin.com/redir/redirect?url=https%3A%2F%2Fjobs.example.com%2Fapply-later',
+    {
+      httpReferrer: { url: 'https://www.linkedin.com/jobs/view/123', policy: 'strict-origin-when-cross-origin' },
+      extraHeaders: 'Content-Type: application/x-www-form-urlencoded',
+      postData
+    }
+  )
 })
 
 test('new tab commands do not complete before the initial page load settles', async () => {
