@@ -783,10 +783,25 @@ def create_app(
         identity = device_authenticator.authenticate(
             HTTPAuthorizationCredentials(scheme=scheme, credentials=token)
         )
+        if identity.device_id != settings.device_id:
+            return error_response(
+                request,
+                status_code=403,
+                code="mcp_local_device_required",
+                message="MCP operations require the trusted local device credential",
+                retryable=False,
+            )
         try:
-            context = state_store.conversation_job_context(conversation_id, identity.device_id)
-        except ConversationNotFound as error:
-            raise HTTPException(status_code=404, detail="Conversation not found") from error
+            context = conversation_manager.get(conversation_id).store.snapshot()["job_context"]
+        except ConversationNotFound:
+            return error_response(
+                request,
+                status_code=404,
+                code="conversation_not_found",
+                message="Conversation not found",
+                retryable=False,
+            )
+        assert isinstance(context, dict)
         if context.get("selected_job_id") != job_id:
             return error_response(
                 request,
