@@ -837,6 +837,61 @@ MIGRATIONS = (
             """,
         ),
     ),
+    Migration(
+        version=19,
+        statements=(
+            "ALTER TABLE conversations ADD COLUMN selected_job_id TEXT",
+            "ALTER TABLE conversations ADD COLUMN active_artifact_id TEXT",
+            """ALTER TABLE conversations ADD COLUMN active_artifact_page
+               INTEGER NOT NULL DEFAULT 1 CHECK (active_artifact_page >= 1)""",
+            """ALTER TABLE conversations ADD COLUMN active_artifact_zoom
+               REAL NOT NULL DEFAULT 1.0
+               CHECK (active_artifact_zoom >= 0.5 AND active_artifact_zoom <= 3.0)""",
+            """
+            UPDATE conversations SET selected_job_id = COALESCE(
+                (SELECT json_extract(t.context_json, '$.selected_job_id')
+                 FROM conversation_turns t WHERE t.conversation_id = conversations.conversation_id
+                   AND json_valid(t.context_json)
+                   AND json_type(t.context_json, '$.selected_job_id') = 'text'
+                 ORDER BY t.created_at DESC, t.rowid DESC LIMIT 1),
+                (SELECT selected_job_id FROM job_workspace WHERE workspace_id = 1))
+            """,
+            """
+            UPDATE conversations SET
+              active_artifact_id = CASE WHEN EXISTS (
+                SELECT 1 FROM workspace_snapshots w JOIN document_artifacts a
+                  ON a.artifact_id = json_extract(w.snapshot_json, '$.active_artifact_id')
+                WHERE w.device_id = conversations.owner_device_id
+                  AND a.job_id = conversations.selected_job_id)
+                THEN (SELECT json_extract(snapshot_json, '$.active_artifact_id')
+                      FROM workspace_snapshots
+                      WHERE device_id = conversations.owner_device_id)
+                ELSE NULL END,
+              active_artifact_page = CASE WHEN EXISTS (
+                SELECT 1 FROM workspace_snapshots w JOIN document_artifacts a
+                  ON a.artifact_id = json_extract(w.snapshot_json, '$.active_artifact_id')
+                WHERE w.device_id = conversations.owner_device_id
+                  AND a.job_id = conversations.selected_job_id)
+                THEN MAX(1, COALESCE((
+                  SELECT json_extract(snapshot_json, '$.active_artifact_page')
+                  FROM workspace_snapshots
+                  WHERE device_id = conversations.owner_device_id
+                ), 1)) ELSE 1 END,
+              active_artifact_zoom = CASE WHEN EXISTS (
+                SELECT 1 FROM workspace_snapshots w JOIN document_artifacts a
+                  ON a.artifact_id = json_extract(w.snapshot_json, '$.active_artifact_id')
+                WHERE w.device_id = conversations.owner_device_id
+                  AND a.job_id = conversations.selected_job_id)
+                THEN MIN(3.0, MAX(0.5, COALESCE((
+                  SELECT json_extract(snapshot_json, '$.active_artifact_zoom')
+                  FROM workspace_snapshots
+                  WHERE device_id = conversations.owner_device_id
+                ), 1.0))) ELSE 1.0 END
+            """,
+            """CREATE INDEX conversations_selected_job
+               ON conversations(selected_job_id) WHERE selected_job_id IS NOT NULL""",
+        ),
+    ),
 )
 SCHEMA_VERSION = MIGRATIONS[-1].version
 
@@ -885,10 +940,13 @@ PRESET_DEFAULTS: dict[str, dict[str, object]] = {
 
 
 def canonical_workspace_snapshot(selected_job_id: str | None = None) -> dict[str, object]:
+    # Kept as a compatibility argument for old migration/test callers. The
+    # device snapshot no longer owns job or document selection.
+    del selected_job_id
     return {
         "selected_preset": "review",
         "layouts": deepcopy(PRESET_DEFAULTS),
-        "selected_job_id": selected_job_id,
+        "selected_job_id": None,
         "active_center_surface": "document",
         "browser_tabs": [],
         "active_browser_tab_id": None,
@@ -953,7 +1011,7 @@ def _valid_layout(value: object) -> bool:
 def normalize_workspace_snapshot(
     value: object, selected_job_id: str | None
 ) -> tuple[dict[str, object], tuple[str, ...]]:
-    canonical = canonical_workspace_snapshot(selected_job_id)
+    canonical = canonical_workspace_snapshot()
     if not isinstance(value, dict):
         canonical["_repaired_browser"] = True
         canonical["_browser_repair_reasons"] = ["metadata_adjusted"]
@@ -1081,27 +1139,10 @@ def normalize_workspace_snapshot(
     ]
     canonical["_repaired_browser"] = bool(ordered_reasons)
     canonical["_browser_repair_reasons"] = ordered_reasons
-    canonical["selected_job_id"] = selected_job_id
-    active_artifact_id = value.get("active_artifact_id")
-    canonical["active_artifact_id"] = (
-        active_artifact_id
-        if isinstance(active_artifact_id, str) and 1 <= len(active_artifact_id) <= 84
-        else None
-    )
-    active_artifact_page = value.get("active_artifact_page")
-    canonical["active_artifact_page"] = (
-        active_artifact_page
-        if isinstance(active_artifact_page, int) and 1 <= active_artifact_page <= 5000
-        else 1
-    )
-    active_artifact_zoom = value.get("active_artifact_zoom")
-    canonical["active_artifact_zoom"] = (
-        float(active_artifact_zoom)
-        if isinstance(active_artifact_zoom, (int, float))
-        and not isinstance(active_artifact_zoom, bool)
-        and 0.5 <= active_artifact_zoom <= 3.0
-        else 1.0
-    )
+    canonical["selected_job_id"] = None
+    canonical["active_artifact_id"] = None
+    canonical["active_artifact_page"] = 1
+    canonical["active_artifact_zoom"] = 1.0
     return canonical, tuple(repaired)
 
 
@@ -1215,21 +1256,17 @@ class JobOsStateStore:
     def workspace_snapshot(self, device_id: str) -> WorkspaceSnapshotRecord:
         with connect_sqlite(f"file:{self._path}?mode=ro", uri=True) as connection:
             connection.execute("BEGIN")
-            selection_row = connection.execute(
-                "SELECT selected_job_id FROM job_workspace WHERE workspace_id = 1"
-            ).fetchone()
             row = connection.execute(
                 "SELECT revision, snapshot_json FROM workspace_snapshots WHERE device_id = ?",
                 (device_id,),
             ).fetchone()
-        selected_job_id = selection_row[0] if selection_row else None
         if row is None:
-            return WorkspaceSnapshotRecord(0, canonical_workspace_snapshot(selected_job_id))
+            return WorkspaceSnapshotRecord(0, canonical_workspace_snapshot())
         try:
             raw: object = json.loads(row[1])
         except (TypeError, json.JSONDecodeError):
             raw = None
-        snapshot, repaired = normalize_workspace_snapshot(raw, selected_job_id)
+        snapshot, repaired = normalize_workspace_snapshot(raw, None)
         repaired_browser = bool(snapshot.pop("_repaired_browser", False))
         browser_repair_reasons = tuple(snapshot.pop("_browser_repair_reasons", ()))
         return WorkspaceSnapshotRecord(
@@ -1285,11 +1322,7 @@ class JobOsStateStore:
                     bool(result.get("repaired_browser", False)),
                     tuple(result.get("browser_repair_reasons", ())),
                 )
-            selection_row = connection.execute(
-                "SELECT selected_job_id FROM job_workspace WHERE workspace_id = 1"
-            ).fetchone()
-            selected_job_id = selection_row[0] if selection_row else None
-            normalized, repaired = normalize_workspace_snapshot(snapshot, selected_job_id)
+            normalized, repaired = normalize_workspace_snapshot(snapshot, None)
             repaired_browser = bool(normalized.pop("_repaired_browser", False))
             browser_repair_reasons = tuple(normalized.pop("_browser_repair_reasons", ()))
             payload = json.dumps(normalized, separators=(",", ":"), sort_keys=True)
@@ -1381,7 +1414,9 @@ class JobOsStateStore:
             connection.row_factory = sqlite3.Row
             rows = connection.execute(
                 """
-                SELECT conversation_id, position, title, owner_device_id, created_at, updated_at
+                SELECT conversation_id, position, title, owner_device_id, selected_job_id,
+                       active_artifact_id, active_artifact_page, active_artifact_zoom,
+                       created_at, updated_at
                 FROM conversations WHERE archived_at IS NULL
                   AND (? IS NULL OR owner_device_id = ?) ORDER BY position
                 """,
@@ -1389,7 +1424,9 @@ class JobOsStateStore:
             ).fetchall()
         return [dict(row) for row in rows]
 
-    def create_conversation(self, *, actor_id: str) -> dict[str, object]:
+    def create_conversation(
+        self, *, actor_id: str, selected_job_id: str | None = None
+    ) -> dict[str, object]:
         conversation_id = f"conv_{secrets.token_urlsafe(16)}"
         with connect_sqlite(self._path) as connection:
             connection.row_factory = sqlite3.Row
@@ -1409,10 +1446,10 @@ class JobOsStateStore:
             connection.execute(
                 """
                 INSERT INTO conversations(
-                    conversation_id, position, title, owner_device_id
-                ) VALUES (?, ?, ?, ?)
+                    conversation_id, position, title, owner_device_id, selected_job_id
+                ) VALUES (?, ?, ?, ?, ?)
                 """,
-                (conversation_id, position, title, actor_id),
+                (conversation_id, position, title, actor_id, selected_job_id),
             )
             connection.execute(
                 """
@@ -1441,6 +1478,103 @@ class JobOsStateStore:
             ).fetchone()
             connection.commit()
         return dict(row)
+
+    def conversation_job_context(
+        self, conversation_id: str, owner_device_id: str
+    ) -> dict[str, object]:
+        with connect_sqlite(f"file:{self._path}?mode=ro", uri=True) as connection:
+            connection.row_factory = sqlite3.Row
+            row = connection.execute(
+                """SELECT selected_job_id, active_artifact_id, active_artifact_page,
+                          active_artifact_zoom FROM conversations
+                   WHERE conversation_id = ? AND owner_device_id = ?
+                     AND archived_at IS NULL""",
+                (conversation_id, owner_device_id),
+            ).fetchone()
+        if row is None:
+            raise ConversationNotFound("Conversation not found")
+        return dict(row)
+
+    def select_conversation_job(
+        self,
+        conversation_id: str,
+        owner_device_id: str,
+        job_id: str | None,
+    ) -> dict[str, object]:
+        with connect_sqlite(self._path) as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute(
+                """SELECT selected_job_id FROM conversations
+                   WHERE conversation_id = ? AND owner_device_id = ?
+                     AND archived_at IS NULL""",
+                (conversation_id, owner_device_id),
+            ).fetchone()
+            if row is None:
+                connection.rollback()
+                raise ConversationNotFound("Conversation not found")
+            if row[0] != job_id:
+                connection.execute(
+                    """UPDATE conversations
+                       SET selected_job_id = ?, active_artifact_id = NULL,
+                           active_artifact_page = 1, active_artifact_zoom = 1.0,
+                           updated_at = CURRENT_TIMESTAMP
+                       WHERE conversation_id = ?""",
+                    (job_id, conversation_id),
+                )
+            connection.commit()
+        return self.conversation_job_context(conversation_id, owner_device_id)
+
+    def save_conversation_document_view(
+        self,
+        conversation_id: str,
+        owner_device_id: str,
+        *,
+        artifact_id: str | None,
+        page: int,
+        zoom: float,
+    ) -> dict[str, object]:
+        if page < 1 or not 0.5 <= zoom <= 3.0:
+            raise ValueError("Invalid document view")
+        with connect_sqlite(self._path) as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute(
+                """SELECT selected_job_id FROM conversations
+                   WHERE conversation_id = ? AND owner_device_id = ?
+                     AND archived_at IS NULL""",
+                (conversation_id, owner_device_id),
+            ).fetchone()
+            if row is None:
+                connection.rollback()
+                raise ConversationNotFound("Conversation not found")
+            if artifact_id is not None and (
+                row[0] is None
+                or connection.execute(
+                    """SELECT 1 FROM document_artifacts
+                       WHERE artifact_id = ? AND job_id = ?""",
+                    (artifact_id, row[0]),
+                ).fetchone()
+                is None
+            ):
+                connection.rollback()
+                raise ValueError("Active artifact does not belong to the selected job")
+            connection.execute(
+                """UPDATE conversations
+                   SET active_artifact_id = ?, active_artifact_page = ?,
+                       active_artifact_zoom = ?, updated_at = CURRENT_TIMESTAMP
+                   WHERE conversation_id = ?""",
+                (artifact_id, page, zoom, conversation_id),
+            )
+            connection.commit()
+        return self.conversation_job_context(conversation_id, owner_device_id)
+
+    def clear_job_from_conversations(self, job_id: str) -> None:
+        with connect_sqlite(self._path) as connection:
+            connection.execute(
+                """UPDATE conversations SET selected_job_id = NULL, active_artifact_id = NULL,
+                          active_artifact_page = 1, active_artifact_zoom = 1.0,
+                          updated_at = CURRENT_TIMESTAMP WHERE selected_job_id = ?""",
+                (job_id,),
+            )
 
     def archive_conversation(self, conversation_id: str, *, actor_id: str) -> None:
         with connect_sqlite(self._path) as connection:

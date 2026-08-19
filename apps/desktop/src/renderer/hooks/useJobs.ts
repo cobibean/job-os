@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 
-import type { JobDetail, JobListItem, JobSortMode, JobStatus } from '../../shared/contracts'
+import type { AgentSessionJobContext, JobDetail, JobListItem, JobSortMode, JobStatus } from '../../shared/contracts'
 
 const JOB_STATUSES = new Set<string>([
   'discovered', 'scored', 'reviewed', 'shortlisted', 'apply_now', 'maybe',
@@ -16,7 +16,11 @@ function statusChangeError(error: unknown): string {
   return 'Status change failed'
 }
 
-export function useJobs() {
+export function useJobs(
+  activeConversationId?: string | null,
+  activeJobContext?: AgentSessionJobContext | null,
+  onJobContextChange?: (conversationId: string, context: AgentSessionJobContext) => void
+) {
   const [jobs, setJobs] = useState<JobListItem[]>([])
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null)
   const [selectedJob, setSelectedJob] = useState<JobListItem | null>(null)
@@ -72,16 +76,16 @@ export function useJobs() {
   }, [bridge, query, sortMode, statusGroup])
 
   useEffect(() => {
+    const selected = activeJobContext?.selectedJobId ?? null
+    setSelectedJobId(selected)
+    setSelectedJob(jobs.find(job => job.jobId === selected) ?? null)
+    void loadDetail(selected)
+  }, [activeConversationId, activeJobContext?.selectedJobId, jobs, loadDetail])
+
+  useEffect(() => {
     if (!bridge) return
     const unsubscribe = bridge.subscribe(event => {
-      if (event.eventType === 'job_selected' && event.jobId) {
-        selectionRevision.current += 1
-        setSelectedJobId(event.jobId)
-        setSelectedJob(current => (
-          jobs.find(job => job.jobId === event.jobId) ?? current
-        ))
-        void loadDetail(event.jobId)
-      } else if (event.eventType === 'job_description_updated' && event.jobId === selectedJobId) {
+      if (event.eventType === 'job_description_updated' && event.jobId === selectedJobId) {
         void loadDetail(event.jobId)
       }
       setFeedback(event.origin === 'mcp' ? 'Agent changes synced' : 'Job changes synced')
@@ -108,11 +112,9 @@ export function useJobs() {
     bridge.getState().then(snapshot => {
       if (!active) return
       setJobs(snapshot.jobs)
-      if (selectionRevision.current === initialSelectionRevision) {
+      if (selectionRevision.current === initialSelectionRevision && activeJobContext === undefined) {
         setSelectedJobId(snapshot.selectedJobId)
-        setSelectedJob(
-          snapshot.jobs.find(job => job.jobId === snapshot.selectedJobId) ?? null
-        )
+        setSelectedJob(snapshot.jobs.find(job => job.jobId === snapshot.selectedJobId) ?? null)
         void loadDetail(snapshot.selectedJobId)
       }
       setSortMode(snapshot.sortMode)
@@ -124,7 +126,7 @@ export function useJobs() {
       setLoading(false)
     })
     return () => { active = false }
-  }, [bridge, loadDetail])
+  }, [activeJobContext, bridge, loadDetail])
 
   useEffect(() => {
     if (!bridge || !ready) return
@@ -133,11 +135,15 @@ export function useJobs() {
   }, [bridge, ready, refresh])
 
   const selectJob = useCallback(async (jobId: string) => {
-    if (!bridge) return false
+    if (!bridge || !activeConversationId) {
+      setError('No active session')
+      return false
+    }
     const requestRevision = selectionRevision.current + 1
     selectionRevision.current = requestRevision
     try {
-      await bridge.select(jobId)
+      const context = await bridge.select(activeConversationId, jobId)
+      onJobContextChange?.(activeConversationId, context)
       const [snapshot, refreshed] = await Promise.all([
         bridge.getState(),
         bridge.list(sortMode, query.trim() || undefined, statusGroup || undefined)
@@ -155,7 +161,7 @@ export function useJobs() {
       if (selectionRevision.current === requestRevision) setError('Selection failed')
       return false
     }
-  }, [bridge, loadDetail, query, sortMode, statusGroup])
+  }, [activeConversationId, bridge, loadDetail, onJobContextChange, query, sortMode, statusGroup])
 
   const changeStatus = useCallback(async (jobId: string, status: JobStatus) => {
     if (!bridge) return

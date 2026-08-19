@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import re
+from contextvars import ContextVar
 from math import log2
 from typing import Any
 from urllib.parse import quote
@@ -122,6 +123,9 @@ class JobOsMcpClient:
         mcp_token: str,
         transport: httpx.AsyncBaseTransport | None = None,
     ) -> None:
+        self._conversation_scope: ContextVar[str | None] = ContextVar(
+            "jobos_mcp_conversation_id", default=None
+        )
         self._client = httpx.AsyncClient(
             base_url=base_url,
             headers={
@@ -133,6 +137,11 @@ class JobOsMcpClient:
 
     async def aclose(self) -> None:
         await self._client.aclose()
+
+    def scope_conversation(self, conversation_id: str) -> None:
+        if not re.fullmatch(r"conv_[A-Za-z0-9_-]{1,128}", conversation_id):
+            raise ValueError("Invalid conversation ID")
+        self._conversation_scope.set(conversation_id)
 
     async def list_jobs(
         self,
@@ -211,9 +220,12 @@ class JobOsMcpClient:
     async def select_job(
         self, job_id: str, *, idempotency_key: str | None = None
     ) -> dict[str, Any]:
+        conversation_id = self._conversation_scope.get()
+        if conversation_id is None:
+            raise ValueError("Conversation ID is required")
         return await self._request(
             "PUT",
-            "/v1/workspace/jobs/selection",
+            f"/v1/conversations/{conversation_id}/workspace/job",
             json={"job_id": job_id, "origin": "mcp", "idempotency_key": self._key(idempotency_key)},
         )
 
@@ -452,10 +464,13 @@ class JobOsMcpClient:
     async def select_document(
         self, artifact_id: str, *, idempotency_key: str | None = None
     ) -> dict[str, Any]:
-        # This prerequisite read is internal to one document-selection action;
-        # omit MCP read metadata so the visible chronology receives one mutation row.
-        workspace = await self._request("GET", "/v1/workspace")
-        selected_job_id = workspace.get("selected_job_id")
+        conversation_id = self._conversation_scope.get()
+        if conversation_id is None:
+            raise ValueError("Conversation ID is required")
+        # These prerequisite reads are internal to one document-selection action;
+        # omit MCP read metadata so chronology receives one visible mutation.
+        workspace_jobs = await self._request("GET", "/v1/workspace/jobs")
+        selected_job_id = workspace_jobs.get("selected_job_id")
         if not isinstance(selected_job_id, str) or not selected_job_id:
             raise ValueError("Select a job before selecting one of its documents")
         documents = await self._request(
@@ -469,16 +484,17 @@ class JobOsMcpClient:
             for artifact in artifacts
         ):
             raise ValueError("Artifact is not registered for the selected job")
-        request_fields = {
-            "revision", "selected_preset", "layouts", "selected_job_id",
-            "active_center_surface", "browser_tabs", "active_browser_tab_id",
-            "active_artifact_id", "active_artifact_page", "active_artifact_zoom",
-            "active_top_level_workspace", "browse_mode", "browse_focus_job_id",
-            "browse_query", "browse_status_group", "browse_sort_mode", "browse_rail_width",
-        }
-        command = {key: workspace[key] for key in request_fields if key in workspace}
-        command.update({"active_artifact_id": artifact_id, "active_center_surface": "document"})
-        return await self.update_workspace(command, idempotency_key=idempotency_key)
+        return await self._request(
+            "PUT",
+            f"/v1/conversations/{conversation_id}/workspace/document",
+            json={
+                "active_artifact_id": artifact_id,
+                "active_artifact_page": 1,
+                "active_artifact_zoom": 1.0,
+                "origin": "mcp",
+                "idempotency_key": self._key(idempotency_key),
+            },
+        )
 
     async def inspect_document_file(
         self,
@@ -581,6 +597,11 @@ class JobOsMcpClient:
         )
 
     async def _request(self, method: str, path: str, **kwargs: Any) -> dict[str, Any]:
+        conversation_id = self._conversation_scope.get()
+        if conversation_id is not None:
+            params = dict(kwargs.pop("params", {}) or {})
+            params["conversation_id"] = conversation_id
+            kwargs["params"] = params
         try:
             response = await self._client.request(method, path, **kwargs)
         except httpx.HTTPError as error:

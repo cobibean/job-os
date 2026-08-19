@@ -6,6 +6,7 @@ from pydantic import Field
 from .agent_gateway import AgentGatewayFactory
 from .conversations import (
     ConnectionResponse,
+    ConversationJobContext,
     ConversationModel,
     ConversationResponse,
     ConversationService,
@@ -22,6 +23,7 @@ class ConversationSummary(ConversationModel):
     recovery_state: Literal["ready", "recovering", "quarantined"]
     latest_event_id: int
     created_at: str
+    job_context: ConversationJobContext
 
 
 class ConversationListResponse(ConversationModel):
@@ -103,6 +105,7 @@ class ConversationManager:
                         ),
                         latest_event_id=int(durable["latest_event_id"]),
                         created_at=str(durable["created_at"]),
+                        job_context=ConversationJobContext.model_validate(durable["job_context"]),
                     )
                 )
                 continue
@@ -117,13 +120,18 @@ class ConversationManager:
                     recovery_state=snapshot.recovery_state,
                     latest_event_id=snapshot.latest_event_id,
                     created_at=snapshot.created_at,
+                    job_context=snapshot.job_context,
                 )
             )
         return ConversationListResponse(conversations=conversations)
 
-    async def create(self, *, actor_id: str) -> ConversationResponse:
+    async def create(
+        self, *, actor_id: str, selected_job_id: str | None = None
+    ) -> ConversationResponse:
         async with self._lifecycle_lock:
-            summary = self.store.create_conversation(actor_id=actor_id)
+            summary = self.store.create_conversation(
+                actor_id=actor_id, selected_job_id=selected_job_id
+            )
             conversation_id = str(summary["conversation_id"])
             service: ConversationService | None = None
             try:

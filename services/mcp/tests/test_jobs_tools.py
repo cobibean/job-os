@@ -219,6 +219,7 @@ async def test_job_tools_use_only_the_authenticated_jobos_http_contract():
         mcp_token="test-mcp-trusted-token",
         transport=httpx.MockTransport(handler),
     )
+    client.scope_conversation("conv_test")
 
     await client.list_jobs(sort="status", query="builder")
     await client.inspect_job("job-1")
@@ -248,7 +249,7 @@ async def test_job_tools_use_only_the_authenticated_jobos_http_contract():
         ("GET", "/v1/jobs"),
         ("GET", "/v1/jobs/job-1"),
         ("POST", "/v1/jobs"),
-        ("PUT", "/v1/workspace/jobs/selection"),
+        ("PUT", "/v1/conversations/conv_test/workspace/job"),
         ("PUT", "/v1/jobs/order"),
         ("PUT", "/v1/jobs/job-1/status"),
         ("PUT", "/v1/jobs/job-1/description"),
@@ -526,7 +527,16 @@ async def test_mcp_server_exposes_public_v1_parity_tools_while_retaining_job_too
     correlated = [
         tool
         for tool in tools
-        if tool.name.startswith("browser_") or tool.name.startswith("document_")
+        if tool.name.startswith("browser_")
+        or tool.name.startswith("document_")
+        or tool.name
+        in {
+            "job_select",
+            "job_update_status",
+            "job_update_description",
+            "workspace_inspect",
+            "workspace_update",
+        }
     ]
     for tool in correlated:
         conversation = tool.inputSchema["properties"]["conversation_id"]
@@ -582,30 +592,13 @@ async def test_document_select_reads_workspace_silently_then_emits_one_shared_mu
 
     async def handler(request: httpx.Request) -> httpx.Response:
         requests.append(request)
-        if request.url.path == "/v1/workspace":
+        if request.url.path == "/v1/workspace/jobs":
             return httpx.Response(
                 200,
                 json={
-                    "revision": 3,
-                    "selected_preset": "research",
-                    "layouts": {
-                        name: {
-                            "order": ["jobs", "center", "agent"],
-                            "widths": {"jobs": 280, "center": 720, "agent": 360},
-                            "collapsed": [],
-                        }
-                        for name in ("research", "review", "agent-focus")
-                    },
                     "selected_job_id": "job-1",
-                    "active_center_surface": "browser",
-                    "browser_tabs": [],
-                    "active_browser_tab_id": None,
-                    "active_artifact_id": None,
-                    "active_artifact_page": 1,
-                    "active_artifact_zoom": 1.0,
-                    "repaired_presets": [],
-                    "repaired_browser": False,
-                    "browser_repair_reasons": ["dropped_tabs"],
+                    "sort_mode": "manual",
+                    "manual_order": [],
                 },
             )
         if request.method == "GET":
@@ -613,7 +606,17 @@ async def test_document_select_reads_workspace_silently_then_emits_one_shared_mu
                 200,
                 json={"artifacts": [{"artifact_id": "art_1234567890abcdef", "job_id": "job-1"}]},
             )
-        return httpx.Response(200, json={"revision": 4, "active_center_surface": "document"})
+        return httpx.Response(
+            200,
+            json={
+                "job_context": {
+                    "selected_job_id": "job-1",
+                    "active_artifact_id": "art_1234567890abcdef",
+                    "active_artifact_page": 1,
+                    "active_artifact_zoom": 1.0,
+                }
+            },
+        )
 
     client = JobOsMcpClient(
         base_url="http://jobos.test",
@@ -621,31 +624,18 @@ async def test_document_select_reads_workspace_silently_then_emits_one_shared_mu
         mcp_token="test-mcp-trusted-token",
         transport=httpx.MockTransport(handler),
     )
+    client.scope_conversation("conv_test")
     await client.select_document("art_1234567890abcdef", idempotency_key="select-document-1")
     await client.aclose()
 
     assert [(item.method, item.url.path) for item in requests] == [
-        ("GET", "/v1/workspace"),
+        ("GET", "/v1/workspace/jobs"),
         ("GET", "/v1/jobs/job-1/artifacts"),
-        ("PUT", "/v1/workspace"),
+        ("PUT", "/v1/conversations/conv_test/workspace/document"),
     ]
-    assert requests[0].url.query == b""
-    assert requests[1].url.query == b""
+    assert requests[0].url.params["conversation_id"] == "conv_test"
+    assert requests[1].url.params["conversation_id"] == "conv_test"
     assert json.loads(requests[2].content) == {
-        "revision": 3,
-        "selected_preset": "research",
-        "layouts": {
-            name: {
-                "order": ["jobs", "center", "agent"],
-                "widths": {"jobs": 280, "center": 720, "agent": 360},
-                "collapsed": [],
-            }
-            for name in ("research", "review", "agent-focus")
-        },
-        "selected_job_id": "job-1",
-        "active_center_surface": "document",
-        "browser_tabs": [],
-        "active_browser_tab_id": None,
         "active_artifact_id": "art_1234567890abcdef",
         "active_artifact_page": 1,
         "active_artifact_zoom": 1.0,

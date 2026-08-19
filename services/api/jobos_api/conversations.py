@@ -51,6 +51,30 @@ class ConnectionResponse(ConversationModel):
     state: Literal["online", "connecting", "offline"]
 
 
+class ConversationJobContext(ConversationModel):
+    selected_job_id: str | None = None
+    active_artifact_id: str | None = None
+    active_artifact_page: int = Field(default=1, ge=1)
+    active_artifact_zoom: float = Field(default=1.0, ge=0.5, le=3.0)
+
+
+class CreateConversationRequest(ConversationModel):
+    selected_job_id: str | None = Field(default=None, max_length=512)
+
+
+class ConversationDocumentViewRequest(ConversationModel):
+    active_artifact_id: str | None = Field(default=None, pattern=r"^art_[A-Za-z0-9_-]{16,80}$")
+    active_artifact_page: int = Field(default=1, ge=1, le=5000)
+    active_artifact_zoom: float = Field(default=1.0, ge=0.5, le=3.0)
+    origin: Literal["user", "mcp"] = "user"
+    idempotency_key: str | None = Field(default=None, min_length=8, max_length=200)
+
+
+class ConversationJobContextMutation(ConversationModel):
+    event_id: int
+    job_context: ConversationJobContext
+
+
 class ConversationResponse(ConversationModel):
     conversation_id: str
     title: str
@@ -61,6 +85,7 @@ class ConversationResponse(ConversationModel):
     connection: ConnectionResponse
     recovery_state: Literal["ready", "recovering", "quarantined"]
     latest_event_id: int
+    job_context: ConversationJobContext
 
 
 class ConversationService:
@@ -210,16 +235,18 @@ class ConversationService:
     def snapshot(self) -> ConversationResponse:
         snapshot = self.store.conversation_snapshot()
         recovery_turn_id = self.store.recovery_turn_id()
-        return ConversationResponse(
-            **snapshot,
-            connection=ConnectionResponse(state=self.gateway.connection_state),
-            recovery_state=(
-                "recovering"
-                if recovery_turn_id and snapshot.get("active_turn") is not None
-                else "quarantined"
-                if recovery_turn_id
-                else "ready"
-            ),
+        return ConversationResponse.model_validate(
+            {
+                **snapshot,
+                "connection": ConnectionResponse(state=self.gateway.connection_state),
+                "recovery_state": (
+                    "recovering"
+                    if recovery_turn_id and snapshot.get("active_turn") is not None
+                    else "quarantined"
+                    if recovery_turn_id
+                    else "ready"
+                ),
+            }
         )
 
     async def send(

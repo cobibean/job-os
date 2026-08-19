@@ -143,7 +143,7 @@ def test_initialization_applies_every_migration_once(tmp_path):
     first = store.initialize()
     second = store.initialize()
 
-    assert first.schema_version == SCHEMA_VERSION == 18
+    assert first.schema_version == SCHEMA_VERSION == 19
     assert second.schema_version == SCHEMA_VERSION
     assert applied_versions(database) == [
         1,
@@ -164,6 +164,7 @@ def test_initialization_applies_every_migration_once(tmp_path):
         16,
         17,
         18,
+        19,
     ]
     assert metadata_columns(database) == {"key", "value", "updated_at"}
 
@@ -220,6 +221,7 @@ def test_initialization_upgrades_a_behind_database(tmp_path):
         16,
         17,
         18,
+        19,
     ]
     assert metadata_columns(database) == {"key", "value", "updated_at"}
 
@@ -317,7 +319,7 @@ def test_migration_15_reconciles_dirty_v14_publications_deterministically(tmp_pa
             (document_id,),
         ).fetchone()
 
-    assert health.schema_version == 18
+    assert health.schema_version == 19
     assert associated == [
         ("art_old_pdf_1234567", "application/pdf", "source-shared"),
         ("art_old_docx_123456", docx_media, "source-shared"),
@@ -431,7 +433,7 @@ def test_migration_15_preserves_valid_owner_and_clears_mixed_wrong_owner_pointer
             (document_id,),
         ).fetchall()
 
-    assert health.schema_version == 18
+    assert health.schema_version == 19
     assert owner_state == (
         "art_owner_pdf_123456",
         "art_owner_pdf_123456",
@@ -619,7 +621,7 @@ def test_migration_15_detaches_every_malformed_v14_publication_and_allows_republ
             connection=connection,
         )
 
-    assert health.schema_version == 18
+    assert health.schema_version == 19
     assert detached == sorted((row[0],) for row in legacy_rows)
     assert state == (None, None, None, None)
     assert published == (None,)
@@ -688,7 +690,7 @@ def test_document_identity_migration_clears_legacy_docx_approval(tmp_path):
 @pytest.mark.parametrize(
     "versions",
     (
-        [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19],
+        [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20],
         [2],
     ),
 )
@@ -1003,7 +1005,7 @@ def test_startup_recovery_interrupts_stale_active_turn_once_without_deleting_his
     assert recovery[0]["detail"]["retry"] is True
 
 
-def test_workspace_snapshot_is_atomic_revisioned_and_preserves_job_selection(tmp_path):
+def test_workspace_snapshot_is_atomic_revisioned_and_strips_conversation_projection(tmp_path):
     database = tmp_path / "jobos.db"
     store = JobOsStateStore(database)
     store.initialize()
@@ -1025,7 +1027,7 @@ def test_workspace_snapshot_is_atomic_revisioned_and_preserves_job_selection(tmp
     )
 
     assert saved.revision == 1
-    assert store.workspace_snapshot("device-a").snapshot["selected_job_id"] == "job-7"
+    assert store.workspace_snapshot("device-a").snapshot["selected_job_id"] is None
 
     with pytest.raises(Exception, match="revision conflict"):
         store.save_workspace_snapshot(
@@ -1040,7 +1042,7 @@ def test_workspace_snapshot_is_atomic_revisioned_and_preserves_job_selection(tmp
     assert store.workspace_snapshot("device-a").revision == 1
 
 
-def test_stale_layout_snapshot_never_rolls_back_newer_job_selection(tmp_path):
+def test_layout_snapshot_is_independent_from_legacy_job_selection(tmp_path):
     database = tmp_path / "jobos.db"
     store = JobOsStateStore(database)
     store.initialize()
@@ -1060,9 +1062,9 @@ def test_stale_layout_snapshot_never_rolls_back_newer_job_selection(tmp_path):
         actor_id="device-a",
     )
 
-    assert saved.snapshot["selected_job_id"] == "job-2"
+    assert saved.snapshot["selected_job_id"] is None
     assert store.job_workspace_state().selected_job_id == "job-2"
-    assert store.workspace_snapshot("device-a").snapshot["selected_job_id"] == "job-2"
+    assert store.workspace_snapshot("device-a").snapshot["selected_job_id"] is None
 
 
 def test_workspace_snapshot_retry_is_idempotent_and_records_one_safe_audit(tmp_path):
@@ -1140,7 +1142,7 @@ def test_corrupt_layout_repairs_only_the_affected_preset(tmp_path):
     assert restored.repaired_presets == ("review",)
     assert restored.snapshot["layouts"]["review"] == initial.snapshot["layouts"]["review"]
     assert restored.snapshot["layouts"]["research"] == initial.snapshot["layouts"]["research"]
-    assert restored.snapshot["selected_job_id"] == "job-9"
+    assert restored.snapshot["selected_job_id"] is None
 
 
 def test_agent_focus_defaults_to_centered_chat_and_upgrades_only_the_legacy_stock_layout(
@@ -1320,7 +1322,7 @@ def test_mixed_browser_restore_repairs_entries_and_active_tab_without_resetting_
     assert "title-secret" not in json.dumps(restored.snapshot)
     assert restored.snapshot["selected_preset"] == "research"
     assert restored.snapshot["layouts"] == initial.snapshot["layouts"]
-    assert restored.snapshot["selected_job_id"] == "job-9"
+    assert restored.snapshot["selected_job_id"] is None
 
 
 @pytest.mark.parametrize(
@@ -1659,6 +1661,40 @@ def test_conversation_scope_isolates_busy_events_idempotency_and_sessions(tmp_pa
     assert second.stored_session_id() is None
     first.restore_isolated_agent_session(str(first_turn["turn_id"]))
     assert first.stored_session_id() == "ordinary-first"
+
+
+def test_conversation_job_selections_are_independent_and_restore_after_restart(tmp_path):
+    database = tmp_path / "conversation-jobs.db"
+    store = JobOsStateStore(database)
+    store.initialize(owner_device_id="device-a")
+    first_id = store.first_active_conversation_id("device-a")
+    second_id = str(
+        store.create_conversation(actor_id="device-a", selected_job_id="job-b")[
+            "conversation_id"
+        ]
+    )
+
+    first = store.select_conversation_job(first_id, "device-a", "job-a")
+    second = store.conversation_job_context(second_id, "device-a")
+
+    assert first == {
+        "selected_job_id": "job-a",
+        "active_artifact_id": None,
+        "active_artifact_page": 1,
+        "active_artifact_zoom": 1.0,
+    }
+    assert second == {
+        "selected_job_id": "job-b",
+        "active_artifact_id": None,
+        "active_artifact_page": 1,
+        "active_artifact_zoom": 1.0,
+    }
+
+    restored = JobOsStateStore(database)
+    assert restored.conversation_job_context(first_id, "device-a") == first
+    assert restored.conversation_job_context(second_id, "device-a") == second
+    with pytest.raises(ConversationNotFound, match="not found"):
+        restored.conversation_job_context(first_id, "device-b")
 
 
 def test_migration_claims_legacy_conversations_for_configured_device(tmp_path):

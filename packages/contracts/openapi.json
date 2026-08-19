@@ -863,6 +863,121 @@
         "title": "ConnectionResponse",
         "type": "object"
       },
+      "ConversationDocumentViewRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "active_artifact_id": {
+            "anyOf": [
+              {
+                "pattern": "^art_[A-Za-z0-9_-]{16,80}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Active Artifact Id"
+          },
+          "active_artifact_page": {
+            "default": 1,
+            "maximum": 5000.0,
+            "minimum": 1.0,
+            "title": "Active Artifact Page",
+            "type": "integer"
+          },
+          "active_artifact_zoom": {
+            "default": 1.0,
+            "maximum": 3.0,
+            "minimum": 0.5,
+            "title": "Active Artifact Zoom",
+            "type": "number"
+          },
+          "idempotency_key": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "minLength": 8,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Idempotency Key"
+          },
+          "origin": {
+            "default": "user",
+            "enum": [
+              "user",
+              "mcp"
+            ],
+            "title": "Origin",
+            "type": "string"
+          }
+        },
+        "title": "ConversationDocumentViewRequest",
+        "type": "object"
+      },
+      "ConversationJobContext": {
+        "additionalProperties": false,
+        "properties": {
+          "active_artifact_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Active Artifact Id"
+          },
+          "active_artifact_page": {
+            "default": 1,
+            "minimum": 1.0,
+            "title": "Active Artifact Page",
+            "type": "integer"
+          },
+          "active_artifact_zoom": {
+            "default": 1.0,
+            "maximum": 3.0,
+            "minimum": 0.5,
+            "title": "Active Artifact Zoom",
+            "type": "number"
+          },
+          "selected_job_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Selected Job Id"
+          }
+        },
+        "title": "ConversationJobContext",
+        "type": "object"
+      },
+      "ConversationJobContextMutation": {
+        "additionalProperties": false,
+        "properties": {
+          "event_id": {
+            "title": "Event Id",
+            "type": "integer"
+          },
+          "job_context": {
+            "$ref": "#/components/schemas/ConversationJobContext"
+          }
+        },
+        "required": [
+          "event_id",
+          "job_context"
+        ],
+        "title": "ConversationJobContextMutation",
+        "type": "object"
+      },
       "ConversationListResponse": {
         "additionalProperties": false,
         "properties": {
@@ -915,6 +1030,9 @@
             "title": "Entries",
             "type": "array"
           },
+          "job_context": {
+            "$ref": "#/components/schemas/ConversationJobContext"
+          },
           "latest_event_id": {
             "title": "Latest Event Id",
             "type": "integer"
@@ -946,7 +1064,8 @@
           "active_turn",
           "connection",
           "recovery_state",
-          "latest_event_id"
+          "latest_event_id",
+          "job_context"
         ],
         "title": "ConversationResponse",
         "type": "object"
@@ -976,6 +1095,9 @@
           "created_at": {
             "title": "Created At",
             "type": "string"
+          },
+          "job_context": {
+            "$ref": "#/components/schemas/ConversationJobContext"
           },
           "latest_event_id": {
             "title": "Latest Event Id",
@@ -1007,7 +1129,8 @@
           "connection",
           "recovery_state",
           "latest_event_id",
-          "created_at"
+          "created_at",
+          "job_context"
         ],
         "title": "ConversationSummary",
         "type": "object"
@@ -1042,6 +1165,25 @@
           "idempotency_key"
         ],
         "title": "CreateBlankRequest",
+        "type": "object"
+      },
+      "CreateConversationRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "selected_job_id": {
+            "anyOf": [
+              {
+                "maxLength": 512,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Selected Job Id"
+          }
+        },
+        "title": "CreateConversationRequest",
         "type": "object"
       },
       "CreateExternalImportRequest": {
@@ -4505,6 +4647,23 @@
       },
       "post": {
         "operationId": "conversation_create_v1_conversations_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/CreateConversationRequest"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Command"
+              }
+            }
+          }
+        },
         "responses": {
           "201": {
             "content": {
@@ -4535,6 +4694,16 @@
               }
             },
             "description": "Resource state conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Request validation failed"
           },
           "500": {
             "content": {
@@ -5135,6 +5304,164 @@
         "summary": "Conversation Retry",
         "tags": [
           "agent"
+        ]
+      }
+    },
+    "/v1/conversations/{conversation_id}/workspace/document": {
+      "put": {
+        "operationId": "conversation_save_document_view_v1_conversations__conversation_id__workspace_document_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "conversation_id",
+            "required": true,
+            "schema": {
+              "maxLength": 133,
+              "pattern": "^conv_[A-Za-z0-9_-]{1,128}$",
+              "title": "Conversation Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConversationDocumentViewRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConversationJobContextMutation"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Device authentication required"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Request validation failed"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Internal server error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Conversation Save Document View",
+        "tags": [
+          "workspace"
+        ]
+      }
+    },
+    "/v1/conversations/{conversation_id}/workspace/job": {
+      "put": {
+        "operationId": "conversation_select_job_v1_conversations__conversation_id__workspace_job_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "conversation_id",
+            "required": true,
+            "schema": {
+              "maxLength": 133,
+              "pattern": "^conv_[A-Za-z0-9_-]{1,128}$",
+              "title": "Conversation Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/JobSelectionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConversationJobContextMutation"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Device authentication required"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Request validation failed"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Internal server error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Conversation Select Job",
+        "tags": [
+          "workspace"
         ]
       }
     },
@@ -8622,6 +8949,22 @@
               ],
               "title": "Idempotency Key"
             }
+          },
+          {
+            "in": "query",
+            "name": "conversation_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Conversation Id"
+            }
           }
         ],
         "responses": {
@@ -8782,6 +9125,24 @@
     "/v1/workspace/jobs": {
       "get": {
         "operationId": "workspace_jobs_v1_workspace_jobs_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "conversation_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Conversation Id"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -8802,6 +9163,16 @@
               }
             },
             "description": "Device authentication required"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Request validation failed"
           },
           "500": {
             "content": {
@@ -8827,25 +9198,8 @@
     },
     "/v1/workspace/jobs/selection": {
       "put": {
-        "operationId": "workspace_select_job_v1_workspace_jobs_selection_put",
-        "parameters": [
-          {
-            "in": "header",
-            "name": "X-JobOS-MCP-Token",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Jobos-Mcp-Token"
-            }
-          }
-        ],
+        "deprecated": true,
+        "operationId": "workspace_select_job_deprecated_v1_workspace_jobs_selection_put",
         "requestBody": {
           "content": {
             "application/json": {
@@ -8877,7 +9231,7 @@
             },
             "description": "Device authentication required"
           },
-          "403": {
+          "410": {
             "content": {
               "application/json": {
                 "schema": {
@@ -8885,27 +9239,7 @@
                 }
               }
             },
-            "description": "Trusted MCP credential required"
-          },
-          "404": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiErrorResponse"
-                }
-              }
-            },
-            "description": "Resource not found"
-          },
-          "409": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiErrorResponse"
-                }
-              }
-            },
-            "description": "Resource state conflict"
+            "description": "Selection must target a conversation"
           },
           "422": {
             "content": {
@@ -8926,16 +9260,6 @@
               }
             },
             "description": "Internal server error"
-          },
-          "503": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiErrorResponse"
-                }
-              }
-            },
-            "description": "Required capability unavailable"
           }
         },
         "security": [
@@ -8943,7 +9267,7 @@
             "HTTPBearer": []
           }
         ],
-        "summary": "Workspace Select Job",
+        "summary": "Workspace Select Job Deprecated",
         "tags": [
           "workspace"
         ]

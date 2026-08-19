@@ -27,7 +27,13 @@ export function registerAgentIpc(
   trusted: (event: IpcMainInvokeEvent) => AgentClient
 ): void {
   ipc.handle('jobos:agent:list', event => trusted(event).list())
-  ipc.handle('jobos:agent:create', event => trusted(event).create())
+  ipc.handle('jobos:agent:create', (event, selectedJobId: unknown) => {
+    if (selectedJobId !== undefined && selectedJobId !== null
+      && (typeof selectedJobId !== 'string' || !selectedJobId || selectedJobId.length > 512)) {
+      throw new Error('Invalid initial job')
+    }
+    return trusted(event).create(selectedJobId as string | null | undefined)
+  })
   ipc.handle('jobos:agent:get', (event, conversation: unknown) => trusted(event).get(conversationId(conversation)))
   ipc.handle('jobos:agent:archive', (event, conversation: unknown) => trusted(event).archive(conversationId(conversation)))
   ipc.handle('jobos:agent:send', (event, conversation: unknown, text: unknown, key: unknown) => {

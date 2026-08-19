@@ -1,13 +1,14 @@
 import { randomUUID } from 'node:crypto'
 
 import {
+  conversationSaveDocumentViewV1ConversationsConversationIdWorkspaceDocumentPut,
   createJobOsApiClient,
   workspaceGetV1WorkspaceGet,
   workspacePutV1WorkspacePut
 } from '@jobos/contracts'
 import type { WorkspaceSnapshotResponse } from '@jobos/contracts'
 
-import type { BrowserTabMetadata, LayoutPreset, PanelId, WorkspaceSnapshot } from '../shared/contracts.js'
+import type { AgentSessionJobContext, BrowserTabMetadata, LayoutPreset, PanelId, WorkspaceSnapshot } from '../shared/contracts.js'
 import type { JobsConfig } from './jobs.js'
 
 interface ApiResult<T> { data?: T; error?: unknown; response?: Response }
@@ -129,6 +130,19 @@ export function createMainWorkspaceClient(config: JobsConfig) {
         })
       }
       return fromApi(unwrap(result, 'Workspace save failed'))
+    },
+    async saveDocumentView(conversationId: string, artifactId: string | null, page: number, zoom: number): Promise<AgentSessionJobContext> {
+      const result = unwrap(await conversationSaveDocumentViewV1ConversationsConversationIdWorkspaceDocumentPut({
+        client,
+        path: { conversation_id: conversationId },
+        body: { active_artifact_id: artifactId, active_artifact_page: page, active_artifact_zoom: zoom }
+      }), 'Document view save failed')
+      return {
+        selectedJobId: result.job_context.selected_job_id ?? null,
+        activeArtifactId: result.job_context.active_artifact_id ?? null,
+        activeArtifactPage: result.job_context.active_artifact_page ?? 1,
+        activeArtifactZoom: result.job_context.active_artifact_zoom ?? 1
+      }
     }
   }
 }

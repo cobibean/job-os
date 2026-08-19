@@ -9,7 +9,8 @@ afterEach(() => { cleanup(); window.localStorage.clear(); vi.restoreAllMocks() }
 
 const summary = (position: number, activeTurn: AgentSessionSummary['activeTurn'] = null): AgentSessionSummary => ({
   conversationId: `conv_${position}`, position, title: `Session ${position}`, createdAt: '2026-08-16T10:00:00Z',
-  activeTurn, connection: 'online', recoveryState: 'ready', latestEventId: 0
+  activeTurn, connection: 'online', recoveryState: 'ready', latestEventId: 0,
+  jobContext: { selectedJobId: null, activeArtifactId: null, activeArtifactPage: 1, activeArtifactZoom: 1 }
 })
 const snapshot = (position: number, entries: ConversationEvent[] = [], activeTurn: AgentSessionSummary['activeTurn'] = null): AgentConversationSnapshot => ({
   ...summary(position, activeTurn), entries, latestEventId: entries.at(-1)?.eventId ?? 0

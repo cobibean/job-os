@@ -7,6 +7,13 @@ import { isExpectedSaveNavigation } from './components/CenterWorkspace'
 
 afterEach(() => { cleanup(); window.localStorage.clear() })
 
+const emptyJobContext = {
+  selectedJobId: null,
+  activeArtifactId: null,
+  activeArtifactPage: 1,
+  activeArtifactZoom: 1
+}
+
 test('missing configuration opens setup without starting workbench services', async () => {
   const getConnectivity = vi.fn()
   const getJobs = vi.fn()
@@ -117,12 +124,12 @@ test('exact Command shortcuts create and select sessions from the composer witho
     created += 1
     return {
       conversationId: `conv-${created}`, position: created, title: `Session ${created}`, createdAt: '',
-      entries: [], activeTurn: null, connection: 'online' as const, latestEventId: 0
+      entries: [], activeTurn: null, connection: 'online' as const, latestEventId: 0, jobContext: emptyJobContext
     }
   })
   Object.defineProperty(window, 'jobos', { configurable: true, value: { agent: {
-    list: vi.fn().mockResolvedValue([{ conversationId: 'conv-1', position: 1, title: 'Session 1', createdAt: '', activeTurn: null, connection: 'online', latestEventId: 0 }]),
-    get: vi.fn().mockResolvedValue({ conversationId: 'conv-1', position: 1, title: 'Session 1', createdAt: '', entries: [], activeTurn: null, connection: 'online', latestEventId: 0 }),
+    list: vi.fn().mockResolvedValue([{ conversationId: 'conv-1', position: 1, title: 'Session 1', createdAt: '', activeTurn: null, connection: 'online', latestEventId: 0, jobContext: emptyJobContext }]),
+    get: vi.fn().mockResolvedValue({ conversationId: 'conv-1', position: 1, title: 'Session 1', createdAt: '', entries: [], activeTurn: null, connection: 'online', latestEventId: 0, jobContext: emptyJobContext }),
     create, archive: vi.fn(), send: vi.fn(), cancel: vi.fn(), retry: vi.fn(), subscribe: vi.fn(() => () => undefined)
   } } })
   render(<App />)
@@ -148,7 +155,7 @@ test('exact Command shortcuts create and select sessions from the composer witho
 test('Command 1 through Command 5 map to visible positions and Command N announces the five-session cap', async () => {
   const summaries = Array.from({ length: 5 }, (_, index) => ({
     conversationId: `conv-${index + 1}`, position: index + 1, title: `Session ${index + 1}`, createdAt: '',
-    activeTurn: null, connection: 'online' as const, latestEventId: 0
+    activeTurn: null, connection: 'online' as const, latestEventId: 0, jobContext: emptyJobContext
   }))
   const create = vi.fn()
   Object.defineProperty(window, 'jobos', { configurable: true, value: { agent: {
@@ -175,7 +182,7 @@ test('Command 1 through Command 5 map to visible positions and Command N announc
 test('Command session shortcuts are suppressed while Settings or any modal is open', async () => {
   const summaries = [1, 2].map(position => ({
     conversationId: `conv-${position}`, position, title: `Session ${position}`, createdAt: '',
-    activeTurn: null, connection: 'online' as const, latestEventId: 0
+    activeTurn: null, connection: 'online' as const, latestEventId: 0, jobContext: emptyJobContext
   }))
   const create = vi.fn()
   Object.defineProperty(window, 'jobos', { configurable: true, value: { agent: {
@@ -231,7 +238,7 @@ test('auth degradation is distinct from network unavailability', async () => {
 })
 
 test('real jobs render compactly and user selection and status use the shared bridge', async () => {
-  const select = vi.fn().mockResolvedValue({ eventId: 1 })
+  const select = vi.fn().mockImplementation(async (_conversationId, jobId) => ({ ...emptyJobContext, selectedJobId: jobId }))
   const updateStatus = vi.fn().mockResolvedValue({
     eventId: 2,
     job: {
@@ -282,7 +289,7 @@ test('real jobs render compactly and user selection and status use the shared br
   render(<App />)
   const job = await screen.findByRole('button', { name: 'Select Example Co Product Builder' })
   fireEvent.click(job)
-  await waitFor(() => expect(select).toHaveBeenCalledWith('job-1'))
+  await waitFor(() => expect(select).toHaveBeenCalledWith('conv_unavailable', 'job-1'))
   await screen.findByText('Example Co · Product Builder')
   fireEvent.change(screen.getByRole('combobox', { name: 'Change Example Co status' }), {
     target: { value: 'reviewed' }
@@ -535,7 +542,11 @@ function setupJobListingNavigation(initialTabs: Array<{
     { ...browserTabs[0]!, tabId: 'created', url, title: 'Northstar', associatedJobId: jobId }
   ])))
   const select = vi.fn((tabId: string) => Promise.resolve(browserState(tabId)))
-  const selectJob = vi.fn().mockResolvedValue({ eventId: 1 })
+  const sessionJobContext = { ...emptyJobContext, selectedJobId }
+  const selectJob = vi.fn().mockImplementation(async (_conversationId: string, jobId: string) => ({
+    ...emptyJobContext,
+    selectedJobId: jobId
+  }))
   const workspace = {
     revision: 1,
     selectedPreset: 'research' as const,
@@ -560,6 +571,18 @@ function setupJobListingNavigation(initialTabs: Array<{
     configurable: true,
     value: {
       connectivity: { get: vi.fn().mockRejectedValue(new Error('offline')) },
+      agent: {
+        list: vi.fn().mockResolvedValue([{
+          conversationId: 'conv-1', position: 1, title: 'Session 1', createdAt: '',
+          activeTurn: null, connection: 'online', latestEventId: 0, jobContext: sessionJobContext
+        }]),
+        get: vi.fn().mockResolvedValue({
+          conversationId: 'conv-1', position: 1, title: 'Session 1', createdAt: '', entries: [],
+          activeTurn: null, connection: 'online', latestEventId: 0, jobContext: sessionJobContext
+        }),
+        create: vi.fn(), archive: vi.fn(), send: vi.fn(), cancel: vi.fn(), retry: vi.fn(),
+        subscribe: vi.fn().mockReturnValue(() => undefined)
+      },
       jobs: {
         getState: vi.fn().mockResolvedValue({ jobs: navigationJobs, selectedJobId, sortMode: 'manual', manualOrder: ['job-1', 'job-2'] }),
         list: vi.fn().mockResolvedValue(navigationJobs), select: selectJob, reorder: vi.fn(), setSort: vi.fn(), updateStatus: vi.fn(),
@@ -592,7 +615,7 @@ test('clicking a job opens its listing in a new associated tab without disturbin
   fireEvent.click(await screen.findByRole('button', { name: 'Select Northstar Staff PM' }))
 
   await waitFor(() => expect(actions.create).toHaveBeenCalledWith(navigationJobs[1]!.canonicalUrl, navigationJobs[1]!.jobId))
-  expect(actions.selectJob).toHaveBeenCalledWith(navigationJobs[1]!.jobId)
+  expect(actions.selectJob).toHaveBeenCalledWith('conv-1', navigationJobs[1]!.jobId)
   expect(screen.getByRole('tab', { name: 'Select Gmail' })).not.toBeNull()
   expect(await screen.findByRole('tab', { name: 'Select Northstar' })).not.toBeNull()
   expect(actions.close).not.toHaveBeenCalled()
@@ -617,8 +640,8 @@ test('overlapping navigator selections only open the latest clicked job', async 
     { tabId: 'gmail', url: 'https://mail.google.com/', title: 'Gmail', associatedJobId: null }
   ])
   const resolveSelection = new Map<string, () => void>()
-  actions.selectJob.mockImplementation((jobId: string) => new Promise(resolve => {
-    resolveSelection.set(jobId, () => resolve({ eventId: 1 }))
+  actions.selectJob.mockImplementation((_conversationId: string, jobId: string) => new Promise(resolve => {
+    resolveSelection.set(jobId, () => resolve({ ...emptyJobContext, selectedJobId: jobId }))
   }))
 
   render(<App />)
@@ -630,7 +653,7 @@ test('overlapping navigator selections only open the latest clicked job', async 
   await act(async () => { resolveSelection.get('job-2')?.() })
   await waitFor(() => expect(actions.create).toHaveBeenCalledWith(navigationJobs[1]!.canonicalUrl, navigationJobs[1]!.jobId))
 
-  expect(actions.selectJob.mock.calls.map(([jobId]) => jobId)).toEqual(['job-1', 'job-2'])
+  expect(actions.selectJob.mock.calls.map(([, jobId]) => jobId)).toEqual(['job-1', 'job-2'])
   expect(actions.create).toHaveBeenCalledTimes(1)
   expect(screen.getByText('Northstar · Staff PM')).not.toBeNull()
 })
@@ -674,10 +697,10 @@ test('startup selection does not open a job listing tab', async () => {
   expect(actions.select).not.toHaveBeenCalled()
 })
 
-test('an MCP job selection does not open a job listing tab', async () => {
+test('a global MCP job selection cannot replace the active session job', async () => {
   const actions = setupJobListingNavigation([
     { tabId: 'gmail', url: 'https://mail.google.com/', title: 'Gmail', associatedJobId: null }
-  ])
+  ], 'job-1')
 
   render(<App />)
   await screen.findByRole('button', { name: 'Select Northstar Staff PM' })
@@ -685,7 +708,8 @@ test('an MCP job selection does not open a job listing tab', async () => {
     actions.emitJobEvent({ eventId: 4, eventType: 'job_selected', origin: 'mcp', jobId: 'job-2' })
   })
 
-  expect(await screen.findByText('Northstar · Staff PM')).not.toBeNull()
+  expect(screen.getByText('Example Co · Product Builder')).not.toBeNull()
+  expect(screen.queryByText('Northstar · Staff PM')).toBeNull()
   expect(actions.create).not.toHaveBeenCalled()
   expect(actions.select).not.toHaveBeenCalled()
 })
@@ -736,7 +760,7 @@ test('filtering the list never clears the active job context', async () => {
       connectivity: { get: vi.fn().mockRejectedValue(new Error('offline')) },
       jobs: {
         getState: vi.fn().mockResolvedValue({ jobs: [apollo, northstar], selectedJobId: null, sortMode: 'manual', manualOrder: ['apollo', 'northstar'] }),
-        list: vi.fn().mockResolvedValue([apollo]), select: vi.fn().mockResolvedValue({ eventId: 1 }),
+        list: vi.fn().mockResolvedValue([apollo]), select: vi.fn().mockImplementation(async (_conversationId, jobId) => ({ ...emptyJobContext, selectedJobId: jobId })),
         reorder: vi.fn(), setSort: vi.fn(), updateStatus: vi.fn(),
         subscribe: vi.fn().mockReturnValue(() => undefined)
       }
@@ -758,16 +782,17 @@ test('changing selected jobs preserves one mounted durable agent conversation an
   ]
   const conversationGet = vi.fn().mockResolvedValue({
     conversationId: 'conv-current', position: 1, title: 'Session 1', createdAt: '', activeTurn: null, connection: 'online', latestEventId: 1,
-    entries: [{ eventId: 1, turnId: 'turn-1', type: 'assistant_message', state: 'completed', summary: 'Persistent response', detail: { type: 'message.complete' }, occurredAt: '2026-07-20T10:00:00Z' }]
+    entries: [{ eventId: 1, turnId: 'turn-1', type: 'assistant_message', state: 'completed', summary: 'Persistent response', detail: { type: 'message.complete' }, occurredAt: '2026-07-20T10:00:00Z' }],
+    jobContext: { ...emptyJobContext, selectedJobId: 'job-1' }
   })
   Object.defineProperty(window, 'jobos', { configurable: true, value: {
     connectivity: { get: vi.fn().mockResolvedValue({ state: 'connected', apiVersion: '0.1.0', checkedAt: '', message: 'Private API authenticated' }) },
     jobs: {
       getState: vi.fn().mockResolvedValue({ jobs, selectedJobId: 'job-1', sortMode: 'manual', manualOrder: ['job-1', 'job-2'] }),
-      list: vi.fn().mockResolvedValue(jobs), select: vi.fn().mockResolvedValue({ eventId: 2 }), reorder: vi.fn(), setSort: vi.fn(), updateStatus: vi.fn(), subscribe: vi.fn(() => () => undefined)
+      list: vi.fn().mockResolvedValue(jobs), select: vi.fn().mockImplementation(async (_conversationId, jobId) => ({ ...emptyJobContext, selectedJobId: jobId })), reorder: vi.fn(), setSort: vi.fn(), updateStatus: vi.fn(), subscribe: vi.fn(() => () => undefined)
     },
     agent: {
-      list: vi.fn().mockResolvedValue([{ conversationId: 'conv-current', position: 1, title: 'Session 1', createdAt: '', activeTurn: null, connection: 'online', latestEventId: 1 }]),
+      list: vi.fn().mockResolvedValue([{ conversationId: 'conv-current', position: 1, title: 'Session 1', createdAt: '', activeTurn: null, connection: 'online', latestEventId: 1, jobContext: { ...emptyJobContext, selectedJobId: 'job-1' } }]),
       create: vi.fn(), archive: vi.fn(), get: conversationGet, send: vi.fn(), cancel: vi.fn(), retry: vi.fn(), subscribe: vi.fn(() => () => undefined)
     }
   } })
@@ -876,7 +901,7 @@ test('a first action after failed startup hydration replays over remote state af
     revision: 11,
     selectedPreset: 'agent-focus',
     activeCenterSurface: 'document',
-    selectedJobId: 'remote-job'
+    selectedJobId: null
   })
   expect(recoveredSave.layouts.research).toEqual(remote.layouts.research)
   expect(recoveredSave.layouts.review).toEqual(remote.layouts.review)
@@ -1008,7 +1033,7 @@ test('creating an additive session leaves the active native browser surface atta
   const setBounds = vi.fn().mockImplementation(bounds => bounds.visible ? Promise.resolve() : detached)
   const createSession = vi.fn().mockResolvedValue({
     conversationId: 'conv-2', position: 2, title: 'Session 2', createdAt: '', entries: [],
-    activeTurn: null, connection: 'online', latestEventId: 0
+    activeTurn: null, connection: 'online', latestEventId: 0, jobContext: emptyJobContext
   })
   const rect = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue(
     DOMRect.fromRect({ x: 100, y: 120, width: 800, height: 500 })
@@ -1018,9 +1043,9 @@ test('creating an additive session leaves the active native browser surface atta
     value: {
       connectivity: { get: vi.fn().mockResolvedValue({ state: 'connected', checkedAt: '', message: 'Private API authenticated' }) },
       agent: {
-        list: vi.fn().mockResolvedValue([{ conversationId: 'conv-1', position: 1, title: 'Session 1', createdAt: '', activeTurn: null, connection: 'online', latestEventId: 0 }]),
+        list: vi.fn().mockResolvedValue([{ conversationId: 'conv-1', position: 1, title: 'Session 1', createdAt: '', activeTurn: null, connection: 'online', latestEventId: 0, jobContext: emptyJobContext }]),
         create: createSession, archive: vi.fn(),
-        get: vi.fn().mockResolvedValue({ conversationId: 'conv-1', position: 1, title: 'Session 1', createdAt: '', entries: [], activeTurn: null, connection: 'online', latestEventId: 0 }),
+        get: vi.fn().mockResolvedValue({ conversationId: 'conv-1', position: 1, title: 'Session 1', createdAt: '', entries: [], activeTurn: null, connection: 'online', latestEventId: 0, jobContext: emptyJobContext }),
         send: vi.fn(), cancel: vi.fn(), retry: vi.fn(), subscribe: vi.fn().mockReturnValue(() => undefined)
       },
       workspace: {
@@ -1524,7 +1549,7 @@ test('Browse focus stays local until Open job commits selection and listing navi
     { jobId: 'one', company: 'Alpha', title: 'Builder', status: 'discovered', statusGroup: 'Inbox', canonicalUrl: 'https://example.com/one', discoveredAt: '2026-01-01', lastSeenAt: '2026-01-01' },
     { jobId: 'two', company: 'Beta', title: 'Designer', status: 'reviewed', statusGroup: 'Considering', canonicalUrl: 'https://example.com/two', discoveredAt: '2026-01-02', lastSeenAt: '2026-01-02' }
   ]
-  const select = vi.fn().mockResolvedValue({ eventId: 1 })
+  const select = vi.fn().mockImplementation(async (_conversationId, jobId) => ({ ...emptyJobContext, selectedJobId: jobId }))
   const create = vi.fn().mockImplementation((url, jobId) => Promise.resolve({
     tabs: [{ tabId: 'opened', url, title: 'Opened', faviconUrl: null, associatedJobId: jobId, loading: false, canGoBack: false, canGoForward: false, error: null, crashed: false, blockedUrl: null }],
     activeTabId: 'opened', download: null, notice: null
@@ -1554,7 +1579,7 @@ test('Browse focus stays local until Open job commits selection and listing navi
   expect(create).not.toHaveBeenCalled()
 
   fireEvent.click(screen.getByRole('button', { name: 'Open job' }))
-  await waitFor(() => expect(select).toHaveBeenCalledWith('two'))
+  await waitFor(() => expect(select).toHaveBeenCalledWith('conv_unavailable', 'two'))
   await waitFor(() => expect(create).toHaveBeenCalledWith('https://example.com/two', 'two'))
   await waitFor(() => expect(screen.getByRole('button', { name: 'Research' }).getAttribute('aria-pressed')).toBe('true'))
 })
@@ -1568,7 +1593,7 @@ test('failed Open job navigation remains in Browse and is announced', async () =
     jobs: {
       getState: vi.fn().mockResolvedValue({ jobs, selectedJobId: null, sortMode: 'manual', manualOrder: ['one'] }),
       list: vi.fn().mockResolvedValue(jobs), inspect: vi.fn(async () => ({ ...jobs[0]!, description: 'Detail', location: null })),
-      select: vi.fn().mockResolvedValue({ eventId: 1 }), reorder: vi.fn(), setSort: vi.fn(), updateStatus: vi.fn(), subscribe: vi.fn(() => () => undefined)
+      select: vi.fn().mockImplementation(async (_conversationId, jobId) => ({ ...emptyJobContext, selectedJobId: jobId })), reorder: vi.fn(), setSort: vi.fn(), updateStatus: vi.fn(), subscribe: vi.fn(() => () => undefined)
     },
     browser: {
       restore: vi.fn().mockResolvedValue({ tabs: [], activeTabId: null, download: null, notice: null }),

@@ -54,7 +54,7 @@ def test_health_reports_truthful_public_capability_states(tmp_path):
         "status": "ready",
         "service": "jobos-api",
         "version": "0.1.0",
-        "state_schema": 18,
+        "state_schema": 19,
         "transport": "local-loopback",
         "agent": "not-configured",
         "artifact_storage": "available",
@@ -207,6 +207,8 @@ def test_version_and_openapi_describe_the_shared_workspace_contract(tmp_path):
         "/v1/conversations/current",
         "/v1/conversations/events/stream",
         "/v1/conversations/{conversation_id}",
+        "/v1/conversations/{conversation_id}/workspace/job",
+        "/v1/conversations/{conversation_id}/workspace/document",
         "/v1/conversations/{conversation_id}/messages",
         "/v1/conversations/{conversation_id}/turns/{turn_id}/cancel",
         "/v1/conversations/{conversation_id}/turns/{turn_id}/retry",
@@ -296,7 +298,7 @@ def test_version_and_openapi_describe_the_shared_workspace_contract(tmp_path):
                 assert response["content"]["application/json"]["schema"] == {
                     "$ref": "#/components/schemas/ApiErrorResponse"
                 }
-    assert documented_errors < 250
+    assert documented_errors < 270
     assert set(schemas["JobListItem"]["required"]) == {
         "job_id",
         "company",
