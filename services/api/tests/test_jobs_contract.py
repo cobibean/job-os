@@ -1517,11 +1517,16 @@ def test_trusted_mcp_can_publish_paired_pdf_and_docx_into_one_logical_revision(
     }
     assert {artifact["source_revision"] for artifact in artifacts} == {sha256(source).hexdigest()}
     assert replay.json() == docx.json()
-    assert len(facade.artifacts["job-0"]) == 2
-    assert all(
-        Path(artifact["path"]).is_relative_to(tmp_path)
-        for artifact in facade.artifacts["job-0"]
-    )
+    assert facade.publish_calls == []
+    with sqlite3.connect(tmp_path / "jobos.db") as connection:
+        stored_paths = [
+            Path(row[0])
+            for row in connection.execute(
+                "SELECT canonical_path FROM document_artifacts ORDER BY render_sequence"
+            ).fetchall()
+        ]
+    assert all(path.is_relative_to(tmp_path / "artifacts") for path in stored_paths)
+    assert all("agent-publications" in path.parts for path in stored_paths)
 
 
 def test_editable_document_publish_pairs_docx_pdf_marks_revision_and_replays(

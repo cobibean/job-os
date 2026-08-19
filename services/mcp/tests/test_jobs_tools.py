@@ -1,13 +1,22 @@
 import base64
 import json
 import os
+from pathlib import Path
 
 import httpx
 import jobos_mcp.server as server_module
 import pytest
 from jobos_api.redaction import sanitize_text
 from jobos_mcp.jobs import JobOsMcpClient, JobOsMcpError, _safe_error_message
-from jobos_mcp.server import _document_import_roots, _read_document_input, create_server
+from jobos_mcp.server import (
+    _document_artifact_root,
+    _existing_document_publication_workspace,
+    _prepare_document_publication_workspace,
+    _read_document_input,
+    _read_publication_input,
+    create_server,
+)
+from mcp.server.fastmcp.exceptions import ToolError  # type: ignore[import-not-found]
 
 
 @pytest.mark.parametrize("value", ["../job", "job/other", "job\\other", "job\nother", ""])
@@ -426,7 +435,9 @@ def test_document_input_rejects_same_inode_same_size_in_place_mutation(tmp_path,
     assert changed.st_size == identity.st_size
 
 
-def test_document_roots_use_explicit_local_config_and_never_cwd_or_hermes(tmp_path, monkeypatch):
+def test_document_artifact_root_uses_local_config_and_never_cwd_or_hermes(
+    tmp_path, monkeypatch
+):
     working = tmp_path / "working"
     working.mkdir()
     hermes = tmp_path / ".hermes/profiles/job-hunter/cache/documents"
@@ -434,10 +445,10 @@ def test_document_roots_use_explicit_local_config_and_never_cwd_or_hermes(tmp_pa
     monkeypatch.chdir(working)
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setenv("JOBOS_CONFIG_PATH", str(tmp_path / "missing-config.json"))
-    monkeypatch.delenv("JOBOS_DOCUMENT_ROOTS", raising=False)
+    monkeypatch.setenv("JOBOS_DOCUMENT_ROOTS", str(hermes))
 
-    with pytest.raises(RuntimeError, match="JOBOS_DOCUMENT_ROOTS or a valid JobOS local config"):
-        _document_import_roots()
+    with pytest.raises(RuntimeError, match="valid JobOS local config"):
+        _document_artifact_root()
 
     artifacts = tmp_path / "application-data/artifacts"
     artifacts.mkdir(parents=True)
@@ -452,24 +463,162 @@ def test_document_roots_use_explicit_local_config_and_never_cwd_or_hermes(tmp_pa
         encoding="utf-8",
     )
     monkeypatch.setenv("JOBOS_CONFIG_PATH", str(config))
-    assert _document_import_roots() == (artifacts.resolve(),)
-    assert working.resolve() not in _document_import_roots()
-    assert hermes.resolve() not in _document_import_roots()
+    assert _document_artifact_root() == artifacts.resolve()
+    assert _document_artifact_root() != working.resolve()
+    assert _document_artifact_root() != hermes.resolve()
 
 
-def test_document_roots_reject_symlink_configuration(tmp_path, monkeypatch):
-    target = tmp_path / "target"
-    target.mkdir()
-    link = tmp_path / "link"
-    os.symlink(target, link)
-    monkeypatch.setenv("JOBOS_DOCUMENT_ROOTS", str(link))
+def test_publication_workspace_is_app_owned_session_scoped_and_stable(tmp_path):
+    artifact_root = tmp_path / "artifacts"
+    artifact_root.mkdir()
+
+    first = _prepare_document_publication_workspace(
+        "conv_alpha", "job:123", artifact_root=artifact_root
+    )
+    repeated = _prepare_document_publication_workspace(
+        "conv_alpha", "job:123", artifact_root=artifact_root
+    )
+    other_session = _prepare_document_publication_workspace(
+        "conv_beta", "job:123", artifact_root=artifact_root
+    )
+
+    assert first == repeated
+    assert first.parent.parent == artifact_root / "publication-inbox"
+    assert first != other_session
+    assert first.is_dir()
+    assert first.stat().st_mode & 0o777 == 0o700
+    assert "job:123" not in str(first)
+
+
+def test_publication_workspace_rejects_symlinked_inbox(tmp_path):
+    artifact_root = tmp_path / "artifacts"
+    artifact_root.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (artifact_root / "publication-inbox").symlink_to(outside, target_is_directory=True)
 
     with pytest.raises(RuntimeError, match="symbolic links"):
-        _document_import_roots()
+        _prepare_document_publication_workspace(
+            "conv_alpha", "job-1", artifact_root=artifact_root
+        )
 
-    monkeypatch.setenv("JOBOS_DOCUMENT_ROOTS", "relative/documents")
-    with pytest.raises(RuntimeError, match="absolute paths"):
-        _document_import_roots()
+
+def test_publication_workspace_rejects_parent_replaced_by_symlink(tmp_path):
+    artifact_root = tmp_path / "artifacts"
+    artifact_root.mkdir()
+    workspace = _prepare_document_publication_workspace(
+        "conv_alpha", "job-1", artifact_root=artifact_root
+    )
+    conversation_directory = workspace.parent
+    held = conversation_directory.with_name(f"{conversation_directory.name}-held")
+    conversation_directory.rename(held)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / workspace.name).mkdir()
+    conversation_directory.symlink_to(outside, target_is_directory=True)
+
+    with pytest.raises(RuntimeError, match="symbolic links"):
+        _existing_document_publication_workspace(
+            "conv_alpha", "job-1", artifact_root=artifact_root
+        )
+
+
+def test_publication_read_cannot_follow_parent_swapped_after_workspace_check(
+    tmp_path, monkeypatch
+):
+    artifact_root = tmp_path / "artifacts"
+    artifact_root.mkdir()
+    workspace = _prepare_document_publication_workspace(
+        "conv_alpha", "job-1", artifact_root=artifact_root
+    )
+    target = workspace / "resume.docx"
+    target.write_bytes(b"inside document")
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / target.name).write_bytes(b"outside private bytes")
+    held = workspace.parent.with_name(f"{workspace.parent.name}-held")
+    original_check = server_module._existing_document_publication_workspace
+
+    def check_then_swap(*args, **kwargs):
+        checked = original_check(*args, **kwargs)
+        checked.parent.rename(held)
+        checked.parent.symlink_to(outside, target_is_directory=True)
+        return checked
+
+    monkeypatch.setattr(
+        server_module, "_existing_document_publication_workspace", check_then_swap
+    )
+    with pytest.raises(ValueError, match="symbolic link|inaccessible component"):
+        _read_publication_input(
+            str(target),
+            conversation_id="conv_alpha",
+            job_id="job-1",
+            artifact_root=artifact_root,
+            maximum=100,
+            suffixes={".docx"},
+        )
+
+
+@pytest.mark.anyio
+async def test_publication_prepare_and_publish_use_only_the_app_owned_inbox(tmp_path):
+    requests = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, json={"job_id": "job-1", "artifacts": []})
+
+    artifact_root = tmp_path / "artifacts"
+    artifact_root.mkdir()
+    client = JobOsMcpClient(
+        base_url="http://jobos.test",
+        device_token="test-device-token",
+        mcp_token="test-mcp-trusted-token",
+        transport=httpx.MockTransport(handler),
+    )
+    server = create_server(client, artifact_root=artifact_root)
+
+    _, prepared = await server.call_tool(
+        "document_publication_prepare",
+        {"conversation_id": "conv_alpha", "job_id": "job-1"},
+    )
+    assert isinstance(prepared, dict)
+    workspace = Path(prepared["publication_directory"])
+    source = workspace / "resume.md"
+    artifact = workspace / "resume.docx"
+    source.write_text("Resume source", encoding="utf-8")
+    artifact.write_bytes(b"PK\x03\x04fixture")
+
+    _, published = await server.call_tool(
+        "document_publish",
+        {
+            "conversation_id": "conv_alpha",
+            "job_id": "job-1",
+            "document_key": "resume",
+            "document_label": "Resume",
+            "source_path": str(source),
+            "artifact_path": str(artifact),
+            "idempotency_key": "publish-1",
+        },
+    )
+    assert isinstance(published, dict)
+    assert len(requests) == 1
+
+    outside = tmp_path / "outside.docx"
+    outside.write_bytes(b"PK\x03\x04private")
+    with pytest.raises(ToolError, match="document_publication_prepare"):
+        await server.call_tool(
+            "document_publish",
+            {
+                "conversation_id": "conv_alpha",
+                "job_id": "job-1",
+                "document_key": "resume",
+                "document_label": "Resume",
+                "source_path": str(source),
+                "artifact_path": str(outside),
+            },
+        )
+    assert len(requests) == 1
+    await client.aclose()
 
 
 @pytest.mark.anyio
@@ -502,6 +651,7 @@ async def test_mcp_server_exposes_public_v1_parity_tools_while_retaining_job_too
         "document_refresh",
         "document_render",
         "document_register",
+        "document_publication_prepare",
         "document_publish",
         "document_approve",
         "document_select",
@@ -524,6 +674,13 @@ async def test_mcp_server_exposes_public_v1_parity_tools_while_retaining_job_too
         "browser_scroll",
         "activity_report",
     ]
+    tools_by_name = {tool.name: tool for tool in tools}
+    assert "before generating a resume or cover letter" in (
+        tools_by_name["document_publication_prepare"].description or ""
+    )
+    assert "Other filesystem paths are never read" in (
+        tools_by_name["document_publish"].description or ""
+    )
     correlated = [
         tool
         for tool in tools

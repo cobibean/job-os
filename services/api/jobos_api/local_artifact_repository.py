@@ -377,6 +377,23 @@ class LocalArtifactRepository:
         finally:
             self._close_descriptors(directory.descriptors)
 
+    def store_agent_publication(
+        self,
+        *,
+        job_id: str,
+        document_key: str,
+        source_revision: str,
+        artifact: ArtifactWrite,
+    ) -> StoredArtifact:
+        directory = self._open_directory_chain(
+            "agent-publications", job_id, document_key, source_revision
+        )
+        try:
+            stored, _ = self._store_in(directory, artifact)
+            return stored
+        finally:
+            self._close_descriptors(directory.descriptors)
+
     def store_publication_pair(
         self,
         *,

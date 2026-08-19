@@ -97,9 +97,13 @@ pnpm contracts:check
 ```
 
 The MCP adapter maps those application operations and errors rather than
-reimplementing domain behavior. MCP file publication accepts only explicit
-`JOBOS_DOCUMENT_ROOTS` or the artifact root from local `config.json`; it does not
-trust the process working directory or a Hermes profile directory.
+reimplementing domain behavior. MCP file publication has one app-owned route:
+`document_publication_prepare` creates a private inbox scoped to the current
+conversation and job, and `document_publish` reads only from that inbox. It does
+not trust process working directories, agent workspaces, Hermes profile caches,
+or operator-defined document roots. The API validates the uploaded PDF/DOCX bytes
+and stores its own immutable copy in JobOS's local artifact repository; publication
+does not require a JobHunter checkout or artifact provider.
 
 ## Document provenance
 

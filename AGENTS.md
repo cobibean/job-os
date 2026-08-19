@@ -33,5 +33,6 @@ For public-boundary work, also run the clean-clone and expected-red gates docume
 ## Document artifacts
 
 - A submission-ready resume or cover letter is a matched PDF/DOCX pair generated from the same revision.
+- Agent publication must use the app-owned inbox returned by `document_publication_prepare`; do not add workspace, profile-cache, or operator-defined path fallbacks.
 - Verify both files and their checksums before describing publication as complete.
 - Real user documents are never Git fixtures or public-release evidence.

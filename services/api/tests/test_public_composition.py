@@ -236,18 +236,15 @@ def test_private_artifact_capabilities_report_stable_unconfigured_errors(
             "artifact_provider_unavailable",
             "Artifact provider is unavailable",
         ),
-        (
-            "publish",
-            published,
-            "artifact_provider_unavailable",
-            "Artifact provider is unavailable",
-        ),
     ):
         assert response.status_code == 503
         assert response.json()["code"] == expected_code, (label, response.json())
         assert response.json()["message"] == expected_message, label
         assert response.json()["retryable"] is True
         assert response.json()["correlation_id"] == response.headers["x-correlation-id"]
+
+    assert published.status_code == 200
+    assert published.json()["artifacts"][0]["filename"] == "resume.pdf"
 
 
 def test_artifact_refresh_maps_filesystem_failures_to_stable_503(tmp_path):

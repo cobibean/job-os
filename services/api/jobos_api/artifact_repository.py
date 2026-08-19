@@ -88,6 +88,15 @@ class ArtifactRepository(Protocol):
         self, *, job_id: str, document_id: str, artifact: ArtifactWrite
     ) -> StoredArtifact: ...
 
+    def store_agent_publication(
+        self,
+        *,
+        job_id: str,
+        document_key: str,
+        source_revision: str,
+        artifact: ArtifactWrite,
+    ) -> StoredArtifact: ...
+
     def store_publication_pair(
         self,
         *,
