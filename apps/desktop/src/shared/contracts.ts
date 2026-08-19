@@ -279,6 +279,13 @@ export interface AgentTurn {
   cancelRequested: boolean
 }
 
+export interface AgentSessionJobContext {
+  selectedJobId: string | null
+  activeArtifactId: string | null
+  activeArtifactPage: number
+  activeArtifactZoom: number
+}
+
 export interface AgentConversationSnapshot {
   conversationId: string
   position: number
@@ -289,6 +296,7 @@ export interface AgentConversationSnapshot {
   connection: Exclude<AgentConnectionState, 'reconnecting'>
   recoveryState: AgentRecoveryState
   latestEventId: number
+  jobContext: AgentSessionJobContext
 }
 
 export interface AgentSessionSummary {
@@ -300,6 +308,7 @@ export interface AgentSessionSummary {
   connection: Exclude<AgentConnectionState, 'reconnecting'>
   recoveryState: AgentRecoveryState
   latestEventId: number
+  jobContext: AgentSessionJobContext
 }
 
 export interface AgentTurnMutation {
@@ -335,7 +344,7 @@ export interface JobOsRendererBridge {
   }
   agent: {
     list: () => Promise<AgentSessionSummary[]>
-    create: () => Promise<AgentConversationSnapshot>
+    create: (initialSelectedJobId?: string | null) => Promise<AgentConversationSnapshot>
     get: (conversationId: string) => Promise<AgentConversationSnapshot>
     archive: (conversationId: string) => Promise<void>
     send: (conversationId: string, text: string, idempotencyKey: string) => Promise<AgentTurnMutation>
@@ -348,7 +357,7 @@ export interface JobOsRendererBridge {
 
     list: (sort: JobSortMode, query?: string, statusGroup?: string) => Promise<JobListItem[]>
     inspect: (jobId: string) => Promise<JobDetail>
-    select: (jobId: string) => Promise<JobMutationResult>
+    select: (conversationId: string, jobId: string) => Promise<AgentSessionJobContext>
     reorder: (jobIds: string[]) => Promise<JobMutationResult>
     setSort: (sort: JobSortMode) => Promise<JobMutationResult>
     updateStatus: (jobId: string, status: JobStatus) => Promise<JobStatusMutationResult>
@@ -364,6 +373,7 @@ export interface JobOsRendererBridge {
   workspace: {
     get: () => Promise<WorkspaceSnapshot>
     save: (snapshot: WorkspaceSnapshot) => Promise<WorkspaceSnapshot>
+    saveDocumentView: (conversationId: string, artifactId: string | null, page: number, zoom: number) => Promise<AgentSessionJobContext>
   }
   browser: {
     getState: () => Promise<BrowserState>

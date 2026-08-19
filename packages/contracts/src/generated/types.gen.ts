@@ -451,6 +451,65 @@ export type ConnectionResponse = {
 };
 
 /**
+ * ConversationDocumentViewRequest
+ */
+export type ConversationDocumentViewRequest = {
+    /**
+     * Active Artifact Id
+     */
+    active_artifact_id?: string | null;
+    /**
+     * Active Artifact Page
+     */
+    active_artifact_page?: number;
+    /**
+     * Active Artifact Zoom
+     */
+    active_artifact_zoom?: number;
+    /**
+     * Idempotency Key
+     */
+    idempotency_key?: string | null;
+    /**
+     * Origin
+     */
+    origin?: 'user' | 'mcp';
+};
+
+/**
+ * ConversationJobContext
+ */
+export type ConversationJobContext = {
+    /**
+     * Active Artifact Id
+     */
+    active_artifact_id?: string | null;
+    /**
+     * Active Artifact Page
+     */
+    active_artifact_page?: number;
+    /**
+     * Active Artifact Zoom
+     */
+    active_artifact_zoom?: number;
+    /**
+     * Selected Job Id
+     */
+    selected_job_id?: string | null;
+};
+
+/**
+ * ConversationJobContextMutation
+ */
+export type ConversationJobContextMutation = {
+    /**
+     * Event Id
+     */
+    event_id: number;
+    job_context: ConversationJobContext;
+};
+
+/**
  * ConversationListResponse
  */
 export type ConversationListResponse = {
@@ -485,6 +544,7 @@ export type ConversationResponse = {
     entries: Array<{
         [key: string]: unknown;
     }>;
+    job_context: ConversationJobContext;
     /**
      * Latest Event Id
      */
@@ -522,6 +582,7 @@ export type ConversationSummary = {
      * Created At
      */
     created_at: string;
+    job_context: ConversationJobContext;
     /**
      * Latest Event Id
      */
@@ -556,6 +617,16 @@ export type CreateBlankRequest = {
      * Mode
      */
     mode: 'blank';
+};
+
+/**
+ * CreateConversationRequest
+ */
+export type CreateConversationRequest = {
+    /**
+     * Selected Job Id
+     */
+    selected_job_id?: string | null;
 };
 
 /**
@@ -2377,7 +2448,10 @@ export type ConversationsListV1ConversationsGetResponses = {
 export type ConversationsListV1ConversationsGetResponse = ConversationsListV1ConversationsGetResponses[keyof ConversationsListV1ConversationsGetResponses];
 
 export type ConversationCreateV1ConversationsPostData = {
-    body?: never;
+    /**
+     * Command
+     */
+    body?: CreateConversationRequest | null;
     path?: never;
     query?: never;
     url: '/v1/conversations';
@@ -2392,6 +2466,10 @@ export type ConversationCreateV1ConversationsPostErrors = {
      * Resource state conflict
      */
     409: ApiErrorResponse;
+    /**
+     * Request validation failed
+     */
+    422: ApiErrorResponse;
     /**
      * Internal server error
      */
@@ -2705,6 +2783,82 @@ export type ConversationRetryV1ConversationsConversationIdTurnsTurnIdRetryPostRe
 };
 
 export type ConversationRetryV1ConversationsConversationIdTurnsTurnIdRetryPostResponse = ConversationRetryV1ConversationsConversationIdTurnsTurnIdRetryPostResponses[keyof ConversationRetryV1ConversationsConversationIdTurnsTurnIdRetryPostResponses];
+
+export type ConversationSaveDocumentViewV1ConversationsConversationIdWorkspaceDocumentPutData = {
+    body: ConversationDocumentViewRequest;
+    path: {
+        /**
+         * Conversation Id
+         */
+        conversation_id: string;
+    };
+    query?: never;
+    url: '/v1/conversations/{conversation_id}/workspace/document';
+};
+
+export type ConversationSaveDocumentViewV1ConversationsConversationIdWorkspaceDocumentPutErrors = {
+    /**
+     * Device authentication required
+     */
+    401: ApiErrorResponse;
+    /**
+     * Request validation failed
+     */
+    422: ApiErrorResponse;
+    /**
+     * Internal server error
+     */
+    500: ApiErrorResponse;
+};
+
+export type ConversationSaveDocumentViewV1ConversationsConversationIdWorkspaceDocumentPutError = ConversationSaveDocumentViewV1ConversationsConversationIdWorkspaceDocumentPutErrors[keyof ConversationSaveDocumentViewV1ConversationsConversationIdWorkspaceDocumentPutErrors];
+
+export type ConversationSaveDocumentViewV1ConversationsConversationIdWorkspaceDocumentPutResponses = {
+    /**
+     * Successful Response
+     */
+    200: ConversationJobContextMutation;
+};
+
+export type ConversationSaveDocumentViewV1ConversationsConversationIdWorkspaceDocumentPutResponse = ConversationSaveDocumentViewV1ConversationsConversationIdWorkspaceDocumentPutResponses[keyof ConversationSaveDocumentViewV1ConversationsConversationIdWorkspaceDocumentPutResponses];
+
+export type ConversationSelectJobV1ConversationsConversationIdWorkspaceJobPutData = {
+    body: JobSelectionRequest;
+    path: {
+        /**
+         * Conversation Id
+         */
+        conversation_id: string;
+    };
+    query?: never;
+    url: '/v1/conversations/{conversation_id}/workspace/job';
+};
+
+export type ConversationSelectJobV1ConversationsConversationIdWorkspaceJobPutErrors = {
+    /**
+     * Device authentication required
+     */
+    401: ApiErrorResponse;
+    /**
+     * Request validation failed
+     */
+    422: ApiErrorResponse;
+    /**
+     * Internal server error
+     */
+    500: ApiErrorResponse;
+};
+
+export type ConversationSelectJobV1ConversationsConversationIdWorkspaceJobPutError = ConversationSelectJobV1ConversationsConversationIdWorkspaceJobPutErrors[keyof ConversationSelectJobV1ConversationsConversationIdWorkspaceJobPutErrors];
+
+export type ConversationSelectJobV1ConversationsConversationIdWorkspaceJobPutResponses = {
+    /**
+     * Successful Response
+     */
+    200: ConversationJobContextMutation;
+};
+
+export type ConversationSelectJobV1ConversationsConversationIdWorkspaceJobPutResponse = ConversationSelectJobV1ConversationsConversationIdWorkspaceJobPutResponses[keyof ConversationSelectJobV1ConversationsConversationIdWorkspaceJobPutResponses];
 
 export type DesktopCapabilityPresenceV1DesktopCapabilitiesGetData = {
     body?: never;
@@ -4378,6 +4532,10 @@ export type WorkspaceGetV1WorkspaceGetData = {
          * Idempotency Key
          */
         idempotency_key?: string | null;
+        /**
+         * Conversation Id
+         */
+        conversation_id?: string | null;
     };
     url: '/v1/workspace';
 };
@@ -4458,7 +4616,12 @@ export type WorkspacePutV1WorkspacePutResponse = WorkspacePutV1WorkspacePutRespo
 export type WorkspaceJobsV1WorkspaceJobsGetData = {
     body?: never;
     path?: never;
-    query?: never;
+    query?: {
+        /**
+         * Conversation Id
+         */
+        conversation_id?: string | null;
+    };
     url: '/v1/workspace/jobs';
 };
 
@@ -4467,6 +4630,10 @@ export type WorkspaceJobsV1WorkspaceJobsGetErrors = {
      * Device authentication required
      */
     401: ApiErrorResponse;
+    /**
+     * Request validation failed
+     */
+    422: ApiErrorResponse;
     /**
      * Internal server error
      */
@@ -4484,36 +4651,22 @@ export type WorkspaceJobsV1WorkspaceJobsGetResponses = {
 
 export type WorkspaceJobsV1WorkspaceJobsGetResponse = WorkspaceJobsV1WorkspaceJobsGetResponses[keyof WorkspaceJobsV1WorkspaceJobsGetResponses];
 
-export type WorkspaceSelectJobV1WorkspaceJobsSelectionPutData = {
+export type WorkspaceSelectJobDeprecatedV1WorkspaceJobsSelectionPutData = {
     body: JobSelectionRequest;
-    headers?: {
-        /**
-         * X-Jobos-Mcp-Token
-         */
-        'X-JobOS-MCP-Token'?: string | null;
-    };
     path?: never;
     query?: never;
     url: '/v1/workspace/jobs/selection';
 };
 
-export type WorkspaceSelectJobV1WorkspaceJobsSelectionPutErrors = {
+export type WorkspaceSelectJobDeprecatedV1WorkspaceJobsSelectionPutErrors = {
     /**
      * Device authentication required
      */
     401: ApiErrorResponse;
     /**
-     * Trusted MCP credential required
+     * Selection must target a conversation
      */
-    403: ApiErrorResponse;
-    /**
-     * Resource not found
-     */
-    404: ApiErrorResponse;
-    /**
-     * Resource state conflict
-     */
-    409: ApiErrorResponse;
+    410: ApiErrorResponse;
     /**
      * Request validation failed
      */
@@ -4522,22 +4675,18 @@ export type WorkspaceSelectJobV1WorkspaceJobsSelectionPutErrors = {
      * Internal server error
      */
     500: ApiErrorResponse;
-    /**
-     * Required capability unavailable
-     */
-    503: ApiErrorResponse;
 };
 
-export type WorkspaceSelectJobV1WorkspaceJobsSelectionPutError = WorkspaceSelectJobV1WorkspaceJobsSelectionPutErrors[keyof WorkspaceSelectJobV1WorkspaceJobsSelectionPutErrors];
+export type WorkspaceSelectJobDeprecatedV1WorkspaceJobsSelectionPutError = WorkspaceSelectJobDeprecatedV1WorkspaceJobsSelectionPutErrors[keyof WorkspaceSelectJobDeprecatedV1WorkspaceJobsSelectionPutErrors];
 
-export type WorkspaceSelectJobV1WorkspaceJobsSelectionPutResponses = {
+export type WorkspaceSelectJobDeprecatedV1WorkspaceJobsSelectionPutResponses = {
     /**
      * Successful Response
      */
     200: JobMutationResponse;
 };
 
-export type WorkspaceSelectJobV1WorkspaceJobsSelectionPutResponse = WorkspaceSelectJobV1WorkspaceJobsSelectionPutResponses[keyof WorkspaceSelectJobV1WorkspaceJobsSelectionPutResponses];
+export type WorkspaceSelectJobDeprecatedV1WorkspaceJobsSelectionPutResponse = WorkspaceSelectJobDeprecatedV1WorkspaceJobsSelectionPutResponses[keyof WorkspaceSelectJobDeprecatedV1WorkspaceJobsSelectionPutResponses];
 
 export type WorkspaceSortJobsV1WorkspaceJobsSortPutData = {
     body: JobSortRequest;

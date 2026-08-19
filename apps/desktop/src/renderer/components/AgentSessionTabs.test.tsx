@@ -10,7 +10,11 @@ afterEach(cleanup)
 
 function session(position: number, status?: 'running' | 'waiting'): AgentSessionViewState {
   return {
-    summary: { conversationId: `conv_${position}`, position, title: `Session ${position}`, createdAt: '', activeTurn: null, connection: 'online', recoveryState: 'ready', latestEventId: 0 },
+    summary: {
+      conversationId: `conv_${position}`, position, title: `Session ${position}`, createdAt: '', activeTurn: null,
+      connection: 'online', recoveryState: 'ready', latestEventId: 0,
+      jobContext: { selectedJobId: null, activeArtifactId: null, activeArtifactPage: 1, activeArtifactZoom: 1 }
+    },
     conversation: {
       ...initialAgentConversationState,
       conversationId: `conv_${position}`,
@@ -31,7 +35,7 @@ function controller(count = 3): AgentSessionsController {
     available: true,
     atMaximum: count === 5,
     select: vi.fn(() => true), selectByIndex: vi.fn(() => true), create: vi.fn(async () => true),
-    archive: vi.fn(async () => true), setDraft: vi.fn(), send: vi.fn(), stop: vi.fn(), retry: vi.fn(), saveScroll: vi.fn()
+    archive: vi.fn(async () => true), updateJobContext: vi.fn(), setDraft: vi.fn(), send: vi.fn(), stop: vi.fn(), retry: vi.fn(), saveScroll: vi.fn()
   }
 }
 

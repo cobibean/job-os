@@ -263,8 +263,11 @@ def create_server(
         )
 
     @server.tool(name="job_select", structured_output=True)
-    async def job_select(job_id: str, idempotency_key: str | None = None) -> dict[str, Any]:
-        """Select the active JobOS job context."""
+    async def job_select(
+        conversation_id: ConversationId, job_id: str, idempotency_key: str | None = None
+    ) -> dict[str, Any]:
+        """Select this conversation's active JobOS job context."""
+        client.scope_conversation(conversation_id)
         return await client.select_job(job_id, idempotency_key=idempotency_key)
 
     @server.tool(name="job_reorder", structured_output=True)
@@ -274,24 +277,28 @@ def create_server(
 
     @server.tool(name="job_update_status", structured_output=True)
     async def job_update_status(
+        conversation_id: ConversationId,
         job_id: str,
         target_status: str,
         reason: str | None = None,
         idempotency_key: str | None = None,
     ) -> dict[str, Any]:
         """Change a job status through the shared JobOS transition command."""
+        client.scope_conversation(conversation_id)
         return await client.update_status(
             job_id, target_status, reason=reason, idempotency_key=idempotency_key
         )
 
     @server.tool(name="job_update_description", structured_output=True)
     async def job_update_description(
+        conversation_id: ConversationId,
         job_id: str,
         description_text: str,
         source_note: str | None = None,
         idempotency_key: str | None = None,
     ) -> dict[str, Any]:
         """Replace a saved job's canonical full listing and refresh its durable packet."""
+        client.scope_conversation(conversation_id)
         return await client.update_description(
             job_id,
             description_text,
@@ -300,15 +307,20 @@ def create_server(
         )
 
     @server.tool(name="workspace_inspect", structured_output=True)
-    async def workspace_inspect(idempotency_key: str | None = None) -> dict[str, Any]:
-        """Inspect the current shared JobOS workspace snapshot."""
+    async def workspace_inspect(
+        conversation_id: ConversationId, idempotency_key: str | None = None
+    ) -> dict[str, Any]:
+        """Inspect global layout merged with this conversation's job context."""
+        client.scope_conversation(conversation_id)
         return await client.inspect_workspace(idempotency_key=idempotency_key)
 
     @server.tool(name="workspace_update", structured_output=True)
     async def workspace_update(
+        conversation_id: ConversationId,
         snapshot: dict[str, Any], idempotency_key: str | None = None
     ) -> dict[str, Any]:
-        """Replace the atomic shared workspace snapshot."""
+        """Update global layout and this conversation's document projection."""
+        client.scope_conversation(conversation_id)
         return await client.update_workspace(snapshot, idempotency_key=idempotency_key)
 
     @server.tool(name="document_list", structured_output=True)
@@ -316,6 +328,7 @@ def create_server(
         conversation_id: ConversationId, job_id: str, idempotency_key: str | None = None
     ) -> dict[str, Any]:
         """List trusted registered artifacts for a job."""
+        client.scope_conversation(conversation_id)
         return await client.list_documents(job_id, idempotency_key=idempotency_key)
 
     @server.tool(name="document_draft_get", structured_output=True)
@@ -326,6 +339,7 @@ def create_server(
         idempotency_key: str | None = None,
     ) -> dict[str, Any]:
         """Read a bounded semantic outline for one editable job document."""
+        client.scope_conversation(conversation_id)
         return await client.get_document_draft(
             job_id, document_key, idempotency_key=idempotency_key  # gitleaks:allow
         )
@@ -340,6 +354,7 @@ def create_server(
         idempotency_key: str | None = None,
     ) -> dict[str, Any]:
         """Atomically apply only the five allowlisted editable-document operations."""
+        client.scope_conversation(conversation_id)
         return await client.apply_document_draft(
             job_id,
             document_id,
@@ -357,6 +372,7 @@ def create_server(
         idempotency_key: str | None = None,
     ) -> dict[str, Any]:
         """Create a durable manual checkpoint for one job-owned editable document."""
+        client.scope_conversation(conversation_id)
         return await client.snapshot_document_draft(
             job_id, document_id, label, idempotency_key=idempotency_key
         )
@@ -366,6 +382,7 @@ def create_server(
         conversation_id: ConversationId, job_id: str, idempotency_key: str | None = None
     ) -> dict[str, Any]:
         """Refresh a job's trusted artifact manifest."""
+        client.scope_conversation(conversation_id)
         return await client.refresh_documents(job_id, idempotency_key=idempotency_key)
 
     @server.tool(name="document_render", structured_output=True)
@@ -376,6 +393,7 @@ def create_server(
         idempotency_key: str | None = None,
     ) -> dict[str, Any]:
         """Start the fixed PDF resume render command for a job source."""
+        client.scope_conversation(conversation_id)
         return await client.render_document(job_id, source_id, idempotency_key=idempotency_key)
 
     @server.tool(name="document_register", structured_output=True)
@@ -386,6 +404,7 @@ def create_server(
         idempotency_key: str | None = None,
     ) -> dict[str, Any]:
         """Register an opaque facade artifact reference through JobOS."""
+        client.scope_conversation(conversation_id)
         return await client.register_document(
             job_id, artifact_reference, idempotency_key=idempotency_key
         )
@@ -405,6 +424,7 @@ def create_server(
         Call once per promised format, use the same source file for paired PDF/DOCX,
         then confirm every format with document_list before claiming completion.
         """
+        client.scope_conversation(conversation_id)
         roots = document_roots or _document_import_roots()
         source_filename, source_bytes = _read_document_input(
             source_path, roots=roots, maximum=2_000_000
@@ -434,6 +454,7 @@ def create_server(
         idempotency_key: str | None = None,
     ) -> dict[str, Any]:
         """Approve one exact successful resume artifact for its job."""
+        client.scope_conversation(conversation_id)
         return await client.approve_document(
             job_id, artifact_id, idempotency_key=idempotency_key
         )
@@ -445,6 +466,7 @@ def create_server(
         idempotency_key: str | None = None,
     ) -> dict[str, Any]:
         """Select a registered artifact in the shared document workspace."""
+        client.scope_conversation(conversation_id)
         return await client.select_document(artifact_id, idempotency_key=idempotency_key)
 
     @server.tool(name="document_file_inspect", structured_output=True)
@@ -456,6 +478,7 @@ def create_server(
         idempotency_key: str | None = None,
     ) -> dict[str, Any]:
         """Inspect the current canonical DOCX hash, capabilities, and bounded block context."""
+        client.scope_conversation(conversation_id)
         return await client.inspect_document_file(
             conversation_id,
             job_id,
@@ -475,6 +498,7 @@ def create_server(
         idempotency_key: str | None = None,
     ) -> dict[str, Any]:
         """Apply typed operations to the canonical DOCX with an expected-hash conflict check."""
+        client.scope_conversation(conversation_id)
         return await client.apply_document_file_operations(
             conversation_id,
             job_id,

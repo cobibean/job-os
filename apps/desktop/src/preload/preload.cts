@@ -44,7 +44,7 @@ const bridge: JobOsRendererBridge = Object.freeze({
   }),
   agent: Object.freeze({
     list: () => ipcRenderer.invoke('jobos:agent:list'),
-    create: () => ipcRenderer.invoke('jobos:agent:create'),
+    create: (initialSelectedJobId?: string | null) => ipcRenderer.invoke('jobos:agent:create', initialSelectedJobId),
     get: (conversationId: string) => ipcRenderer.invoke('jobos:agent:get', conversationId),
     archive: (conversationId: string) => ipcRenderer.invoke('jobos:agent:archive', conversationId),
     send: (conversationId: string, text: string, idempotencyKey: string) => ipcRenderer.invoke('jobos:agent:send', conversationId, text, idempotencyKey),
@@ -61,7 +61,7 @@ const bridge: JobOsRendererBridge = Object.freeze({
 
     list: (sort: JobSortMode, query?: string, statusGroup?: string) => ipcRenderer.invoke('jobos:jobs:list', sort, query, statusGroup),
     inspect: (jobId: string) => ipcRenderer.invoke('jobos:jobs:inspect', jobId),
-    select: (jobId: string) => ipcRenderer.invoke('jobos:jobs:select', jobId),
+    select: (conversationId: string, jobId: string) => ipcRenderer.invoke('jobos:jobs:select', conversationId, jobId),
     reorder: (jobIds: string[]) => ipcRenderer.invoke('jobos:jobs:reorder', jobIds),
     setSort: (sort: JobSortMode) => ipcRenderer.invoke('jobos:jobs:set-sort', sort),
     updateStatus: (jobId: string, status: JobStatus) => ipcRenderer.invoke('jobos:jobs:update-status', jobId, status),
@@ -77,7 +77,9 @@ const bridge: JobOsRendererBridge = Object.freeze({
   }),
   workspace: Object.freeze({
     get: () => ipcRenderer.invoke('jobos:workspace:get'),
-    save: (snapshot: WorkspaceSnapshot) => ipcRenderer.invoke('jobos:workspace:save', snapshot)
+    save: (snapshot: WorkspaceSnapshot) => ipcRenderer.invoke('jobos:workspace:save', snapshot),
+    saveDocumentView: (conversationId: string, artifactId: string | null, page: number, zoom: number) =>
+      ipcRenderer.invoke('jobos:workspace:save-document-view', conversationId, artifactId, page, zoom)
   }),
   browser: Object.freeze({
     getState: () => ipcRenderer.invoke('jobos:browser:get-state'),

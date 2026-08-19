@@ -423,14 +423,13 @@ def test_browser_save_persists_complete_long_description_for_new_and_existing_jo
     assert facade.add_job_calls == 2
 
 
-def test_browser_save_creates_selects_and_immediately_lists_the_canonical_job(tmp_path):
+def test_browser_save_creates_and_lists_without_retargeting_an_agent_session(tmp_path):
     facade = FakeJobHunterFacade()
 
     with make_client(tmp_path, facade) as client:
         response = client.post("/v1/jobs", headers=auth_headers(), json=browser_job_payload())
         jobs = client.get("/v1/jobs", headers=auth_headers())
         workspace = client.get("/v1/workspace/jobs", headers=auth_headers())
-        events = client.get("/v1/events?after=0", headers=auth_headers())
 
     assert response.status_code == 200
     body = response.json()
@@ -440,9 +439,7 @@ def test_browser_save_creates_selects_and_immediately_lists_the_canonical_job(tm
     assert body["job"]["location"] == "United States · Remote"
     assert body["job"]["description"].startswith("Build useful agent workflows")
     assert jobs.json()["jobs"][-1]["job_id"] == body["job"]["job_id"]
-    assert workspace.json()["selected_job_id"] == body["job"]["job_id"]
-    assert events.json()["events"][-1]["event_type"] == "job_selected"
-    assert events.json()["events"][-1]["job_id"] == body["job"]["job_id"]
+    assert workspace.json()["selected_job_id"] is None
 
 
 def test_mcp_job_create_requires_the_separate_trusted_credential(tmp_path):
@@ -768,30 +765,75 @@ def test_invalid_transition_returns_clear_feedback_without_an_event_or_partial_c
     assert events.json() == {"events": []}
 
 
-def test_selection_is_durable_and_uses_the_same_event_path_for_user_and_mcp(tmp_path):
+def test_selection_is_durable_and_uses_the_same_conversation_path_for_user_and_mcp(tmp_path):
     facade = FakeJobHunterFacade()
     facade.jobs = facade.jobs[:2]
 
     with make_client(tmp_path, facade) as client:
+        conversation_id = client.get(
+            "/v1/conversations/current", headers=auth_headers()
+        ).json()["conversation_id"]
         user_selection = client.put(
-            "/v1/workspace/jobs/selection",
+            f"/v1/conversations/{conversation_id}/workspace/job",
             headers=auth_headers(),
             json={"job_id": "job-1", "origin": "user"},
         )
-        state = client.get("/v1/workspace/jobs", headers=auth_headers())
+        state = client.get(
+            f"/v1/workspace/jobs?conversation_id={conversation_id}", headers=auth_headers()
+        )
         mcp_selection = client.put(
-            "/v1/workspace/jobs/selection",
+            f"/v1/conversations/{conversation_id}/workspace/job",
             headers=auth_headers(),
             json={"job_id": "job-0", "origin": "mcp"},
         )
-        events = client.get("/v1/events?after=0", headers=auth_headers()).json()["events"]
+        restored = client.get(
+            f"/v1/workspace/jobs?conversation_id={conversation_id}", headers=auth_headers()
+        )
 
     assert user_selection.status_code == 200
     assert state.json()["selected_job_id"] == "job-1"
     assert mcp_selection.status_code == 200
-    assert events[-1]["event_type"] == "job_selected"
-    assert events[-1]["origin"] == "mcp"
-    assert events[-1]["selected_job_id"] == "job-0"
+    assert restored.json()["selected_job_id"] == "job-0"
+
+
+def test_mcp_job_and_artifact_calls_fail_closed_when_the_conversation_owns_another_job(
+    tmp_path,
+):
+    facade = FakeJobHunterFacade()
+    facade.jobs = facade.jobs[:2]
+
+    with make_client(tmp_path, facade) as client:
+        conversation_id = client.get(
+            "/v1/conversations/current", headers=auth_headers()
+        ).json()["conversation_id"]
+        selected = client.put(
+            f"/v1/conversations/{conversation_id}/workspace/job",
+            headers=auth_headers(),
+            json={"job_id": "job-0", "origin": "user"},
+        )
+        mismatched_read = client.get(
+            f"/v1/jobs/job-1/artifacts?conversation_id={conversation_id}",
+            headers=auth_headers(),
+        )
+        mismatched_mutation = client.put(
+            f"/v1/jobs/job-1/status?conversation_id={conversation_id}",
+            headers=auth_headers(),
+            json={
+                "target_status": "reviewed",
+                "origin": "mcp",
+                "idempotency_key": "wrong-session-job",
+            },
+        )
+        owned_read = client.get(
+            f"/v1/jobs/job-0/artifacts?conversation_id={conversation_id}",
+            headers=auth_headers(),
+        )
+
+    assert selected.status_code == 200
+    assert mismatched_read.status_code == 409
+    assert mismatched_read.json()["code"] == "conversation_job_mismatch"
+    assert mismatched_mutation.status_code == 409
+    assert owned_read.status_code == 200
 
 
 def test_inspect_and_history_expose_normalized_facade_records(tmp_path):
@@ -909,7 +951,7 @@ def test_workspace_snapshot_round_trip_and_revision_conflict(tmp_path):
     assert stale.status_code == 409
     assert stale.json()["detail"] == "Workspace revision conflict; current revision is 1"
     assert restored.json()["selected_preset"] == "agent-focus"
-    assert restored.json()["selected_job_id"] == "job-1"
+    assert restored.json()["selected_job_id"] is None
     assert restored.json()["active_top_level_workspace"] == "browse"
     assert restored.json()["browse_mode"] == "swipe"
     assert restored.json()["browse_focus_job_id"] == "job-0"
@@ -1306,8 +1348,11 @@ def test_layout_save_cannot_overwrite_a_newer_user_or_mcp_selection(tmp_path):
     facade.jobs = facade.jobs[:2]
 
     with make_client(tmp_path, facade) as client:
+        conversation_id = client.get(
+            "/v1/conversations/current", headers=auth_headers()
+        ).json()["conversation_id"]
         client.put(
-            "/v1/workspace/jobs/selection",
+            f"/v1/conversations/{conversation_id}/workspace/job",
             headers=auth_headers(),
             json={"job_id": "job-0", "origin": "user"},
         )
@@ -1317,16 +1362,18 @@ def test_layout_save_cannot_overwrite_a_newer_user_or_mcp_selection(tmp_path):
         stale_layout.pop("browser_repair_reasons")
         stale_layout.update({"origin": "user", "idempotency_key": "workspace-selection-race-1"})
         client.put(
-            "/v1/workspace/jobs/selection",
+            f"/v1/conversations/{conversation_id}/workspace/job",
             headers=auth_headers(),
             json={"job_id": "job-1", "origin": "mcp"},
         )
         stale_layout["selected_preset"] = "research"
         saved = client.put("/v1/workspace", headers=auth_headers(), json=stale_layout)
-        job_state = client.get("/v1/workspace/jobs", headers=auth_headers())
+        job_state = client.get(
+            f"/v1/workspace/jobs?conversation_id={conversation_id}", headers=auth_headers()
+        )
 
     assert saved.status_code == 200
-    assert saved.json()["selected_job_id"] == "job-1"
+    assert saved.json()["selected_job_id"] is None
     assert job_state.json()["selected_job_id"] == "job-1"
 
 
@@ -1337,11 +1384,6 @@ def test_workspace_get_repairs_non_scalar_layout_values_without_losing_valid_sta
     facade.jobs = facade.jobs[:2]
 
     with make_client(tmp_path, facade) as client:
-        client.put(
-            "/v1/workspace/jobs/selection",
-            headers=auth_headers(),
-            json={"job_id": "job-1", "origin": "user"},
-        )
         snapshot = client.get("/v1/workspace", headers=auth_headers()).json()
         snapshot.pop("revision")
         snapshot.pop("repaired_presets")
@@ -1374,7 +1416,7 @@ def test_workspace_get_repairs_non_scalar_layout_values_without_losing_valid_sta
     assert body["revision"] == 7
     assert body["repaired_presets"] == ["review"]
     assert body["selected_preset"] == "review"
-    assert body["selected_job_id"] == "job-1"
+    assert body["selected_job_id"] is None
     assert body["active_center_surface"] == "browser"
     assert body["layouts"]["research"] == snapshot["layouts"]["research"]
     assert body["layouts"]["agent-focus"] == snapshot["layouts"]["agent-focus"]
@@ -2330,36 +2372,31 @@ def test_workspace_restores_only_an_active_artifact_owned_by_the_selected_job(tm
     facade.artifacts["job-0"] = [artifact_metadata(pdf)]
 
     with make_client(tmp_path, facade) as client:
+        conversation_id = client.get(
+            "/v1/conversations/current", headers=auth_headers()
+        ).json()["conversation_id"]
         client.put(
-            "/v1/workspace/jobs/selection",
+            f"/v1/conversations/{conversation_id}/workspace/job",
             headers=auth_headers(),
             json={"job_id": "job-0", "origin": "user"},
         )
         artifact_id = client.post(
             "/v1/jobs/job-0/artifacts/refresh", headers=auth_headers()
         ).json()["current_artifact_id"]
-        initial = client.get("/v1/workspace", headers=auth_headers()).json()
-        command = {
-            key: value
-            for key, value in initial.items()
-            if key
-            not in {
-                "repaired_presets",
-                "repaired_browser",
-                "browser_repair_reasons",
-            }
-        }
-        command.update(
-            {
+        saved = client.put(
+            f"/v1/conversations/{conversation_id}/workspace/document",
+            headers=auth_headers(),
+            json={
                 "origin": "user",
                 "idempotency_key": "document-view-restore-1",
                 "active_artifact_id": artifact_id,
                 "active_artifact_page": 2,
                 "active_artifact_zoom": 1.4,
-            }
+            },
         )
-        saved = client.put("/v1/workspace", headers=auth_headers(), json=command)
-        restored = client.get("/v1/workspace", headers=auth_headers())
+        restored = client.get(
+            f"/v1/workspace?conversation_id={conversation_id}", headers=auth_headers()
+        )
 
     assert saved.status_code == 200
     assert restored.json()["active_artifact_id"] == artifact_id
@@ -2375,51 +2412,39 @@ def test_workspace_rejects_cross_job_stale_and_unselected_active_artifacts(tmp_p
     facade.artifacts["job-0"] = [artifact_metadata(pdf)]
 
     with make_client(tmp_path, facade) as client:
+        conversation_id = client.get(
+            "/v1/conversations/current", headers=auth_headers()
+        ).json()["conversation_id"]
         artifact_id = client.post(
             "/v1/jobs/job-0/artifacts/refresh", headers=auth_headers()
         ).json()["current_artifact_id"]
-        initial = client.get("/v1/workspace", headers=auth_headers()).json()
-        command = {
-            key: value
-            for key, value in initial.items()
-            if key not in {"repaired_presets", "repaired_browser", "browser_repair_reasons"}
-        }
         unselected = client.put(
-            "/v1/workspace",
+            f"/v1/conversations/{conversation_id}/workspace/document",
             headers=auth_headers(),
             json={
-                **command,
                 "origin": "user",
                 "idempotency_key": "unselected-artifact",
                 "active_artifact_id": artifact_id,
             },
         )
         client.put(
-            "/v1/workspace/jobs/selection",
+            f"/v1/conversations/{conversation_id}/workspace/job",
             headers=auth_headers(),
             json={"job_id": "job-1", "origin": "user"},
         )
-        selected = client.get("/v1/workspace", headers=auth_headers()).json()
-        selected = {
-            key: value
-            for key, value in selected.items()
-            if key not in {"repaired_presets", "repaired_browser", "browser_repair_reasons"}
-        }
         mismatch = client.put(
-            "/v1/workspace",
+            f"/v1/conversations/{conversation_id}/workspace/document",
             headers=auth_headers(),
             json={
-                **selected,
                 "origin": "user",
                 "idempotency_key": "cross-job-artifact",
                 "active_artifact_id": artifact_id,
             },
         )
         stale = client.put(
-            "/v1/workspace",
+            f"/v1/conversations/{conversation_id}/workspace/document",
             headers=auth_headers(),
             json={
-                **selected,
                 "origin": "user",
                 "idempotency_key": "stale-artifact",
                 "active_artifact_id": "art_AAAAAAAAAAAAAAAA",
@@ -2434,17 +2459,6 @@ def test_workspace_rejects_cross_job_stale_and_unselected_active_artifacts(tmp_p
 @pytest.mark.parametrize(
     ("method", "endpoint", "payload", "source_event_id"),
     [
-        (
-            "put",
-            "/v1/workspace/jobs/selection",
-            {"job_id": "job-0", "origin": "mcp", "idempotency_key": "repair-select"},
-            mutation_activity_source_id(
-                actor_id="primary-device",
-                target_resource="workspace/jobs",
-                command_name="job.select",
-                idempotency_key="repair-select",
-            ),
-        ),
         (
             "put",
             "/v1/jobs/job-0/status",

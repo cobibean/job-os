@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import type {
   AgentConversationSnapshot,
+  AgentSessionJobContext,
   AgentSessionStreamUpdate,
   AgentSessionSummary,
   ConversationEvent
@@ -36,7 +37,8 @@ interface AgentSessionsState {
 
 const unavailableSummary: AgentSessionSummary = {
   conversationId: 'conv_unavailable', position: 1, title: 'Session 1', createdAt: '',
-  activeTurn: null, connection: 'offline', recoveryState: 'ready', latestEventId: 0
+  activeTurn: null, connection: 'offline', recoveryState: 'ready', latestEventId: 0,
+  jobContext: { selectedJobId: null, activeArtifactId: null, activeArtifactPage: 1, activeArtifactZoom: 1 }
 }
 
 function identifier(prefix: string): string {
@@ -75,7 +77,8 @@ function summaryFromSnapshot(snapshot: AgentConversationSnapshot): AgentSessionS
     activeTurn: snapshot.activeTurn,
     connection: snapshot.connection,
     recoveryState: snapshot.recoveryState ?? 'ready',
-    latestEventId: snapshot.latestEventId
+    latestEventId: snapshot.latestEventId,
+    jobContext: snapshot.jobContext
   }
 }
 
@@ -267,7 +270,7 @@ export function useAgentSessions() {
     return id ? select(id) : false
   }, [select])
 
-  const create = useCallback((): Promise<boolean> => {
+  const create = useCallback((initialSelectedJobId?: string | null): Promise<boolean> => {
     const bridge = window.jobos?.agent
     if (!bridge) return Promise.resolve(false)
     const task = createQueue.current.then(async (): Promise<boolean> => {
@@ -277,7 +280,10 @@ export function useAgentSessions() {
       }
       setCreating(true)
       try {
-        const snapshot = await bridge.create()
+        const inheritedJobId = initialSelectedJobId === undefined
+          ? stateRef.current.sessions[stateRef.current.activeId ?? '']?.summary.jobContext.selectedJobId ?? null
+          : initialSelectedJobId
+        const snapshot = await bridge.create(inheritedJobId)
         let session: AgentSessionViewState = {
           ...sessionFromSummary(summaryFromSnapshot(snapshot)),
           conversation: agentConversationReducer(initialAgentConversationState, { type: 'hydrate', snapshot })
@@ -432,6 +438,18 @@ export function useAgentSessions() {
     })
   }, [updateState])
 
+  const updateJobContext = useCallback((conversationId: string, jobContext: AgentSessionJobContext) => {
+    updateState(current => {
+      const session = current.sessions[conversationId]
+      return session ? {
+        ...current,
+        sessions: { ...current.sessions, [conversationId]: {
+          ...session, summary: { ...session.summary, jobContext }
+        } }
+      } : current
+    })
+  }, [updateState])
+
   const activeSession = state.activeId ? state.sessions[state.activeId] ?? null : null
   const activeConversation = useMemo(() => activeSession ? {
     ...activeSession.conversation,
@@ -456,7 +474,8 @@ export function useAgentSessions() {
     send,
     stop,
     retry,
-    saveScroll
+    saveScroll,
+    updateJobContext
   }
 }
 

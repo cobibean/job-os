@@ -1,7 +1,16 @@
+import { useState } from 'react'
 import { act, cleanup, renderHook, waitFor } from '@testing-library/react'
 import { afterEach, expect, test, vi } from 'vitest'
 
+import type { AgentSessionJobContext } from '../../shared/contracts'
 import { useJobs } from './useJobs'
+
+const emptyJobContext: AgentSessionJobContext = {
+  selectedJobId: null,
+  activeArtifactId: null,
+  activeArtifactPage: 1,
+  activeArtifactZoom: 1
+}
 
 const discoveredJob = {
   jobId: 'job-1',
@@ -12,6 +21,11 @@ const discoveredJob = {
   canonicalUrl: 'https://example.com/jobs/1',
   discoveredAt: '2026-07-20T00:00:00Z',
   lastSeenAt: '2026-07-20T01:00:00Z'
+}
+
+function useConversationJobs() {
+  const [context, setContext] = useState<AgentSessionJobContext>(emptyJobContext)
+  return useJobs('conv-1', context, (_conversationId, nextContext) => setContext(nextContext))
 }
 
 afterEach(cleanup)
@@ -40,7 +54,7 @@ test('a rejected status transition preserves the API explanation for the user', 
     }
   })
 
-  const { result } = renderHook(() => useJobs())
+  const { result } = renderHook(() => useJobs('conv-1', emptyJobContext))
   await waitFor(() => expect(result.current.loading).toBe(false))
 
   await act(async () => {
@@ -74,7 +88,7 @@ test('an unknown transition-shaped IPC error stays generic', async () => {
     }
   })
 
-  const { result } = renderHook(() => useJobs())
+  const { result } = renderHook(() => useJobs('conv-1', emptyJobContext))
   await waitFor(() => expect(result.current.loading).toBe(false))
 
   await act(async () => {
@@ -88,7 +102,7 @@ test('a selection event emitted by the same successful user action does not inva
   let listener: ((event: { eventId: number; eventType: string; origin: 'user'; jobId: string }) => void) | undefined
   const select = vi.fn().mockImplementation(async () => {
     listener?.({ eventId: 3, eventType: 'job_selected', origin: 'user', jobId: 'job-1' })
-    return { eventId: 3 }
+    return { ...emptyJobContext, selectedJobId: 'job-1' }
   })
   Object.defineProperty(window, 'jobos', {
     configurable: true,
@@ -107,7 +121,7 @@ test('a selection event emitted by the same successful user action does not inva
       }
     }
   })
-  const { result } = renderHook(() => useJobs())
+  const { result } = renderHook(() => useConversationJobs())
   await waitFor(() => expect(result.current.loading).toBe(false))
 
   let selected = false
@@ -132,13 +146,13 @@ test('selecting a job fetches its full detail separately from the lightweight li
         }),
         list: vi.fn().mockResolvedValue([discoveredJob]),
         inspect,
-        select: vi.fn().mockResolvedValue({ eventId: 2 }),
+        select: vi.fn().mockResolvedValue({ ...emptyJobContext, selectedJobId: 'job-1' }),
         reorder: vi.fn(), setSort: vi.fn(), updateStatus: vi.fn(),
         subscribe: vi.fn().mockReturnValue(() => undefined)
       }
     }
   })
-  const { result } = renderHook(() => useJobs())
+  const { result } = renderHook(() => useConversationJobs())
   await waitFor(() => expect(result.current.loading).toBe(false))
 
   await act(async () => { await result.current.selectJob('job-1') })
@@ -147,19 +161,13 @@ test('selecting a job fetches its full detail separately from the lightweight li
   expect(result.current.selectedJobDetail?.description).toBe('Complete responsibilities and qualifications.')
 })
 
-test('a live selection event wins over an older startup snapshot', async () => {
+test('a newer session job context wins over an older startup snapshot', async () => {
   const secondJob = { ...discoveredJob, jobId: 'job-2', title: 'Second role' }
   let resolveSnapshot: ((value: {
     jobs: typeof discoveredJob[]
     selectedJobId: string | null
     sortMode: 'manual'
     manualOrder: string[]
-  }) => void) | undefined
-  let listener: ((event: {
-    eventId: number
-    eventType: string
-    origin: 'mcp'
-    jobId: string
   }) => void) | undefined
   const getState = vi.fn().mockReturnValue(new Promise((resolve) => { resolveSnapshot = resolve }))
   const inspect = vi.fn().mockImplementation(async (jobId: string) => ({
@@ -175,17 +183,17 @@ test('a live selection event wins over an older startup snapshot', async () => {
         list: vi.fn().mockResolvedValue([discoveredJob, secondJob]),
         inspect,
         select: vi.fn(), reorder: vi.fn(), setSort: vi.fn(), updateStatus: vi.fn(),
-        subscribe: vi.fn().mockImplementation(callback => {
-          listener = callback
-          return () => undefined
-        })
+        subscribe: vi.fn().mockReturnValue(() => undefined)
       }
     }
   })
-  const { result } = renderHook(() => useJobs())
+  const { result, rerender } = renderHook(
+    ({ context }) => useJobs('conv-1', context),
+    { initialProps: { context: emptyJobContext } }
+  )
 
   await act(async () => {
-    listener?.({ eventId: 8, eventType: 'job_selected', origin: 'mcp', jobId: 'job-2' })
+    rerender({ context: { ...emptyJobContext, selectedJobId: 'job-2' } })
     await Promise.resolve()
   })
   await waitFor(() => expect(result.current.selectedJobId).toBe('job-2'))

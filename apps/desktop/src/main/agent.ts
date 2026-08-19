@@ -14,6 +14,7 @@ import type {
   AgentConversationSnapshot,
   AgentConnectionState,
   AgentRecoveryState,
+  AgentSessionJobContext,
   AgentSessionStreamUpdate,
   AgentSessionSummary,
   AgentTurn,
@@ -129,6 +130,20 @@ function normalizeRecoveryState(value: unknown): AgentRecoveryState {
   throw new Error('Conversation unavailable')
 }
 
+function normalizeJobContext(value: unknown): AgentSessionJobContext {
+  if (!isRecord(value)
+    || (value.selected_job_id !== null && typeof value.selected_job_id !== 'string')
+    || (value.active_artifact_id !== null && typeof value.active_artifact_id !== 'string')
+    || !Number.isInteger(value.active_artifact_page)
+    || typeof value.active_artifact_zoom !== 'number') throw new Error('Conversation job context unavailable')
+  return {
+    selectedJobId: value.selected_job_id,
+    activeArtifactId: value.active_artifact_id,
+    activeArtifactPage: Number(value.active_artifact_page),
+    activeArtifactZoom: value.active_artifact_zoom
+  }
+}
+
 function normalizeSummary(value: ConversationSummary): AgentSessionSummary {
   if (!isRecord(value) || !validConversationId(value.conversation_id)
     || !Number.isInteger(value.position) || Number(value.position) < 1 || Number(value.position) > 5
@@ -145,7 +160,8 @@ function normalizeSummary(value: ConversationSummary): AgentSessionSummary {
     activeTurn: value.active_turn === null ? null : normalizeTurn(value.active_turn),
     connection: value.connection.state,
     recoveryState: normalizeRecoveryState(value.recovery_state),
-    latestEventId: value.latest_event_id
+    latestEventId: value.latest_event_id,
+    jobContext: normalizeJobContext(value.job_context)
   }
 }
 
@@ -167,7 +183,8 @@ function normalizeSnapshot(value: ConversationResponse): AgentConversationSnapsh
     activeTurn: value.active_turn === null ? null : normalizeTurn(value.active_turn),
     connection: value.connection.state,
     recoveryState: normalizeRecoveryState(value.recovery_state),
-    latestEventId: value.latest_event_id
+    latestEventId: value.latest_event_id,
+    jobContext: normalizeJobContext(value.job_context)
   }
 }
 
@@ -257,9 +274,11 @@ export function createScopedMainAgentClient(config: AgentConfig, registry?: Agen
       if (!registry) return request()
       return registry.runExclusive(request, summaries => registry.replace(summaries.map(summary => summary.conversationId)))
     },
-    async create(): Promise<AgentConversationSnapshot> {
+    async create(initialSelectedJobId?: string | null): Promise<AgentConversationSnapshot> {
       const request = async () => {
-        const result = await conversationCreateV1ConversationsPost({ client })
+        const result = await conversationCreateV1ConversationsPost({
+          client, body: { selected_job_id: initialSelectedJobId ?? null }
+        })
         return normalizeSnapshot(unwrap(result, [201], 'New session could not be started'))
       }
       if (!registry) return request()

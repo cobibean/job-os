@@ -8,7 +8,8 @@ afterEach(() => { cleanup(); window.localStorage.clear() })
 
 const summary = (position: number): AgentSessionSummary => ({
   conversationId: `conv_${position}`, position, title: `Session ${position}`,
-  createdAt: '2026-08-16T10:00:00Z', activeTurn: null, connection: 'online', recoveryState: 'ready', latestEventId: 0
+  createdAt: '2026-08-16T10:00:00Z', activeTurn: null, connection: 'online', recoveryState: 'ready', latestEventId: 0,
+  jobContext: { selectedJobId: null, activeArtifactId: null, activeArtifactPage: 1, activeArtifactZoom: 1 }
 })
 const snapshot = (position: number, entries: ConversationEvent[] = []): AgentConversationSnapshot => ({
   ...summary(position), entries, latestEventId: entries.at(-1)?.eventId ?? 0

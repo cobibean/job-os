@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 
 import type { BrowseMode, LayoutPreset, PanelId, TopLevelWorkspace, WorkspaceSnapshot } from '../workspaceLayout'
-import type { JobSortMode } from '../../shared/contracts'
+import type { AgentSessionJobContext, JobSortMode } from '../../shared/contracts'
 import type { BrowserRestoreState } from '../../shared/contracts'
 import type { WorkspaceSnapshot as BridgeWorkspaceSnapshot } from '../../shared/contracts'
 import {
@@ -28,7 +28,11 @@ function withBrowseDefaults(snapshot: BridgeWorkspaceSnapshot): WorkspaceSnapsho
   }
 }
 
-export function useWorkspace(selectedJobId: string | null, jobSelectionReady = true) {
+export function useWorkspace(
+  conversationId: string | null,
+  jobContext: AgentSessionJobContext | null,
+  onJobContextChange?: (conversationId: string, context: AgentSessionJobContext) => void
+) {
   const [workspace, setWorkspace] = useState<WorkspaceSnapshot>(canonicalWorkspace)
   const [announcement, setAnnouncement] = useState('Layout controls ready')
   const [hydrated, setHydrated] = useState(!window.jobos?.workspace)
@@ -40,8 +44,8 @@ export function useWorkspace(selectedJobId: string | null, jobSelectionReady = t
   const pendingHydrationUpdates = useRef<WorkspaceUpdate[]>([])
   const startupRecoveryUpdates = useRef<WorkspaceUpdate[]>([])
   const recoveringStartup = useRef(false)
-  const selectedJobIdRef = useRef(selectedJobId)
-  selectedJobIdRef.current = selectedJobId
+  const conversationIdRef = useRef(conversationId)
+  conversationIdRef.current = conversationId
 
   const persist = useCallback((next: WorkspaceSnapshot): Promise<void> => {
     if (!bridge) return Promise.resolve()
@@ -51,7 +55,10 @@ export function useWorkspace(selectedJobId: string | null, jobSelectionReady = t
         const saved = await bridge.save({
           ...latest.current,
           revision: revision.current,
-          selectedJobId: selectedJobIdRef.current ?? latest.current.selectedJobId
+          selectedJobId: null,
+          activeArtifactId: null,
+          activeArtifactPage: 1,
+          activeArtifactZoom: 1
         })
         revision.current = saved.revision
         if (recoveringStartup.current) {
@@ -70,7 +77,10 @@ export function useWorkspace(selectedJobId: string | null, jobSelectionReady = t
         const saved = await bridge.save({
           ...reconciled,
           revision: remote.revision,
-          selectedJobId: selectedJobIdRef.current ?? reconciled.selectedJobId
+          selectedJobId: null,
+          activeArtifactId: null,
+          activeArtifactPage: 1,
+          activeArtifactZoom: 1
         })
         revision.current = saved.revision
         if (recoveringStartup.current) {
@@ -141,15 +151,17 @@ export function useWorkspace(selectedJobId: string | null, jobSelectionReady = t
   }, [bridge, persist])
 
   useEffect(() => {
-    if (!hydrated || !jobSelectionReady || latest.current.selectedJobId === selectedJobId) return
-    void commit(current => ({
-      ...current,
-      selectedJobId,
-      activeArtifactId: null,
-      activeArtifactPage: 1,
-      activeArtifactZoom: 1
-    }), selectedJobId ? 'Active job changed; document preview cleared' : 'Active job cleared')
-  }, [commit, hydrated, jobSelectionReady, selectedJobId])
+    if (!hydrated) return
+    const next = {
+      ...latest.current,
+      selectedJobId: jobContext?.selectedJobId ?? null,
+      activeArtifactId: jobContext?.activeArtifactId ?? null,
+      activeArtifactPage: jobContext?.activeArtifactPage ?? 1,
+      activeArtifactZoom: jobContext?.activeArtifactZoom ?? 1
+    }
+    latest.current = next
+    setWorkspace(next)
+  }, [conversationId, hydrated, jobContext])
 
   const selectPreset = (preset: LayoutPreset) => commit(current => ({
     ...current,
@@ -209,12 +221,16 @@ export function useWorkspace(selectedJobId: string | null, jobSelectionReady = t
     browserRepairReasons: []
   }), ''), [commit])
 
-  const updateDocumentState = useCallback((artifactId: string | null, page: number, zoom: number) => commit(current => ({
-    ...current,
-    activeArtifactId: artifactId,
-    activeArtifactPage: page,
-    activeArtifactZoom: zoom
-  }), ''), [commit])
+  const updateDocumentState = useCallback(async (artifactId: string | null, page: number, zoom: number) => {
+    const ownerConversationId = conversationId
+    if (!ownerConversationId || !bridge) return
+    const context = await bridge.saveDocumentView(ownerConversationId, artifactId, page, zoom)
+    if (ownerConversationId !== conversationIdRef.current) return
+    onJobContextChange?.(ownerConversationId, context)
+    const next = { ...latest.current, activeArtifactId: artifactId, activeArtifactPage: page, activeArtifactZoom: zoom }
+    latest.current = next
+    setWorkspace(next)
+  }, [bridge, conversationId, onJobContextChange])
 
   const showDocument = useCallback(() => commit(current => ({
     ...current,

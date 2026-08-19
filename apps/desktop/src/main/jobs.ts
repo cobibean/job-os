@@ -1,4 +1,5 @@
 import {
+  conversationSelectJobV1ConversationsConversationIdWorkspaceJobPut,
   createJobOsApiClient,
   jobCreateFromBrowserV1JobsPost,
   jobInspectV1JobsJobIdGet,
@@ -7,7 +8,6 @@ import {
   jobsListV1JobsGet,
   jobsReorderV1JobsOrderPut,
   workspaceJobsV1WorkspaceJobsGet,
-  workspaceSelectJobV1WorkspaceJobsSelectionPut,
   workspaceSortJobsV1WorkspaceJobsSortPut
 } from '@jobos/contracts'
 import type {
@@ -24,6 +24,7 @@ import type {
 import type {
   BrowserJobExtraction,
   BrowserJobSaveResult,
+  AgentSessionJobContext,
   JobDetail,
   JobEvent,
   JobListItem,
@@ -114,13 +115,20 @@ export function createMainJobsClient(config: JobsConfig) {
       return toJobDetail(unwrap<ApiJobDetail>(result, 'Job details unavailable'))
     },
 
-    async select(jobId: string): Promise<JobMutationResult> {
-      const result = await workspaceSelectJobV1WorkspaceJobsSelectionPut({
+    async select(conversationId: string, jobId: string): Promise<AgentSessionJobContext> {
+      if (!/^conv_[A-Za-z0-9_-]{1,128}$/.test(conversationId)) throw new Error('Invalid agent conversation')
+      const result = await conversationSelectJobV1ConversationsConversationIdWorkspaceJobPut({
         client,
+        path: { conversation_id: conversationId },
         body: { job_id: jobId, origin: 'user' }
       })
-      const mutation = unwrap<JobMutationResponse>(result, 'Job selection failed')
-      return { eventId: mutation.event_id }
+      const mutation = unwrap(result, 'Job selection failed')
+      return {
+        selectedJobId: mutation.job_context.selected_job_id ?? null,
+        activeArtifactId: mutation.job_context.active_artifact_id ?? null,
+        activeArtifactPage: mutation.job_context.active_artifact_page ?? 1,
+        activeArtifactZoom: mutation.job_context.active_artifact_zoom ?? 1
+      }
     },
 
     async reorder(jobIds: string[]): Promise<JobMutationResult> {

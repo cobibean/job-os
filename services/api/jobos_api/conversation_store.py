@@ -562,6 +562,12 @@ class ConversationStore:
             "title": conversation["title"],
             "position": int(conversation["position"]),
             "created_at": conversation["created_at"],
+            "job_context": {
+                "selected_job_id": conversation["selected_job_id"],
+                "active_artifact_id": conversation["active_artifact_id"],
+                "active_artifact_page": int(conversation["active_artifact_page"]),
+                "active_artifact_zoom": float(conversation["active_artifact_zoom"]),
+            },
             "entries": entries,
             "active_turn": (
                 {

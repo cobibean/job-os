@@ -274,9 +274,10 @@ function registerJobsInterface(): void {
     if (typeof jobId !== 'string' || !jobId || jobId.length > 512) throw new Error('Invalid job')
     return trusted(event).inspect(jobId)
   })
-  ipcMain.handle('jobos:jobs:select', (event, jobId: string) => {
-    if (typeof jobId !== 'string' || !jobId) throw new Error('Invalid job selection')
-    return trusted(event).select(jobId)
+  ipcMain.handle('jobos:jobs:select', (event, conversationId: string, jobId: string) => {
+    if (typeof conversationId !== 'string' || !/^conv_[A-Za-z0-9_-]{1,128}$/.test(conversationId)) throw new Error('Invalid agent conversation')
+    if (typeof jobId !== 'string' || !jobId || jobId.length > 512) throw new Error('Invalid job selection')
+    return trusted(event).select(conversationId, jobId)
   })
   ipcMain.handle('jobos:jobs:reorder', (event, jobIds: string[]) => {
     if (!Array.isArray(jobIds) || jobIds.some(jobId => typeof jobId !== 'string') || new Set(jobIds).size !== jobIds.length) {
@@ -351,6 +352,12 @@ function registerWorkspaceInterface(): void {
       throw new Error('Invalid workspace snapshot')
     }
     return trusted(event).save(snapshot)
+  })
+  ipcMain.handle('jobos:workspace:save-document-view', (event, conversationId: string, artifactId: string | null, page: number, zoom: number) => {
+    if (typeof conversationId !== 'string' || !/^conv_[A-Za-z0-9_-]{1,128}$/.test(conversationId)) throw new Error('Invalid agent conversation')
+    if (artifactId !== null && (typeof artifactId !== 'string' || !/^art_[A-Za-z0-9_-]{16,80}$/.test(artifactId))) throw new Error('Invalid artifact')
+    if (!Number.isInteger(page) || page < 1 || !Number.isFinite(zoom) || zoom < 0.5 || zoom > 3) throw new Error('Invalid document view')
+    return trusted(event).saveDocumentView(conversationId, artifactId, page, zoom)
   })
 }
 

@@ -39,11 +39,20 @@ export function App() {
 
 function WorkbenchApp() {
   const connectivity = useConnectivity()
-  const jobState = useJobs()
-  const layoutState = useWorkspace(jobState.selectedJobId, jobState.ready)
+  const agentSessions = useAgentSessions()
+  const activeJobContext = agentSessions.activeSession?.summary.jobContext ?? null
+  const jobState = useJobs(
+    agentSessions.activeId,
+    activeJobContext,
+    agentSessions.updateJobContext
+  )
+  const layoutState = useWorkspace(
+    agentSessions.activeId,
+    activeJobContext,
+    agentSessions.updateJobContext
+  )
   const theme = useTheme()
   const agentAvatar = useAgentAvatarPreference()
-  const agentSessions = useAgentSessions()
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [settingsPreparing, setSettingsPreparing] = useState(false)
   const [browseDetachState, setBrowseDetachState] = useState<'idle' | 'preparing' | 'ready' | 'error'>('idle')

@@ -365,6 +365,12 @@ def test_empty_current_conversation_is_authenticated_and_stable(tmp_path):
         "connection": {"state": "online"},
         "recovery_state": "ready",
         "latest_event_id": 0,
+        "job_context": {
+            "selected_job_id": None,
+            "active_artifact_id": None,
+            "active_artifact_page": 1,
+            "active_artifact_zoom": 1.0,
+        },
     }
     assert gateway.started and gateway.closed
 
@@ -480,7 +486,7 @@ def test_turn_snapshots_selected_job_and_device_workspace_without_new_conversati
     with make_client(tmp_path, gateway) as client:
         before = client.get("/v1/conversations/current", headers=headers()).json()
         selected = client.put(
-            "/v1/workspace/jobs/selection",
+            f"/v1/conversations/{before['conversation_id']}/workspace/job",
             headers=headers(),
             json={"job_id": "job-1", "origin": "user"},
         )

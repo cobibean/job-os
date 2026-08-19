@@ -13,7 +13,7 @@ from functools import wraps
 from pathlib import Path
 from threading import Lock
 from typing import Annotated, Any, Literal, ParamSpec, TypeVar, cast
-from urllib.parse import quote
+from urllib.parse import quote, unquote
 from uuid import uuid4
 
 from fastapi import (
@@ -61,7 +61,11 @@ from jobos_api.capabilities import (
 from jobos_api.composition import create_job_services
 from jobos_api.conversation_manager import ConversationListResponse, ConversationManager
 from jobos_api.conversations import (
+    ConversationDocumentViewRequest,
+    ConversationJobContext,
+    ConversationJobContextMutation,
     ConversationResponse,
+    CreateConversationRequest,
     RetryTurnRequest,
     SendMessageRequest,
     TurnMutationResponse,
@@ -737,6 +741,63 @@ def create_app(
                 detail="MCP operations require the trusted local MCP credential",
             )
 
+    @app.middleware("http")
+    async def enforce_mcp_conversation_job_scope(
+        request: Request, call_next: Callable[[Request], Any]
+    ) -> Response:
+        """Fence conversation-scoped MCP job/document calls at the API boundary."""
+        supplied_mcp_token = request.headers.get("x-jobos-mcp-token")
+        conversation_id = request.query_params.get("conversation_id")
+        if (
+            supplied_mcp_token is None
+            or not hmac.compare_digest(supplied_mcp_token, settings.mcp_token)
+            or conversation_id is None
+        ):
+            return await call_next(request)
+
+        job_id: str | None = None
+        job_match = re.match(
+            r"^/v1/jobs/([^/]+)/(?:status|description|artifacts(?:/|$)|"
+            r"editable-documents(?:/|$)|editable-document-outlines(?:/|$))",
+            request.url.path,
+        )
+        if job_match is not None:
+            job_id = unquote(job_match.group(1))
+        else:
+            editable_match = re.match(r"^/v1/editable-documents/([^/]+)", request.url.path)
+            if editable_match is not None:
+                document = state_store.get_editable_document(unquote(editable_match.group(1)))
+                if document is not None and isinstance(document.get("job_id"), str):
+                    job_id = cast(str, document["job_id"])
+            else:
+                artifact_match = re.match(r"^/v1/artifacts/([^/]+)", request.url.path)
+                if artifact_match is not None:
+                    artifact = state_store.get_document_artifact(unquote(artifact_match.group(1)))
+                    if artifact is not None and isinstance(artifact.get("job_id"), str):
+                        job_id = cast(str, artifact["job_id"])
+
+        if job_id is None:
+            return await call_next(request)
+
+        authorization = request.headers.get("authorization", "")
+        scheme, _, token = authorization.partition(" ")
+        identity = device_authenticator.authenticate(
+            HTTPAuthorizationCredentials(scheme=scheme, credentials=token)
+        )
+        try:
+            context = state_store.conversation_job_context(conversation_id, identity.device_id)
+        except ConversationNotFound as error:
+            raise HTTPException(status_code=404, detail="Conversation not found") from error
+        if context.get("selected_job_id") != job_id:
+            return error_response(
+                request,
+                status_code=409,
+                code="conversation_job_mismatch",
+                message="This agent session is attached to a different job",
+                retryable=False,
+            )
+        return await call_next(request)
+
     def mutation_hash(command_name: str, payload: dict[str, object]) -> str:
         return hashlib.sha256(
             json.dumps(
@@ -1132,9 +1193,15 @@ def create_app(
     @app.post("/v1/conversations", tags=["agent"], status_code=201)
     async def conversation_create(
         identity: Annotated[DeviceIdentity, Depends(authenticated_device)],
+        command: CreateConversationRequest | None = None,
     ) -> ConversationResponse:
+        selected_job_id = command.selected_job_id if command else None
+        if selected_job_id is not None:
+            ensure_job(selected_job_id)
         try:
-            return await conversation_manager.create(actor_id=identity.device_id)
+            return await conversation_manager.create(
+                actor_id=identity.device_id, selected_job_id=selected_job_id
+            )
         except ConversationLimit as error:
             raise HTTPException(status_code=409, detail=str(error)) from error
 
@@ -1166,8 +1233,11 @@ def create_app(
             raise HTTPException(status_code=409, detail=str(error)) from error
         return Response(status_code=204)
 
-    def conversation_context(identity: DeviceIdentity) -> dict[str, object]:
-        selection = state_store.job_workspace_state().selected_job_id
+    def conversation_context(
+        conversation_id: str, identity: DeviceIdentity
+    ) -> dict[str, object]:
+        context = state_store.conversation_job_context(conversation_id, identity.device_id)
+        selection = context["selected_job_id"]
         workspace = state_store.workspace_snapshot(identity.device_id).snapshot
         selected_job = None
         if selection is not None:
@@ -1194,12 +1264,53 @@ def create_app(
                     "selected_preset",
                     "active_center_surface",
                     "active_browser_tab_id",
-                    "active_artifact_id",
-                    "active_artifact_page",
-                    "active_artifact_zoom",
                 )
+            } | {
+                "active_artifact_id": context["active_artifact_id"],
+                "active_artifact_page": context["active_artifact_page"],
+                "active_artifact_zoom": context["active_artifact_zoom"],
             },
         }
+
+    @app.put(
+        "/v1/conversations/{conversation_id}/workspace/job", tags=["workspace"]
+    )
+    def conversation_select_job(
+        conversation_id: ConversationId,
+        command: JobSelectionRequest,
+        identity: Annotated[DeviceIdentity, Depends(authenticated_device)],
+    ) -> ConversationJobContextMutation:
+        conversation_service(conversation_id, identity)
+        ensure_job(command.job_id)
+        context = state_store.select_conversation_job(
+            conversation_id, identity.device_id, command.job_id
+        )
+        return ConversationJobContextMutation(
+            event_id=0, job_context=ConversationJobContext.model_validate(context)
+        )
+
+    @app.put(
+        "/v1/conversations/{conversation_id}/workspace/document", tags=["workspace"]
+    )
+    def conversation_save_document_view(
+        conversation_id: ConversationId,
+        command: ConversationDocumentViewRequest,
+        identity: Annotated[DeviceIdentity, Depends(authenticated_device)],
+    ) -> ConversationJobContextMutation:
+        conversation_service(conversation_id, identity)
+        try:
+            context = state_store.save_conversation_document_view(
+                conversation_id,
+                identity.device_id,
+                artifact_id=command.active_artifact_id,
+                page=command.active_artifact_page,
+                zoom=command.active_artifact_zoom,
+            )
+        except ValueError as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
+        return ConversationJobContextMutation(
+            event_id=0, job_context=ConversationJobContext.model_validate(context)
+        )
 
     @app.post(
         "/v1/conversations/{conversation_id}/messages",
@@ -1215,7 +1326,7 @@ def create_app(
             return await conversation_service(conversation_id, identity).send(
                 command,
                 actor_id=identity.device_id,
-                context=conversation_context(identity),
+                context=conversation_context(conversation_id, identity),
             )
         except ConversationBusy as error:
             raise HTTPException(status_code=409, detail=str(error)) from error
@@ -1392,9 +1503,9 @@ def create_app(
             )
         )
         normalized = normalize_job_detail(saved)
-        # The canonical job commits first. A retry converges on its unique URL,
-        # then the existing workbench idempotency ledger records selection/audit.
-        event_id = state_store.save_job_selection(normalized.job_id, command.origin)
+        # Saving a job never silently retargets an agent session. Selection is
+        # an explicit conversation-scoped command.
+        event_id = 0
         result = BrowserJobCreateResponse(
             event_id=event_id,
             created=saved.job_id == command_job_id,
@@ -1466,11 +1577,18 @@ def create_app(
 
     @app.get("/v1/workspace/jobs", tags=["workspace"])
     def workspace_jobs(
-        _: Annotated[DeviceIdentity, Depends(authenticated_device)],
+        identity: Annotated[DeviceIdentity, Depends(authenticated_device)],
+        conversation_id: str | None = None,
     ) -> WorkspaceJobsResponse:
         state = state_store.job_workspace_state()
+        selected_job_id = None
+        if conversation_id is not None:
+            conversation_service(conversation_id, identity)
+            selected_job_id = state_store.conversation_job_context(
+                conversation_id, identity.device_id
+            )["selected_job_id"]
         return WorkspaceJobsResponse(
-            selected_job_id=state.selected_job_id,
+            selected_job_id=selected_job_id,
             sort_mode=state.sort_mode,
             manual_order=state.manual_order,
         )
@@ -1480,14 +1598,27 @@ def create_app(
         identity: Annotated[DeviceIdentity, Depends(authenticated_device)],
         origin: Literal["mcp"] | None = None,
         idempotency_key: str | None = None,
+        conversation_id: str | None = None,
     ) -> WorkspaceSnapshotResponse:
         record = state_store.workspace_snapshot(identity.device_id)
-        result = WorkspaceSnapshotResponse(
-            revision=record.revision,
-            repaired_presets=list(record.repaired_presets),
-            repaired_browser=record.repaired_browser,
-            browser_repair_reasons=list(record.browser_repair_reasons),
-            **record.snapshot,
+        snapshot = dict(record.snapshot)
+        if conversation_id is not None:
+            conversation_service(conversation_id, identity)
+            context = state_store.conversation_job_context(conversation_id, identity.device_id)
+            snapshot.update(
+                selected_job_id=context["selected_job_id"],
+                active_artifact_id=context["active_artifact_id"],
+                active_artifact_page=context["active_artifact_page"],
+                active_artifact_zoom=context["active_artifact_zoom"],
+            )
+        result = WorkspaceSnapshotResponse.model_validate(
+            {
+                "revision": record.revision,
+                "repaired_presets": list(record.repaired_presets),
+                "repaired_browser": record.repaired_browser,
+                "browser_repair_reasons": list(record.browser_repair_reasons),
+                **snapshot,
+            }
         )
         record_agent_read(
             identity=identity,
@@ -1511,19 +1642,8 @@ def create_app(
         mcp_token: Annotated[str | None, Header(alias="X-JobOS-MCP-Token")] = None,
     ) -> WorkspaceSnapshotResponse:
         require_trusted_mcp(identity, command.origin, mcp_token)
-        if command.active_artifact_id is not None:
-            artifact = state_store.get_document_artifact(command.active_artifact_id)
-            selected_job_id = state_store.job_workspace_state().selected_job_id
-            if (
-                artifact is None
-                or selected_job_id is None
-                or command.selected_job_id != selected_job_id
-                or artifact["job_id"] != selected_job_id
-            ):
-                raise HTTPException(
-                    status_code=409,
-                    detail="Active artifact does not belong to the selected job",
-                )
+        # Selected job and document view are conversation-owned. Compatibility
+        # fields in this global snapshot are stripped by the state store.
         try:
             record = state_store.save_workspace_snapshot(
                 identity.device_id,
@@ -1553,49 +1673,23 @@ def create_app(
     @app.put(
         "/v1/workspace/jobs/selection",
         tags=["workspace"],
+        deprecated=True,
         responses={
-            403: {"model": ApiErrorResponse, "description": "Trusted MCP credential required"}
+            410: {
+                "model": ApiErrorResponse,
+                "description": "Selection must target a conversation",
+            }
         },
     )
-    @serialized_mutation_route
-    def workspace_select_job(
+    def workspace_select_job_deprecated(
         command: JobSelectionRequest,
         identity: Annotated[DeviceIdentity, Depends(authenticated_device)],
-        mcp_token: Annotated[str | None, Header(alias="X-JobOS-MCP-Token")] = None,
     ) -> JobMutationResponse:
-        require_trusted_mcp(identity, command.origin, mcp_token)
-        request_hash = mutation_hash(
-            "job.select", {"job_id": command.job_id, "origin": command.origin}
+        del command, identity
+        raise HTTPException(
+            status_code=410,
+            detail="Select a job through /v1/conversations/{conversation_id}/workspace/job",
         )
-        try:
-            replay = mutation_replay(
-                identity=identity,
-                target="workspace/jobs",
-                command_name="job.select",
-                idempotency_key=command.idempotency_key,
-                request_hash=request_hash,
-            )
-        except IdempotencyConflict as error:
-            raise HTTPException(status_code=409, detail=str(error)) from error
-        if replay is not None:
-            return JobMutationResponse.model_validate(replay)
-        known_ids = {job.job_id for job in jobs.list_jobs()}
-        if command.job_id not in known_ids:
-            raise HTTPException(status_code=404, detail="Job not found")
-        event_id = state_store.save_job_selection(command.job_id, command.origin)
-        result = JobMutationResponse(event_id=event_id)
-        record_mutation(
-            identity=identity,
-            target="workspace/jobs",
-            command_name="job.select",
-            origin=command.origin,
-            idempotency_key=command.idempotency_key,
-            request_hash=request_hash,
-            result=result.model_dump(),
-            label=f"Selected job {command.job_id}",
-            job_id=command.job_id,
-        )
-        return result
 
     @app.put(
         "/v1/workspace/jobs/sort",
@@ -1709,8 +1803,7 @@ def create_app(
                 )
             jobs.delete_job(job_id)
         state_store.delete_job_documents(job_id)
-        if state_store.job_workspace_state().selected_job_id == job_id:
-            state_store.save_job_selection(None, command.origin)
+        state_store.clear_job_from_conversations(job_id)
         result_payload = JobMutationResponse(event_id=0).model_dump(mode="json")
         event_id = record_mutation(
             identity=identity,

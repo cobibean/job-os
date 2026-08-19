@@ -72,7 +72,7 @@ assert.deepEqual(
 )
 
 await bridge.agent.list()
-await bridge.agent.create()
+await bridge.agent.create('job-inherited')
 await bridge.agent.get('conv_one')
 await bridge.agent.archive('conv_two')
 await bridge.agent.send('conv_one', 'Hello', 'idempotency-0001')
@@ -80,7 +80,7 @@ await bridge.agent.cancel('conv_one', 'turn-1')
 await bridge.agent.retry('conv_two', 'turn-1', 'idempotency-0002')
 assert.deepEqual(invokeCalls, [
   ['jobos:agent:list'],
-  ['jobos:agent:create'],
+  ['jobos:agent:create', 'job-inherited'],
   ['jobos:agent:get', 'conv_one'],
   ['jobos:agent:archive', 'conv_two'],
   ['jobos:agent:send', 'conv_one', 'Hello', 'idempotency-0001'],
