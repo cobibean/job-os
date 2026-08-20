@@ -277,7 +277,7 @@ function WorkbenchApp() {
           browserRepaired={Boolean(layoutState.workspace.repairedBrowser)}
           browserRepairReasons={layoutState.workspace.browserRepairReasons ?? []}
           browserVisible={nativeBrowserVisible && !panelReorderActive}
-          agentConversationId={agentSessions.activeId}
+          onCreateSaveSession={agentSessions.createJobless}
           documentMutationGeneration={documentMutationGeneration}
           documentPreviewMode={documentPreviewMode}
           jobListingRequest={jobListingRequest}
@@ -286,8 +286,10 @@ function WorkbenchApp() {
           onBrowserPersist={layoutState.updateBrowserState}
           onDocumentPersist={layoutState.updateDocumentState}
           onDocumentPreviewModeChange={setDocumentPreviewMode}
-          onJobSaved={async jobId => {
-            await jobState.selectJob(jobId)
+          onJobSaved={async (jobId, conversationId) => {
+            if (!await jobState.selectJobForConversation(conversationId, jobId)) {
+              throw new Error('The job was saved, but JobOS could not attach it to the new agent session.')
+            }
             setDocumentMutationGeneration(generation => generation + 1)
           }}
           onOpenEditor={setEditingDocument}

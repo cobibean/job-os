@@ -208,3 +208,9 @@ async def test_release_pinned_process_exposes_correlated_browser_snapshot(tmp_pa
     assert schema["properties"]["conversation_id"]["pattern"] == (
         "^conv_[A-Za-z0-9_-]{1,128}$"
     )
+    assert "text_start" in schema["required"]
+    assert "text_length" in schema["required"]
+    assert "include_targets" in schema["required"]
+    assert "default" not in schema["properties"]["text_start"]
+    assert "default" not in schema["properties"]["text_length"]
+    assert "default" not in schema["properties"]["include_targets"]

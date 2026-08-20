@@ -90,7 +90,7 @@ class BrowserCommandRequest(BaseModel):
         args = self.arguments
         allowed: dict[str, set[str]] = {
             "tabs.inspect": set(),
-            "tab.create": {"url", "associated_job_id"},
+            "tab.create": {"url", "associated_job_id", "activate"},
             "tab.select": {"tab_id"},
             "tab.associate": {"tab_id", "job_id"},
             "tab.close": {"tab_id"},
@@ -100,7 +100,7 @@ class BrowserCommandRequest(BaseModel):
             "tab.forward": {"tab_id"},
             "tab.reload": {"tab_id"},
             "tab.stop": {"tab_id"},
-            "page.snapshot": {"tab_id"},
+            "page.snapshot": {"tab_id", "text_start", "text_length", "include_targets"},
             "element.click": {"tab_id", "target_id"},
             "element.type": {"tab_id", "target_id", "text", "clear"},
             "page.scroll": {"tab_id", "direction", "amount"},
@@ -125,6 +125,20 @@ class BrowserCommandRequest(BaseModel):
         if command in {"element.click", "element.type"}:
             target = args.get("target_id")
             if not isinstance(target, str) or not TARGET_ID.fullmatch(target):
+                raise ValueError("Invalid browser command arguments")
+        if command == "page.snapshot":
+            text_start = args.get("text_start", 0)
+            text_length = args.get("text_length", 12_000)
+            include_targets = args.get("include_targets", True)
+            if (
+                not isinstance(text_start, int)
+                or isinstance(text_start, bool)
+                or not 0 <= text_start <= 10_000_000
+                or not isinstance(text_length, int)
+                or isinstance(text_length, bool)
+                or not 1 <= text_length <= 12_000
+                or not isinstance(include_targets, bool)
+            ):
                 raise ValueError("Invalid browser command arguments")
         if command == "element.type":
             text = args.get("text")
@@ -166,6 +180,10 @@ class BrowserCommandRequest(BaseModel):
                 not isinstance(job_id, str) or not job_id or len(job_id) > 512
             ):
                 raise ValueError("Invalid browser command arguments")
+        if command == "tab.create" and "activate" in args and not isinstance(
+            args["activate"], bool
+        ):
+            raise ValueError("Invalid browser command arguments")
         if command == "tab.associate":
             job_id = args.get("job_id")
             if not isinstance(job_id, str) or not job_id or len(job_id) > 512:
@@ -260,7 +278,7 @@ def sanitize_browser_result_data(value: Any, *, key: str = "", depth: int = 0) -
         safe = sanitize_user_text(value)
         if key == "title":
             safe = sanitize_browser_title(safe)
-        limit = 5_000 if key in {"text", "page_text"} else 1_000
+        limit = 12_000 if key in {"text", "page_text"} else 1_000
         return safe[:limit]
     if isinstance(value, dict):
         return {

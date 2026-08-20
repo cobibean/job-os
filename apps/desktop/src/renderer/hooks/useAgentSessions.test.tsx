@@ -183,6 +183,22 @@ test('selection persists only a valid opaque id and otherwise falls back to posi
   await waitFor(() => expect(secondRender.result.current.activeId).toBe('conv_1'))
 })
 
+test('browser save creates a fresh session with explicitly empty job context', async () => {
+  const existing = { ...summary(1), jobContext: { ...summary(1).jobContext, selectedJobId: 'job-samsara' } }
+  const { agent } = install([existing])
+  agent.create.mockResolvedValue(snapshot(2))
+  const { result } = renderHook(() => useAgentSessions())
+  await waitFor(() => expect(result.current.activeId).toBe('conv_1'))
+
+  let createdId: string | null = null
+  await act(async () => { createdId = await result.current.createJobless() })
+
+  expect(agent.create).toHaveBeenCalledWith(null)
+  expect(createdId).toBe('conv_2')
+  expect(result.current.activeId).toBe('conv_2')
+  expect(result.current.sessions.conv_2?.summary.jobContext.selectedJobId).toBeNull()
+})
+
 test('the sixth session is blocked locally with the exact announcement', async () => {
   const { agent } = install(Array.from({ length: 5 }, (_, index) => summary(index + 1)))
   const { result } = renderHook(() => useAgentSessions())

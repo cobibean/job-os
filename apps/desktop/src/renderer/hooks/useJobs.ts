@@ -134,16 +134,16 @@ export function useJobs(
     return () => window.clearTimeout(timeout)
   }, [bridge, ready, refresh])
 
-  const selectJob = useCallback(async (jobId: string) => {
-    if (!bridge || !activeConversationId) {
+  const selectJobForConversation = useCallback(async (conversationId: string, jobId: string) => {
+    if (!bridge || !conversationId) {
       setError('No active session')
       return false
     }
     const requestRevision = selectionRevision.current + 1
     selectionRevision.current = requestRevision
     try {
-      const context = await bridge.select(activeConversationId, jobId)
-      onJobContextChange?.(activeConversationId, context)
+      const context = await bridge.select(conversationId, jobId)
+      onJobContextChange?.(conversationId, context)
       const [snapshot, refreshed] = await Promise.all([
         bridge.getState(),
         bridge.list(sortMode, query.trim() || undefined, statusGroup || undefined)
@@ -161,7 +161,11 @@ export function useJobs(
       if (selectionRevision.current === requestRevision) setError('Selection failed')
       return false
     }
-  }, [activeConversationId, bridge, loadDetail, onJobContextChange, query, sortMode, statusGroup])
+  }, [bridge, loadDetail, onJobContextChange, query, sortMode, statusGroup])
+
+  const selectJob = useCallback(async (jobId: string) => (
+    activeConversationId ? selectJobForConversation(activeConversationId, jobId) : false
+  ), [activeConversationId, selectJobForConversation])
 
   const changeStatus = useCallback(async (jobId: string, status: JobStatus) => {
     if (!bridge) return
@@ -259,6 +263,7 @@ export function useJobs(
     setQuery,
     setStatusGroup,
     selectJob,
+    selectJobForConversation,
     changeStatus,
     removeDemo,
     changeSort,

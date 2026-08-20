@@ -213,7 +213,11 @@ export class BrowserManager {
     return this.getState()
   }
 
-  async create(url = DEFAULT_BROWSER_URL, associatedJobId: string | null = null): Promise<BrowserState> {
+  async create(
+    url = DEFAULT_BROWSER_URL,
+    associatedJobId: string | null = null,
+    activate = true
+  ): Promise<BrowserState> {
     this.#hasExplicitAction = true
     if (this.#order.length >= BROWSER_PERSISTENCE_LIMITS.tabs) {
       this.#notice = `Tab limit reached (${BROWSER_PERSISTENCE_LIMITS.tabs}). Close a tab before opening another.`
@@ -228,7 +232,7 @@ export class BrowserManager {
       faviconUrl: null,
       associatedJobId
     })
-    this.#activeTabId = tabId
+    if (activate) this.#activeTabId = tabId
     this.#syncAttachedView()
     this.#emit()
     await initialLoad
@@ -330,20 +334,29 @@ export class BrowserManager {
     return this.getState()
   }
 
-  async snapshot(tabId: string): Promise<BrowserSemanticSnapshot> {
+  async snapshot(
+    tabId: string,
+    requestedTextStart = 0,
+    requestedTextLength = 12_000,
+    includeTargets = true
+  ): Promise<BrowserSemanticSnapshot> {
     const tab = this.#requireTab(tabId)
+    if (!Number.isInteger(requestedTextStart) || requestedTextStart < 0
+      || !Number.isInteger(requestedTextLength) || requestedTextLength < 1 || requestedTextLength > 12_000) {
+      throw new TypeError('Invalid browser snapshot range')
+    }
     this.#invalidateTargets(tab)
     const targetEpoch = tab.targetEpoch
     const targetPrefix = randomUUID().replaceAll('-', '').slice(0, 20)
-    const raw = await tab.view.webContents.executeJavaScript(`(() => {
+    const raw = await tab.view.webContents.executeJavaScript(`(async () => {
       const visible = (element) => {
         const style = getComputedStyle(element);
         return !element.hidden && style.visibility !== 'hidden'
           && style.display !== 'none' && element.getClientRects().length > 0;
       };
-      const candidates = [...document.querySelectorAll(
+      const candidates = ${includeTargets} ? [...document.querySelectorAll(
         'a,button,input,textarea,select,[role="button"],[role="link"],[contenteditable="true"],[tabindex]'
-      )].filter(visible).slice(0, 100);
+      )].filter(visible).slice(0, 100) : [];
       const elements = candidates.map((element, index) => {
         if (!visible(element)) return null;
         const name = (element.getAttribute('aria-label') || element.getAttribute('title')
@@ -357,13 +370,16 @@ export class BrowserManager {
       const pageText = (document.body?.innerText || '').trim();
       const viewportHeight = Math.max(1, window.innerHeight);
       const scrollHeight = Math.max(viewportHeight, document.documentElement.scrollHeight, document.body?.scrollHeight || 0);
-      const textStart = Math.min(${tab.snapshotTextOffset}, Math.max(0, pageText.length - 1));
-      return { text: pageText.slice(textStart, textStart + 5000), textStart,
-        textLength: pageText.length, scrollY: window.scrollY, scrollHeight, viewportHeight, elements };
+      const textStart = Math.min(${requestedTextStart}, pageText.length);
+      const text = pageText.slice(textStart, textStart + ${requestedTextLength});
+      const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(pageText));
+      const pageRevision = [...new Uint8Array(digest)].map(byte => byte.toString(16).padStart(2, '0')).join('');
+      return { text, textStart, totalTextLength: pageText.length, pageRevision,
+        scrollY: window.scrollY, scrollHeight, viewportHeight, elements };
     })()`, true) as unknown
     const value = raw && typeof raw === 'object' ? raw as Record<string, unknown> : {}
     tab.snapshotTextOffset = boundedNonNegativeInteger(value.textStart)
-    tab.snapshotTextLength = boundedNonNegativeInteger(value.textLength)
+    tab.snapshotTextLength = boundedNonNegativeInteger(value.totalTextLength)
     const targets = Array.isArray(value.elements)
       ? value.elements.slice(0, 100).flatMap(item => {
           if (!item || typeof item !== 'object') return []
@@ -403,9 +419,16 @@ export class BrowserManager {
       tabId,
       url: state?.url ?? 'about:blank',
       title: state?.title ?? 'Untitled',
-      text: typeof value.text === 'string' ? value.text.slice(0, 5000) : '',
+      text: typeof value.text === 'string' ? value.text.slice(0, requestedTextLength) : '',
+      requestedTextStart,
       textStart: boundedNonNegativeInteger(value.textStart),
-      textLength: boundedNonNegativeInteger(value.textLength),
+      textLength: typeof value.text === 'string' ? value.text.slice(0, requestedTextLength).length : 0,
+      totalTextLength: boundedNonNegativeInteger(value.totalTextLength),
+      hasMore: boundedNonNegativeInteger(value.textStart)
+        + (typeof value.text === 'string' ? value.text.slice(0, requestedTextLength).length : 0)
+        < boundedNonNegativeInteger(value.totalTextLength),
+      pageRevision: typeof value.pageRevision === 'string' && /^[a-f0-9]{64}$/.test(value.pageRevision)
+        ? value.pageRevision : '',
       scrollY: boundedNonNegativeInteger(value.scrollY),
       scrollHeight: boundedNonNegativeInteger(value.scrollHeight),
       viewportHeight: boundedNonNegativeInteger(value.viewportHeight),

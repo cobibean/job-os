@@ -270,13 +270,16 @@ export function useAgentSessions() {
     return id ? select(id) : false
   }, [select])
 
-  const create = useCallback((initialSelectedJobId?: string | null): Promise<boolean> => {
+  const createSession = useCallback((initialSelectedJobId?: string | null): Promise<{
+    handled: boolean
+    conversationId: string | null
+  }> => {
     const bridge = window.jobos?.agent
-    if (!bridge) return Promise.resolve(false)
-    const task = createQueue.current.then(async (): Promise<boolean> => {
+    if (!bridge) return Promise.resolve({ handled: false, conversationId: null })
+    const task = createQueue.current.then(async () => {
       if (stateRef.current.order.length >= MAX_SESSIONS) {
         setAnnouncement('Maximum 5 sessions.')
-        return true
+        return { handled: true, conversationId: null }
       }
       setCreating(true)
       try {
@@ -300,10 +303,10 @@ export function useAgentSessions() {
         updateState(() => createdState)
         window.localStorage.setItem(ACTIVE_CONVERSATION_KEY, snapshot.conversationId)
         setAnnouncement(`Session ${stateRef.current.order.length} created`)
-        return true
+        return { handled: true, conversationId: snapshot.conversationId }
       } catch {
         setAnnouncement('New session could not be started')
-        return false
+        return { handled: false, conversationId: null }
       } finally {
         setCreating(false)
       }
@@ -311,6 +314,14 @@ export function useAgentSessions() {
     createQueue.current = task.then(() => undefined, () => undefined)
     return task
   }, [updateState])
+
+  const create = useCallback(async (initialSelectedJobId?: string | null): Promise<boolean> => (
+    await createSession(initialSelectedJobId)
+  ).handled, [createSession])
+
+  const createJobless = useCallback(async (): Promise<string | null> => (
+    await createSession(null)
+  ).conversationId, [createSession])
 
   const setDraft = useCallback((conversationId: string, draft: string) => {
     updateState(current => {
@@ -469,6 +480,7 @@ export function useAgentSessions() {
     select,
     selectByIndex,
     create,
+    createJobless,
     archive,
     setDraft,
     send,

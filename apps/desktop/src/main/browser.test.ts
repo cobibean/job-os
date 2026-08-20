@@ -131,7 +131,8 @@ test('new-window handoff preserves Chromium request context instead of replaying
     activeTabId: 'linkedin'
   })
   const opener = views[0]
-  const openHandler = (opener?.webContents.setWindowOpenHandler as ReturnType<typeof vi.fn>).mock.calls[0]?.[0]
+  if (!opener) throw new Error('Browser view was not created')
+  const openHandler = (opener.webContents.setWindowOpenHandler as ReturnType<typeof vi.fn>).mock.calls[0]?.[0]
   if (!openHandler) throw new Error('Window-open policy was not installed')
 
   const response = openHandler({
@@ -219,7 +220,13 @@ test('new tab commands do not complete before the initial page load settles', as
   await Promise.resolve()
   expect(completed).toBe(false)
   finishLoad()
-  expect((await creating).tabs[0]?.url).toBe('https://example.com/jobs/1')
+  const firstState = await creating
+  expect(firstState.tabs[0]?.url).toBe('https://example.com/jobs/1')
+  const firstTabId = firstState.activeTabId
+  const backgroundState = await manager.create('https://example.com/jobs/2', null, false)
+  expect(backgroundState.activeTabId).toBe(firstTabId)
+  expect(backgroundState.tabs).toHaveLength(2)
+  expect(backgroundState.tabs[1]?.url).toBe('https://example.com/jobs/2')
 })
 
 test('restore does not complete until every initial tab load settles', async () => {
@@ -491,11 +498,13 @@ test('agent browser operations paginate long page text with bounded overlapping 
   let pageText = 'Job results\nExample job'
   const executeJavaScript = vi.fn(async (script: string) => {
     if (script.includes('candidates.map')) {
-      const textStart = Number(script.match(/Math\.min\((\d+)/)?.[1] ?? 0)
+      const textStart = Number(script.match(/Math\.min\((\d+), pageText\.length/)?.[1] ?? 0)
+      const textLength = Number(script.match(/textStart \+ (\d+)/)?.[1] ?? 12_000)
       return {
-        text: pageText.slice(textStart, textStart + 5_000),
+        text: pageText.slice(textStart, textStart + textLength),
         textStart,
-        textLength: pageText.length,
+        totalTextLength: pageText.length,
+        pageRevision: 'c'.repeat(64),
         scrollY: 900,
         scrollHeight: 2_400,
         viewportHeight: 800,
@@ -547,11 +556,9 @@ test('agent browser operations paginate long page text with bounded overlapping 
   await manager.click('tab-1', detailTarget.targetId)
   pageText = detailPageText
   contents.emit('did-navigate')
-  const detailSnapshots = [await manager.snapshot('tab-1')]
-  while (detailSnapshots.at(-1)!.textStart + detailSnapshots.at(-1)!.text.length < detailSnapshots.at(-1)!.textLength
-    && detailSnapshots.length < 30) {
-    await manager.scroll('tab-1', 'down', 600)
-    detailSnapshots.push(await manager.snapshot('tab-1'))
+  const detailSnapshots = []
+  for (let textStart = 0; textStart < detailPageText.length; textStart += 12_000) {
+    detailSnapshots.push(await manager.snapshot('tab-1', textStart, 12_000, false))
   }
 
   expect(listSnapshot.elements).toEqual([
@@ -562,27 +569,35 @@ test('agent browser operations paginate long page text with bounded overlapping 
   ])
   expect(description).toHaveLength(100_000)
   expect(listSnapshot.textStart).toBe(0)
-  expect(detailSnapshots).toHaveLength(28)
+  expect(detailSnapshots).toHaveLength(10)
   expect(detailSnapshots[0]!.textStart).toBe(0)
   expect(detailSnapshots.at(-1)!.textStart).toBe(108_000)
   expect(detailSnapshots.some(item => item.text.includes('FULL-DESCRIPTION-START'))).toBe(true)
   expect(detailSnapshots.some(item => item.text.includes('FULL-DESCRIPTION-MIDDLE'))).toBe(true)
   expect(detailSnapshots.at(-1)!.text).toContain('FULL-DESCRIPTION-END')
-  expect(detailSnapshots.at(-1)!.textStart + detailSnapshots.at(-1)!.text.length).toBe(detailPageText.length)
+  expect(detailSnapshots.at(-1)!.textStart + detailSnapshots.at(-1)!.textLength).toBe(detailPageText.length)
   for (let index = 1; index < detailSnapshots.length; index += 1) {
-    expect(detailSnapshots[index]!.textLength).toBe(detailPageText.length)
-    expect(detailSnapshots[index - 1]!.text.slice(-1_000)).toBe(detailSnapshots[index]!.text.slice(0, 1_000))
+    expect(detailSnapshots[index]!.totalTextLength).toBe(detailPageText.length)
+    expect(detailSnapshots[index]!.textStart).toBe(
+      detailSnapshots[index - 1]!.textStart + detailSnapshots[index - 1]!.textLength
+    )
+    expect(detailSnapshots[index]!.pageRevision).toBe(detailSnapshots[0]!.pageRevision)
   }
   expect(detailSnapshots[0]).toMatchObject({
+    requestedTextStart: 0,
     textStart: 0,
-    textLength: detailPageText.length,
+    textLength: 12_000,
+    totalTextLength: detailPageText.length,
+    hasMore: true,
+    pageRevision: 'c'.repeat(64),
     scrollY: 900,
     scrollHeight: 2_400,
     viewportHeight: 800
   })
   const snapshotScript = String(executeJavaScript.mock.calls[0]?.[0])
   expect(snapshotScript).toContain('getClientRects().length')
-  expect(snapshotScript).toContain('pageText.slice(textStart, textStart + 5000)')
+  expect(snapshotScript).toContain('pageText.slice(textStart, textStart + 12000)')
+  expect(snapshotScript).toContain("crypto.subtle.digest('SHA-256'")
   expect(snapshotScript).not.toContain('window.scrollY / maxScroll')
   expect(snapshotScript).toContain('filter(visible).slice(0, 100)')
   const allScripts = executeJavaScript.mock.calls.flat().join('\n')

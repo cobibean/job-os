@@ -700,6 +700,104 @@ async def test_mcp_server_exposes_public_v1_parity_tools_while_retaining_job_too
         assert "conversation_id" in tool.inputSchema["required"]
         assert conversation["maxLength"] == 133
         assert conversation["pattern"] == "^conv_[A-Za-z0-9_-]{1,128}$"
+    snapshot_schema = tools_by_name["browser_snapshot"].inputSchema
+    assert "text_start" in snapshot_schema["required"]
+    assert "text_length" in snapshot_schema["required"]
+    assert "include_targets" in snapshot_schema["required"]
+    assert "default" not in snapshot_schema["properties"]["text_start"]
+    assert "default" not in snapshot_schema["properties"]["text_length"]
+    assert "default" not in snapshot_schema["properties"]["include_targets"]
+    create_schema = tools_by_name["browser_tab_create"].inputSchema
+    assert create_schema["properties"]["activate"]["default"] is True
+
+
+@pytest.mark.anyio
+async def test_save_current_tab_contract_pages_oversized_listing_then_creates_and_associates():
+    listing_text = "Applied Systems AI Product Manager\n" + "J" * 48_000
+    revision = "a" * 64
+    requests = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        body = json.loads(request.content)
+        if request.url.path == "/v1/browser/commands" and body["command"] == "page.snapshot":
+            start = body["arguments"]["text_start"]
+            length = body["arguments"]["text_length"]
+            text = listing_text[start : start + length]
+            return httpx.Response(200, json={
+                "state": "completed",
+                "outcome": "page.snapshot",
+                "data": {
+                    "tab_id": "live-applied-systems-tab",
+                    "url": "https://www.linkedin.com/jobs/view/4431837844/",
+                    "title": "AI Product Manager",
+                    "text": text,
+                    "requested_text_start": start,
+                    "text_start": start,
+                    "text_length": len(text),
+                    "next_text_start": (
+                        start + len(text)
+                        if start + len(text) < len(listing_text)
+                        else None
+                    ),
+                    "total_text_length": len(listing_text),
+                    "has_more": start + len(text) < len(listing_text),
+                    "page_revision": revision,
+                    "targets": [],
+                },
+            })
+        if request.url.path == "/v1/jobs":
+            return httpx.Response(200, json={"job_id": "job-applied-systems", "created": True})
+        return httpx.Response(200, json={"state": "completed", "outcome": "tab.associate"})
+
+    client = JobOsMcpClient(
+        base_url="http://jobos.test",
+        device_token="test-device-token",
+        mcp_token="test-mcp-trusted-token",
+        transport=httpx.MockTransport(handler),
+    )
+    server = create_server(client)
+    captured = []
+    start = 0
+    while True:
+        content, snapshot = await server.call_tool("browser_snapshot", {
+            "conversation_id": "conv_save_current_tab",
+            "tab_id": "live-applied-systems-tab",
+            "text_start": start,
+            "text_length": 12_000,
+            "include_targets": False,
+        })
+        assert sum(len(item.text) for item in content if hasattr(item, "text")) < 25_000
+        assert snapshot["data"]["page_revision"] == revision
+        captured.append(snapshot["data"]["text"])
+        if not snapshot["data"]["has_more"]:
+            break
+        start = snapshot["data"]["next_text_start"]
+
+    _, created = await server.call_tool("job_create_from_browser", {
+        "company_name": "Applied Systems",
+        "title": "AI Product Manager",
+        "canonical_url": "https://www.linkedin.com/jobs/view/4431837844/",
+        "location_text": "Not specified",
+        "description_text": "".join(captured),
+        "application_url": "https://www.linkedin.com/jobs/view/4431837844/",
+    })
+    await server.call_tool("browser_tab_associate", {
+        "conversation_id": "conv_save_current_tab",
+        "tab_id": "live-applied-systems-tab",
+        "job_id": created["job_id"],
+    })
+    await client.aclose()
+
+    assert "".join(captured) == listing_text
+    assert created == {"job_id": "job-applied-systems", "created": True}
+    create_body = json.loads(requests[-2].content)
+    associate_body = json.loads(requests[-1].content)
+    assert create_body["company_name"] == "Applied Systems"
+    assert create_body["title"] == "AI Product Manager"
+    assert associate_body["arguments"] == {
+        "tab_id": "live-applied-systems-tab", "job_id": "job-applied-systems"
+    }
 
 
 @pytest.mark.anyio
