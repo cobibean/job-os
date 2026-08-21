@@ -4,6 +4,12 @@ from urllib.parse import parse_qs, urlsplit
 
 import pytest
 from jobos_api.agent_gateway import AgentContext, GatewayEvent
+from jobos_api.career_profile import (
+    CareerProfileStore,
+    WorkArrangementMutation,
+    WorkArrangementValue,
+    principal_for_device,
+)
 from jobos_api.conversations import ConversationService, RetryTurnRequest, SendMessageRequest
 from jobos_api.hermes_adapter import HermesWebSocketGateway, _prompt_with_context
 from jobos_api.state_store import JobOsStateStore
@@ -262,7 +268,8 @@ def test_prompt_context_is_bounded_parseable_untrusted_reference_data():
         "\n</jobos_untrusted_context>", 1
     )[0]
     context = json.loads(serialized)
-    assert set(context) == {"selected_job_id", "selected_job", "workspace"}
+    assert set(context) == {"selected_job_id", "selected_job", "workspace", "career_profile"}
+    assert context["career_profile"] is None
     assert set(context["selected_job"]) == {"job_id", "company", "title"}
     assert set(context["workspace"]) == {
         "selected_preset",
@@ -275,6 +282,49 @@ def test_prompt_context_is_bounded_parseable_untrusted_reference_data():
     assert max(len(value) for value in context["selected_job"].values()) <= 200
     assert prompt.index("</jobos_untrusted_context>") < prompt.index("User request:")
     assert prompt.endswith("User request:\nReview the selected role")
+
+
+def test_prompt_context_exposes_only_bounded_career_profile_projection():
+    prompt = _prompt_with_context(
+        "Find a role",
+        {
+            "career_profile": {
+                "snapshot_id": "cps_snapshot_reference_1234",
+                "profile_revision": 7,
+                "content_hash": "a" * 64,
+                "projection": {
+                    "work_arrangement": {
+                        "mode": "remote",
+                        "strength": "requirement",
+                        "note": "Remote only",
+                        "unrelated": "omit me",
+                    },
+                    "evidence": {"absolute_path": "/private/sensitive"},
+                },
+                "credentials": "omit me",
+            }
+        },
+        "conv_profile_prompt",
+    )
+    serialized = prompt.split("<jobos_untrusted_context>\n", 1)[1].split(
+        "\n</jobos_untrusted_context>", 1
+    )[0]
+    profile = json.loads(serialized)["career_profile"]
+    assert profile == {
+        "snapshot_id": "cps_snapshot_reference_1234",
+        "profile_revision": 7,
+        "content_hash": "a" * 64,
+        "projection": {
+            "work_arrangement": {
+                "mode": "remote",
+                "strength": "requirement",
+                "note": "Remote only",
+            }
+        },
+    }
+    assert "record-private" not in prompt
+    assert "/private/sensitive" not in prompt
+    assert "device:private" not in prompt
 
 
 def test_prompt_rejects_unbounded_conversation_correlation():
@@ -476,29 +526,103 @@ def test_service_records_late_continuation_without_disturbing_active_user_turn(t
             connector=FakeConnector(socket),
         )
         store = JobOsStateStore(tmp_path / "jobos.db")
-        store.initialize()
+        store.initialize(owner_device_id="device-a")
+        profile = CareerProfileStore(tmp_path / "jobos.db")
+        profile.initialize()
+        principal = principal_for_device("device-a")
+        profile.set_work_arrangement(
+            principal=principal,
+            command=WorkArrangementMutation(
+                expected_profile_revision=0,
+                idempotency_key="adapter-source-profile-0001",
+                value=WorkArrangementValue(
+                    mode="remote", strength="strong_preference", note="Source A"
+                ),
+            ),
+        )
+        conversation_id = store.first_active_conversation_id("device-a")
+        conversation = store.conversation_store(conversation_id)
         await gateway.start()
         await gateway.create_or_resume_conversation(None)
-        service = ConversationService(store, gateway)
+        service = ConversationService(
+            conversation,
+            gateway,
+            conversation_id,
+            career_profile_principal=principal,
+        )
         await service.start()
-        active = store.create_conversation_turn(
+        source = conversation.create_turn(
+            text="Spawn background work",
+            context={},
+            idempotency_key="adapter-source-turn-0001",
+            actor_id="device-a",
+            career_profile_principal=principal,
+        )
+        gateway._active_turn_id = str(source["turn_id"])
+        socket.incoming.put_nowait(
+            json.dumps(
+                event(
+                    "tool.complete",
+                    "live-1",
+                    {
+                        "event_id": "adapter-delegation-source-0001",
+                        "tool_id": "adapter-delegation-tool-0001",
+                        "name": "delegate_task",
+                        "status": "complete",
+                        "result": {"delegation_id": "delegation-service-1234"},
+                    },
+                )
+            )
+        )
+        socket.incoming.put_nowait(
+            json.dumps(
+                event(
+                    "message.complete",
+                    "live-1",
+                    {"status": "complete", "text": "Source A foreground work finished"},
+                )
+            )
+        )
+        source_record = None
+        for _ in range(50):
+            source_record = conversation.turn_record(str(source["turn_id"]))
+            if source_record is not None and source_record["status"] == "completed":
+                break
+            await asyncio.sleep(0.01)
+        assert source_record is not None
+        assert source_record["status"] == "completed"
+        profile.set_work_arrangement(
+            principal=principal,
+            command=WorkArrangementMutation(
+                expected_profile_revision=1,
+                idempotency_key="adapter-newer-profile-0001",
+                value=WorkArrangementValue(
+                    mode="hybrid", strength="strong_preference", note="Newer B"
+                ),
+            ),
+        )
+        active = conversation.create_turn(
             text="A newer follow-up",
             context={"selected_job_id": None, "workspace": {}},
             idempotency_key="active-during-late-continuation",
             actor_id="device-a",
+            career_profile_principal=principal,
         )
         gateway._active_turn_id = str(active["turn_id"])
-        snapshot = store.conversation_snapshot()
+        snapshot = conversation.snapshot()
         gateway_active_turn_id = None
         try:
             socket.incoming.put_nowait(
                 json.dumps(
                     event(
-                        "message.start",
+                        "status.update",
                         "live-1",
                         {
-                            "display_kind": "async_delegation_complete",
-                            "continuation_id": "delegation-service-1234",
+                            "kind": "process",
+                            "text": (
+                                "[ASYNC DELEGATION BATCH COMPLETE — delegation-service-1234]\n"
+                                "A background fan-out has finished."
+                            ),
                         },
                     )
                 )
@@ -508,17 +632,26 @@ def test_service_records_late_continuation_without_disturbing_active_user_turn(t
                     event(
                         "message.complete",
                         "live-1",
+                        {"status": "complete", "text": "Newer B finished first"},
+                    )
+                )
+            )
+            socket.incoming.put_nowait(json.dumps(event("message.start", "live-1")))
+            socket.incoming.put_nowait(json.dumps(event("message.start", "live-1")))
+            socket.incoming.put_nowait(
+                json.dumps(
+                    event(
+                        "message.complete",
+                        "live-1",
                         {
                             "status": "complete",
                             "text": "Background work finished",
-                            "display_kind": "async_delegation_complete",
-                            "continuation_id": "delegation-service-1234",
                         },
                     )
                 )
             )
             for _ in range(50):
-                snapshot = store.conversation_snapshot()
+                snapshot = conversation.snapshot()
                 entries = snapshot["entries"]
                 assert isinstance(entries, list)
                 if any(
@@ -550,13 +683,101 @@ def test_service_records_late_continuation_without_disturbing_active_user_turn(t
             and entry["state"] == "completed"
             for entry in typed_entries
         )
-        assert sum(entry["type"] == "user_message" for entry in typed_entries) == 1
-        active_turn = snapshot["active_turn"]
-        assert isinstance(active_turn, dict)
-        assert active_turn["turn_id"] == active["turn_id"]
-        assert gateway_active_turn_id == active["turn_id"]
+        assert sum(entry["type"] == "user_message" for entry in typed_entries) == 2
+        assert any(
+            entry["turn_id"] == active["turn_id"]
+            and entry["type"] == "assistant_message"
+            and entry["summary"] == "Newer B finished first"
+            for entry in typed_entries
+        )
+        assert snapshot["active_turn"] is None
+        assert gateway_active_turn_id is None
+        continuation_record = conversation.turn_record(continuation_id)
+        source_record = conversation.turn_record(str(source["turn_id"]))
+        assert continuation_record is not None
+        assert source_record is not None
+        assert continuation_record["career_profile_snapshot_id"] == source_record[
+            "career_profile_snapshot_id"
+        ]
+        assert continuation_record["career_profile_revision"] == 1
+        active_record = conversation.turn_record(str(active["turn_id"]))
+        assert active_record is not None
+        assert active_record["career_profile_revision"] == 2
 
     asyncio.run(scenario())
+
+
+def test_async_continuation_marker_does_not_capture_metadata_bearing_turn(tmp_path):
+    gateway = HermesWebSocketGateway(
+        url="ws://127.0.0.1:9119/api/ws", token=TOKEN, cwd=tmp_path
+    )
+    gateway._live_session_id = "live-1"
+    gateway._active_turn_id = "turn-newer-b"
+
+    marker = gateway.normalize_frame(
+        event(
+            "status.update",
+            "live-1",
+            {
+                "kind": "process",
+                "text": "[ASYNC DELEGATION COMPLETE — delegation-stale-1234]\nReady",
+            },
+        )
+    )
+    ordinary_start = gateway.normalize_frame(
+        event(
+            "message.start",
+            "live-1",
+            {"display_kind": "ordinary_assistant_message"},
+        )
+    )
+    ordinary_complete = gateway.normalize_frame(
+        event(
+            "message.complete",
+            "live-1",
+            {"status": "complete", "text": "Newer B finished"},
+        )
+    )
+
+    assert marker is None
+    assert ordinary_start is not None
+    assert ordinary_complete is not None
+    assert ordinary_complete.turn_id == "turn-newer-b"
+    assert ordinary_complete.detail.get("agent_continuation") is not True
+    assert gateway._pending_async_continuation_id == "delegation-stale-1234"
+    assert gateway._pending_async_continuation_stage == "awaiting_start"
+
+
+def test_async_continuation_marker_without_expected_start_does_not_capture_completion(tmp_path):
+    gateway = HermesWebSocketGateway(
+        url="ws://127.0.0.1:9119/api/ws", token=TOKEN, cwd=tmp_path
+    )
+    gateway._live_session_id = "live-1"
+    gateway._active_turn_id = "turn-newer-b"
+
+    gateway.normalize_frame(
+        event(
+            "status.update",
+            "live-1",
+            {
+                "kind": "process",
+                "text": "[ASYNC DELEGATION BATCH COMPLETE — delegation-requeued-1234]\nReady",
+            },
+        )
+    )
+    ordinary_complete = gateway.normalize_frame(
+        event(
+            "message.complete",
+            "live-1",
+            {"status": "complete", "text": "Newer B finished first"},
+        )
+    )
+
+    assert ordinary_complete is not None
+    assert ordinary_complete.turn_id == "turn-newer-b"
+    assert ordinary_complete.detail.get("agent_continuation") is not True
+    assert gateway._pending_async_continuation_id == "delegation-requeued-1234"
+    assert gateway._pending_async_continuation_stage == "awaiting_start"
 
 
 def test_verified_live_attachment_fast_path_preserves_state_and_rotated_id(tmp_path):

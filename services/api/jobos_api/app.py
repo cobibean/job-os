@@ -464,7 +464,11 @@ def create_app(
         )
         configured_gateway = True
     conversation_manager = ConversationManager(
-        state_store, gateway_factory or OfflineAgentGatewayFactory()
+        state_store,
+        gateway_factory or OfflineAgentGatewayFactory(),
+        career_profile_principal=(
+            principal_for_device(settings.device_id) if settings.career_profile_enabled else None
+        ),
     )
     browser_capabilities = capability_broker or CapabilityBroker()
     browser_command_locks: dict[tuple[str, str], asyncio.Lock] = {}
@@ -1473,6 +1477,8 @@ def create_app(
         command: SendMessageRequest,
         identity: Annotated[DeviceIdentity, Depends(authenticated_device)],
     ) -> TurnMutationResponse:
+        if settings.career_profile_enabled:
+            require_career_profile_owner(identity)
         try:
             return await conversation_service(conversation_id, identity).send(
                 command,
@@ -1508,6 +1514,8 @@ def create_app(
         command: RetryTurnRequest,
         identity: Annotated[DeviceIdentity, Depends(authenticated_device)],
     ) -> TurnMutationResponse:
+        if settings.career_profile_enabled:
+            require_career_profile_owner(identity)
         try:
             result = await conversation_service(conversation_id, identity).retry(
                 validated_turn_id(turn_id), command, actor_id=identity.device_id

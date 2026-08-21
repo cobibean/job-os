@@ -161,6 +161,93 @@ def _snapshot_hash(
     ).hexdigest()
 
 
+def create_snapshot_in_transaction(
+    connection: sqlite3.Connection,
+    *,
+    principal: str,
+    request: CareerProfileSnapshotRequest,
+) -> CareerProfileSnapshot:
+    """Create an immutable authorized projection inside the caller's transaction."""
+    scopes = list(dict.fromkeys(request.scopes))
+    head_row = connection.execute(
+        "SELECT head_revision FROM career_profiles WHERE profile_id = ?",
+        (PROFILE_ID,),
+    ).fetchone()
+    if head_row is None:
+        raise RuntimeError("Career Profile storage is not initialized")
+    head = int(head_row[0])
+    record_row = connection.execute(
+        """
+        SELECT record_id, value_json, item_revision, actor_principal, updated_at
+        FROM career_profile_records
+        WHERE profile_id = ? AND namespace = ?
+        """,
+        (PROFILE_ID, WORK_ARRANGEMENT_NAMESPACE),
+    ).fetchone()
+    record = CareerProfileStore._record_from_row(record_row, head) if record_row else None
+    projection = CareerProfileProjection(work_arrangement=record)
+    snapshot_id = _opaque_id("cps_")
+    content_hash = _snapshot_hash(head, scopes, projection)
+    connection.execute(
+        """
+        INSERT INTO career_profile_snapshots(
+            snapshot_id, profile_revision, content_hash, authorized_principal,
+            scopes_json, projection_json
+        ) VALUES (?, ?, ?, ?, ?, ?)
+        """,
+        (
+            snapshot_id,
+            head,
+            content_hash,
+            principal,
+            _canonical_json(scopes),
+            _canonical_json(projection.model_dump(mode="json")),
+        ),
+    )
+    row = connection.execute(
+        """
+        SELECT snapshot_id, profile_revision, content_hash, authorized_principal,
+               scopes_json, projection_json, created_at
+        FROM career_profile_snapshots WHERE snapshot_id = ?
+        """,
+        (snapshot_id,),
+    ).fetchone()
+    connection.execute(
+        """
+        INSERT INTO career_profile_audit_events(
+            actor_principal, action, profile_revision, affected_fields_json
+        ) VALUES (?, 'snapshot.create', ?, ?)
+        """,
+        (principal, head, _canonical_json(scopes)),
+    )
+    assert row is not None
+    return CareerProfileStore._snapshot_from_row(row)
+
+
+def get_snapshot_in_connection(
+    connection: sqlite3.Connection, snapshot_id: str, *, principal: str
+) -> CareerProfileSnapshot:
+    row = connection.execute(
+        """
+        SELECT snapshot_id, profile_revision, content_hash, authorized_principal,
+               scopes_json, projection_json, created_at
+        FROM career_profile_snapshots WHERE snapshot_id = ?
+        """,
+        (snapshot_id,),
+    ).fetchone()
+    if row is None:
+        raise CareerProfileSnapshotNotFound
+    if not secrets.compare_digest(str(row[3]), principal):
+        raise CareerProfileSnapshotForbidden
+    snapshot = CareerProfileStore._snapshot_from_row(row)
+    expected_hash = _snapshot_hash(
+        snapshot.profile_revision, list(snapshot.scopes), snapshot.projection
+    )
+    if not secrets.compare_digest(snapshot.content_hash, expected_hash):
+        raise CareerProfileSnapshotIntegrityError
+    return snapshot
+
+
 def _changed_fields(previous: dict[str, object] | None, current: dict[str, object]) -> list[str]:
     fields = ("mode", "strength", "note")
     return [
@@ -326,86 +413,21 @@ class CareerProfileStore:
         principal: str,
         request: CareerProfileSnapshotRequest,
     ) -> CareerProfileSnapshot:
-        scopes = list(dict.fromkeys(request.scopes))
         with connect_sqlite(self._path) as connection:
             connection.execute("BEGIN IMMEDIATE")
             try:
-                head = self._head_revision(connection)
-                row = connection.execute(
-                    """
-                    SELECT record_id, value_json, item_revision, actor_principal, updated_at
-                    FROM career_profile_records
-                    WHERE profile_id = ? AND namespace = ?
-                    """,
-                    (PROFILE_ID, WORK_ARRANGEMENT_NAMESPACE),
-                ).fetchone()
-                record = self._record_from_row(row, head) if row is not None else None
-                projection = CareerProfileProjection(work_arrangement=record)
-                projection_json = _canonical_json(projection.model_dump(mode="json"))
-                content_hash = _snapshot_hash(head, scopes, projection)
-                snapshot_id = _opaque_id("cps_")
-                connection.execute(
-                    """
-                    INSERT INTO career_profile_snapshots(
-                        snapshot_id, profile_revision, content_hash, authorized_principal,
-                        scopes_json, projection_json
-                    ) VALUES (?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        snapshot_id,
-                        head,
-                        content_hash,
-                        principal,
-                        _canonical_json(scopes),
-                        projection_json,
-                    ),
-                )
-                row = connection.execute(
-                    """
-                    SELECT snapshot_id, profile_revision, content_hash, authorized_principal,
-                           scopes_json, projection_json, created_at
-                    FROM career_profile_snapshots WHERE snapshot_id = ?
-                    """,
-                    (snapshot_id,),
-                ).fetchone()
-                connection.execute(
-                    """
-                    INSERT INTO career_profile_audit_events(
-                        actor_principal, action, profile_revision, affected_fields_json
-                    ) VALUES (?, 'snapshot.create', ?, ?)
-                    """,
-                    (principal, head, _canonical_json(scopes)),
+                snapshot = create_snapshot_in_transaction(
+                    connection, principal=principal, request=request
                 )
                 connection.commit()
             except Exception:
                 connection.rollback()
                 raise
-        assert row is not None
-        return self._snapshot_from_row(row)
+        return snapshot
 
     def get_snapshot(self, snapshot_id: str, *, principal: str) -> CareerProfileSnapshot:
         with connect_sqlite(f"file:{self._path}?mode=ro", uri=True) as connection:
-            row = connection.execute(
-                """
-                SELECT snapshot_id, profile_revision, content_hash, authorized_principal,
-                       scopes_json, projection_json, created_at
-                FROM career_profile_snapshots WHERE snapshot_id = ?
-                """,
-                (snapshot_id,),
-            ).fetchone()
-        if row is None:
-            raise CareerProfileSnapshotNotFound
-        if not secrets.compare_digest(row[3], principal):
-            raise CareerProfileSnapshotForbidden
-        snapshot = self._snapshot_from_row(row)
-        expected_hash = _snapshot_hash(
-            snapshot.profile_revision,
-            list(snapshot.scopes),
-            snapshot.projection,
-        )
-        if not secrets.compare_digest(snapshot.content_hash, expected_hash):
-            raise CareerProfileSnapshotIntegrityError
-        return snapshot
+            return get_snapshot_in_connection(connection, snapshot_id, principal=principal)
 
     def _mutate(
         self,
