@@ -844,6 +844,93 @@
         "title": "BrowserTabMetadata",
         "type": "object"
       },
+      "CareerProfileProjection": {
+        "additionalProperties": false,
+        "properties": {
+          "work_arrangement": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/WorkArrangementRecord"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "work_arrangement"
+        ],
+        "title": "CareerProfileProjection",
+        "type": "object"
+      },
+      "CareerProfileSnapshot": {
+        "additionalProperties": false,
+        "properties": {
+          "authorized_principal": {
+            "title": "Authorized Principal",
+            "type": "string"
+          },
+          "content_hash": {
+            "pattern": "^[a-f0-9]{64}$",
+            "title": "Content Hash",
+            "type": "string"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "profile_revision": {
+            "minimum": 0.0,
+            "title": "Profile Revision",
+            "type": "integer"
+          },
+          "projection": {
+            "$ref": "#/components/schemas/CareerProfileProjection"
+          },
+          "scopes": {
+            "items": {
+              "const": "search_preferences.work_arrangement",
+              "type": "string"
+            },
+            "title": "Scopes",
+            "type": "array"
+          },
+          "snapshot_id": {
+            "pattern": "^cps_[A-Za-z0-9_-]{16,64}$",
+            "title": "Snapshot Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "snapshot_id",
+          "profile_revision",
+          "content_hash",
+          "authorized_principal",
+          "scopes",
+          "projection",
+          "created_at"
+        ],
+        "title": "CareerProfileSnapshot",
+        "type": "object"
+      },
+      "CareerProfileSnapshotRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "scopes": {
+            "items": {
+              "const": "search_preferences.work_arrangement",
+              "type": "string"
+            },
+            "maxItems": 1,
+            "minItems": 1,
+            "title": "Scopes",
+            "type": "array"
+          }
+        },
+        "title": "CareerProfileSnapshotRequest",
+        "type": "object"
+      },
       "ConnectionResponse": {
         "additionalProperties": false,
         "properties": {
@@ -3770,6 +3857,282 @@
         "title": "VersionResponse",
         "type": "object"
       },
+      "WorkArrangementCurrent": {
+        "additionalProperties": false,
+        "properties": {
+          "profile_revision": {
+            "minimum": 0.0,
+            "title": "Profile Revision",
+            "type": "integer"
+          },
+          "record": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/WorkArrangementRecord"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "profile_revision",
+          "record"
+        ],
+        "title": "WorkArrangementCurrent",
+        "type": "object"
+      },
+      "WorkArrangementHistory": {
+        "additionalProperties": false,
+        "properties": {
+          "profile_revision": {
+            "minimum": 0.0,
+            "title": "Profile Revision",
+            "type": "integer"
+          },
+          "revisions": {
+            "items": {
+              "$ref": "#/components/schemas/WorkArrangementRevision"
+            },
+            "title": "Revisions",
+            "type": "array"
+          }
+        },
+        "required": [
+          "profile_revision",
+          "revisions"
+        ],
+        "title": "WorkArrangementHistory",
+        "type": "object"
+      },
+      "WorkArrangementMutation": {
+        "additionalProperties": false,
+        "properties": {
+          "expected_profile_revision": {
+            "minimum": 0.0,
+            "title": "Expected Profile Revision",
+            "type": "integer"
+          },
+          "idempotency_key": {
+            "maxLength": 200,
+            "minLength": 8,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+            "title": "Idempotency Key",
+            "type": "string"
+          },
+          "value": {
+            "$ref": "#/components/schemas/WorkArrangementValue"
+          }
+        },
+        "required": [
+          "expected_profile_revision",
+          "idempotency_key",
+          "value"
+        ],
+        "title": "WorkArrangementMutation",
+        "type": "object"
+      },
+      "WorkArrangementRecord": {
+        "additionalProperties": false,
+        "properties": {
+          "actor_principal": {
+            "title": "Actor Principal",
+            "type": "string"
+          },
+          "item_revision": {
+            "minimum": 1.0,
+            "title": "Item Revision",
+            "type": "integer"
+          },
+          "namespace": {
+            "const": "search_preferences.work_arrangement",
+            "title": "Namespace",
+            "type": "string"
+          },
+          "profile_revision": {
+            "minimum": 1.0,
+            "title": "Profile Revision",
+            "type": "integer"
+          },
+          "record_id": {
+            "pattern": "^cpr_[A-Za-z0-9_-]{16,64}$",
+            "title": "Record Id",
+            "type": "string"
+          },
+          "updated_at": {
+            "title": "Updated At",
+            "type": "string"
+          },
+          "value": {
+            "$ref": "#/components/schemas/WorkArrangementValue"
+          }
+        },
+        "required": [
+          "record_id",
+          "namespace",
+          "value",
+          "profile_revision",
+          "item_revision",
+          "actor_principal",
+          "updated_at"
+        ],
+        "title": "WorkArrangementRecord",
+        "type": "object"
+      },
+      "WorkArrangementRestore": {
+        "additionalProperties": false,
+        "properties": {
+          "expected_profile_revision": {
+            "minimum": 1.0,
+            "title": "Expected Profile Revision",
+            "type": "integer"
+          },
+          "idempotency_key": {
+            "maxLength": 200,
+            "minLength": 8,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+            "title": "Idempotency Key",
+            "type": "string"
+          },
+          "target_profile_revision": {
+            "minimum": 1.0,
+            "title": "Target Profile Revision",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "expected_profile_revision",
+          "idempotency_key",
+          "target_profile_revision"
+        ],
+        "title": "WorkArrangementRestore",
+        "type": "object"
+      },
+      "WorkArrangementRevision": {
+        "additionalProperties": false,
+        "properties": {
+          "actor_principal": {
+            "title": "Actor Principal",
+            "type": "string"
+          },
+          "base_profile_revision": {
+            "minimum": 0.0,
+            "title": "Base Profile Revision",
+            "type": "integer"
+          },
+          "changed_fields": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Changed Fields",
+            "type": "array"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "item_revision": {
+            "minimum": 1.0,
+            "title": "Item Revision",
+            "type": "integer"
+          },
+          "operation": {
+            "enum": [
+              "set",
+              "restore"
+            ],
+            "title": "Operation",
+            "type": "string"
+          },
+          "profile_revision": {
+            "minimum": 1.0,
+            "title": "Profile Revision",
+            "type": "integer"
+          },
+          "record_id": {
+            "pattern": "^cpr_[A-Za-z0-9_-]{16,64}$",
+            "title": "Record Id",
+            "type": "string"
+          },
+          "restored_from_profile_revision": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Restored From Profile Revision"
+          },
+          "revision_id": {
+            "title": "Revision Id",
+            "type": "string"
+          },
+          "value": {
+            "$ref": "#/components/schemas/WorkArrangementValue"
+          }
+        },
+        "required": [
+          "revision_id",
+          "profile_revision",
+          "record_id",
+          "item_revision",
+          "actor_principal",
+          "base_profile_revision",
+          "operation",
+          "changed_fields",
+          "value",
+          "created_at"
+        ],
+        "title": "WorkArrangementRevision",
+        "type": "object"
+      },
+      "WorkArrangementValue": {
+        "additionalProperties": false,
+        "properties": {
+          "mode": {
+            "enum": [
+              "remote",
+              "hybrid",
+              "onsite",
+              "flexible"
+            ],
+            "title": "Mode",
+            "type": "string"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "maxLength": 1000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "strength": {
+            "enum": [
+              "requirement",
+              "strong_preference",
+              "preference",
+              "dealbreaker"
+            ],
+            "title": "Strength",
+            "type": "string"
+          }
+        },
+        "required": [
+          "mode",
+          "strength"
+        ],
+        "title": "WorkArrangementValue",
+        "type": "object"
+      },
       "WorkspaceJobsResponse": {
         "additionalProperties": false,
         "properties": {
@@ -4597,6 +4960,461 @@
         "summary": "Browser Command",
         "tags": [
           "browser"
+        ]
+      }
+    },
+    "/v1/career-profile/snapshots": {
+      "post": {
+        "operationId": "career_profile_snapshot_create_v1_career_profile_snapshots_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CareerProfileSnapshotRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CareerProfileSnapshot"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Device authentication required"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Operation is not permitted"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Request validation failed"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Internal server error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Career Profile Snapshot Create",
+        "tags": [
+          "career-profile"
+        ]
+      }
+    },
+    "/v1/career-profile/snapshots/{snapshot_id}": {
+      "get": {
+        "operationId": "career_profile_snapshot_get_v1_career_profile_snapshots__snapshot_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "snapshot_id",
+            "required": true,
+            "schema": {
+              "title": "Snapshot Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CareerProfileSnapshot"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Device authentication required"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Operation is not permitted"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Resource not found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Request validation failed"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Internal server error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Career Profile Snapshot Get",
+        "tags": [
+          "career-profile"
+        ]
+      }
+    },
+    "/v1/career-profile/work-arrangement": {
+      "get": {
+        "operationId": "career_profile_work_arrangement_get_v1_career_profile_work_arrangement_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkArrangementCurrent"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Device authentication required"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Operation is not permitted"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Internal server error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Career Profile Work Arrangement Get",
+        "tags": [
+          "career-profile"
+        ]
+      },
+      "put": {
+        "operationId": "career_profile_work_arrangement_put_v1_career_profile_work_arrangement_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WorkArrangementMutation"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkArrangementCurrent"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Device authentication required"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Operation is not permitted"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Resource state conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Request validation failed"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Internal server error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Career Profile Work Arrangement Put",
+        "tags": [
+          "career-profile"
+        ]
+      }
+    },
+    "/v1/career-profile/work-arrangement/history": {
+      "get": {
+        "operationId": "career_profile_work_arrangement_history_v1_career_profile_work_arrangement_history_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkArrangementHistory"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Device authentication required"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Operation is not permitted"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Internal server error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Career Profile Work Arrangement History",
+        "tags": [
+          "career-profile"
+        ]
+      }
+    },
+    "/v1/career-profile/work-arrangement/restore": {
+      "post": {
+        "operationId": "career_profile_work_arrangement_restore_v1_career_profile_work_arrangement_restore_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WorkArrangementRestore"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkArrangementCurrent"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Device authentication required"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Operation is not permitted"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Resource not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Resource state conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Request validation failed"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Internal server error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Career Profile Work Arrangement Restore",
+        "tags": [
+          "career-profile"
         ]
       }
     },

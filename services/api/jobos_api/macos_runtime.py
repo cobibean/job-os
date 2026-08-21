@@ -304,6 +304,8 @@ def build_service_environment(
             separators=(",", ":"),
             sort_keys=True,
         )
+    if source.get("JOBOS_CAREER_PROFILE_ENABLED") == "1":
+        environment["JOBOS_CAREER_PROFILE_ENABLED"] = "1"
     return environment
 
 

@@ -54,6 +54,7 @@ class Settings(BaseModel):
     hermes_dashboard_token: str | None = Field(default=None, min_length=16, repr=False)
     hermes_job_hunter_cwd: Path | None = None
     hermes_request_timeout: float = Field(default=5.0, gt=0, le=30)
+    career_profile_enabled: bool = False
 
     @model_validator(mode="after")
     def validate_unique_device_credentials(self) -> "Settings":

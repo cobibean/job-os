@@ -892,6 +892,91 @@ MIGRATIONS = (
                ON conversations(selected_job_id) WHERE selected_job_id IS NOT NULL""",
         ),
     ),
+    Migration(
+        version=20,
+        statements=(
+            """
+            CREATE TABLE career_profiles (
+                profile_id TEXT PRIMARY KEY CHECK (profile_id = 'career_profile_global'),
+                head_revision INTEGER NOT NULL DEFAULT 0 CHECK (head_revision >= 0),
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+            """,
+            """
+            CREATE TABLE career_profile_records (
+                record_id TEXT PRIMARY KEY,
+                profile_id TEXT NOT NULL,
+                namespace TEXT NOT NULL,
+                item_revision INTEGER NOT NULL CHECK (item_revision >= 1),
+                value_json TEXT NOT NULL CHECK (json_valid(value_json)),
+                actor_principal TEXT NOT NULL,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(profile_id, namespace),
+                FOREIGN KEY(profile_id) REFERENCES career_profiles(profile_id)
+            )
+            """,
+            """
+            CREATE TABLE career_profile_revisions (
+                revision_id TEXT PRIMARY KEY,
+                profile_revision INTEGER NOT NULL UNIQUE CHECK (profile_revision >= 1),
+                profile_id TEXT NOT NULL,
+                record_id TEXT NOT NULL,
+                namespace TEXT NOT NULL,
+                item_revision INTEGER NOT NULL CHECK (item_revision >= 1),
+                actor_principal TEXT NOT NULL,
+                base_profile_revision INTEGER NOT NULL CHECK (base_profile_revision >= 0),
+                operation TEXT NOT NULL CHECK (operation IN ('set', 'restore')),
+                previous_value_json TEXT CHECK (
+                    previous_value_json IS NULL OR json_valid(previous_value_json)
+                ),
+                resulting_value_json TEXT NOT NULL CHECK (json_valid(resulting_value_json)),
+                changed_fields_json TEXT NOT NULL CHECK (json_valid(changed_fields_json)),
+                restored_from_profile_revision INTEGER,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY(profile_id) REFERENCES career_profiles(profile_id)
+            )
+            """,
+            """CREATE INDEX career_profile_revisions_record
+               ON career_profile_revisions(record_id, profile_revision DESC)""",
+            """
+            CREATE TABLE career_profile_idempotency (
+                actor_principal TEXT NOT NULL,
+                idempotency_key TEXT NOT NULL,
+                request_hash TEXT NOT NULL,
+                result_json TEXT NOT NULL CHECK (json_valid(result_json)),
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY(actor_principal, idempotency_key)
+            )
+            """,
+            """
+            CREATE TABLE career_profile_snapshots (
+                snapshot_id TEXT PRIMARY KEY,
+                profile_revision INTEGER NOT NULL CHECK (profile_revision >= 0),
+                content_hash TEXT NOT NULL,
+                authorized_principal TEXT NOT NULL,
+                scopes_json TEXT NOT NULL CHECK (json_valid(scopes_json)),
+                projection_json TEXT NOT NULL CHECK (json_valid(projection_json)),
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+            """,
+            """CREATE INDEX career_profile_snapshots_principal
+               ON career_profile_snapshots(authorized_principal, created_at DESC)""",
+            """
+            CREATE TABLE career_profile_audit_events (
+                audit_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                actor_principal TEXT NOT NULL,
+                action TEXT NOT NULL,
+                profile_revision INTEGER NOT NULL CHECK (profile_revision >= 0),
+                base_profile_revision INTEGER,
+                affected_fields_json TEXT NOT NULL CHECK (json_valid(affected_fields_json)),
+                revision_id TEXT,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+            """,
+        ),
+    ),
 )
 SCHEMA_VERSION = MIGRATIONS[-1].version
 
