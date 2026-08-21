@@ -1,0 +1,274 @@
+{
+  "schemaVersion": 1,
+  "classification": "synthetic-semantic-contract",
+  "activation": "dormant",
+  "evidencePolicy": {
+    "role": "optional_provenance",
+    "absenceIsDefect": false,
+    "acceptedContentRequiresEvidence": false,
+    "removedEvidenceDemotesAcceptedContent": false,
+    "permittedHealthDimensions": [
+      "pending_review",
+      "conflict",
+      "source_changed",
+      "review_suggested"
+    ],
+    "forbiddenEvidenceAbsenceEffects": [
+      "health_score_penalty",
+      "required_task",
+      "filter_exclusion",
+      "generation_exclusion"
+    ]
+  },
+  "contextContract": {
+    "modes": [
+      "none",
+      "selected",
+      "broader"
+    ],
+    "selectedKinds": [
+      "item",
+      "area"
+    ],
+    "rules": [
+      "bind_exact_scope_before_dispatch",
+      "preserve_scope_on_retry_recovery_continuation",
+      "fail_closed_on_unauthorized_expansion",
+      "treat_profile_text_as_non_executable"
+    ],
+    "examples": [
+      {
+        "id": "none",
+        "authorization": {
+          "mode": "none",
+          "selectedItemIds": [],
+          "selectedAreas": []
+        },
+        "projectedItemIds": [],
+        "expected": "allowed"
+      },
+      {
+        "id": "selected-items",
+        "authorization": {
+          "mode": "selected",
+          "selectedItemIds": [
+            "cpi_FAKE_selected_0001"
+          ],
+          "selectedAreas": []
+        },
+        "projectedItemIds": [
+          "cpi_FAKE_selected_0001"
+        ],
+        "expected": "allowed"
+      },
+      {
+        "id": "selected-area",
+        "authorization": {
+          "mode": "selected",
+          "selectedItemIds": [],
+          "selectedAreas": [
+            "what_im_looking_for"
+          ]
+        },
+        "projectedItemIds": [
+          "cpi_FAKE_work_preference_0001"
+        ],
+        "expected": "allowed"
+      },
+      {
+        "id": "broader-authorized",
+        "authorization": {
+          "mode": "broader",
+          "selectedItemIds": [],
+          "selectedAreas": [
+            "my_career",
+            "what_im_looking_for",
+            "my_evidence"
+          ]
+        },
+        "projectedItemIds": [
+          "cpi_FAKE_claim_00000001",
+          "cpi_FAKE_work_preference_0001"
+        ],
+        "expected": "allowed"
+      },
+      {
+        "id": "unauthorized-expansion",
+        "authorization": {
+          "mode": "selected",
+          "selectedItemIds": [
+            "cpi_FAKE_selected_0001"
+          ],
+          "selectedAreas": []
+        },
+        "requested": {
+          "mode": "broader",
+          "selectedItemIds": [],
+          "selectedAreas": [
+            "my_career",
+            "what_im_looking_for"
+          ]
+        },
+        "projectedItemIds": [],
+        "expected": "fail_closed"
+      }
+    ],
+    "retryRecoveryExample": {
+      "initialScopeExampleId": "selected-items",
+      "retryScopeExampleId": "selected-items",
+      "recoveryScopeExampleId": "selected-items",
+      "continuationScopeExampleId": "selected-items",
+      "expected": "same_bound_scope"
+    }
+  },
+  "exportContract": {
+    "explicitEvidenceChoiceRequired": true,
+    "defaultEvidenceMode": null,
+    "modes": [
+      "profile_only",
+      "profile_plus_selected_evidence",
+      "profile_plus_all_evidence"
+    ],
+    "examples": [
+      {
+        "id": "profile-only",
+        "mode": "profile_only",
+        "selectedEvidenceIds": [],
+        "includedEvidenceIds": []
+      },
+      {
+        "id": "selected-evidence",
+        "mode": "profile_plus_selected_evidence",
+        "selectedEvidenceIds": [
+          "cpe_FAKE_source_000001"
+        ],
+        "includedEvidenceIds": [
+          "cpe_FAKE_source_000001"
+        ]
+      },
+      {
+        "id": "all-evidence-explicit",
+        "mode": "profile_plus_all_evidence",
+        "selectedEvidenceIds": [],
+        "includedEvidenceIds": [
+          "cpe_FAKE_source_000001",
+          "cpe_FAKE_source_000002"
+        ]
+      }
+    ]
+  },
+  "semanticFixtures": [
+    {
+      "id": "user-authored",
+      "description": "(FAKE) A direct user statement without supporting Evidence.",
+      "actorClass": "direct_user",
+      "reviewStatus": "accepted",
+      "evidence": [],
+      "advisories": [],
+      "expected": {
+        "usable": true,
+        "missingEvidenceDefect": false
+      }
+    },
+    {
+      "id": "user-approved-agent",
+      "description": "(FAKE) An agent suggestion accepted by the user without Evidence.",
+      "actorClass": "agent",
+      "decision": "user_accepted_exact_proposal",
+      "reviewStatus": "accepted",
+      "evidence": [],
+      "advisories": [],
+      "expected": {
+        "usable": true,
+        "missingEvidenceDefect": false
+      }
+    },
+    {
+      "id": "unapproved-agent",
+      "description": "(FAKE) An autonomous agent suggestion that the user has not accepted.",
+      "actorClass": "agent",
+      "reviewStatus": "proposed",
+      "evidence": [],
+      "advisories": [],
+      "expected": {
+        "usable": false,
+        "missingEvidenceDefect": false
+      }
+    },
+    {
+      "id": "advisory-conflict",
+      "description": "(FAKE) User-accepted content with a visible contradiction warning.",
+      "actorClass": "direct_user",
+      "reviewStatus": "accepted",
+      "evidence": [],
+      "advisories": [
+        "conflict"
+      ],
+      "expected": {
+        "usable": true,
+        "missingEvidenceDefect": false
+      }
+    },
+    {
+      "id": "removed-evidence",
+      "description": "(FAKE) Accepted content retaining an unavailable historical Evidence link.",
+      "actorClass": "direct_user",
+      "reviewStatus": "accepted",
+      "evidence": [
+        {
+          "id": "cpe_FAKE_removed_000001",
+          "active": false
+        }
+      ],
+      "advisories": [
+        "evidence_unavailable"
+      ],
+      "expected": {
+        "usable": true,
+        "missingEvidenceDefect": false
+      }
+    },
+    {
+      "id": "sparse-profile",
+      "description": "(FAKE) One accepted preference while other areas are empty.",
+      "actorClass": "direct_user",
+      "reviewStatus": "accepted",
+      "evidence": [],
+      "profileShape": {
+        "my_career": 0,
+        "what_im_looking_for": 1,
+        "my_evidence": 0
+      },
+      "advisories": [],
+      "expected": {
+        "usable": true,
+        "missingEvidenceDefect": false,
+        "acceptedMigrationShape": true
+      }
+    },
+    {
+      "id": "zero-evidence-profile",
+      "description": "(FAKE) Accepted profile content with no Source Evidence objects.",
+      "actorClass": "direct_user",
+      "reviewStatus": "accepted",
+      "evidence": [],
+      "profileShape": {
+        "my_career": 1,
+        "what_im_looking_for": 1,
+        "my_evidence": 0
+      },
+      "sourceEvidenceCount": 0,
+      "advisories": [],
+      "expected": {
+        "usable": true,
+        "missingEvidenceDefect": false,
+        "acceptedMigrationShape": true
+      }
+    }
+  ],
+  "nonActivationAssertions": [
+    "no_complete_profile_projection_activation",
+    "no_migration_execution",
+    "no_live_authority_change"
+  ]
+}
