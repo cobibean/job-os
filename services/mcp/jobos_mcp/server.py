@@ -607,19 +607,6 @@ def create_server(
             idempotency_key=idempotency_key,
         )
 
-    @server.tool(name="document_approve", structured_output=True)
-    async def document_approve(
-        conversation_id: ConversationId,
-        job_id: str,
-        artifact_id: str,
-        idempotency_key: str | None = None,
-    ) -> dict[str, Any]:
-        """Approve one exact successful resume artifact for its job."""
-        client.scope_conversation(conversation_id)
-        return await client.approve_document(
-            job_id, artifact_id, idempotency_key=idempotency_key
-        )
-
     @server.tool(name="document_select", structured_output=True)
     async def document_select(
         conversation_id: ConversationId,

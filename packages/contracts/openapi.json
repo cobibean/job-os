@@ -4765,6 +4765,11 @@
       "PublishEditableDocumentRequest": {
         "additionalProperties": false,
         "properties": {
+          "confirm_current_state": {
+            "default": false,
+            "title": "Confirm Current State",
+            "type": "boolean"
+          },
           "docx_base64": {
             "maxLength": 28000000,
             "minLength": 1,
@@ -4809,6 +4814,13 @@
             "pattern": "^[a-f0-9]{64}$",
             "title": "Pdf Sha256",
             "type": "string"
+          },
+          "unresolved_suggestion_count": {
+            "default": 0,
+            "maximum": 5000.0,
+            "minimum": 0.0,
+            "title": "Unresolved Suggestion Count",
+            "type": "integer"
           }
         },
         "required": [

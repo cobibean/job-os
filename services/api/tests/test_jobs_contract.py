@@ -1811,6 +1811,14 @@ def test_approval_persists_the_exact_successful_artifact_for_the_job(tmp_path):
                 "idempotency_key": "approve-artifact-1",
             },
         )
+        agent_approval = client.post(
+            f"/v1/jobs/job-0/artifacts/{artifact_id}/approve",
+            headers=auth_headers(),
+            json={
+                "origin": "mcp",
+                "idempotency_key": "agent-cannot-self-approve-1",
+            },
+        )
 
     with make_client(tmp_path, facade) as restarted:
         restored = restarted.get(
@@ -1818,6 +1826,8 @@ def test_approval_persists_the_exact_successful_artifact_for_the_job(tmp_path):
         ).json()
 
     assert approved.status_code == 200
+    assert agent_approval.status_code == 403
+    assert "only the authenticated user" in agent_approval.json()["detail"]
     assert approved.json()["approved_artifact_id"] == artifact_id
     approved_artifact = next(
         item for item in approved.json()["artifacts"] if item["artifact_id"] == artifact_id
@@ -2379,7 +2389,7 @@ def test_unregistered_ids_paths_and_docx_preview_are_rejected(tmp_path, minimal_
     assert arbitrary_path.status_code in {404, 422}
 
 
-def test_multiple_document_formats_keep_identity_and_resume_only_approval(
+def test_multiple_document_formats_keep_identity_and_logical_document_approval(
     tmp_path, minimal_docx
 ):
     facade = FakeJobHunterFacade()
@@ -2441,7 +2451,10 @@ def test_multiple_document_formats_keep_identity_and_resume_only_approval(
     assert {item["document_label"] for item in cover} == {"Cover Letter"}
     assert {item["render_sequence"] for item in body["artifacts"]} == {1, 2, 3, 4}
     assert resume_approval.status_code == 200
-    assert cover_approval.status_code == 409
+    assert cover_approval.status_code == 200
+    assert all(item["is_approved"] for item in cover_approval.json()["artifacts"] if (
+        item["document_key"] == "cover_letter" and item["source_revision"] == "cover-source"
+    ))
 
 
 def test_workspace_restores_only_an_active_artifact_owned_by_the_selected_job(tmp_path):

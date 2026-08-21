@@ -3146,10 +3146,19 @@ def create_app(
         if current["revision"] != command.expected_revision:
             raise editable_conflict(EditableDocumentConflict(current))
         content = cast(dict[str, object], current["content"])
-        if unresolved_suggestion_count(content):
+        unresolved = unresolved_suggestion_count(content)
+        if unresolved != command.unresolved_suggestion_count:
             raise HTTPException(
                 status_code=409,
-                detail="Resolve all document suggestions before publication",
+                detail="Document suggestions changed; review the current revision again",
+            )
+        if unresolved and not command.confirm_current_state:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "Publishing with unresolved JobHunter suggestions requires explicit "
+                    "confirmation of the deterministic current state"
+                ),
             )
         canonical_bytes = json.dumps(
             {
@@ -3355,21 +3364,39 @@ def create_app(
         command: ArtifactApprovalRequest | None = None,
     ) -> JobArtifactsResponse:
         command = command or ArtifactApprovalRequest()
+        if command.origin != "user":
+            raise HTTPException(
+                status_code=403,
+                detail=(
+                    "Agents may endorse a document, but only the authenticated user "
+                    "can approve it"
+                ),
+            )
         ensure_job(job_id)
         artifact = state_store.get_document_artifact(artifact_id)
         if (
             artifact is None
             or artifact["job_id"] != job_id
-            or artifact["document_key"] != "resume"
-            or artifact["media_type"] != PDF_MEDIA_TYPE
+            or artifact["document_key"] not in {"resume", "cover_letter"}
+            or artifact["media_type"] not in {PDF_MEDIA_TYPE, DOCX_MEDIA_TYPE}
             or artifact["render_status"] != "succeeded"
             or not artifact["canonical_path"]
         ):
             raise HTTPException(
                 status_code=409,
-                detail="Only a successful artifact registered for this job can be approved",
+                detail=(
+                    "Only a successful resume or cover-letter representation registered "
+                    "for this job can be approved"
+                ),
             )
-        registered_artifact_payload(artifact)
+        representations = state_store.approval_representation_artifacts(job_id, artifact_id)
+        if not representations:
+            raise HTTPException(
+                status_code=409,
+                detail="Document revision has no successful representation",
+            )
+        for representation in representations:
+            registered_artifact_payload(representation)
         request_hash = mutation_hash(
             "document.approve",
             {"job_id": job_id, "artifact_id": artifact_id, "origin": command.origin},

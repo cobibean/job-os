@@ -213,7 +213,8 @@ function validateSuggestion(value: unknown): void {
   if (!isRecord(value)) throw new Error('Invalid suggestion')
   exactKeys(value, new Set(['suggestionId', 'kind', 'author', 'createdAt']), 'suggestion')
   if (typeof value.suggestionId !== 'string' || !SUGGESTION_ID.test(value.suggestionId)
-    || !['insert', 'delete'].includes(String(value.kind)) || value.author !== 'user'
+    || !['insert', 'delete'].includes(String(value.kind))
+    || !['user', 'jobhunter'].includes(String(value.author))
     || !validTimestamp(value.createdAt)) {
     throw new Error('Invalid suggestion')
   }
@@ -267,7 +268,19 @@ function validateMark(mark: TiptapMarkJson): void {
 
 function validateStructuralSuggestion(value: unknown): void {
   if (value === null) return
-  validateSuggestion(value)
+  if (!isRecord(value)) throw new Error('Invalid suggestion')
+  exactKeys(value, new Set([
+    'suggestionId', 'kind', 'author', 'createdAt', 'afterBlockId', 'semanticRole'
+  ]), 'suggestion')
+  if (typeof value.suggestionId !== 'string' || !SUGGESTION_ID.test(value.suggestionId)
+    || !['insert', 'delete', 'move', 'set_role'].includes(String(value.kind))
+    || !['user', 'jobhunter'].includes(String(value.author)) || !validTimestamp(value.createdAt)
+    || (value.kind === 'move' && (typeof value.afterBlockId !== 'string' || !ID.test(value.afterBlockId)))
+    || (value.kind === 'set_role' && !ROLES.has(value.semanticRole as SemanticRole))
+    || (value.kind !== 'move' && value.afterBlockId !== undefined)
+    || (value.kind !== 'set_role' && value.semanticRole !== undefined)) {
+    throw new Error('Invalid suggestion')
+  }
 }
 
 function validateBlockAttrs(node: TiptapNodeJson, attrs: Record<string, unknown>, seen: Set<string>): void {
@@ -474,7 +487,8 @@ export function unresolvedSuggestionCount(content: TiptapDocumentJson): number {
 
 export interface DocumentSuggestion {
   suggestionId: `sug_${string}`
-  kind: 'insert' | 'delete'
+  kind: 'insert' | 'delete' | 'move' | 'set_role'
+  author: 'user' | 'jobhunter'
   blockId: `node_${string}` | null
   preview: string
   structural: boolean
@@ -489,6 +503,7 @@ export function collectDocumentSuggestions(content: TiptapDocumentJson): Documen
       suggestions.set(structural.suggestionId, {
         suggestionId: structural.suggestionId,
         kind: structural.kind,
+        author: structural.author,
         blockId: nodeId,
         preview: plainText(node).slice(0, 180),
         structural: true
@@ -501,6 +516,7 @@ export function collectDocumentSuggestions(content: TiptapDocumentJson): Documen
       suggestions.set(attrs.suggestionId, {
         suggestionId: attrs.suggestionId as `sug_${string}`,
         kind: attrs.kind,
+        author: attrs.author as 'user' | 'jobhunter',
         blockId: nodeId,
         preview: (node.text ?? '').slice(0, 180),
         structural: false
@@ -535,9 +551,33 @@ export function resolveDocumentSuggestion(
     })
     if (removeText) return null
 
-    const resolvedChildren = (node.content ?? []).map(resolveNode).filter((child): child is TiptapNodeJson => child !== null)
+    const childResults = (node.content ?? []).map(child => ({
+      proposal: child.attrs?.structuralSuggestion as StructuralSuggestion | null | undefined,
+      resolved: resolveNode(child)
+    }))
+    let resolvedChildren = childResults
+      .map(result => result.resolved)
+      .filter((child): child is TiptapNodeJson => child !== null)
+    if (resolution === 'accept') {
+      const movingResult = childResults.find(result => (
+        result.proposal?.suggestionId === suggestionId && result.proposal.kind === 'move'
+      ))
+      const moving = movingResult?.resolved
+      const move = movingResult?.proposal
+      if (moving && move?.afterBlockId) {
+        resolvedChildren = resolvedChildren.filter(child => child !== moving)
+        const destination = resolvedChildren.findIndex(child => child.attrs?.jobosId === move.afterBlockId)
+        if (destination >= 0) resolvedChildren.splice(destination + 1, 0, moving)
+      }
+    }
     const attrs = structural?.suggestionId === suggestionId
-      ? { ...node.attrs, structuralSuggestion: null }
+      ? {
+          ...node.attrs,
+          ...(structural.kind === 'set_role' && resolution === 'accept'
+            ? { semanticRole: structural.semanticRole }
+            : {}),
+          structuralSuggestion: null
+        }
       : node.attrs
     return {
       ...node,
@@ -550,6 +590,14 @@ export function resolveDocumentSuggestion(
   const resolved = resolveNode(content)
   if (!resolved || resolved.type !== 'doc') throw new Error('Suggestion resolution cannot remove the document root')
   return resolved
+}
+
+/** Accept every proposal into a detached tree used only for deterministic current-state bytes. */
+export function materializeDocumentCurrentState(content: TiptapDocumentJson): TiptapDocumentJson {
+  return collectDocumentSuggestions(content).reduce(
+    (current, suggestion) => resolveDocumentSuggestion(current, suggestion.suggestionId, 'accept'),
+    content
+  )
 }
 
 export function semanticOutline(content: TiptapDocumentJson): SemanticOutlineBlock[] {

@@ -1151,6 +1151,37 @@ MIGRATIONS = (
             """,
         ),
     ),
+    Migration(
+        version=25,
+        statements=(
+            """
+            CREATE TABLE document_revision_approvals (
+                job_id TEXT NOT NULL,
+                document_key TEXT NOT NULL CHECK (document_key IN ('resume', 'cover_letter')),
+                source_revision TEXT NOT NULL,
+                artifact_manifest_json TEXT NOT NULL CHECK (json_valid(artifact_manifest_json)),
+                approved_by TEXT NOT NULL CHECK (approved_by = 'user'),
+                approved_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY(job_id, document_key)
+            )
+            """,
+            """
+            INSERT INTO document_revision_approvals(
+                job_id, document_key, source_revision, artifact_manifest_json,
+                approved_by, approved_at
+            )
+            SELECT artifact.job_id, artifact.document_key, artifact.source_revision,
+                   json_object(artifact.artifact_id, artifact.sha256), 'user',
+                   COALESCE(state.approved_at, CURRENT_TIMESTAMP)
+            FROM job_document_state AS state
+            JOIN document_artifacts AS artifact
+                ON artifact.artifact_id = state.approved_artifact_id
+            WHERE artifact.document_key IN ('resume', 'cover_letter')
+                AND artifact.render_status = 'succeeded'
+                AND artifact.sha256 IS NOT NULL
+            """,
+        ),
+    ),
 )
 SCHEMA_VERSION = MIGRATIONS[-1].version
 

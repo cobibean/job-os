@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { collectDocumentSuggestions, createBlankDocument, defaultDocumentSettings, resolveDocumentSuggestion, semanticOutline, stableSerialize, unresolvedSuggestionCount, validateEditableContent } from './editableDocumentSchema.js'
+import { collectDocumentSuggestions, createBlankDocument, defaultDocumentSettings, materializeDocumentCurrentState, resolveDocumentSuggestion, semanticOutline, stableSerialize, unresolvedSuggestionCount, validateEditableContent } from './editableDocumentSchema.js'
 
 describe('editable document schema', () => {
   it.each(['resume', 'cover_letter', 'references'] as const)('creates and validates a stable %s template', key => {
@@ -37,7 +37,7 @@ describe('editable document schema', () => {
     const content = createBlankDocument('references'); const block = content.content![1]!.content![0]!
     const blockId = block.attrs!.jobosId
     block.content = [{ type: 'text', text: 'Reference text', marks: [{ type: 'suggestion', attrs: { suggestionId: 'sug_inline', kind: 'insert', author: 'user', createdAt: '2026-08-07T00:00:00Z' } }] }]
-    expect(collectDocumentSuggestions(content)).toEqual([{ suggestionId: 'sug_inline', kind: 'insert', blockId, preview: 'Reference text', structural: false }])
+    expect(collectDocumentSuggestions(content)).toEqual([{ suggestionId: 'sug_inline', kind: 'insert', author: 'user', blockId, preview: 'Reference text', structural: false }])
     const accepted = resolveDocumentSuggestion(structuredClone(content), 'sug_inline', 'accept')
     expect(semanticOutline(accepted).at(-1)?.text).toBe('Reference text')
     expect(semanticOutline(accepted).at(-1)?.blockId).toBe(blockId)
@@ -71,5 +71,16 @@ describe('editable document schema', () => {
     expect(unresolvedSuggestionCount(content)).toBe(1)
     const rejected = resolveDocumentSuggestion(content, 'sug_image', 'reject')
     expect(JSON.stringify(rejected)).not.toContain('sug_image')
+  })
+  it('materializes one deterministic current state without settling JobHunter suggestions', () => {
+    const content = createBlankDocument('resume'); const block = content.content![1]!.content![0]!
+    block.content = [
+      { type: 'text', text: 'Old summary', marks: [{ type: 'suggestion', attrs: { suggestionId: 'sug_rewrite', kind: 'delete', author: 'jobhunter', createdAt: '2026-08-07T00:00:00Z' } }] },
+      { type: 'text', text: 'New summary', marks: [{ type: 'suggestion', attrs: { suggestionId: 'sug_rewrite', kind: 'insert', author: 'jobhunter', createdAt: '2026-08-07T00:00:00Z' } }] }
+    ]
+    const materialized = materializeDocumentCurrentState(content)
+    expect(semanticOutline(materialized).find(item => item.blockId === block.attrs!.jobosId)?.text).toBe('New summary')
+    expect(unresolvedSuggestionCount(materialized)).toBe(0)
+    expect(unresolvedSuggestionCount(content)).toBe(1)
   })
 })

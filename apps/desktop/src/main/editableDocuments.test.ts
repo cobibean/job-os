@@ -265,6 +265,53 @@ describe('editable document main client', () => {
     expect(exportEditableDocumentPdf).toHaveBeenCalledTimes(1)
   })
 
+  it('requires a clear confirmation and binds the unresolved count when publishing current state', async () => {
+    const responseDocument = apiDocument('cover_letter')
+    const paragraph = responseDocument.content.content![1]!.content![0]!
+    paragraph.content = [{
+      type: 'text',
+      text: '(FAKE) JobHunter draft',
+      marks: [{
+        type: 'suggestion',
+        attrs: {
+          suggestionId: 'sug_jobhunter_publish',
+          kind: 'insert',
+          author: 'jobhunter',
+          createdAt: '2026-08-21T00:00:00Z'
+        }
+      }]
+    }]
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => new Response(
+      JSON.stringify({ ...responseDocument, published_revision: init?.method === 'POST' ? 1 : null }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } }
+    ))
+    globalThis.fetch = fetchMock as typeof fetch
+    const showMessageBox = vi.fn(async () => ({ response: 0, checkboxChecked: false }))
+    const client = createMainEditableDocumentsClient({
+      baseUrl: 'http://127.0.0.1:8766',
+      deviceToken: 'test-device-token'
+    }, { dialog: {
+      showMessageBox,
+      showOpenDialog: vi.fn(async () => ({ canceled: true, filePaths: [] })),
+      showSaveDialog: vi.fn(async () => ({ canceled: true, filePath: '' }))
+    } })
+
+    await client.publish(documentId)
+
+    expect(showMessageBox).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'warning',
+      defaultId: 1,
+      cancelId: 1,
+      message: 'The publish will use the exact current state shown in preview.'
+    }))
+    const body = JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body))
+    expect(body).toEqual(expect.objectContaining({
+      expected_revision: 1,
+      unresolved_suggestion_count: 1,
+      confirm_current_state: true
+    }))
+  })
+
   it('accepts the exact snapshot identifier shape used by the API', () => {
     expect(safeEditableSnapshotId(snapshotId)).toBe(snapshotId)
   })

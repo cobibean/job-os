@@ -693,7 +693,7 @@ export function DocumentWorkspace(props: DocumentWorkspaceProps) {
           </div>,
           document.body
         ) : null}
-        {previewMode === 'pdf' && activeArtifact?.documentKey === 'resume' && activeArtifact.mediaType === PDF ? (
+        {previewMode === 'pdf' && activeArtifact && ['resume', 'cover_letter'].includes(activeArtifact.documentKey) && [PDF, DOCX].includes(activeArtifact.mediaType) ? (
           <button
             className="approve-revision"
             disabled={activeArtifact.renderStatus !== 'succeeded' || activeArtifact.isApproved || !bridge || loading}

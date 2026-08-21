@@ -2439,6 +2439,10 @@ export type ProjectValue = {
  */
 export type PublishEditableDocumentRequest = {
     /**
+     * Confirm Current State
+     */
+    confirm_current_state?: boolean;
+    /**
      * Docx Base64
      */
     docx_base64: string;
@@ -2470,6 +2474,10 @@ export type PublishEditableDocumentRequest = {
      * Pdf Sha256
      */
     pdf_sha256: string;
+    /**
+     * Unresolved Suggestion Count
+     */
+    unresolved_suggestion_count?: number;
 };
 
 /**

@@ -3,7 +3,7 @@ from copy import deepcopy
 from hashlib import sha256
 
 import pytest
-from jobos_api.document_operations import apply_operations
+from jobos_api.document_operations import apply_operations, unresolved_suggestion_count
 from jobos_api.editable_documents import (
     ApplyOperationsRequest,
     CreateEditableDocumentRequest,
@@ -26,6 +26,23 @@ from pydantic import TypeAdapter, ValidationError
 
 def _paragraphs(content):
     return [section["content"][0] for section in content["content"]]
+
+
+def _suggestions(content):
+    found = []
+
+    def walk(node):
+        structural = (node.get("attrs") or {}).get("structuralSuggestion")
+        if structural:
+            found.append(structural)
+        found.extend(
+            mark["attrs"] for mark in node.get("marks", []) if mark.get("type") == "suggestion"
+        )
+        for child in node.get("content", []):
+            walk(child)
+
+    walk(content)
+    return found
 
 
 @pytest.mark.parametrize("document_key", ["resume", "cover_letter", "references"])
@@ -261,7 +278,12 @@ def test_all_five_agent_operations_apply_as_one_valid_batch():
     assert len(changed_ids) == 5
     assert len(changes) == 5
     assert "Product builder" in str(updated)
-    assert experience_section["attrs"]["jobosId"] not in str(updated)
+    assert experience_section["attrs"]["jobosId"] in str(updated)
+    assert unresolved_suggestion_count(updated) == 5
+    assert all(
+        suggestion["author"] == "jobhunter"
+        for suggestion in _suggestions(updated)
+    )
 
 
 def test_operation_validation_is_atomic_and_locked_ancestors_fail_closed():

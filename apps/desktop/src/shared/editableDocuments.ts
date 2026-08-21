@@ -43,9 +43,11 @@ export type AllowedMarkType =
 
 export interface StructuralSuggestion {
   suggestionId: `sug_${string}`
-  kind: 'insert' | 'delete'
-  author: 'user'
+  kind: 'insert' | 'delete' | 'move' | 'set_role'
+  author: 'user' | 'jobhunter'
   createdAt: string
+  afterBlockId?: `node_${string}`
+  semanticRole?: SemanticRole
 }
 
 export interface JobOsNodeAttrs {

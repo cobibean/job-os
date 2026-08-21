@@ -1,5 +1,5 @@
 import type { DocumentSettings, EditableDocument, TiptapMarkJson, TiptapNodeJson } from '../../shared/editableDocuments.js'
-import { unresolvedSuggestionCount, validateEditableContent } from '../../shared/editableDocumentSchema.js'
+import { materializeDocumentCurrentState, unresolvedSuggestionCount, validateEditableContent } from '../../shared/editableDocumentSchema.js'
 
 const SAFE_LINK = /^(https?:|mailto:)/i
 const SAFE_IMAGE = /^data:image\/(png|jpeg|gif);base64,[A-Za-z0-9+/]*={0,2}$/
@@ -107,7 +107,10 @@ export function renderEditableDocumentHtml(
   if (!options.allowUnresolvedSuggestions && unresolvedSuggestionCount(document.content) > 0) {
     throw new Error('Resolve every suggestion before export or publication')
   }
-  const body = renderNode(document.content)
+  const renderedContent = options.allowUnresolvedSuggestions
+    ? materializeDocumentCurrentState(document.content)
+    : document.content
+  const body = renderNode(renderedContent)
   const settings = document.settings
   const header = [settings.header.left, settings.header.center, settings.header.right].map(templateHtml)
   const footer = [settings.footer.left, settings.footer.center, settings.footer.right].map(templateHtml)
