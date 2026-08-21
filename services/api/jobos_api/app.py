@@ -73,6 +73,20 @@ from jobos_api.career_profile import (
     WorkArrangementRestore,
     principal_for_device,
 )
+from jobos_api.career_profile_complete import (
+    CareerProfileCompleteCurrent,
+    CareerProfileCompleteStore,
+    CareerProfileEvidenceIntegrityError,
+    CareerProfileEvidenceNotFound,
+    CareerProfileEvidencePathError,
+    CareerProfileItemNotFound,
+    CareerProfileValueError,
+    CompleteProfileItemId,
+    EvidenceImportRequest,
+    OpaqueEvidenceId,
+    ProfileItemMutation,
+    ProfileItemRemoval,
+)
 from jobos_api.composition import create_job_services
 from jobos_api.conversation_manager import ConversationListResponse, ConversationManager
 from jobos_api.conversations import (
@@ -213,6 +227,13 @@ _ENDPOINT_ERROR_ROUTES = {
     403: frozenset(
         {
             "browser_command",
+            "career_profile_complete_get",
+            "career_profile_evidence_content",
+            "career_profile_evidence_import",
+            "career_profile_evidence_remove",
+            "career_profile_item_create",
+            "career_profile_item_remove",
+            "career_profile_item_update",
             "career_profile_snapshot_create",
             "career_profile_snapshot_get",
             "career_profile_work_arrangement_get",
@@ -236,6 +257,13 @@ _ENDPOINT_ERROR_ROUTES = {
     404: frozenset(
         {
             "approve_job_artifact",
+            "career_profile_complete_get",
+            "career_profile_evidence_content",
+            "career_profile_evidence_import",
+            "career_profile_evidence_remove",
+            "career_profile_item_create",
+            "career_profile_item_remove",
+            "career_profile_item_update",
             "career_profile_snapshot_get",
             "career_profile_work_arrangement_restore",
             "artifact_content",
@@ -274,6 +302,12 @@ _ENDPOINT_ERROR_ROUTES = {
     409: frozenset(
         {
             "approve_job_artifact",
+            "career_profile_evidence_content",
+            "career_profile_evidence_import",
+            "career_profile_evidence_remove",
+            "career_profile_item_create",
+            "career_profile_item_remove",
+            "career_profile_item_update",
             "career_profile_work_arrangement_put",
             "career_profile_work_arrangement_restore",
             "artifact_content",
@@ -407,6 +441,10 @@ def create_app(
 ) -> FastAPI:
     state_store = state_store or JobOsStateStore(settings.state_db_path)
     career_profiles = CareerProfileStore(settings.state_db_path)
+    complete_career_profile = CareerProfileCompleteStore(
+        settings.state_db_path,
+        settings.resolved_evidence_vault_root(),
+    )
     artifact_gateway_configured = (
         artifact_gateway is not None or settings.artifact_provider == "gateway"
     )
@@ -538,6 +576,7 @@ def create_app(
         state_store.initialize(owner_device_id=settings.device_id)
         if settings.career_profile_enabled:
             career_profiles.initialize()
+            complete_career_profile.initialize()
         jobs.initialize()
         await conversation_manager.start()
         try:
@@ -1214,6 +1253,180 @@ def create_app(
         if value is None:
             raise HTTPException(status_code=404, detail="Document file not found")
         return DocumentFileRecord.model_validate(value)
+
+    @app.get(
+        "/v1/career-profile",
+        tags=["career-profile"],
+    )
+    def career_profile_complete_get(
+        identity: Annotated[DeviceIdentity, Depends(authenticated_device)],
+    ) -> CareerProfileCompleteCurrent:
+        require_career_profile_owner(identity)
+        return complete_career_profile.current()
+
+    def complete_profile_conflict(error: Exception) -> HTTPException:
+        if isinstance(error, CareerProfileEvidenceNotFound):
+            return HTTPException(status_code=404, detail="Career Profile Evidence was not found")
+        if isinstance(error, CareerProfileItemNotFound):
+            return HTTPException(status_code=404, detail="Career Profile item was not found")
+        if isinstance(error, CareerProfileValueError):
+            return HTTPException(status_code=422, detail=str(error))
+        if isinstance(
+            error,
+            (CareerProfileEvidenceIntegrityError, CareerProfileEvidencePathError),
+        ):
+            return HTTPException(
+                status_code=409,
+                detail="Career Profile Evidence failed its immutable storage check",
+            )
+        return HTTPException(status_code=409, detail=str(error))
+
+    @app.post(
+        "/v1/career-profile/items",
+        tags=["career-profile"],
+        status_code=201,
+    )
+    def career_profile_item_create(
+        command: ProfileItemMutation,
+        identity: Annotated[DeviceIdentity, Depends(authenticated_device)],
+    ) -> CareerProfileCompleteCurrent:
+        require_career_profile_owner(identity)
+        try:
+            return complete_career_profile.upsert_item(
+                principal=principal_for_device(identity.device_id),
+                command=command,
+            )
+        except (
+            CareerProfileRevisionConflict,
+            CareerProfileIdempotencyConflict,
+            CareerProfileValueError,
+        ) as error:
+            raise complete_profile_conflict(error) from error
+
+    @app.put(
+        "/v1/career-profile/items/{item_id}",
+        tags=["career-profile"],
+    )
+    def career_profile_item_update(
+        item_id: CompleteProfileItemId,
+        command: ProfileItemMutation,
+        identity: Annotated[DeviceIdentity, Depends(authenticated_device)],
+    ) -> CareerProfileCompleteCurrent:
+        require_career_profile_owner(identity)
+        try:
+            return complete_career_profile.upsert_item(
+                principal=principal_for_device(identity.device_id),
+                command=command,
+                item_id=item_id,
+            )
+        except (
+            CareerProfileRevisionConflict,
+            CareerProfileIdempotencyConflict,
+            CareerProfileItemNotFound,
+            CareerProfileValueError,
+        ) as error:
+            raise complete_profile_conflict(error) from error
+
+    @app.delete(
+        "/v1/career-profile/items/{item_id}",
+        tags=["career-profile"],
+    )
+    def career_profile_item_remove(
+        item_id: CompleteProfileItemId,
+        command: ProfileItemRemoval,
+        identity: Annotated[DeviceIdentity, Depends(authenticated_device)],
+    ) -> CareerProfileCompleteCurrent:
+        require_career_profile_owner(identity)
+        try:
+            return complete_career_profile.remove_item(
+                principal=principal_for_device(identity.device_id),
+                item_id=item_id,
+                command=command,
+            )
+        except (
+            CareerProfileRevisionConflict,
+            CareerProfileIdempotencyConflict,
+            CareerProfileItemNotFound,
+            CareerProfileValueError,
+        ) as error:
+            raise complete_profile_conflict(error) from error
+
+    @app.post(
+        "/v1/career-profile/evidence",
+        tags=["career-profile"],
+        status_code=201,
+    )
+    def career_profile_evidence_import(
+        command: EvidenceImportRequest,
+        identity: Annotated[DeviceIdentity, Depends(authenticated_device)],
+    ) -> CareerProfileCompleteCurrent:
+        require_career_profile_owner(identity)
+        try:
+            return complete_career_profile.import_evidence(
+                principal=principal_for_device(identity.device_id),
+                command=command,
+            )
+        except (
+            CareerProfileRevisionConflict,
+            CareerProfileIdempotencyConflict,
+            CareerProfileValueError,
+            CareerProfileEvidencePathError,
+        ) as error:
+            raise complete_profile_conflict(error) from error
+
+    @app.delete(
+        "/v1/career-profile/evidence/{evidence_id}",
+        tags=["career-profile"],
+    )
+    def career_profile_evidence_remove(
+        evidence_id: OpaqueEvidenceId,
+        command: ProfileItemRemoval,
+        identity: Annotated[DeviceIdentity, Depends(authenticated_device)],
+    ) -> CareerProfileCompleteCurrent:
+        require_career_profile_owner(identity)
+        try:
+            return complete_career_profile.remove_evidence(
+                principal=principal_for_device(identity.device_id),
+                evidence_id=evidence_id,
+                command=command,
+            )
+        except (
+            CareerProfileRevisionConflict,
+            CareerProfileIdempotencyConflict,
+            CareerProfileEvidenceNotFound,
+        ) as error:
+            raise complete_profile_conflict(error) from error
+
+    @app.get(
+        "/v1/career-profile/evidence/{evidence_id}/content",
+        tags=["career-profile"],
+    )
+    def career_profile_evidence_content(
+        evidence_id: OpaqueEvidenceId,
+        identity: Annotated[DeviceIdentity, Depends(authenticated_device)],
+    ) -> Response:
+        require_career_profile_owner(identity)
+        try:
+            metadata = complete_career_profile.evidence_metadata(evidence_id)
+            content = complete_career_profile.read_evidence(evidence_id)
+        except (
+            CareerProfileEvidenceNotFound,
+            CareerProfileEvidenceIntegrityError,
+            CareerProfileEvidencePathError,
+        ) as error:
+            raise complete_profile_conflict(error) from error
+        filename = re.sub(r'[\x00-\x1f\x7f"\\]', "_", metadata.original_filename)
+        fallback_filename = filename.encode("ascii", "replace").decode("ascii")
+        return Response(
+            content=content,
+            media_type=metadata.media_type,
+            headers={
+                "Content-Disposition": (
+                    f'attachment; filename="{fallback_filename}"; '
+                    f"filename*=UTF-8''{quote(filename)}"
+                )
+            },
+        )
 
     @app.get(
         "/v1/career-profile/work-arrangement",

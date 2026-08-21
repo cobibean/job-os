@@ -844,6 +844,37 @@
         "title": "BrowserTabMetadata",
         "type": "object"
       },
+      "CareerProfileCompleteCurrent": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ProfileItemRecord"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "profile_revision": {
+            "minimum": 0.0,
+            "title": "Profile Revision",
+            "type": "integer"
+          },
+          "source_evidence": {
+            "items": {
+              "$ref": "#/components/schemas/SourceEvidenceRecord"
+            },
+            "title": "Source Evidence",
+            "type": "array"
+          }
+        },
+        "required": [
+          "profile_revision",
+          "items",
+          "source_evidence"
+        ],
+        "title": "CareerProfileCompleteCurrent",
+        "type": "object"
+      },
       "CareerProfileProjection": {
         "additionalProperties": false,
         "properties": {
@@ -929,6 +960,115 @@
           }
         },
         "title": "CareerProfileSnapshotRequest",
+        "type": "object"
+      },
+      "ClaimValue": {
+        "additionalProperties": false,
+        "properties": {
+          "forbidden_uses": {
+            "items": {
+              "maxLength": 2000,
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 20,
+            "title": "Forbidden Uses",
+            "type": "array"
+          },
+          "kind": {
+            "const": "claim",
+            "title": "Kind",
+            "type": "string"
+          },
+          "qualifiers": {
+            "items": {
+              "maxLength": 2000,
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 20,
+            "title": "Qualifiers",
+            "type": "array"
+          },
+          "statement": {
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Statement",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "statement"
+        ],
+        "title": "ClaimValue",
+        "type": "object"
+      },
+      "CompensationValue": {
+        "additionalProperties": false,
+        "properties": {
+          "currency": {
+            "default": "USD",
+            "maxLength": 3,
+            "minLength": 3,
+            "title": "Currency",
+            "type": "string"
+          },
+          "kind": {
+            "const": "compensation",
+            "title": "Kind",
+            "type": "string"
+          },
+          "minimum": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Minimum"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "maxLength": 1000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "period": {
+            "default": "year",
+            "enum": [
+              "hour",
+              "year"
+            ],
+            "title": "Period",
+            "type": "string"
+          },
+          "target": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target"
+          }
+        },
+        "required": [
+          "kind"
+        ],
+        "title": "CompensationValue",
         "type": "object"
       },
       "ConnectionResponse": {
@@ -1433,6 +1573,40 @@
           "idempotency_key"
         ],
         "title": "CreateSnapshotRequest",
+        "type": "object"
+      },
+      "DealbreakerValue": {
+        "additionalProperties": false,
+        "properties": {
+          "explanation": {
+            "anyOf": [
+              {
+                "maxLength": 2000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Explanation"
+          },
+          "kind": {
+            "const": "dealbreaker",
+            "title": "Kind",
+            "type": "string"
+          },
+          "label": {
+            "maxLength": 300,
+            "minLength": 1,
+            "title": "Label",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "label"
+        ],
+        "title": "DealbreakerValue",
         "type": "object"
       },
       "DeleteBlock": {
@@ -2224,6 +2398,362 @@
         "title": "EditableDocumentSummary",
         "type": "object"
       },
+      "EducationValue": {
+        "additionalProperties": false,
+        "properties": {
+          "credential": {
+            "maxLength": 300,
+            "minLength": 1,
+            "title": "Credential",
+            "type": "string"
+          },
+          "details": {
+            "anyOf": [
+              {
+                "maxLength": 2000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Details"
+          },
+          "ended_on": {
+            "anyOf": [
+              {
+                "maxLength": 10,
+                "minLength": 4,
+                "pattern": "^\\d{4}(?:-\\d{2}(?:-\\d{2})?)?$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ended On"
+          },
+          "field_of_study": {
+            "anyOf": [
+              {
+                "maxLength": 300,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Field Of Study"
+          },
+          "institution": {
+            "maxLength": 300,
+            "minLength": 1,
+            "title": "Institution",
+            "type": "string"
+          },
+          "kind": {
+            "const": "education",
+            "title": "Kind",
+            "type": "string"
+          },
+          "started_on": {
+            "anyOf": [
+              {
+                "maxLength": 10,
+                "minLength": 4,
+                "pattern": "^\\d{4}(?:-\\d{2}(?:-\\d{2})?)?$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started On"
+          }
+        },
+        "required": [
+          "kind",
+          "institution",
+          "credential"
+        ],
+        "title": "EducationValue",
+        "type": "object"
+      },
+      "EvidenceExtraction": {
+        "additionalProperties": false,
+        "properties": {
+          "assessment": {
+            "enum": [
+              "exact",
+              "inferred",
+              "ambiguous",
+              "conflicting"
+            ],
+            "title": "Assessment",
+            "type": "string"
+          },
+          "value": {
+            "discriminator": {
+              "mapping": {
+                "claim": "#/components/schemas/ClaimValue",
+                "compensation": "#/components/schemas/CompensationValue",
+                "dealbreaker": "#/components/schemas/DealbreakerValue",
+                "education": "#/components/schemas/EducationValue",
+                "experience": "#/components/schemas/ExperienceValue",
+                "identity": "#/components/schemas/IdentityValue",
+                "industries": "#/components/schemas/IndustryPreferencesValue",
+                "location": "#/components/schemas/LocationPreferenceValue",
+                "positioning": "#/components/schemas/PositioningValue",
+                "priority": "#/components/schemas/PriorityValue",
+                "project": "#/components/schemas/ProjectValue",
+                "skill": "#/components/schemas/SkillValue",
+                "target_roles": "#/components/schemas/TargetRolesValue",
+                "work_arrangement": "#/components/schemas/WorkArrangementProfileValue"
+              },
+              "propertyName": "kind"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/IdentityValue"
+              },
+              {
+                "$ref": "#/components/schemas/EducationValue"
+              },
+              {
+                "$ref": "#/components/schemas/SkillValue"
+              },
+              {
+                "$ref": "#/components/schemas/PositioningValue"
+              },
+              {
+                "$ref": "#/components/schemas/ExperienceValue"
+              },
+              {
+                "$ref": "#/components/schemas/ProjectValue"
+              },
+              {
+                "$ref": "#/components/schemas/ClaimValue"
+              },
+              {
+                "$ref": "#/components/schemas/TargetRolesValue"
+              },
+              {
+                "$ref": "#/components/schemas/CompensationValue"
+              },
+              {
+                "$ref": "#/components/schemas/LocationPreferenceValue"
+              },
+              {
+                "$ref": "#/components/schemas/WorkArrangementProfileValue"
+              },
+              {
+                "$ref": "#/components/schemas/IndustryPreferencesValue"
+              },
+              {
+                "$ref": "#/components/schemas/PriorityValue"
+              },
+              {
+                "$ref": "#/components/schemas/DealbreakerValue"
+              }
+            ],
+            "title": "Value"
+          }
+        },
+        "required": [
+          "assessment",
+          "value"
+        ],
+        "title": "EvidenceExtraction",
+        "type": "object"
+      },
+      "EvidenceImportRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "captured_at": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Captured At",
+            "type": "string"
+          },
+          "content_base64": {
+            "maxLength": 14680064,
+            "minLength": 1,
+            "title": "Content Base64",
+            "type": "string"
+          },
+          "expected_profile_revision": {
+            "minimum": 0.0,
+            "title": "Expected Profile Revision",
+            "type": "integer"
+          },
+          "extractions": {
+            "items": {
+              "$ref": "#/components/schemas/EvidenceExtraction"
+            },
+            "maxItems": 100,
+            "title": "Extractions",
+            "type": "array"
+          },
+          "idempotency_key": {
+            "maxLength": 200,
+            "minLength": 8,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+            "title": "Idempotency Key",
+            "type": "string"
+          },
+          "media_type": {
+            "maxLength": 200,
+            "minLength": 3,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9!#$&^_.+-]*/[A-Za-z0-9][A-Za-z0-9!#$&^_.+-]*$",
+            "title": "Media Type",
+            "type": "string"
+          },
+          "original_filename": {
+            "maxLength": 500,
+            "minLength": 1,
+            "pattern": "^[^\\x00-\\x1f\\x7f]+$",
+            "title": "Original Filename",
+            "type": "string"
+          },
+          "provenance": {
+            "$ref": "#/components/schemas/EvidenceProvenance"
+          }
+        },
+        "required": [
+          "expected_profile_revision",
+          "idempotency_key",
+          "original_filename",
+          "media_type",
+          "captured_at",
+          "provenance",
+          "content_base64"
+        ],
+        "title": "EvidenceImportRequest",
+        "type": "object"
+      },
+      "EvidenceProvenance": {
+        "additionalProperties": false,
+        "properties": {
+          "method": {
+            "enum": [
+              "user_import",
+              "agent_import",
+              "migration_import"
+            ],
+            "title": "Method",
+            "type": "string"
+          },
+          "source_kind": {
+            "enum": [
+              "resume",
+              "portfolio",
+              "supporting_document",
+              "citation"
+            ],
+            "title": "Source Kind",
+            "type": "string"
+          },
+          "source_label": {
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Source Label",
+            "type": "string"
+          }
+        },
+        "required": [
+          "source_kind",
+          "source_label",
+          "method"
+        ],
+        "title": "EvidenceProvenance",
+        "type": "object"
+      },
+      "ExperienceValue": {
+        "additionalProperties": false,
+        "properties": {
+          "current": {
+            "default": false,
+            "title": "Current",
+            "type": "boolean"
+          },
+          "ended_on": {
+            "anyOf": [
+              {
+                "maxLength": 10,
+                "minLength": 4,
+                "pattern": "^\\d{4}(?:-\\d{2}(?:-\\d{2})?)?$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ended On"
+          },
+          "kind": {
+            "const": "experience",
+            "title": "Kind",
+            "type": "string"
+          },
+          "location": {
+            "anyOf": [
+              {
+                "maxLength": 300,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Location"
+          },
+          "organization": {
+            "maxLength": 300,
+            "minLength": 1,
+            "title": "Organization",
+            "type": "string"
+          },
+          "role": {
+            "maxLength": 300,
+            "minLength": 1,
+            "title": "Role",
+            "type": "string"
+          },
+          "started_on": {
+            "anyOf": [
+              {
+                "maxLength": 10,
+                "minLength": 4,
+                "pattern": "^\\d{4}(?:-\\d{2}(?:-\\d{2})?)?$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started On"
+          },
+          "summary": {
+            "anyOf": [
+              {
+                "maxLength": 4000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Summary"
+          }
+        },
+        "required": [
+          "kind",
+          "organization",
+          "role"
+        ],
+        "title": "ExperienceValue",
+        "type": "object"
+      },
       "HeaderFooter": {
         "additionalProperties": false,
         "properties": {
@@ -2326,6 +2856,112 @@
         "title": "HealthResponse",
         "type": "object"
       },
+      "IdentityValue": {
+        "additionalProperties": false,
+        "properties": {
+          "city": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "City"
+          },
+          "email": {
+            "anyOf": [
+              {
+                "maxLength": 320,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Email"
+          },
+          "kind": {
+            "const": "identity",
+            "title": "Kind",
+            "type": "string"
+          },
+          "links": {
+            "items": {
+              "maxLength": 2000,
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 20,
+            "title": "Links",
+            "type": "array"
+          },
+          "phone": {
+            "anyOf": [
+              {
+                "maxLength": 100,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Phone"
+          },
+          "professional_name": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Professional Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "professional_name"
+        ],
+        "title": "IdentityValue",
+        "type": "object"
+      },
+      "IndustryPreferencesValue": {
+        "additionalProperties": false,
+        "properties": {
+          "industries": {
+            "items": {
+              "maxLength": 300,
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 50,
+            "minItems": 1,
+            "title": "Industries",
+            "type": "array"
+          },
+          "kind": {
+            "const": "industries",
+            "title": "Kind",
+            "type": "string"
+          },
+          "strength": {
+            "enum": [
+              "requirement",
+              "strong_preference",
+              "preference",
+              "dealbreaker"
+            ],
+            "title": "Strength",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "industries",
+          "strength"
+        ],
+        "title": "IndustryPreferencesValue",
+        "type": "object"
+      },
       "InsertBlockAfter": {
         "additionalProperties": false,
         "properties": {
@@ -2377,6 +3013,50 @@
           "text"
         ],
         "title": "InsertBlockAfter",
+        "type": "object"
+      },
+      "ItemProvenance": {
+        "additionalProperties": false,
+        "properties": {
+          "imported_at": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Imported At"
+          },
+          "method": {
+            "enum": [
+              "user_entered",
+              "evidence_import",
+              "tracer_compatibility"
+            ],
+            "title": "Method",
+            "type": "string"
+          },
+          "source_label": {
+            "anyOf": [
+              {
+                "maxLength": 500,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Label"
+          }
+        },
+        "required": [
+          "method"
+        ],
+        "title": "ItemProvenance",
         "type": "object"
       },
       "JobArtifactsResponse": {
@@ -3121,6 +3801,54 @@
         "title": "LeadHistoryResponse",
         "type": "object"
       },
+      "LocationPreferenceValue": {
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "const": "location",
+            "title": "Kind",
+            "type": "string"
+          },
+          "locations": {
+            "items": {
+              "maxLength": 300,
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 50,
+            "minItems": 1,
+            "title": "Locations",
+            "type": "array"
+          },
+          "relocation": {
+            "default": "consider",
+            "enum": [
+              "yes",
+              "no",
+              "consider"
+            ],
+            "title": "Relocation",
+            "type": "string"
+          },
+          "strength": {
+            "enum": [
+              "requirement",
+              "strong_preference",
+              "preference",
+              "dealbreaker"
+            ],
+            "title": "Strength",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "locations",
+          "strength"
+        ],
+        "title": "LocationPreferenceValue",
+        "type": "object"
+      },
       "ManualOrderRequest": {
         "additionalProperties": false,
         "properties": {
@@ -3314,6 +4042,399 @@
           "collapsed"
         ],
         "title": "PanelLayout",
+        "type": "object"
+      },
+      "PositioningValue": {
+        "additionalProperties": false,
+        "properties": {
+          "headline": {
+            "maxLength": 300,
+            "minLength": 1,
+            "title": "Headline",
+            "type": "string"
+          },
+          "kind": {
+            "const": "positioning",
+            "title": "Kind",
+            "type": "string"
+          },
+          "summary": {
+            "anyOf": [
+              {
+                "maxLength": 4000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Summary"
+          }
+        },
+        "required": [
+          "kind",
+          "headline"
+        ],
+        "title": "PositioningValue",
+        "type": "object"
+      },
+      "PriorityValue": {
+        "additionalProperties": false,
+        "properties": {
+          "explanation": {
+            "anyOf": [
+              {
+                "maxLength": 2000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Explanation"
+          },
+          "kind": {
+            "const": "priority",
+            "title": "Kind",
+            "type": "string"
+          },
+          "label": {
+            "maxLength": 300,
+            "minLength": 1,
+            "title": "Label",
+            "type": "string"
+          },
+          "strength": {
+            "enum": [
+              "requirement",
+              "strong_preference",
+              "preference"
+            ],
+            "title": "Strength",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "label",
+          "strength"
+        ],
+        "title": "PriorityValue",
+        "type": "object"
+      },
+      "ProfileItemMutation": {
+        "additionalProperties": false,
+        "properties": {
+          "evidence_ids": {
+            "items": {
+              "pattern": "^cpe_[A-Za-z0-9_-]{16,64}$",
+              "type": "string"
+            },
+            "maxItems": 100,
+            "title": "Evidence Ids",
+            "type": "array"
+          },
+          "expected_profile_revision": {
+            "minimum": 0.0,
+            "title": "Expected Profile Revision",
+            "type": "integer"
+          },
+          "idempotency_key": {
+            "maxLength": 200,
+            "minLength": 8,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+            "title": "Idempotency Key",
+            "type": "string"
+          },
+          "value": {
+            "discriminator": {
+              "mapping": {
+                "claim": "#/components/schemas/ClaimValue",
+                "compensation": "#/components/schemas/CompensationValue",
+                "dealbreaker": "#/components/schemas/DealbreakerValue",
+                "education": "#/components/schemas/EducationValue",
+                "experience": "#/components/schemas/ExperienceValue",
+                "identity": "#/components/schemas/IdentityValue",
+                "industries": "#/components/schemas/IndustryPreferencesValue",
+                "location": "#/components/schemas/LocationPreferenceValue",
+                "positioning": "#/components/schemas/PositioningValue",
+                "priority": "#/components/schemas/PriorityValue",
+                "project": "#/components/schemas/ProjectValue",
+                "skill": "#/components/schemas/SkillValue",
+                "target_roles": "#/components/schemas/TargetRolesValue",
+                "work_arrangement": "#/components/schemas/WorkArrangementProfileValue"
+              },
+              "propertyName": "kind"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/IdentityValue"
+              },
+              {
+                "$ref": "#/components/schemas/EducationValue"
+              },
+              {
+                "$ref": "#/components/schemas/SkillValue"
+              },
+              {
+                "$ref": "#/components/schemas/PositioningValue"
+              },
+              {
+                "$ref": "#/components/schemas/ExperienceValue"
+              },
+              {
+                "$ref": "#/components/schemas/ProjectValue"
+              },
+              {
+                "$ref": "#/components/schemas/ClaimValue"
+              },
+              {
+                "$ref": "#/components/schemas/TargetRolesValue"
+              },
+              {
+                "$ref": "#/components/schemas/CompensationValue"
+              },
+              {
+                "$ref": "#/components/schemas/LocationPreferenceValue"
+              },
+              {
+                "$ref": "#/components/schemas/WorkArrangementProfileValue"
+              },
+              {
+                "$ref": "#/components/schemas/IndustryPreferencesValue"
+              },
+              {
+                "$ref": "#/components/schemas/PriorityValue"
+              },
+              {
+                "$ref": "#/components/schemas/DealbreakerValue"
+              }
+            ],
+            "title": "Value"
+          }
+        },
+        "required": [
+          "expected_profile_revision",
+          "idempotency_key",
+          "value"
+        ],
+        "title": "ProfileItemMutation",
+        "type": "object"
+      },
+      "ProfileItemRecord": {
+        "additionalProperties": false,
+        "properties": {
+          "actor_principal": {
+            "title": "Actor Principal",
+            "type": "string"
+          },
+          "area": {
+            "enum": [
+              "my_career",
+              "what_im_looking_for",
+              "my_evidence"
+            ],
+            "title": "Area",
+            "type": "string"
+          },
+          "created_at": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Created At",
+            "type": "string"
+          },
+          "evidence_ids": {
+            "items": {
+              "pattern": "^cpe_[A-Za-z0-9_-]{16,64}$",
+              "type": "string"
+            },
+            "maxItems": 100,
+            "title": "Evidence Ids",
+            "type": "array"
+          },
+          "item_id": {
+            "pattern": "^cp[ir]_[A-Za-z0-9_-]{16,64}$",
+            "title": "Item Id",
+            "type": "string"
+          },
+          "item_revision": {
+            "minimum": 1.0,
+            "title": "Item Revision",
+            "type": "integer"
+          },
+          "provenance": {
+            "$ref": "#/components/schemas/ItemProvenance"
+          },
+          "review_status": {
+            "enum": [
+              "accepted",
+              "proposed",
+              "conflicting"
+            ],
+            "title": "Review Status",
+            "type": "string"
+          },
+          "updated_at": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Updated At",
+            "type": "string"
+          },
+          "value": {
+            "discriminator": {
+              "mapping": {
+                "claim": "#/components/schemas/ClaimValue",
+                "compensation": "#/components/schemas/CompensationValue",
+                "dealbreaker": "#/components/schemas/DealbreakerValue",
+                "education": "#/components/schemas/EducationValue",
+                "experience": "#/components/schemas/ExperienceValue",
+                "identity": "#/components/schemas/IdentityValue",
+                "industries": "#/components/schemas/IndustryPreferencesValue",
+                "location": "#/components/schemas/LocationPreferenceValue",
+                "positioning": "#/components/schemas/PositioningValue",
+                "priority": "#/components/schemas/PriorityValue",
+                "project": "#/components/schemas/ProjectValue",
+                "skill": "#/components/schemas/SkillValue",
+                "target_roles": "#/components/schemas/TargetRolesValue",
+                "work_arrangement": "#/components/schemas/WorkArrangementProfileValue"
+              },
+              "propertyName": "kind"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/IdentityValue"
+              },
+              {
+                "$ref": "#/components/schemas/EducationValue"
+              },
+              {
+                "$ref": "#/components/schemas/SkillValue"
+              },
+              {
+                "$ref": "#/components/schemas/PositioningValue"
+              },
+              {
+                "$ref": "#/components/schemas/ExperienceValue"
+              },
+              {
+                "$ref": "#/components/schemas/ProjectValue"
+              },
+              {
+                "$ref": "#/components/schemas/ClaimValue"
+              },
+              {
+                "$ref": "#/components/schemas/TargetRolesValue"
+              },
+              {
+                "$ref": "#/components/schemas/CompensationValue"
+              },
+              {
+                "$ref": "#/components/schemas/LocationPreferenceValue"
+              },
+              {
+                "$ref": "#/components/schemas/WorkArrangementProfileValue"
+              },
+              {
+                "$ref": "#/components/schemas/IndustryPreferencesValue"
+              },
+              {
+                "$ref": "#/components/schemas/PriorityValue"
+              },
+              {
+                "$ref": "#/components/schemas/DealbreakerValue"
+              }
+            ],
+            "title": "Value"
+          }
+        },
+        "required": [
+          "item_id",
+          "area",
+          "value",
+          "review_status",
+          "provenance",
+          "item_revision",
+          "actor_principal",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "ProfileItemRecord",
+        "type": "object"
+      },
+      "ProfileItemRemoval": {
+        "additionalProperties": false,
+        "properties": {
+          "expected_profile_revision": {
+            "minimum": 0.0,
+            "title": "Expected Profile Revision",
+            "type": "integer"
+          },
+          "idempotency_key": {
+            "maxLength": 200,
+            "minLength": 8,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+            "title": "Idempotency Key",
+            "type": "string"
+          }
+        },
+        "required": [
+          "expected_profile_revision",
+          "idempotency_key"
+        ],
+        "title": "ProfileItemRemoval",
+        "type": "object"
+      },
+      "ProjectValue": {
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "const": "project",
+            "title": "Kind",
+            "type": "string"
+          },
+          "name": {
+            "maxLength": 300,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "role": {
+            "anyOf": [
+              {
+                "maxLength": 300,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Role"
+          },
+          "summary": {
+            "maxLength": 4000,
+            "minLength": 1,
+            "title": "Summary",
+            "type": "string"
+          },
+          "url": {
+            "anyOf": [
+              {
+                "maxLength": 2000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Url"
+          }
+        },
+        "required": [
+          "kind",
+          "name",
+          "summary"
+        ],
+        "title": "ProjectValue",
         "type": "object"
       },
       "PublishEditableDocumentRequest": {
@@ -3694,6 +4815,124 @@
         "title": "SetBlockRole",
         "type": "object"
       },
+      "SkillValue": {
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "const": "skill",
+            "title": "Kind",
+            "type": "string"
+          },
+          "level": {
+            "anyOf": [
+              {
+                "enum": [
+                  "familiar",
+                  "proficient",
+                  "advanced",
+                  "expert"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Level"
+          },
+          "name": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "maxLength": 1000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          }
+        },
+        "required": [
+          "kind",
+          "name"
+        ],
+        "title": "SkillValue",
+        "type": "object"
+      },
+      "SourceEvidenceRecord": {
+        "additionalProperties": false,
+        "properties": {
+          "active": {
+            "title": "Active",
+            "type": "boolean"
+          },
+          "byte_count": {
+            "maximum": 10485760.0,
+            "minimum": 1.0,
+            "title": "Byte Count",
+            "type": "integer"
+          },
+          "captured_at": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Captured At",
+            "type": "string"
+          },
+          "evidence_id": {
+            "pattern": "^cpe_[A-Za-z0-9_-]{16,64}$",
+            "title": "Evidence Id",
+            "type": "string"
+          },
+          "imported_at": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Imported At",
+            "type": "string"
+          },
+          "media_type": {
+            "maxLength": 200,
+            "minLength": 3,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9!#$&^_.+-]*/[A-Za-z0-9][A-Za-z0-9!#$&^_.+-]*$",
+            "title": "Media Type",
+            "type": "string"
+          },
+          "original_filename": {
+            "maxLength": 500,
+            "minLength": 1,
+            "pattern": "^[^\\x00-\\x1f\\x7f]+$",
+            "title": "Original Filename",
+            "type": "string"
+          },
+          "provenance": {
+            "$ref": "#/components/schemas/EvidenceProvenance"
+          },
+          "sha256": {
+            "pattern": "^[a-f0-9]{64}$",
+            "title": "Sha256",
+            "type": "string"
+          }
+        },
+        "required": [
+          "evidence_id",
+          "original_filename",
+          "media_type",
+          "sha256",
+          "byte_count",
+          "captured_at",
+          "imported_at",
+          "provenance",
+          "active"
+        ],
+        "title": "SourceEvidenceRecord",
+        "type": "object"
+      },
       "StatusChangeRequest": {
         "additionalProperties": false,
         "properties": {
@@ -3770,6 +5009,43 @@
           "job"
         ],
         "title": "StatusChangeResponse",
+        "type": "object"
+      },
+      "TargetRolesValue": {
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "const": "target_roles",
+            "title": "Kind",
+            "type": "string"
+          },
+          "roles": {
+            "items": {
+              "maxLength": 300,
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 50,
+            "minItems": 1,
+            "title": "Roles",
+            "type": "array"
+          },
+          "strength": {
+            "default": "preference",
+            "enum": [
+              "requirement",
+              "strong_preference",
+              "preference"
+            ],
+            "title": "Strength",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "roles"
+        ],
+        "title": "TargetRolesValue",
         "type": "object"
       },
       "TurnMutationResponse": {
@@ -3931,6 +5207,55 @@
           "value"
         ],
         "title": "WorkArrangementMutation",
+        "type": "object"
+      },
+      "WorkArrangementProfileValue": {
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "const": "work_arrangement",
+            "title": "Kind",
+            "type": "string"
+          },
+          "mode": {
+            "enum": [
+              "remote",
+              "hybrid",
+              "onsite",
+              "flexible"
+            ],
+            "title": "Mode",
+            "type": "string"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "maxLength": 1000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "strength": {
+            "enum": [
+              "requirement",
+              "strong_preference",
+              "preference",
+              "dealbreaker"
+            ],
+            "title": "Strength",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "mode",
+          "strength"
+        ],
+        "title": "WorkArrangementProfileValue",
         "type": "object"
       },
       "WorkArrangementRecord": {
@@ -4960,6 +6285,682 @@
         "summary": "Browser Command",
         "tags": [
           "browser"
+        ]
+      }
+    },
+    "/v1/career-profile": {
+      "get": {
+        "operationId": "career_profile_complete_get_v1_career_profile_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CareerProfileCompleteCurrent"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Device authentication required"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Operation is not permitted"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Resource not found"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Internal server error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Career Profile Complete Get",
+        "tags": [
+          "career-profile"
+        ]
+      }
+    },
+    "/v1/career-profile/evidence": {
+      "post": {
+        "operationId": "career_profile_evidence_import_v1_career_profile_evidence_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EvidenceImportRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CareerProfileCompleteCurrent"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Device authentication required"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Operation is not permitted"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Resource not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Resource state conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Request validation failed"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Internal server error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Career Profile Evidence Import",
+        "tags": [
+          "career-profile"
+        ]
+      }
+    },
+    "/v1/career-profile/evidence/{evidence_id}": {
+      "delete": {
+        "operationId": "career_profile_evidence_remove_v1_career_profile_evidence__evidence_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "evidence_id",
+            "required": true,
+            "schema": {
+              "pattern": "^cpe_[A-Za-z0-9_-]{16,64}$",
+              "title": "Evidence Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProfileItemRemoval"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CareerProfileCompleteCurrent"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Device authentication required"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Operation is not permitted"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Resource not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Resource state conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Request validation failed"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Internal server error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Career Profile Evidence Remove",
+        "tags": [
+          "career-profile"
+        ]
+      }
+    },
+    "/v1/career-profile/evidence/{evidence_id}/content": {
+      "get": {
+        "operationId": "career_profile_evidence_content_v1_career_profile_evidence__evidence_id__content_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "evidence_id",
+            "required": true,
+            "schema": {
+              "pattern": "^cpe_[A-Za-z0-9_-]{16,64}$",
+              "title": "Evidence Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Device authentication required"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Operation is not permitted"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Resource not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Resource state conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Request validation failed"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Internal server error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Career Profile Evidence Content",
+        "tags": [
+          "career-profile"
+        ]
+      }
+    },
+    "/v1/career-profile/items": {
+      "post": {
+        "operationId": "career_profile_item_create_v1_career_profile_items_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProfileItemMutation"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CareerProfileCompleteCurrent"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Device authentication required"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Operation is not permitted"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Resource not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Resource state conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Request validation failed"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Internal server error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Career Profile Item Create",
+        "tags": [
+          "career-profile"
+        ]
+      }
+    },
+    "/v1/career-profile/items/{item_id}": {
+      "delete": {
+        "operationId": "career_profile_item_remove_v1_career_profile_items__item_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "item_id",
+            "required": true,
+            "schema": {
+              "pattern": "^cpi_[A-Za-z0-9_-]{16,64}$",
+              "title": "Item Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProfileItemRemoval"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CareerProfileCompleteCurrent"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Device authentication required"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Operation is not permitted"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Resource not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Resource state conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Request validation failed"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Internal server error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Career Profile Item Remove",
+        "tags": [
+          "career-profile"
+        ]
+      },
+      "put": {
+        "operationId": "career_profile_item_update_v1_career_profile_items__item_id__put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "item_id",
+            "required": true,
+            "schema": {
+              "pattern": "^cpi_[A-Za-z0-9_-]{16,64}$",
+              "title": "Item Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProfileItemMutation"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CareerProfileCompleteCurrent"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Device authentication required"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Operation is not permitted"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Resource not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Resource state conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Request validation failed"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Internal server error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Career Profile Item Update",
+        "tags": [
+          "career-profile"
         ]
       }
     },

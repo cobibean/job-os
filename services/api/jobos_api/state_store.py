@@ -999,6 +999,72 @@ MIGRATIONS = (
             )""",
         ),
     ),
+    Migration(
+        version=22,
+        statements=(
+            """
+            CREATE TABLE career_profile_items (
+                item_id TEXT PRIMARY KEY,
+                value_json TEXT NOT NULL CHECK (json_valid(value_json)),
+                provenance_json TEXT NOT NULL CHECK (json_valid(provenance_json)),
+                review_status TEXT NOT NULL CHECK (
+                    review_status IN ('accepted', 'proposed', 'conflicting')
+                ),
+                evidence_ids_json TEXT NOT NULL CHECK (json_valid(evidence_ids_json)),
+                item_revision INTEGER NOT NULL CHECK (item_revision >= 1),
+                actor_principal TEXT NOT NULL,
+                active INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0, 1)),
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+            """,
+            """CREATE INDEX career_profile_items_active
+               ON career_profile_items(active, created_at, item_id)""",
+            """
+            CREATE TABLE career_profile_evidence (
+                evidence_id TEXT PRIMARY KEY,
+                original_filename TEXT NOT NULL,
+                media_type TEXT NOT NULL,
+                content_sha256 TEXT NOT NULL,
+                byte_count INTEGER NOT NULL CHECK (byte_count > 0),
+                captured_at TEXT NOT NULL,
+                imported_at TEXT NOT NULL,
+                provenance_json TEXT NOT NULL CHECK (json_valid(provenance_json)),
+                storage_name TEXT NOT NULL UNIQUE,
+                active INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0, 1))
+            )
+            """,
+            """
+            CREATE TABLE career_profile_complete_revisions (
+                revision_id TEXT PRIMARY KEY,
+                profile_revision INTEGER NOT NULL UNIQUE CHECK (profile_revision >= 1),
+                base_profile_revision INTEGER NOT NULL CHECK (base_profile_revision >= 0),
+                actor_principal TEXT NOT NULL,
+                operation TEXT NOT NULL CHECK (
+                    operation IN (
+                        'item.upsert', 'item.remove', 'evidence.import', 'evidence.remove'
+                    )
+                ),
+                item_id TEXT,
+                evidence_id TEXT,
+                before_json TEXT CHECK (before_json IS NULL OR json_valid(before_json)),
+                after_json TEXT CHECK (after_json IS NULL OR json_valid(after_json)),
+                affected_fields_json TEXT NOT NULL CHECK (json_valid(affected_fields_json)),
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+            """,
+            """
+            CREATE TABLE career_profile_complete_idempotency (
+                actor_principal TEXT NOT NULL,
+                idempotency_key TEXT NOT NULL,
+                request_hash TEXT NOT NULL,
+                result_json TEXT NOT NULL CHECK (json_valid(result_json)),
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY(actor_principal, idempotency_key)
+            )
+            """,
+        ),
+    ),
 )
 SCHEMA_VERSION = MIGRATIONS[-1].version
 

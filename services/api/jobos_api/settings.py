@@ -82,6 +82,9 @@ class Settings(BaseModel):
     def resolved_local_artifact_root(self) -> Path:
         return self.local_artifact_root or self.state_db_path.parent / "artifacts"
 
+    def resolved_evidence_vault_root(self) -> Path:
+        return self.state_db_path.parent / "career-profile-evidence"
+
     def resolved_artifact_roots(self) -> tuple[Path, ...]:
         roots = (self.resolved_local_artifact_root(), *self.artifact_roots)
         return tuple(dict.fromkeys(roots))
