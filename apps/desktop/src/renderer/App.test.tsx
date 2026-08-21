@@ -3,7 +3,7 @@ import { afterEach, expect, test, vi } from 'vitest'
 
 import type { AgentSessionStreamUpdate, JobListItem } from '../shared/contracts'
 import { App } from './App'
-import { isExpectedSaveNavigation } from './components/CenterWorkspace'
+import { isExpectedSaveNavigation, parseAgentJobSaveError } from './components/CenterWorkspace'
 
 afterEach(() => { cleanup(); window.localStorage.clear() })
 
@@ -51,6 +51,22 @@ test('browser save navigation only accepts the original listing or its slug-matc
     'https://wellfound.com/jobs/starred?job_listing_slug=applied-ai-builder',
     'https://wellfound.com/jobs/starred?job_listing_slug=unrelated-role'
   )).toBe(false)
+})
+
+test('browser save failures preserve the exact failed stage instead of reporting tool unavailable', () => {
+  expect(parseAgentJobSaveError('JOBOS_SAVE_ERROR:ERROR_LISTING_COVERAGE_INCOMPLETE')).toBe(
+    'JobOS could not confirm the complete job listing. No job was saved.'
+  )
+  expect(parseAgentJobSaveError('JOBOS_SAVE_ERROR:ERROR_LISTING_CONTENT_NOT_EXTRACTABLE')).toBe(
+    'JobOS recognized this as a job listing but could not read its description. Paste the listing text into this save session to continue.'
+  )
+  expect(parseAgentJobSaveError('JOBOS_SAVE_ERROR:ERROR_JOB_CREATE_FAILED')).toBe(
+    'JobOS read the listing but could not save the job. You can retry.'
+  )
+  expect(parseAgentJobSaveError('JOBOS_SAVE_RESULT:ERROR_JOB_CREATE_FAILED')).toBe(
+    'JobOS read the listing but could not save the job. You can retry.'
+  )
+  expect(parseAgentJobSaveError('JOBOS_SAVE_RESULT:ERROR_REQUIRED_TOOL_UNAVAILABLE')).toBeNull()
 })
 
 
@@ -316,9 +332,10 @@ test('saving dispatches job-hunter and reconciles a failure emitted before send 
   }
   const browserState = { tabs: [browserTab], activeTabId: browserTab.tabId, download: null, notice: null }
   const associate = vi.fn()
-  const create = vi.fn()
+  const createBrowserTab = vi.fn()
   let saveOutcome: 'idle' | 'failed' | 'completed' | 'running' | 'interrupted' = 'idle'
   let currentTurnId = ''
+  let currentConversationId = ''
   let sendCount = 0
   let browserListener: (state: typeof browserState) => void = () => undefined
   const agentListeners: Array<(update: AgentSessionStreamUpdate) => void> = []
@@ -330,8 +347,9 @@ test('saving dispatches job-hunter and reconciles a failure emitted before send 
     associated: true,
     job: successfulJob
   }))
-  const send = vi.fn().mockImplementation(async () => {
+  const send = vi.fn().mockImplementation(async (conversationId: string) => {
     sendCount += 1
+    currentConversationId = conversationId
     currentTurnId = `turn-save-job-${sendCount}`
     if (saveOutcome === 'idle') saveOutcome = 'failed'
     if (successfulJob) browserListener({
@@ -343,19 +361,33 @@ test('saving dispatches job-hunter and reconciles a failure emitted before send 
   const getConversation = vi.fn().mockImplementation(async (conversationId: string) => ({
     conversationId, position: conversationId === 'conv-2' ? 2 : 1,
     title: conversationId === 'conv-2' ? 'Session 2' : 'Session 1', createdAt: '',
-    entries: conversationId === 'conv-1' && ['failed', 'completed', 'interrupted'].includes(saveOutcome) ? [{
+    entries: conversationId === currentConversationId && ['failed', 'completed', 'interrupted'].includes(saveOutcome) ? [{
       eventId: 1,
       turnId: currentTurnId,
       type: saveOutcome === 'failed' ? 'error' : saveOutcome === 'interrupted' ? 'status' : 'assistant_message',
       state: saveOutcome === 'failed' ? 'failed' : saveOutcome === 'interrupted' ? 'interrupted' : 'completed',
       summary: saveOutcome === 'failed' ? 'Agent connection unavailable'
-        : successfulJob ? `JOBOS_SAVE_RESULT:${JSON.stringify({
-            jobId: successfulJob.jobId,
-            created: true
-          })}` : 'Could not identify a job listing',
+      : successfulJob ? `JOBOS_SAVE_RESULT:${JSON.stringify({
+        jobId: successfulJob.jobId,
+        created: true,
+        tabId: browserTab.tabId
+      })}` : 'Could not identify a job listing',
       detail: {}, occurredAt: ''
     }] : [],
-    activeTurn: null, connection: 'online', latestEventId: conversationId === 'conv-1' && ['failed', 'completed', 'interrupted'].includes(saveOutcome) ? 1 : 0
+    activeTurn: null, connection: 'online', latestEventId: conversationId === currentConversationId && ['failed', 'completed', 'interrupted'].includes(saveOutcome) ? 1 : 0,
+    jobContext: emptyJobContext
+  }))
+  const createSession = vi.fn().mockImplementation(async (initialJobId: string | null) => {
+    const position = createSession.mock.calls.length
+    return {
+      conversationId: `conv-${position}`, position, title: `Session ${position}`, createdAt: '', entries: [],
+      activeTurn: null, connection: 'online', latestEventId: 0,
+      jobContext: { ...emptyJobContext, selectedJobId: initialJobId }
+    }
+  })
+  const selectJob = vi.fn().mockImplementation(async (conversationId: string, jobId: string) => ({
+    ...emptyJobContext,
+    selectedJobId: jobId
   }))
   const workspace = {
     revision: 1,
@@ -375,11 +407,8 @@ test('saving dispatches job-hunter and reconciles a failure emitted before send 
   Object.defineProperty(window, 'jobos', { configurable: true, value: {
     connectivity: { get: vi.fn().mockResolvedValue({ state: 'connected', apiVersion: '0.1.0', checkedAt: '', message: 'Private API authenticated' }) },
     agent: {
-      list: vi.fn().mockResolvedValue([
-        { conversationId: 'conv-1', position: 1, title: 'Session 1', createdAt: '', activeTurn: null, connection: 'online', latestEventId: 0 },
-        { conversationId: 'conv-2', position: 2, title: 'Session 2', createdAt: '', activeTurn: null, connection: 'online', latestEventId: 0 }
-      ]),
-      create: vi.fn(), archive: vi.fn(),
+      list: vi.fn().mockResolvedValue([]),
+      create: createSession, archive: vi.fn(),
       get: getConversation,
       send, cancel, retry: vi.fn(),
       subscribe: vi.fn(listener => { agentListeners.push(listener); return () => undefined })
@@ -389,7 +418,7 @@ test('saving dispatches job-hunter and reconciles a failure emitted before send 
         jobs: successfulJob ? [successfulJob] : [], selectedJobId: null,
         sortMode: 'manual', manualOrder: []
       })),
-      list: vi.fn().mockImplementation(async () => successfulJob ? [successfulJob] : []), select: vi.fn(), reorder: vi.fn(), setSort: vi.fn(), updateStatus: vi.fn(), saveFromBrowser,
+      list: vi.fn().mockImplementation(async () => successfulJob ? [successfulJob] : []), select: selectJob, reorder: vi.fn(), setSort: vi.fn(), updateStatus: vi.fn(), saveFromBrowser,
       subscribe: vi.fn(() => () => undefined)
     },
     workspace: { get: vi.fn().mockResolvedValue(workspace), save: vi.fn().mockImplementation(value => Promise.resolve({ ...value, revision: value.revision + 1 })) },
@@ -399,7 +428,7 @@ test('saving dispatches job-hunter and reconciles a failure emitted before send 
         tabs: [{ ...browserTab, associatedJobId: successfulJob.jobId }]
       } : browserState),
       restore: vi.fn().mockResolvedValue(browserState),
-      associate, create, select: vi.fn(), close: vi.fn(), reorder: vi.fn(), navigate: vi.fn(), back: vi.fn(), forward: vi.fn(),
+      associate, create: createBrowserTab, select: vi.fn(), close: vi.fn(), reorder: vi.fn(), navigate: vi.fn(), back: vi.fn(), forward: vi.fn(),
       reload: vi.fn(), stop: vi.fn(), copyBlockedUrl: vi.fn(), setBounds: vi.fn().mockResolvedValue(undefined),
       subscribe: vi.fn(listener => { browserListener = listener; return () => undefined })
     }
@@ -410,29 +439,50 @@ test('saving dispatches job-hunter and reconciles a failure emitted before send 
   fireEvent.click(screen.getByRole('button', { name: 'Save this job to JobOS' }))
 
   await waitFor(() => expect(send).toHaveBeenCalledOnce())
+  expect(createSession).toHaveBeenLastCalledWith(null)
+  expect(send.mock.calls[0]?.[0]).toBe('conv-1')
   expect(send.mock.calls[0]?.[1]).toContain('job-tab')
+  expect(send.mock.calls[0]?.[1]).toContain(listing.canonicalUrl)
   const savePrompt = send.mock.calls[0]?.[1] ?? ''
   expect(savePrompt).toContain('mcp__jobos__browser_click')
   expect(savePrompt).toContain('link whose href or name matches the job slug')
   expect(savePrompt).toContain('complete job description')
   expect(savePrompt).toContain('do not summarize it or cap it at 300 characters')
   expect(savePrompt).toContain('responsibilities, qualifications, preferred qualifications, benefits, compensation')
-  expect(savePrompt).toContain('textStart and textLength')
+  expect(savePrompt).toContain('page displayed in that source or replacement tab is the source of truth')
+  expect(savePrompt).toContain('selected_job, active browser tab, or workspace context may refer to a different saved job')
+  expect(savePrompt).toContain('MUST explicitly include text_start, text_length, and include_targets')
+  expect(savePrompt).toContain('text_start set to the returned next_text_start')
+  expect(savePrompt).toContain('If a duplicate segment is ever returned, retry once')
   expect(savePrompt).toContain('list inspection does not count toward the detail-page limit')
-  expect(savePrompt).toContain('begin detail coverage from textStart 0')
+  expect(savePrompt).toContain('begin detail coverage from text_start 0')
   expect(savePrompt).toContain('never exceed 30 detail-page snapshots')
-  expect(savePrompt).toContain('while relevant page text remains unread')
+  expect(savePrompt).toContain('while text remains unread')
   expect(savePrompt).toContain('do not call either mutation')
+  expect(savePrompt).toContain('ERROR_BROWSER_TOOL_UNAVAILABLE')
+  expect(savePrompt).toContain('ERROR_SOURCE_TAB_RECOVERY_FAILED')
+  expect(savePrompt).toContain('ERROR_BROWSER_SNAPSHOT_FAILED')
+  expect(savePrompt).toContain('ERROR_PAGE_NOT_JOB_LISTING')
+  expect(savePrompt).toContain('ERROR_LISTING_CONTENT_NOT_EXTRACTABLE')
+  expect(savePrompt).toContain('ERROR_LISTING_COVERAGE_INCOMPLETE')
+  expect(savePrompt).toContain('ERROR_JOB_CREATE_FAILED')
+  expect(savePrompt).toContain('ERROR_TAB_ASSOCIATION_FAILED')
+  expect(savePrompt).not.toContain('ERROR_REQUIRED_TOOL_UNAVAILABLE')
   expect(savePrompt).toContain('Only after confirming complete relevant coverage')
   expect(savePrompt).not.toContain('concise role description of at most 300 characters')
   expect(savePrompt).not.toContain('Use at most four snapshots')
   expect(savePrompt).toContain('JOBOS_SAVE_RESULT:')
+  expect(savePrompt).toContain('JOBOS_SAVE_ERROR:')
   expect(savePrompt.match(/Call mcp__jobos__job_create_from_browser exactly once/g)).toHaveLength(1)
   expect(savePrompt.match(/call mcp__jobos__browser_tab_associate exactly once/g)).toHaveLength(1)
   expect(savePrompt).toContain('Never call mcp__jobos__browser_navigate')
+  expect(savePrompt).toContain('mcp__jobos__browser_tab_create exactly once')
+  expect(savePrompt).toContain('activate=false')
+  expect(savePrompt).toContain('user may freely switch, navigate, or close browser tabs')
   expect(savePrompt).toContain('Do not apply or submit forms')
   expect(send.mock.calls[0]?.[2]).toMatch(/^browser-save-/)
   expect(associate).not.toHaveBeenCalled()
+  await waitFor(() => expect(getConversation).toHaveBeenCalledWith('conv-1'))
   expect(await screen.findByText('Agent connection unavailable')).not.toBeNull()
   expect((screen.getByRole('button', { name: 'Save this job to JobOS' }) as HTMLButtonElement).disabled).toBe(false)
 
@@ -454,16 +504,26 @@ test('saving dispatches job-hunter and reconciles a failure emitted before send 
     ...browserState,
     tabs: [{ ...browserTab, url: 'https://wellfound.com/jobs/another-listing' }]
   })
-  await waitFor(() => expect(cancel).toHaveBeenCalledWith('conv-1', 'turn-save-job-3'))
-  expect(await screen.findByText('The browser listing changed before saving finished. Retry on the intended listing.')).not.toBeNull()
-
-  browserListener(browserState)
-  await waitFor(() => expect(screen.getByRole('button', { name: 'Save this job to JobOS' }).textContent).toContain('Save job'))
-  saveOutcome = 'running'
+  expect(cancel).not.toHaveBeenCalledWith('conv-3', 'turn-save-job-3')
+  const firstConcurrentTurnId = currentTurnId
+  const secondTab = {
+    ...browserTab,
+    tabId: 'second-job-tab',
+    url: 'https://jobs.example.com/second-role',
+    title: 'Second role'
+  }
+  act(() => browserListener({
+    ...browserState,
+    activeTabId: secondTab.tabId,
+    tabs: [browserTab, secondTab]
+  }))
+  expect((screen.getByRole('button', { name: 'Save this job to JobOS' }) as HTMLButtonElement).disabled).toBe(false)
   fireEvent.click(screen.getByRole('button', { name: 'Save this job to JobOS' }))
   await waitFor(() => expect(send).toHaveBeenCalledTimes(4))
-  saveOutcome = 'interrupted'
-  fireEvent.click(screen.getByRole('tab', { name: 'Session 2, Idle' }))
+  expect(send.mock.calls[3]?.[1]).toContain(secondTab.tabId)
+  expect(send.mock.calls[3]?.[1]).toContain(secondTab.url)
+  expect(cancel).not.toHaveBeenCalled()
+
   const getsBeforeWrongOwner = getConversation.mock.calls.length
   act(() => {
     agentListeners.forEach(listener => listener({ kind: 'event', conversationId: 'conv-2', recoveryState: 'ready', event: {
@@ -472,14 +532,27 @@ test('saving dispatches job-hunter and reconciles a failure emitted before send 
     } }))
   })
   await waitFor(() => expect(getConversation).toHaveBeenCalledTimes(getsBeforeWrongOwner))
+
+  saveOutcome = 'interrupted'
   act(() => {
-    agentListeners.forEach(listener => listener({ kind: 'event', conversationId: 'conv-1', recoveryState: 'ready', event: {
+    agentListeners.forEach(listener => listener({ kind: 'event', conversationId: 'conv-4', recoveryState: 'ready', event: {
       eventId: 2, turnId: currentTurnId, type: 'status', state: 'interrupted',
       summary: 'Turn stopped', detail: {}, occurredAt: ''
     } }))
   })
   expect(await screen.findByText('Job hunter finished without returning usable job details. You can retry.')).not.toBeNull()
-  expect((screen.getByRole('button', { name: 'Save this job to JobOS' }) as HTMLButtonElement).disabled).toBe(false)
+
+  currentConversationId = 'conv-3'
+  currentTurnId = firstConcurrentTurnId
+  act(() => {
+    agentListeners.forEach(listener => listener({ kind: 'event', conversationId: 'conv-3', recoveryState: 'ready', event: {
+      eventId: 3, turnId: firstConcurrentTurnId, type: 'status', state: 'interrupted',
+      summary: 'First turn stopped', detail: {}, occurredAt: ''
+    } }))
+  })
+
+  browserListener(browserState)
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Save this job to JobOS' }).textContent).toContain('Save job'))
 
   successfulJob = {
     jobId: 'job-saved-by-turn',
@@ -491,12 +564,14 @@ test('saving dispatches job-hunter and reconciles a failure emitted before send 
     discoveredAt: '2026-07-22T00:00:00Z',
     lastSeenAt: '2026-07-22T00:00:00Z'
   }
-  fireEvent.click(screen.getByRole('tab', { name: 'Session 1, Interrupted' }))
   saveOutcome = 'completed'
   fireEvent.click(screen.getByRole('button', { name: 'Save this job to JobOS' }))
   await waitFor(() => expect(send).toHaveBeenCalledTimes(5))
   expect(saveFromBrowser).not.toHaveBeenCalled()
-  expect(create).not.toHaveBeenCalled()
+  expect(createBrowserTab).not.toHaveBeenCalled()
+  expect(createSession).toHaveBeenCalledTimes(5)
+  expect(createSession.mock.calls.every(call => call[0] === null)).toBe(true)
+  expect(selectJob).toHaveBeenCalledWith('conv-5', 'job-saved-by-turn')
   expect(await screen.findByText(`Saved to JobOS: Northstar Labs · ${listing.title}`)).not.toBeNull()
   expect(await screen.findByRole('button', {
     name: `Select Northstar Labs ${listing.title}`
@@ -508,7 +583,7 @@ test('saving dispatches job-hunter and reconciles a failure emitted before send 
   fireEvent.click(screen.getByRole('button', { name: 'Send message' }))
   await waitFor(() => expect(send).toHaveBeenCalledTimes(6))
   expect(send.mock.calls[5]).toEqual([
-    'conv-1', 'Continue ordinary Hermes work', expect.stringMatching(/^desktop-message-/)
+    'conv-5', 'Continue ordinary Hermes work', expect.stringMatching(/^desktop-message-/)
   ])
 })
 

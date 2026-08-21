@@ -693,12 +693,15 @@ def create_server(
         conversation_id: ConversationId,
         url: str,
         associated_job_id: str | None = None,
+        activate: bool = True,
         idempotency_key: str | None = None,
     ) -> dict[str, Any]:
         """Create a live browser tab for an ordinary HTTP(S) URL."""
         return await browser(
             conversation_id,
-            "tab.create", {"url": url, "associated_job_id": associated_job_id}, idempotency_key
+            "tab.create",
+            {"url": url, "associated_job_id": associated_job_id, "activate": activate},
+            idempotency_key,
         )
 
     @server.tool(name="browser_tab_select", structured_output=True)
@@ -786,10 +789,30 @@ def create_server(
 
     @server.tool(name="browser_snapshot", structured_output=True)
     async def browser_snapshot(
-        conversation_id: ConversationId, tab_id: str, idempotency_key: str | None = None
+        conversation_id: ConversationId,
+        tab_id: str,
+        text_start: int = 0,
+        text_length: int = 12_000,
+        include_targets: bool = True,
+        idempotency_key: str | None = None,
     ) -> dict[str, Any]:
-        """Capture a bounded semantic snapshot with opaque target IDs."""
-        return await tab_command(conversation_id, "page.snapshot", tab_id, idempotency_key)
+        """Read one bounded page-text segment.
+
+        Pagination defaults to the first 12,000-character segment with targets.
+        For later segments, pass every pagination argument and use the returned
+        next_text_start.
+        """
+        return await browser(
+            conversation_id,
+            "page.snapshot",
+            {
+                "tab_id": tab_id,
+                "text_start": text_start,
+                "text_length": text_length,
+                "include_targets": include_targets,
+            },
+            idempotency_key,
+        )
 
     @server.tool(name="browser_click", structured_output=True)
     async def browser_click(

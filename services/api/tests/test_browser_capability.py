@@ -111,6 +111,51 @@ def test_tab_association_requires_a_bounded_job_id():
         ).validated_arguments()
 
 
+def test_tab_create_accepts_only_an_explicit_boolean_activation_policy():
+    request = BrowserCommandRequest(
+        command="tab.create",
+        arguments={
+            "url": "https://jobs.example.com/role",
+            "associated_job_id": None,
+            "activate": False,
+        },
+        origin="mcp",
+        idempotency_key="create-background-1",
+    )
+
+    assert request.validated_arguments() == request.arguments
+    with pytest.raises(ValueError, match="Invalid browser command arguments"):
+        request.model_copy(update={"arguments": {"activate": "false"}}).validated_arguments()
+
+
+def test_snapshot_accepts_only_bounded_explicit_text_pagination():
+    request = BrowserCommandRequest(
+        command="page.snapshot",
+        arguments={
+            "tab_id": "tab-1",
+            "text_start": 12_000,
+            "text_length": 12_000,
+            "include_targets": False,
+        },
+        origin="mcp",
+        idempotency_key="snapshot-page-1",
+    )
+
+    assert request.validated_arguments() == request.arguments
+    for invalid in (-1, 12_001, True):
+        with pytest.raises(ValueError, match="Invalid browser command arguments"):
+            request.model_copy(
+                update={
+                    "arguments": {
+                        "tab_id": "tab-1",
+                        "text_start": 0,
+                        "text_length": invalid,
+                        "include_targets": False,
+                    }
+                }
+            ).validated_arguments()
+
+
 def test_tab_association_rejects_unknown_jobs_before_desktop_dispatch(tmp_path):
     class InspectOnlyJobs:
         def inspect_job(self, job_id):

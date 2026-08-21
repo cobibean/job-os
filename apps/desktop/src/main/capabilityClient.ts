@@ -10,6 +10,7 @@ const COMMANDS = new Set([
 const TAB_ID = /^[A-Za-z0-9_-]{1,128}$/
 const TARGET_ID = /^t_[A-Za-z0-9_-]{1,64}$/
 const COMMAND_ID = /^cmd_[A-Za-z0-9_-]{8,80}$/
+const MAX_SNAPSHOT_DATA_CHARS = 20_000
 
 function ordinaryUrl(value: unknown): value is string {
   if (typeof value !== 'string' || value.length > 8192) return false
@@ -21,7 +22,7 @@ function ordinaryUrl(value: unknown): value is string {
 
 interface BrowserCapabilities {
   inspect: () => BrowserState
-  create?: (url?: string, associatedJobId?: string | null) => Promise<BrowserState>
+  create?: (url?: string, associatedJobId?: string | null, activate?: boolean) => Promise<BrowserState>
   select?: (tabId: string) => BrowserState
   associate?: (tabId: string, jobId: string | null) => BrowserState
   close?: (tabId: string) => Promise<BrowserState>
@@ -31,7 +32,12 @@ interface BrowserCapabilities {
   forward?: (tabId: string) => BrowserState
   reload?: (tabId: string) => BrowserState
   stop?: (tabId: string) => BrowserState
-  snapshot?: (tabId: string) => Promise<BrowserSemanticSnapshot>
+  snapshot?: (
+    tabId: string,
+    textStart?: number,
+    textLength?: number,
+    includeTargets?: boolean
+  ) => Promise<BrowserSemanticSnapshot>
   click?: (tabId: string, targetId: string) => Promise<BrowserState>
   type?: (tabId: string, targetId: string, text: string, clear?: boolean) => Promise<BrowserState>
   scroll?: (tabId: string, direction: 'up' | 'down', amount?: number) => Promise<BrowserState>
@@ -177,10 +183,12 @@ export async function dispatchCapabilityCommand(
         if ((args.url !== undefined && !ordinaryUrl(args.url))
           || (args.associated_job_id !== undefined && args.associated_job_id !== null
             && (typeof args.associated_job_id !== 'string'
-              || args.associated_job_id.length > 512))) throw new TypeError()
+              || args.associated_job_id.length > 512))
+          || (args.activate !== undefined && typeof args.activate !== 'boolean')) throw new TypeError()
         data = safeState(await requiredMethod(manager, 'create')(
           args.url as string | undefined,
-          typeof args.associated_job_id === 'string' ? args.associated_job_id : null))
+          typeof args.associated_job_id === 'string' ? args.associated_job_id : null,
+          args.activate !== false))
         break
       }
       case 'tab.select': data = safeState(requiredMethod(manager, 'select')(tabId as string)); break
@@ -204,15 +212,36 @@ export async function dispatchCapabilityCommand(
       case 'tab.reload': data = safeState(requiredMethod(manager, 'reload')(tabId as string)); break
       case 'tab.stop': data = safeState(requiredMethod(manager, 'stop')(tabId as string)); break
       case 'page.snapshot': {
-        const snapshot = await requiredMethod(manager, 'snapshot')(tabId as string)
+        const textStart = args.text_start === undefined ? 0 : Number(args.text_start)
+        const textLength = args.text_length === undefined ? 12_000 : Number(args.text_length)
+        const includeTargets = args.include_targets === undefined ? true : args.include_targets
+        if (!Number.isInteger(textStart) || textStart < 0 || textStart > 10_000_000
+          || !Number.isInteger(textLength) || textLength < 1 || textLength > 12_000
+          || typeof includeTargets !== 'boolean') throw new TypeError()
+        const snapshot = await requiredMethod(manager, 'snapshot')(
+          tabId as string, textStart, textLength, includeTargets
+        )
         data = { tab_id: snapshot.tabId, url: snapshot.url, title: snapshot.title,
-          text: snapshot.text.slice(0, 5000), text_start: snapshot.textStart,
-          text_length: snapshot.textLength, scroll_y: snapshot.scrollY,
+          text: snapshot.text.slice(0, 12_000), requested_text_start: snapshot.requestedTextStart,
+          text_start: snapshot.textStart, text_length: snapshot.textLength,
+          next_text_start: snapshot.hasMore ? snapshot.textStart + snapshot.textLength : null,
+          total_text_length: snapshot.totalTextLength, has_more: snapshot.hasMore,
+          page_revision: snapshot.pageRevision, scroll_y: snapshot.scrollY,
           scroll_height: snapshot.scrollHeight, viewport_height: snapshot.viewportHeight,
-          elements: snapshot.elements.slice(0, 100).map(element => ({
-            target_id: element.targetId, role: element.role, name: element.name,
-            disabled: element.disabled, href: element.href
-          })) }
+          targets: [] as Record<string, unknown>[] }
+        if (includeTargets) {
+          for (const element of snapshot.elements.slice(0, 100)) {
+            const target = { target_id: element.targetId, role: element.role.slice(0, 40),
+              name: element.name.slice(0, 200), disabled: element.disabled,
+              href: element.href?.slice(0, 1_000) ?? null }
+            const targets = data.targets as Record<string, unknown>[]
+            targets.push(target)
+            if (JSON.stringify(data).length > MAX_SNAPSHOT_DATA_CHARS) {
+              targets.pop()
+              break
+            }
+          }
+        }
         break
       }
       case 'element.click': {

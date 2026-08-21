@@ -125,8 +125,12 @@ export interface BrowserSemanticSnapshot {
   url: string
   title: string
   text: string
+  requestedTextStart: number
   textStart: number
   textLength: number
+  totalTextLength: number
+  hasMore: boolean
+  pageRevision: string
   scrollY: number
   scrollHeight: number
   viewportHeight: number
