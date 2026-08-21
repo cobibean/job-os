@@ -105,6 +105,7 @@ def test_complete_contract_represents_all_three_areas_and_canonical_item_kinds(t
         "IndustryPreferencesValue",
         "PriorityValue",
         "DealbreakerValue",
+        "CustomValue",
     ):
         assert model in referenced
 
@@ -175,6 +176,137 @@ def test_contract_rejects_invalid_provenance_timestamps_and_accepts_honest_date_
     }
     with pytest.raises(ValueError, match="YYYY, YYYY-MM, or YYYY-MM-DD"):
         ProfileItemMutation.model_validate(invalid_date)
+
+
+@pytest.mark.parametrize(
+    "value, expected_unknowns",
+    [
+        ({"kind": "identity", "email": "alex@example.invalid"}, {"professional_name": None}),
+        ({"kind": "education", "institution": "(FAKE) Example College"}, {"credential": None}),
+        ({"kind": "experience", "role": "(FAKE) Builder"}, {"current": None}),
+        ({"kind": "project", "summary": "(FAKE) Built a useful prototype"}, {"name": None}),
+        ({"kind": "positioning", "summary": "(FAKE) Product-minded engineer"}, {"headline": None}),
+        ({"kind": "location", "relocation": "no"}, {"strength": None}),
+        ({"kind": "compensation", "minimum": 125_000}, {"currency": None, "period": None}),
+        ({"kind": "priority", "explanation": "(FAKE) Sustainable pace"}, {"strength": None}),
+    ],
+)
+def test_meaningful_partial_records_preserve_unknown_semantics(value, expected_unknowns):
+    parsed = ProfileItemMutation.model_validate(
+        {
+            "expected_profile_revision": 0,
+            "idempotency_key": "partial-record-test-0001",
+            "value": value,
+        }
+    ).value.model_dump(mode="json")
+
+    for field, expected in expected_unknowns.items():
+        assert parsed[field] == expected
+
+
+@pytest.mark.parametrize(
+    "kind",
+    [
+        "identity",
+        "education",
+        "skill",
+        "positioning",
+        "experience",
+        "project",
+        "claim",
+        "target_roles",
+        "compensation",
+        "location",
+        "industries",
+        "priority",
+        "dealbreaker",
+    ],
+)
+def test_empty_partial_records_are_not_meaningful(kind: str):
+    with pytest.raises(ValueError, match="requires"):
+        ProfileItemMutation.model_validate(
+            {
+                "expected_profile_revision": 0,
+                "idempotency_key": "empty-record-test-0001",
+                "value": {"kind": kind},
+            }
+        )
+
+
+def test_bounded_custom_record_and_custom_vocabularies_round_trip(tmp_path: Path):
+    custom = ProfileItemMutation.model_validate(
+        {
+            "expected_profile_revision": 0,
+            "idempotency_key": "custom-profile-context-0001",
+            "value": {
+                "kind": "custom",
+                "label": "(FAKE) Community leadership",
+                "text": "(FAKE) Organizes a local peer mentoring circle.",
+            },
+        }
+    )
+    assert custom.value.model_dump(mode="json") == {
+        "kind": "custom",
+        "label": "(FAKE) Community leadership",
+        "text": "(FAKE) Organizes a local peer mentoring circle.",
+    }
+    store = initialized_store(tmp_path)
+    saved = store.upsert_item(principal="device:primary-device", command=custom)
+    restarted = CareerProfileCompleteStore(
+        tmp_path / "state/jobos.db", tmp_path / "evidence-vault"
+    ).current()
+    assert restarted == saved
+    assert restarted.items[0].area == "my_career"
+    assert restarted.items[0].value == custom.value
+
+    custom_vocabulary = ProfileItemMutation.model_validate(
+        {
+            "expected_profile_revision": 0,
+            "idempotency_key": "custom-profile-vocabulary-0001",
+            "value": {
+                "kind": "work_arrangement",
+                "mode": "client-site rotation",
+                "strength": "only during launch weeks",
+            },
+        }
+    )
+    assert isinstance(custom_vocabulary.value, WorkArrangementProfileValue)
+    assert custom_vocabulary.value.mode == "client-site rotation"
+    assert custom_vocabulary.value.strength == "only during launch weeks"
+
+    oversized = custom.model_dump(mode="json")
+    oversized["value"]["text"] = "x" * 4001
+    with pytest.raises(ValueError):
+        ProfileItemMutation.model_validate(oversized)
+
+
+def test_capture_time_is_optional_or_partial_while_import_time_remains_exact(tmp_path: Path):
+    store = initialized_store(tmp_path)
+    request = evidence_request().model_dump(mode="json")
+    request["captured_at"] = "2026-08"
+    imported = store.import_evidence(
+        principal="device:primary-device",
+        command=EvidenceImportRequest.model_validate(request),
+    )
+    evidence = imported.source_evidence[0]
+    assert evidence.captured_at == "2026-08"
+    assert evidence.imported_at is not None
+
+    restarted = CareerProfileCompleteStore(
+        tmp_path / "state/jobos.db", tmp_path / "evidence-vault"
+    ).current()
+    assert restarted.source_evidence[0] == evidence
+
+    without_capture = evidence_request().model_dump(mode="json")
+    without_capture["expected_profile_revision"] = 1
+    without_capture["idempotency_key"] = "import-without-capture-time-0001"
+    without_capture.pop("captured_at")
+    second = store.import_evidence(
+        principal="device:primary-device",
+        command=EvidenceImportRequest.model_validate(without_capture),
+    )
+    assert second.source_evidence[1].captured_at is None
+    assert second.source_evidence[1].imported_at is not None
 
 
 def test_exact_import_is_accepted_and_inferred_ambiguous_conflicting_stay_unaccepted(
@@ -592,7 +724,7 @@ def test_schema_migration_adds_complete_model_tables_without_activating_profile(
     database = tmp_path / "jobos.db"
     health = JobOsStateStore(database).initialize(owner_device_id="primary-device")
 
-    assert health.schema_version == SCHEMA_VERSION == 22
+    assert health.schema_version == SCHEMA_VERSION == 23
     with sqlite3.connect(database) as connection:
         tables = {
             row[0]

@@ -72,15 +72,17 @@ test('validates locally, saves accessible fields, and announces next-turn timing
 
   fireEvent.change(screen.getByLabelText('Work arrangement'), { target: { value: 'hybrid' } })
   fireEvent.change(screen.getByLabelText('How important is this?'), { target: { value: 'strong_preference' } })
-  fireEvent.change(screen.getByLabelText('Additional context'), { target: { value: 'x'.repeat(501) } })
+  fireEvent.change(screen.getByLabelText('Additional context'), { target: { value: '🙂'.repeat(1001) } })
   fireEvent.click(screen.getByRole('button', { name: 'Save preference' }))
-  expect(screen.getByRole('alert').textContent).toContain('Keep the note to 500 characters or fewer.')
+  expect(screen.getByRole('alert').textContent).toContain('Keep the note to 1000 characters or fewer.')
+  expect(api.saveWorkArrangement).not.toHaveBeenCalled()
 
-  fireEvent.change(screen.getByLabelText('Additional context'), { target: { value: '(FAKE) Two office days are okay' } })
+  fireEvent.change(screen.getByLabelText('Additional context'), { target: { value: '🙂'.repeat(1000) } })
+  expect(screen.getByText('1000/1000')).not.toBeNull()
   fireEvent.click(screen.getByRole('button', { name: 'Save preference' }))
   await waitFor(() => expect(api.saveWorkArrangement).toHaveBeenCalledWith(expect.objectContaining({
     expectedProfileRevision: 2,
-    value: { mode: 'hybrid', strength: 'strong_preference', note: '(FAKE) Two office days are okay' }
+    value: { mode: 'hybrid', strength: 'strong_preference', note: '🙂'.repeat(1000) }
   })))
   expect(await screen.findByText('Saved — applies to the next turn.')).not.toBeNull()
 })
@@ -243,18 +245,22 @@ test('reopens the last known profile for read-only use after a cold offline fail
   expect(screen.getByRole('button', { name: 'Save preference' }).hasAttribute('disabled')).toBe(true)
 })
 
-test('keeps flexible internally consistent and freezes fields during save', async () => {
+test('preserves flexible strength combinations and freezes fields during save', async () => {
   let finishSave: ((value: unknown) => void) | undefined
   const saveWorkArrangement = vi.fn().mockReturnValue(new Promise(resolve => { finishSave = resolve }))
   const api = bridge({ saveWorkArrangement })
   render(<CareerProfileWorkspace bridge={api} hasActiveTurn={false} />)
   await screen.findByDisplayValue('(FAKE) Remote in the US')
 
+  fireEvent.change(screen.getByLabelText('How important is this?'), { target: { value: 'dealbreaker' } })
   fireEvent.change(screen.getByLabelText('Work arrangement'), { target: { value: 'flexible' } })
-  expect((screen.getByLabelText('How important is this?') as HTMLSelectElement).value).toBe('preference')
-  expect(screen.getByLabelText('How important is this?').hasAttribute('disabled')).toBe(true)
+  expect((screen.getByLabelText('How important is this?') as HTMLSelectElement).value).toBe('dealbreaker')
+  expect(screen.getByLabelText('How important is this?').hasAttribute('disabled')).toBe(false)
   fireEvent.click(screen.getByRole('button', { name: 'Save preference' }))
   await waitFor(() => expect(saveWorkArrangement).toHaveBeenCalledTimes(1))
+  expect(saveWorkArrangement).toHaveBeenCalledWith(expect.objectContaining({
+    value: expect.objectContaining({ mode: 'flexible', strength: 'dealbreaker' })
+  }))
   expect(screen.getByLabelText('Work arrangement').hasAttribute('disabled')).toBe(true)
   expect(screen.getByLabelText('Additional context').hasAttribute('disabled')).toBe(true)
 

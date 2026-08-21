@@ -991,15 +991,21 @@
             "type": "array"
           },
           "statement": {
-            "maxLength": 2000,
-            "minLength": 1,
-            "title": "Statement",
-            "type": "string"
+            "anyOf": [
+              {
+                "maxLength": 2000,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Statement"
           }
         },
         "required": [
-          "kind",
-          "statement"
+          "kind"
         ],
         "title": "ClaimValue",
         "type": "object"
@@ -1008,11 +1014,17 @@
         "additionalProperties": false,
         "properties": {
           "currency": {
-            "default": "USD",
-            "maxLength": 3,
-            "minLength": 3,
-            "title": "Currency",
-            "type": "string"
+            "anyOf": [
+              {
+                "maxLength": 3,
+                "minLength": 3,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Currency"
           },
           "kind": {
             "const": "compensation",
@@ -1035,6 +1047,7 @@
             "anyOf": [
               {
                 "maxLength": 1000,
+                "minLength": 1,
                 "type": "string"
               },
               {
@@ -1044,13 +1057,24 @@
             "title": "Note"
           },
           "period": {
-            "default": "year",
-            "enum": [
-              "hour",
-              "year"
+            "anyOf": [
+              {
+                "enum": [
+                  "hour",
+                  "year"
+                ],
+                "type": "string"
+              },
+              {
+                "maxLength": 100,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
             ],
-            "title": "Period",
-            "type": "string"
+            "title": "Period"
           },
           "target": {
             "anyOf": [
@@ -1575,6 +1599,35 @@
         "title": "CreateSnapshotRequest",
         "type": "object"
       },
+      "CustomValue": {
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "const": "custom",
+            "title": "Kind",
+            "type": "string"
+          },
+          "label": {
+            "maxLength": 300,
+            "minLength": 1,
+            "title": "Label",
+            "type": "string"
+          },
+          "text": {
+            "maxLength": 4000,
+            "minLength": 1,
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "label",
+          "text"
+        ],
+        "title": "CustomValue",
+        "type": "object"
+      },
       "DealbreakerValue": {
         "additionalProperties": false,
         "properties": {
@@ -1582,6 +1635,7 @@
             "anyOf": [
               {
                 "maxLength": 2000,
+                "minLength": 1,
                 "type": "string"
               },
               {
@@ -1596,15 +1650,21 @@
             "type": "string"
           },
           "label": {
-            "maxLength": 300,
-            "minLength": 1,
-            "title": "Label",
-            "type": "string"
+            "anyOf": [
+              {
+                "maxLength": 300,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Label"
           }
         },
         "required": [
-          "kind",
-          "label"
+          "kind"
         ],
         "title": "DealbreakerValue",
         "type": "object"
@@ -2402,15 +2462,23 @@
         "additionalProperties": false,
         "properties": {
           "credential": {
-            "maxLength": 300,
-            "minLength": 1,
-            "title": "Credential",
-            "type": "string"
+            "anyOf": [
+              {
+                "maxLength": 300,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Credential"
           },
           "details": {
             "anyOf": [
               {
                 "maxLength": 2000,
+                "minLength": 1,
                 "type": "string"
               },
               {
@@ -2437,6 +2505,7 @@
             "anyOf": [
               {
                 "maxLength": 300,
+                "minLength": 1,
                 "type": "string"
               },
               {
@@ -2446,10 +2515,17 @@
             "title": "Field Of Study"
           },
           "institution": {
-            "maxLength": 300,
-            "minLength": 1,
-            "title": "Institution",
-            "type": "string"
+            "anyOf": [
+              {
+                "maxLength": 300,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Institution"
           },
           "kind": {
             "const": "education",
@@ -2472,9 +2548,7 @@
           }
         },
         "required": [
-          "kind",
-          "institution",
-          "credential"
+          "kind"
         ],
         "title": "EducationValue",
         "type": "object"
@@ -2497,6 +2571,7 @@
               "mapping": {
                 "claim": "#/components/schemas/ClaimValue",
                 "compensation": "#/components/schemas/CompensationValue",
+                "custom": "#/components/schemas/CustomValue",
                 "dealbreaker": "#/components/schemas/DealbreakerValue",
                 "education": "#/components/schemas/EducationValue",
                 "experience": "#/components/schemas/ExperienceValue",
@@ -2554,6 +2629,9 @@
               },
               {
                 "$ref": "#/components/schemas/DealbreakerValue"
+              },
+              {
+                "$ref": "#/components/schemas/CustomValue"
               }
             ],
             "title": "Value"
@@ -2570,10 +2648,17 @@
         "additionalProperties": false,
         "properties": {
           "captured_at": {
-            "maxLength": 64,
-            "minLength": 1,
-            "title": "Captured At",
-            "type": "string"
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "minLength": 4,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Captured At"
           },
           "content_base64": {
             "maxLength": 14680064,
@@ -2624,7 +2709,6 @@
           "idempotency_key",
           "original_filename",
           "media_type",
-          "captured_at",
           "provenance",
           "content_base64"
         ],
@@ -2672,9 +2756,15 @@
         "additionalProperties": false,
         "properties": {
           "current": {
-            "default": false,
-            "title": "Current",
-            "type": "boolean"
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current"
           },
           "ended_on": {
             "anyOf": [
@@ -2699,6 +2789,7 @@
             "anyOf": [
               {
                 "maxLength": 300,
+                "minLength": 1,
                 "type": "string"
               },
               {
@@ -2708,16 +2799,30 @@
             "title": "Location"
           },
           "organization": {
-            "maxLength": 300,
-            "minLength": 1,
-            "title": "Organization",
-            "type": "string"
+            "anyOf": [
+              {
+                "maxLength": 300,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Organization"
           },
           "role": {
-            "maxLength": 300,
-            "minLength": 1,
-            "title": "Role",
-            "type": "string"
+            "anyOf": [
+              {
+                "maxLength": 300,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Role"
           },
           "started_on": {
             "anyOf": [
@@ -2737,6 +2842,7 @@
             "anyOf": [
               {
                 "maxLength": 4000,
+                "minLength": 1,
                 "type": "string"
               },
               {
@@ -2747,9 +2853,7 @@
           }
         },
         "required": [
-          "kind",
-          "organization",
-          "role"
+          "kind"
         ],
         "title": "ExperienceValue",
         "type": "object"
@@ -2863,6 +2967,7 @@
             "anyOf": [
               {
                 "maxLength": 200,
+                "minLength": 1,
                 "type": "string"
               },
               {
@@ -2875,6 +2980,7 @@
             "anyOf": [
               {
                 "maxLength": 320,
+                "minLength": 1,
                 "type": "string"
               },
               {
@@ -2902,6 +3008,7 @@
             "anyOf": [
               {
                 "maxLength": 100,
+                "minLength": 1,
                 "type": "string"
               },
               {
@@ -2911,15 +3018,21 @@
             "title": "Phone"
           },
           "professional_name": {
-            "maxLength": 200,
-            "minLength": 1,
-            "title": "Professional Name",
-            "type": "string"
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Professional Name"
           }
         },
         "required": [
-          "kind",
-          "professional_name"
+          "kind"
         ],
         "title": "IdentityValue",
         "type": "object"
@@ -2934,7 +3047,6 @@
               "type": "string"
             },
             "maxItems": 50,
-            "minItems": 1,
             "title": "Industries",
             "type": "array"
           },
@@ -2944,20 +3056,30 @@
             "type": "string"
           },
           "strength": {
-            "enum": [
-              "requirement",
-              "strong_preference",
-              "preference",
-              "dealbreaker"
+            "anyOf": [
+              {
+                "enum": [
+                  "requirement",
+                  "strong_preference",
+                  "preference",
+                  "dealbreaker"
+                ],
+                "type": "string"
+              },
+              {
+                "maxLength": 100,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
             ],
-            "title": "Strength",
-            "type": "string"
+            "title": "Strength"
           }
         },
         "required": [
-          "kind",
-          "industries",
-          "strength"
+          "kind"
         ],
         "title": "IndustryPreferencesValue",
         "type": "object"
@@ -3816,35 +3938,55 @@
               "type": "string"
             },
             "maxItems": 50,
-            "minItems": 1,
             "title": "Locations",
             "type": "array"
           },
           "relocation": {
-            "default": "consider",
-            "enum": [
-              "yes",
-              "no",
-              "consider"
+            "anyOf": [
+              {
+                "enum": [
+                  "yes",
+                  "no",
+                  "consider"
+                ],
+                "type": "string"
+              },
+              {
+                "maxLength": 100,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
             ],
-            "title": "Relocation",
-            "type": "string"
+            "title": "Relocation"
           },
           "strength": {
-            "enum": [
-              "requirement",
-              "strong_preference",
-              "preference",
-              "dealbreaker"
+            "anyOf": [
+              {
+                "enum": [
+                  "requirement",
+                  "strong_preference",
+                  "preference",
+                  "dealbreaker"
+                ],
+                "type": "string"
+              },
+              {
+                "maxLength": 100,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
             ],
-            "title": "Strength",
-            "type": "string"
+            "title": "Strength"
           }
         },
         "required": [
-          "kind",
-          "locations",
-          "strength"
+          "kind"
         ],
         "title": "LocationPreferenceValue",
         "type": "object"
@@ -4048,10 +4190,17 @@
         "additionalProperties": false,
         "properties": {
           "headline": {
-            "maxLength": 300,
-            "minLength": 1,
-            "title": "Headline",
-            "type": "string"
+            "anyOf": [
+              {
+                "maxLength": 300,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Headline"
           },
           "kind": {
             "const": "positioning",
@@ -4062,6 +4211,7 @@
             "anyOf": [
               {
                 "maxLength": 4000,
+                "minLength": 1,
                 "type": "string"
               },
               {
@@ -4072,8 +4222,7 @@
           }
         },
         "required": [
-          "kind",
-          "headline"
+          "kind"
         ],
         "title": "PositioningValue",
         "type": "object"
@@ -4085,6 +4234,7 @@
             "anyOf": [
               {
                 "maxLength": 2000,
+                "minLength": 1,
                 "type": "string"
               },
               {
@@ -4099,25 +4249,42 @@
             "type": "string"
           },
           "label": {
-            "maxLength": 300,
-            "minLength": 1,
-            "title": "Label",
-            "type": "string"
+            "anyOf": [
+              {
+                "maxLength": 300,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Label"
           },
           "strength": {
-            "enum": [
-              "requirement",
-              "strong_preference",
-              "preference"
+            "anyOf": [
+              {
+                "enum": [
+                  "requirement",
+                  "strong_preference",
+                  "preference"
+                ],
+                "type": "string"
+              },
+              {
+                "maxLength": 100,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
             ],
-            "title": "Strength",
-            "type": "string"
+            "title": "Strength"
           }
         },
         "required": [
-          "kind",
-          "label",
-          "strength"
+          "kind"
         ],
         "title": "PriorityValue",
         "type": "object"
@@ -4151,6 +4318,7 @@
               "mapping": {
                 "claim": "#/components/schemas/ClaimValue",
                 "compensation": "#/components/schemas/CompensationValue",
+                "custom": "#/components/schemas/CustomValue",
                 "dealbreaker": "#/components/schemas/DealbreakerValue",
                 "education": "#/components/schemas/EducationValue",
                 "experience": "#/components/schemas/ExperienceValue",
@@ -4208,6 +4376,9 @@
               },
               {
                 "$ref": "#/components/schemas/DealbreakerValue"
+              },
+              {
+                "$ref": "#/components/schemas/CustomValue"
               }
             ],
             "title": "Value"
@@ -4285,6 +4456,7 @@
               "mapping": {
                 "claim": "#/components/schemas/ClaimValue",
                 "compensation": "#/components/schemas/CompensationValue",
+                "custom": "#/components/schemas/CustomValue",
                 "dealbreaker": "#/components/schemas/DealbreakerValue",
                 "education": "#/components/schemas/EducationValue",
                 "experience": "#/components/schemas/ExperienceValue",
@@ -4342,6 +4514,9 @@
               },
               {
                 "$ref": "#/components/schemas/DealbreakerValue"
+              },
+              {
+                "$ref": "#/components/schemas/CustomValue"
               }
             ],
             "title": "Value"
@@ -4393,15 +4568,23 @@
             "type": "string"
           },
           "name": {
-            "maxLength": 300,
-            "minLength": 1,
-            "title": "Name",
-            "type": "string"
+            "anyOf": [
+              {
+                "maxLength": 300,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
           },
           "role": {
             "anyOf": [
               {
                 "maxLength": 300,
+                "minLength": 1,
                 "type": "string"
               },
               {
@@ -4411,15 +4594,23 @@
             "title": "Role"
           },
           "summary": {
-            "maxLength": 4000,
-            "minLength": 1,
-            "title": "Summary",
-            "type": "string"
+            "anyOf": [
+              {
+                "maxLength": 4000,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Summary"
           },
           "url": {
             "anyOf": [
               {
                 "maxLength": 2000,
+                "minLength": 1,
                 "type": "string"
               },
               {
@@ -4430,9 +4621,7 @@
           }
         },
         "required": [
-          "kind",
-          "name",
-          "summary"
+          "kind"
         ],
         "title": "ProjectValue",
         "type": "object"
@@ -4835,21 +5024,34 @@
                 "type": "string"
               },
               {
+                "maxLength": 100,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
                 "type": "null"
               }
             ],
             "title": "Level"
           },
           "name": {
-            "maxLength": 200,
-            "minLength": 1,
-            "title": "Name",
-            "type": "string"
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
           },
           "note": {
             "anyOf": [
               {
                 "maxLength": 1000,
+                "minLength": 1,
                 "type": "string"
               },
               {
@@ -4860,8 +5062,7 @@
           }
         },
         "required": [
-          "kind",
-          "name"
+          "kind"
         ],
         "title": "SkillValue",
         "type": "object"
@@ -4880,10 +5081,17 @@
             "type": "integer"
           },
           "captured_at": {
-            "maxLength": 64,
-            "minLength": 1,
-            "title": "Captured At",
-            "type": "string"
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "minLength": 4,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Captured At"
           },
           "evidence_id": {
             "pattern": "^cpe_[A-Za-z0-9_-]{16,64}$",
@@ -4925,7 +5133,6 @@
           "media_type",
           "sha256",
           "byte_count",
-          "captured_at",
           "imported_at",
           "provenance",
           "active"
@@ -5026,24 +5233,33 @@
               "type": "string"
             },
             "maxItems": 50,
-            "minItems": 1,
             "title": "Roles",
             "type": "array"
           },
           "strength": {
-            "default": "preference",
-            "enum": [
-              "requirement",
-              "strong_preference",
-              "preference"
+            "anyOf": [
+              {
+                "enum": [
+                  "requirement",
+                  "strong_preference",
+                  "preference"
+                ],
+                "type": "string"
+              },
+              {
+                "maxLength": 100,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
             ],
-            "title": "Strength",
-            "type": "string"
+            "title": "Strength"
           }
         },
         "required": [
-          "kind",
-          "roles"
+          "kind"
         ],
         "title": "TargetRolesValue",
         "type": "object"
@@ -5218,19 +5434,29 @@
             "type": "string"
           },
           "mode": {
-            "enum": [
-              "remote",
-              "hybrid",
-              "onsite",
-              "flexible"
+            "anyOf": [
+              {
+                "enum": [
+                  "remote",
+                  "hybrid",
+                  "onsite",
+                  "flexible"
+                ],
+                "type": "string"
+              },
+              {
+                "maxLength": 100,
+                "minLength": 1,
+                "type": "string"
+              }
             ],
-            "title": "Mode",
-            "type": "string"
+            "title": "Mode"
           },
           "note": {
             "anyOf": [
               {
                 "maxLength": 1000,
+                "minLength": 1,
                 "type": "string"
               },
               {
@@ -5240,20 +5466,31 @@
             "title": "Note"
           },
           "strength": {
-            "enum": [
-              "requirement",
-              "strong_preference",
-              "preference",
-              "dealbreaker"
+            "anyOf": [
+              {
+                "enum": [
+                  "requirement",
+                  "strong_preference",
+                  "preference",
+                  "dealbreaker"
+                ],
+                "type": "string"
+              },
+              {
+                "maxLength": 100,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
             ],
-            "title": "Strength",
-            "type": "string"
+            "title": "Strength"
           }
         },
         "required": [
           "kind",
-          "mode",
-          "strength"
+          "mode"
         ],
         "title": "WorkArrangementProfileValue",
         "type": "object"

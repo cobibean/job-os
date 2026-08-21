@@ -527,7 +527,7 @@ export type ClaimValue = {
     /**
      * Statement
      */
-    statement: string;
+    statement?: string | null;
 };
 
 /**
@@ -537,7 +537,7 @@ export type CompensationValue = {
     /**
      * Currency
      */
-    currency?: string;
+    currency?: string | null;
     /**
      * Kind
      */
@@ -553,7 +553,7 @@ export type CompensationValue = {
     /**
      * Period
      */
-    period?: 'hour' | 'year';
+    period?: 'hour' | 'year' | string | null;
     /**
      * Target
      */
@@ -844,6 +844,24 @@ export type CreateSnapshotRequest = {
 };
 
 /**
+ * CustomValue
+ */
+export type CustomValue = {
+    /**
+     * Kind
+     */
+    kind: 'custom';
+    /**
+     * Label
+     */
+    label: string;
+    /**
+     * Text
+     */
+    text: string;
+};
+
+/**
  * DealbreakerValue
  */
 export type DealbreakerValue = {
@@ -858,7 +876,7 @@ export type DealbreakerValue = {
     /**
      * Label
      */
-    label: string;
+    label?: string | null;
 };
 
 /**
@@ -1311,7 +1329,7 @@ export type EducationValue = {
     /**
      * Credential
      */
-    credential: string;
+    credential?: string | null;
     /**
      * Details
      */
@@ -1327,7 +1345,7 @@ export type EducationValue = {
     /**
      * Institution
      */
-    institution: string;
+    institution?: string | null;
     /**
      * Kind
      */
@@ -1377,7 +1395,9 @@ export type EvidenceExtraction = {
         kind: 'priority';
     } & PriorityValue) | ({
         kind: 'dealbreaker';
-    } & DealbreakerValue);
+    } & DealbreakerValue) | ({
+        kind: 'custom';
+    } & CustomValue);
 };
 
 /**
@@ -1387,7 +1407,7 @@ export type EvidenceImportRequest = {
     /**
      * Captured At
      */
-    captured_at: string;
+    captured_at?: string | null;
     /**
      * Content Base64
      */
@@ -1440,7 +1460,7 @@ export type ExperienceValue = {
     /**
      * Current
      */
-    current?: boolean;
+    current?: boolean | null;
     /**
      * Ended On
      */
@@ -1456,11 +1476,11 @@ export type ExperienceValue = {
     /**
      * Organization
      */
-    organization: string;
+    organization?: string | null;
     /**
      * Role
      */
-    role: string;
+    role?: string | null;
     /**
      * Started On
      */
@@ -1558,7 +1578,7 @@ export type IdentityValue = {
     /**
      * Professional Name
      */
-    professional_name: string;
+    professional_name?: string | null;
 };
 
 /**
@@ -1568,7 +1588,7 @@ export type IndustryPreferencesValue = {
     /**
      * Industries
      */
-    industries: Array<string>;
+    industries?: Array<string>;
     /**
      * Kind
      */
@@ -1576,7 +1596,7 @@ export type IndustryPreferencesValue = {
     /**
      * Strength
      */
-    strength: 'requirement' | 'strong_preference' | 'preference' | 'dealbreaker';
+    strength?: 'requirement' | 'strong_preference' | 'preference' | 'dealbreaker' | string | null;
 };
 
 /**
@@ -2011,15 +2031,15 @@ export type LocationPreferenceValue = {
     /**
      * Locations
      */
-    locations: Array<string>;
+    locations?: Array<string>;
     /**
      * Relocation
      */
-    relocation?: 'yes' | 'no' | 'consider';
+    relocation?: 'yes' | 'no' | 'consider' | string | null;
     /**
      * Strength
      */
-    strength: 'requirement' | 'strong_preference' | 'preference' | 'dealbreaker';
+    strength?: 'requirement' | 'strong_preference' | 'preference' | 'dealbreaker' | string | null;
 };
 
 /**
@@ -2144,7 +2164,7 @@ export type PositioningValue = {
     /**
      * Headline
      */
-    headline: string;
+    headline?: string | null;
     /**
      * Kind
      */
@@ -2170,11 +2190,11 @@ export type PriorityValue = {
     /**
      * Label
      */
-    label: string;
+    label?: string | null;
     /**
      * Strength
      */
-    strength: 'requirement' | 'strong_preference' | 'preference';
+    strength?: 'requirement' | 'strong_preference' | 'preference' | string | null;
 };
 
 /**
@@ -2224,7 +2244,9 @@ export type ProfileItemMutation = {
         kind: 'priority';
     } & PriorityValue) | ({
         kind: 'dealbreaker';
-    } & DealbreakerValue);
+    } & DealbreakerValue) | ({
+        kind: 'custom';
+    } & CustomValue);
 };
 
 /**
@@ -2295,7 +2317,9 @@ export type ProfileItemRecord = {
         kind: 'priority';
     } & PriorityValue) | ({
         kind: 'dealbreaker';
-    } & DealbreakerValue);
+    } & DealbreakerValue) | ({
+        kind: 'custom';
+    } & CustomValue);
 };
 
 /**
@@ -2323,7 +2347,7 @@ export type ProjectValue = {
     /**
      * Name
      */
-    name: string;
+    name?: string | null;
     /**
      * Role
      */
@@ -2331,7 +2355,7 @@ export type ProjectValue = {
     /**
      * Summary
      */
-    summary: string;
+    summary?: string | null;
     /**
      * Url
      */
@@ -2564,11 +2588,11 @@ export type SkillValue = {
     /**
      * Level
      */
-    level?: 'familiar' | 'proficient' | 'advanced' | 'expert' | null;
+    level?: 'familiar' | 'proficient' | 'advanced' | 'expert' | string | null;
     /**
      * Name
      */
-    name: string;
+    name?: string | null;
     /**
      * Note
      */
@@ -2590,7 +2614,7 @@ export type SourceEvidenceRecord = {
     /**
      * Captured At
      */
-    captured_at: string;
+    captured_at?: string | null;
     /**
      * Evidence Id
      */
@@ -2662,11 +2686,11 @@ export type TargetRolesValue = {
     /**
      * Roles
      */
-    roles: Array<string>;
+    roles?: Array<string>;
     /**
      * Strength
      */
-    strength?: 'requirement' | 'strong_preference' | 'preference';
+    strength?: 'requirement' | 'strong_preference' | 'preference' | string | null;
 };
 
 /**
@@ -2764,7 +2788,7 @@ export type WorkArrangementProfileValue = {
     /**
      * Mode
      */
-    mode: 'remote' | 'hybrid' | 'onsite' | 'flexible';
+    mode: 'remote' | 'hybrid' | 'onsite' | 'flexible' | string;
     /**
      * Note
      */
@@ -2772,7 +2796,7 @@ export type WorkArrangementProfileValue = {
     /**
      * Strength
      */
-    strength: 'requirement' | 'strong_preference' | 'preference' | 'dealbreaker';
+    strength?: 'requirement' | 'strong_preference' | 'preference' | 'dealbreaker' | string | null;
 };
 
 /**

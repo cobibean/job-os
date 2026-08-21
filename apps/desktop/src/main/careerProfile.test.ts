@@ -118,16 +118,37 @@ describe('Career Profile desktop client', () => {
     })).resolves.toMatchObject({ status: 'saved' })
   })
 
-  it('rejects contradictory flexible strength before sending it', async () => {
-    const fetchMock = vi.fn()
+  it('preserves every flexible strength and the 1000-character context boundary', async () => {
+    const fetchMock = vi.fn(async (_input, init) => {
+      const body = JSON.parse(String(init?.body))
+      expect(body.value).toEqual({
+        mode: 'flexible',
+        strength: 'dealbreaker',
+        note: '🙂'.repeat(1000)
+      })
+      return new Response(JSON.stringify({
+        ...current,
+        record: { ...current.record, value: body.value }
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+    })
     globalThis.fetch = fetchMock as typeof fetch
 
     await expect(client().saveWorkArrangement({
       expectedProfileRevision: 2,
       idempotencyKey: 'desktop-save-flexible',
-      value: { mode: 'flexible', strength: 'dealbreaker', note: null }
-    })).rejects.toThrow('Flexible work arrangement must use preference strength')
-    expect(fetchMock).not.toHaveBeenCalled()
+      value: { mode: 'flexible', strength: 'dealbreaker', note: '🙂'.repeat(1000) }
+    })).resolves.toMatchObject({
+      status: 'saved',
+      current: { record: { value: { mode: 'flexible', strength: 'dealbreaker' } } }
+    })
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+
+    await expect(client().saveWorkArrangement({
+      expectedProfileRevision: 3,
+      idempotencyKey: 'desktop-save-oversized',
+      value: { mode: 'flexible', strength: 'requirement', note: '🙂'.repeat(1001) }
+    })).rejects.toThrow('Work arrangement note is too long')
+    expect(fetchMock).toHaveBeenCalledTimes(1)
   })
 
   it('rejects a restore target that the API cannot represent', async () => {

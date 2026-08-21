@@ -110,6 +110,8 @@ The tracer bullet introduces `search_preferences.work_arrangement` with:
 - `mode`: `remote | hybrid | onsite | flexible`;
 - `strength`: `requirement | strong_preference | preference | dealbreaker` where semantically applicable;
 - optional plain-language `note`;
+- one 1,000-Unicode-code-point cross-layer resource limit for that additional context, preserved
+  unchanged by API, desktop validation, cache validation, and renderer input;
 - stable opaque record ID;
 - profile revision and item revision;
 - actor and timestamp metadata.

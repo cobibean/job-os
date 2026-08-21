@@ -14,7 +14,14 @@ from hashlib import sha256
 from pathlib import Path
 from typing import Annotated, Literal
 
-from pydantic import AfterValidator, BaseModel, ConfigDict, Field, field_validator
+from pydantic import (
+    AfterValidator,
+    BaseModel,
+    ConfigDict,
+    Field,
+    field_validator,
+    model_validator,
+)
 
 from .career_profile import (
     PROFILE_ID,
@@ -43,6 +50,8 @@ DisplayFilename = Annotated[
 ListLabel = Annotated[str, Field(min_length=1, max_length=300)]
 ConstraintText = Annotated[str, Field(min_length=1, max_length=2000)]
 LinkText = Annotated[str, Field(min_length=1, max_length=2000)]
+CustomEnumText = Annotated[str, Field(min_length=1, max_length=100)]
+AdditionalContextText = Annotated[str, Field(min_length=1, max_length=1000)]
 
 
 def _validate_timestamp(value: str) -> str:
@@ -74,23 +83,37 @@ def _validate_career_date(value: str) -> str:
     return value
 
 
+def _validate_capture_time(value: str) -> str:
+    if re.fullmatch(r"\d{4}(?:-\d{2}(?:-\d{2})?)?", value):
+        return _validate_career_date(value)
+    return _validate_aware_timestamp(value)
+
+
 TimestampText = Annotated[
     str,
     Field(min_length=1, max_length=64),
     AfterValidator(_validate_timestamp),
-]
-InputTimestampText = Annotated[
-    str,
-    Field(min_length=1, max_length=64),
-    AfterValidator(_validate_aware_timestamp),
 ]
 CareerDateText = Annotated[
     str,
     Field(min_length=4, max_length=10, pattern=r"^\d{4}(?:-\d{2}(?:-\d{2})?)?$"),
     AfterValidator(_validate_career_date),
 ]
+CaptureTimeText = Annotated[
+    str,
+    Field(min_length=4, max_length=64),
+    AfterValidator(_validate_capture_time),
+]
 ReviewStatus = Literal["accepted", "proposed", "conflicting"]
 ImportAssessment = Literal["exact", "inferred", "ambiguous", "conflicting"]
+
+PreferenceStrength = (
+    Literal["requirement", "strong_preference", "preference", "dealbreaker"]
+    | CustomEnumText
+)
+PositivePreferenceStrength = (
+    Literal["requirement", "strong_preference", "preference"] | CustomEnumText
+)
 
 
 class StrictModel(BaseModel):
@@ -99,108 +122,219 @@ class StrictModel(BaseModel):
 
 class IdentityValue(StrictModel):
     kind: Literal["identity"]
-    professional_name: str = Field(min_length=1, max_length=200)
-    email: str | None = Field(default=None, max_length=320)
-    phone: str | None = Field(default=None, max_length=100)
-    city: str | None = Field(default=None, max_length=200)
+    professional_name: str | None = Field(default=None, min_length=1, max_length=200)
+    email: str | None = Field(default=None, min_length=1, max_length=320)
+    phone: str | None = Field(default=None, min_length=1, max_length=100)
+    city: str | None = Field(default=None, min_length=1, max_length=200)
     links: list[LinkText] = Field(default_factory=list, max_length=20)
+
+    @model_validator(mode="after")
+    def require_meaningful_field(self) -> IdentityValue:
+        if not any((self.professional_name, self.email, self.phone, self.city, self.links)):
+            raise ValueError("identity requires at least one meaningful field")
+        return self
 
 
 class EducationValue(StrictModel):
     kind: Literal["education"]
-    institution: str = Field(min_length=1, max_length=300)
-    credential: str = Field(min_length=1, max_length=300)
-    field_of_study: str | None = Field(default=None, max_length=300)
+    institution: str | None = Field(default=None, min_length=1, max_length=300)
+    credential: str | None = Field(default=None, min_length=1, max_length=300)
+    field_of_study: str | None = Field(default=None, min_length=1, max_length=300)
     started_on: CareerDateText | None = None
     ended_on: CareerDateText | None = None
-    details: str | None = Field(default=None, max_length=2000)
+    details: str | None = Field(default=None, min_length=1, max_length=2000)
+
+    @model_validator(mode="after")
+    def require_meaningful_field(self) -> EducationValue:
+        if not any(
+            (
+                self.institution,
+                self.credential,
+                self.field_of_study,
+                self.started_on,
+                self.ended_on,
+                self.details,
+            )
+        ):
+            raise ValueError("education requires at least one meaningful field")
+        return self
 
 
 class SkillValue(StrictModel):
     kind: Literal["skill"]
-    name: str = Field(min_length=1, max_length=200)
-    level: Literal["familiar", "proficient", "advanced", "expert"] | None = None
-    note: str | None = Field(default=None, max_length=1000)
+    name: str | None = Field(default=None, min_length=1, max_length=200)
+    level: (Literal["familiar", "proficient", "advanced", "expert"] | CustomEnumText) | None = None
+    note: str | None = Field(default=None, min_length=1, max_length=1000)
+
+    @model_validator(mode="after")
+    def require_meaningful_field(self) -> SkillValue:
+        if not any((self.name, self.level, self.note)):
+            raise ValueError("skill requires at least one meaningful field")
+        return self
 
 
 class PositioningValue(StrictModel):
     kind: Literal["positioning"]
-    headline: str = Field(min_length=1, max_length=300)
-    summary: str | None = Field(default=None, max_length=4000)
+    headline: str | None = Field(default=None, min_length=1, max_length=300)
+    summary: str | None = Field(default=None, min_length=1, max_length=4000)
+
+    @model_validator(mode="after")
+    def require_meaningful_field(self) -> PositioningValue:
+        if not any((self.headline, self.summary)):
+            raise ValueError("positioning requires at least one meaningful field")
+        return self
 
 
 class ExperienceValue(StrictModel):
     kind: Literal["experience"]
-    organization: str = Field(min_length=1, max_length=300)
-    role: str = Field(min_length=1, max_length=300)
-    location: str | None = Field(default=None, max_length=300)
+    organization: str | None = Field(default=None, min_length=1, max_length=300)
+    role: str | None = Field(default=None, min_length=1, max_length=300)
+    location: str | None = Field(default=None, min_length=1, max_length=300)
     started_on: CareerDateText | None = None
     ended_on: CareerDateText | None = None
-    current: bool = False
-    summary: str | None = Field(default=None, max_length=4000)
+    current: bool | None = None
+    summary: str | None = Field(default=None, min_length=1, max_length=4000)
+
+    @model_validator(mode="after")
+    def require_meaningful_field(self) -> ExperienceValue:
+        if not any(
+            (
+                self.organization,
+                self.role,
+                self.location,
+                self.started_on,
+                self.ended_on,
+                self.current is not None,
+                self.summary,
+            )
+        ):
+            raise ValueError("experience requires at least one meaningful field")
+        return self
 
 
 class ProjectValue(StrictModel):
     kind: Literal["project"]
-    name: str = Field(min_length=1, max_length=300)
-    role: str | None = Field(default=None, max_length=300)
-    summary: str = Field(min_length=1, max_length=4000)
-    url: str | None = Field(default=None, max_length=2000)
+    name: str | None = Field(default=None, min_length=1, max_length=300)
+    role: str | None = Field(default=None, min_length=1, max_length=300)
+    summary: str | None = Field(default=None, min_length=1, max_length=4000)
+    url: str | None = Field(default=None, min_length=1, max_length=2000)
+
+    @model_validator(mode="after")
+    def require_meaningful_field(self) -> ProjectValue:
+        if not any((self.name, self.role, self.summary, self.url)):
+            raise ValueError("project requires at least one meaningful field")
+        return self
 
 
 class ClaimValue(StrictModel):
     kind: Literal["claim"]
-    statement: str = Field(min_length=1, max_length=2000)
+    statement: str | None = Field(default=None, min_length=1, max_length=2000)
     qualifiers: list[ConstraintText] = Field(default_factory=list, max_length=20)
     forbidden_uses: list[ConstraintText] = Field(default_factory=list, max_length=20)
+
+    @model_validator(mode="after")
+    def require_meaningful_field(self) -> ClaimValue:
+        if not any((self.statement, self.qualifiers, self.forbidden_uses)):
+            raise ValueError("claim requires at least one meaningful field")
+        return self
 
 
 class TargetRolesValue(StrictModel):
     kind: Literal["target_roles"]
-    roles: list[ListLabel] = Field(min_length=1, max_length=50)
-    strength: Literal["requirement", "strong_preference", "preference"] = "preference"
+    roles: list[ListLabel] = Field(default_factory=list, max_length=50)
+    strength: PositivePreferenceStrength | None = None
+
+    @model_validator(mode="after")
+    def require_meaningful_field(self) -> TargetRolesValue:
+        if not self.roles:
+            raise ValueError("target roles requires at least one role")
+        return self
 
 
 class CompensationValue(StrictModel):
     kind: Literal["compensation"]
-    currency: str = Field(default="USD", min_length=3, max_length=3)
+    currency: str | None = Field(default=None, min_length=3, max_length=3)
     minimum: int | None = Field(default=None, ge=0)
     target: int | None = Field(default=None, ge=0)
-    period: Literal["hour", "year"] = "year"
-    note: str | None = Field(default=None, max_length=1000)
+    period: (Literal["hour", "year"] | CustomEnumText) | None = None
+    note: str | None = Field(default=None, min_length=1, max_length=1000)
+
+    @model_validator(mode="after")
+    def require_meaningful_field(self) -> CompensationValue:
+        if not any(
+            (
+                self.currency,
+                self.minimum is not None,
+                self.target is not None,
+                self.period,
+                self.note,
+            )
+        ):
+            raise ValueError("compensation requires at least one meaningful field")
+        return self
 
 
 class LocationPreferenceValue(StrictModel):
     kind: Literal["location"]
-    locations: list[ListLabel] = Field(min_length=1, max_length=50)
-    relocation: Literal["yes", "no", "consider"] = "consider"
-    strength: Literal["requirement", "strong_preference", "preference", "dealbreaker"]
+    locations: list[ListLabel] = Field(default_factory=list, max_length=50)
+    relocation: (Literal["yes", "no", "consider"] | CustomEnumText) | None = None
+    strength: PreferenceStrength | None = None
+
+    @model_validator(mode="after")
+    def require_meaningful_field(self) -> LocationPreferenceValue:
+        if not any((self.locations, self.relocation)):
+            raise ValueError("location requires a location or relocation preference")
+        return self
 
 
 class WorkArrangementProfileValue(StrictModel):
     kind: Literal["work_arrangement"]
-    mode: Literal["remote", "hybrid", "onsite", "flexible"]
-    strength: Literal["requirement", "strong_preference", "preference", "dealbreaker"]
-    note: str | None = Field(default=None, max_length=1000)
+    mode: Literal["remote", "hybrid", "onsite", "flexible"] | CustomEnumText
+    strength: PreferenceStrength | None = None
+    note: AdditionalContextText | None = None
 
 
 class IndustryPreferencesValue(StrictModel):
     kind: Literal["industries"]
-    industries: list[ListLabel] = Field(min_length=1, max_length=50)
-    strength: Literal["requirement", "strong_preference", "preference", "dealbreaker"]
+    industries: list[ListLabel] = Field(default_factory=list, max_length=50)
+    strength: PreferenceStrength | None = None
+
+    @model_validator(mode="after")
+    def require_meaningful_field(self) -> IndustryPreferencesValue:
+        if not self.industries:
+            raise ValueError("industries requires at least one industry")
+        return self
 
 
 class PriorityValue(StrictModel):
     kind: Literal["priority"]
-    label: str = Field(min_length=1, max_length=300)
-    explanation: str | None = Field(default=None, max_length=2000)
-    strength: Literal["requirement", "strong_preference", "preference"]
+    label: str | None = Field(default=None, min_length=1, max_length=300)
+    explanation: str | None = Field(default=None, min_length=1, max_length=2000)
+    strength: PositivePreferenceStrength | None = None
+
+    @model_validator(mode="after")
+    def require_meaningful_field(self) -> PriorityValue:
+        if not any((self.label, self.explanation)):
+            raise ValueError("priority requires a label or explanation")
+        return self
 
 
 class DealbreakerValue(StrictModel):
     kind: Literal["dealbreaker"]
+    label: str | None = Field(default=None, min_length=1, max_length=300)
+    explanation: str | None = Field(default=None, min_length=1, max_length=2000)
+
+    @model_validator(mode="after")
+    def require_meaningful_field(self) -> DealbreakerValue:
+        if not any((self.label, self.explanation)):
+            raise ValueError("dealbreaker requires a label or explanation")
+        return self
+
+
+class CustomValue(StrictModel):
+    kind: Literal["custom"]
     label: str = Field(min_length=1, max_length=300)
-    explanation: str | None = Field(default=None, max_length=2000)
+    text: str = Field(min_length=1, max_length=4000)
 
 
 ProfileValue = Annotated[
@@ -217,7 +351,8 @@ ProfileValue = Annotated[
     | WorkArrangementProfileValue
     | IndustryPreferencesValue
     | PriorityValue
-    | DealbreakerValue,
+    | DealbreakerValue
+    | CustomValue,
     Field(discriminator="kind"),
 ]
 
@@ -253,7 +388,7 @@ class SourceEvidenceRecord(StrictModel):
     media_type: MediaType
     sha256: Sha256Digest
     byte_count: int = Field(ge=1, le=10 * 1024 * 1024)
-    captured_at: TimestampText
+    captured_at: CaptureTimeText | None = None
     imported_at: TimestampText
     provenance: EvidenceProvenance
     active: bool
@@ -287,7 +422,7 @@ class EvidenceImportRequest(StrictModel):
     idempotency_key: IdempotencyKey
     original_filename: DisplayFilename
     media_type: MediaType
-    captured_at: InputTimestampText
+    captured_at: CaptureTimeText | None = None
     provenance: EvidenceProvenance
     content_base64: str = Field(min_length=1, max_length=14 * 1024 * 1024)
     extractions: list[EvidenceExtraction] = Field(default_factory=list, max_length=100)
@@ -349,6 +484,7 @@ def _area_for_kind(kind: str) -> Literal["my_career", "what_im_looking_for", "my
         "experience",
         "project",
         "claim",
+        "custom",
     }:
         return "my_career"
     return "what_im_looking_for"
@@ -1069,7 +1205,7 @@ class CareerProfileCompleteStore:
             media_type=str(row[2]),
             sha256=str(row[3]),
             byte_count=int(row[4]),
-            captured_at=str(row[5]),
+            captured_at=str(row[5]) if row[5] is not None else None,
             imported_at=str(row[6]),
             provenance=EvidenceProvenance.model_validate_json(str(row[7])),
             active=bool(row[8]),

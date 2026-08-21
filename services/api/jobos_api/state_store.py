@@ -1065,6 +1065,36 @@ MIGRATIONS = (
             """,
         ),
     ),
+    Migration(
+        version=23,
+        statements=(
+            "ALTER TABLE career_profile_evidence RENAME TO career_profile_evidence_v22",
+            """
+            CREATE TABLE career_profile_evidence (
+                evidence_id TEXT PRIMARY KEY,
+                original_filename TEXT NOT NULL,
+                media_type TEXT NOT NULL,
+                content_sha256 TEXT NOT NULL,
+                byte_count INTEGER NOT NULL CHECK (byte_count > 0),
+                captured_at TEXT,
+                imported_at TEXT NOT NULL,
+                provenance_json TEXT NOT NULL CHECK (json_valid(provenance_json)),
+                storage_name TEXT NOT NULL UNIQUE,
+                active INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0, 1))
+            )
+            """,
+            """
+            INSERT INTO career_profile_evidence(
+                evidence_id, original_filename, media_type, content_sha256, byte_count,
+                captured_at, imported_at, provenance_json, storage_name, active
+            )
+            SELECT evidence_id, original_filename, media_type, content_sha256, byte_count,
+                   captured_at, imported_at, provenance_json, storage_name, active
+            FROM career_profile_evidence_v22
+            """,
+            "DROP TABLE career_profile_evidence_v22",
+        ),
+    ),
 )
 SCHEMA_VERSION = MIGRATIONS[-1].version
 
