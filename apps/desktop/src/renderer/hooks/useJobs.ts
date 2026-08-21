@@ -78,7 +78,9 @@ export function useJobs(
   useEffect(() => {
     const selected = activeJobContext?.selectedJobId ?? null
     setSelectedJobId(selected)
-    setSelectedJob(jobs.find(job => job.jobId === selected) ?? null)
+    setSelectedJob(current => selected
+      ? jobs.find(job => job.jobId === selected) ?? (current?.jobId === selected ? current : null)
+      : null)
     void loadDetail(selected)
   }, [activeConversationId, activeJobContext?.selectedJobId, jobs, loadDetail])
 
