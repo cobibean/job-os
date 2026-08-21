@@ -62,10 +62,51 @@ def _bounded_prompt_context(context: dict[str, object]) -> dict[str, object]:
         if isinstance(zoom, (int, float)) and not isinstance(zoom, bool) and 0.5 <= zoom <= 3:
             workspace["active_artifact_zoom"] = zoom
 
+    career_profile = None
+    raw_profile = context.get("career_profile")
+    if isinstance(raw_profile, dict):
+        snapshot_id = _bounded_reference(raw_profile.get("snapshot_id"), 200)
+        revision = raw_profile.get("profile_revision")
+        content_hash = raw_profile.get("content_hash")
+        projection = raw_profile.get("projection")
+        if (
+            snapshot_id
+            and isinstance(revision, int)
+            and not isinstance(revision, bool)
+            and revision >= 0
+            and isinstance(content_hash, str)
+            and re.fullmatch(r"[a-f0-9]{64}", content_hash)
+            and isinstance(projection, dict)
+        ):
+            work_arrangement = None
+            raw_arrangement = projection.get("work_arrangement")
+            if isinstance(raw_arrangement, dict):
+                mode = raw_arrangement.get("mode")
+                strength = raw_arrangement.get("strength")
+                note = _bounded_reference(raw_arrangement.get("note"), 1000)
+                if mode in {"remote", "hybrid", "onsite", "flexible"} and strength in {
+                    "requirement",
+                    "strong_preference",
+                    "preference",
+                    "dealbreaker",
+                }:
+                    work_arrangement = {
+                        "mode": mode,
+                        "strength": strength,
+                        "note": note,
+                    }
+            career_profile = {
+                "snapshot_id": snapshot_id,
+                "profile_revision": revision,
+                "content_hash": content_hash,
+                "projection": {"work_arrangement": work_arrangement},
+            }
+
     return {
         "selected_job_id": selected_job_id,
         "selected_job": selected_job,
         "workspace": workspace,
+        "career_profile": career_profile,
     }
 
 
@@ -157,6 +198,10 @@ class HermesWebSocketGateway:
         self._attaching_session = False
         self._pending_session_info: dict[str, tuple[bool, GatewayEvent | None]] = {}
         self._pending_continuation_frames: list[dict[str, object]] = []
+        self._pending_async_continuation_id: str | None = None
+        self._pending_async_continuation_stage: str | None = None
+        self._pending_async_continuation_blocking_turn_id: str | None = None
+        self._pending_async_continuation_start_count = 0
         self._activity = ActivityNormalizer()
         self._closed = False
         self._start_lock = asyncio.Lock()
@@ -331,6 +376,7 @@ class HermesWebSocketGateway:
         self._attaching_session = True
         self._pending_session_info.clear()
         self._pending_continuation_frames = []
+        self._clear_pending_async_continuation()
 
     def _reset_live_session(self) -> None:
         if self._session_isolation_state == "unverified":
@@ -342,6 +388,13 @@ class HermesWebSocketGateway:
         self._attaching_session = False
         self._pending_session_info.clear()
         self._pending_continuation_frames = []
+        self._clear_pending_async_continuation()
+
+    def _clear_pending_async_continuation(self) -> None:
+        self._pending_async_continuation_id = None
+        self._pending_async_continuation_stage = None
+        self._pending_async_continuation_blocking_turn_id = None
+        self._pending_async_continuation_start_count = 0
 
     def _record_session_verification(self, verified: bool) -> None:
         if self._session_isolation_state in {"failed", "verified"}:
@@ -400,11 +453,13 @@ class HermesWebSocketGateway:
         if not self._live_session_id:
             raise RuntimeError("Hermes session is not attached")
         await self._require_session_verification()
+        self._clear_pending_async_continuation()
         self._active_turn_id = context.turn_id
         bounded_context = {
             "selected_job_id": context.selected_job_id,
             "selected_job": context.selected_job,
             "workspace": context.workspace,
+            "career_profile": context.career_profile,
         }
         prompt = _prompt_with_context(text, bounded_context, context.conversation_id)
         try:
@@ -634,19 +689,74 @@ class HermesWebSocketGateway:
         }
         if frame_type not in supported_types:
             return None
+        if frame_type == "status.update" and frame.get("kind") == "process":
+            marker = re.match(
+                r"^\[ASYNC DELEGATION(?: BATCH)? COMPLETE — ([A-Za-z0-9_-]{8,200})\](?:\n|$)",
+                str(frame.get("text") or ""),
+            )
+            if marker is not None:
+                # Hermes emits this trusted process-status frame before it
+                # attempts the synthetic completion turn. The attempt can be
+                # requeued behind an active user turn, so only arm the identity
+                # until the exact metadata-free message.start arrives.
+                self._clear_pending_async_continuation()
+                self._pending_async_continuation_id = marker.group(1)
+                self._pending_async_continuation_stage = "awaiting_start"
+                self._pending_async_continuation_blocking_turn_id = self._active_turn_id
+                return None
         continuation_id = frame.get("continuation_id")
-        if frame.get("display_kind") == "async_delegation_complete":
+        is_explicit_continuation = frame.get("display_kind") == "async_delegation_complete"
+        if self._pending_async_continuation_id is not None:
+            is_metadata_free_start = frame_type == "message.start" and set(frame) <= {
+                "type",
+                "session_id",
+            }
+            blocking_turn_is_active = (
+                self._pending_async_continuation_blocking_turn_id is not None
+                and self._active_turn_id
+                == self._pending_async_continuation_blocking_turn_id
+            )
+            if self._pending_async_continuation_stage == "awaiting_start":
+                if not blocking_turn_is_active and is_metadata_free_start:
+                    self._pending_async_continuation_stage = "awaiting_terminal"
+                    self._pending_async_continuation_start_count = 1
+                    return None
+                # Hermes emits the marker before checking whether the session is
+                # busy. Preserve it while the already-running JobOS turn settles;
+                # that turn's frames continue through ordinary normalization.
+            elif self._pending_async_continuation_stage == "awaiting_terminal":
+                if is_metadata_free_start:
+                    if self._pending_async_continuation_start_count < 2:
+                        self._pending_async_continuation_start_count += 1
+                        return None
+                    self._clear_pending_async_continuation()
+                else:
+                    is_metadata_free_terminal = (
+                        frame_type in {"message.complete", "error"}
+                        and frame.get("display_kind") is None
+                        and frame.get("continuation_id") is None
+                    )
+                    if is_metadata_free_terminal:
+                        continuation_id = self._pending_async_continuation_id
+                        is_explicit_continuation = True
+                    elif frame_type in {"message.start", "message.complete", "error"}:
+                        self._clear_pending_async_continuation()
+            else:
+                self._clear_pending_async_continuation()
+        if is_explicit_continuation:
             if not isinstance(continuation_id, str) or not re.fullmatch(
                 r"[A-Za-z0-9_-]{8,200}", continuation_id
             ):
                 return None
             if frame_type not in {"message.complete", "error"}:
                 return None
+            self._clear_pending_async_continuation()
             continuation_digest = hashlib.sha256(continuation_id.encode()).hexdigest()[:32]
             turn_id = f"turn_cont_{continuation_digest}"
             source_event_id = f"async_delegation:{continuation_digest}:terminal"
             safe_detail = redact_detail(frame)
             safe_detail["agent_continuation"] = True
+            safe_detail["continuation_id"] = continuation_id
             if frame_type == "error":
                 return GatewayEvent(
                     event_type="error",

@@ -977,6 +977,28 @@ MIGRATIONS = (
             """,
         ),
     ),
+    Migration(
+        version=21,
+        statements=(
+            "ALTER TABLE conversation_turns ADD COLUMN career_profile_snapshot_id TEXT",
+            """ALTER TABLE conversation_turns
+               ADD COLUMN career_profile_revision INTEGER
+               CHECK (career_profile_revision >= 0)""",
+            "ALTER TABLE conversation_turns ADD COLUMN career_profile_content_hash TEXT",
+            """CREATE INDEX conversation_turns_career_profile_snapshot
+               ON conversation_turns(career_profile_snapshot_id)
+               WHERE career_profile_snapshot_id IS NOT NULL""",
+            """CREATE TABLE conversation_continuation_bindings (
+                conversation_id TEXT NOT NULL,
+                continuation_digest TEXT NOT NULL,
+                source_turn_id TEXT NOT NULL,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (conversation_id, continuation_digest),
+                FOREIGN KEY (conversation_id) REFERENCES conversations(conversation_id),
+                FOREIGN KEY (source_turn_id) REFERENCES conversation_turns(turn_id)
+            )""",
+        ),
+    ),
 )
 SCHEMA_VERSION = MIGRATIONS[-1].version
 

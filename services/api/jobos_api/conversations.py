@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+import re
 import time
 from collections.abc import AsyncIterator
 from contextlib import suppress
@@ -94,6 +95,7 @@ class ConversationService:
         store: ConversationStore | JobOsStateStore,
         gateway: AgentGateway,
         conversation_id: str | None = None,
+        career_profile_principal: str | None = None,
     ) -> None:
         if isinstance(store, JobOsStateStore):
             conversation_id = conversation_id or store.first_active_conversation_id()
@@ -101,6 +103,7 @@ class ConversationService:
         self.conversation_id = conversation_id or store.conversation_id
         self.store = store
         self.gateway = gateway
+        self.career_profile_principal = career_profile_principal
         self._event_task: asyncio.Task[None] | None = None
         self._connection_task: asyncio.Task[None] | None = None
         self._recovery_turn_id: str | None = None
@@ -266,6 +269,7 @@ class ConversationService:
             context=stored_context,
             idempotency_key=command.idempotency_key,
             actor_id=actor_id,
+            career_profile_principal=self.career_profile_principal,
         )
         turn = self.store.turn_record(str(created["turn_id"]))
         if turn and turn["status"] == "running" and created["created"] is True:
@@ -296,6 +300,7 @@ class ConversationService:
             source_turn_id=turn_id,
             idempotency_key=command.idempotency_key,
             actor_id=actor_id,
+            career_profile_principal=self.career_profile_principal,
         )
         turn = self.store.turn_record(str(created["turn_id"]))
         if turn and created["created"] is True:
@@ -377,6 +382,23 @@ class ConversationService:
             prior_stored_id = self.store.stored_session_id()
             context = turn["context"]
             assert isinstance(context, dict)
+            career_profile = None
+            if self.career_profile_principal is not None:
+                snapshot = self.store.bound_career_profile_snapshot(
+                    turn_id, principal=self.career_profile_principal
+                )
+                career_profile = {
+                    "snapshot_id": snapshot.snapshot_id,
+                    "profile_revision": snapshot.profile_revision,
+                    "content_hash": snapshot.content_hash,
+                    "projection": {
+                        "work_arrangement": (
+                            snapshot.projection.work_arrangement.value.model_dump(mode="json")
+                            if snapshot.projection.work_arrangement is not None
+                            else None
+                        )
+                    },
+                }
             requested_session_id = (
                 None if context.get(FRESH_AGENT_SESSION_CONTEXT_KEY) is True else prior_stored_id
             )
@@ -419,6 +441,7 @@ class ConversationService:
                             if isinstance(selected_job, dict)
                             else None
                         ),
+                        career_profile=career_profile,
                     ),
                 )
         except Exception as error:
@@ -478,6 +501,7 @@ class ConversationService:
                         summary=event.summary,
                         detail={**event.detail, "activity_id": event.activity_id},
                         source_event_id=event.source_event_id,
+                        career_profile_principal=self.career_profile_principal,
                     )
                 continue
             is_terminal = bool(
@@ -498,6 +522,11 @@ class ConversationService:
                 if won:
                     self._restore_session_after_isolated_turn(str(turn_id))
                 continue
+            continuation_ids = (
+                tuple(_continuation_ids(event.detail))
+                if turn_id and event.event_type == "activity"
+                else ()
+            )
             event_id = self.store.append_conversation_event(
                 turn_id=turn_id,
                 event_type=event.event_type,
@@ -505,6 +534,7 @@ class ConversationService:
                 summary=event.summary,
                 detail={**event.detail, "activity_id": event.activity_id},
                 source_event_id=event.source_event_id,
+                continuation_ids=continuation_ids,
             )
             if (
                 event_id is not None
@@ -567,6 +597,25 @@ class ConversationService:
                 except Exception:
                     logger.exception("Unable to persist agent event consumer quarantine")
                 await asyncio.sleep(self._event_consumer_restart_delay)
+
+
+def _continuation_ids(value: object) -> set[str]:
+    """Extract only explicit Hermes continuation identifiers from a tool result."""
+    found: set[str] = set()
+    if isinstance(value, dict):
+        for key, item in value.items():
+            if (
+                key in {"continuation_id", "delegation_id"}
+                and isinstance(item, str)
+                and re.fullmatch(r"[A-Za-z0-9_-]{8,200}", item)
+            ):
+                found.add(item)
+            else:
+                found.update(_continuation_ids(item))
+    elif isinstance(value, list):
+        for item in value:
+            found.update(_continuation_ids(item))
+    return found
 
 
 def encode_sse(entry: dict[str, object]) -> str:

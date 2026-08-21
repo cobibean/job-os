@@ -31,9 +31,16 @@ class ConversationListResponse(ConversationModel):
 
 
 class ConversationManager:
-    def __init__(self, store: JobOsStateStore, gateway_factory: AgentGatewayFactory) -> None:
+    def __init__(
+        self,
+        store: JobOsStateStore,
+        gateway_factory: AgentGatewayFactory,
+        *,
+        career_profile_principal: str | None = None,
+    ) -> None:
         self.store = store
         self.gateway_factory = gateway_factory
+        self.career_profile_principal = career_profile_principal
         self._services: dict[str, ConversationService] = {}
         self._lifecycle_lock = asyncio.Lock()
 
@@ -77,6 +84,7 @@ class ConversationManager:
             self.store.conversation_store(conversation_id),
             self.gateway_factory.create(conversation_id),
             conversation_id,
+            career_profile_principal=self.career_profile_principal,
         )
 
     def list(self, *, owner_device_id: str) -> ConversationListResponse:

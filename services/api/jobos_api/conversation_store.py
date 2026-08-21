@@ -8,6 +8,12 @@ import sqlite3
 from hashlib import sha256
 from pathlib import Path
 
+from .career_profile import (
+    CareerProfileSnapshot,
+    CareerProfileSnapshotRequest,
+    create_snapshot_in_transaction,
+    get_snapshot_in_connection,
+)
 from .redaction import redact_detail, sanitize_summary, sanitize_user_text
 from .sqlite_connection import connect_sqlite
 from .state_store import (
@@ -162,6 +168,7 @@ class ConversationStore:
         idempotency_key: str,
         actor_id: str,
         source_turn_id: str | None = None,
+        career_profile_principal: str | None = None,
     ) -> dict[str, str | bool | None]:
         safe_text = sanitize_user_text(text)
         command = (
@@ -191,14 +198,18 @@ class ConversationStore:
                 result = json.loads(str(prior[1]))
                 connection.rollback()
                 return {**result, "created": False}
-            if (
-                source_turn_id
-                and connection.execute(
-                    "SELECT 1 FROM conversation_turns WHERE turn_id = ? AND conversation_id = ?",
+            source = None
+            if source_turn_id:
+                source = connection.execute(
+                    """
+                    SELECT career_profile_snapshot_id, career_profile_revision,
+                           career_profile_content_hash
+                    FROM conversation_turns
+                    WHERE turn_id = ? AND conversation_id = ?
+                    """,
                     (source_turn_id, self.conversation_id),
                 ).fetchone()
-                is None
-            ):
+            if source_turn_id and source is None:
                 connection.rollback()
                 raise ConversationNotFound("Turn not found")
             if connection.execute(
@@ -215,12 +226,42 @@ class ConversationStore:
                 raise ConversationBusy("Remote agent cleanup must be confirmed before new work")
             message_id = f"msg_{secrets.token_urlsafe(16)}"
             turn_id = f"turn_{secrets.token_urlsafe(16)}"
+            bound_snapshot: CareerProfileSnapshot | None = None
+            if career_profile_principal is not None:
+                if source is None:
+                    bound_snapshot = create_snapshot_in_transaction(
+                        connection,
+                        principal=career_profile_principal,
+                        request=CareerProfileSnapshotRequest(),
+                    )
+                else:
+                    snapshot_id, revision, content_hash = source
+                    if snapshot_id is None or revision is None or content_hash is None:
+                        connection.rollback()
+                        raise RuntimeError("Source turn has no valid Career Profile binding")
+                    bound_snapshot = get_snapshot_in_connection(
+                        connection, str(snapshot_id), principal=career_profile_principal
+                    )
+                    if (
+                        bound_snapshot.profile_revision != int(revision)
+                        or not secrets.compare_digest(
+                            bound_snapshot.content_hash, str(content_hash)
+                        )
+                    ):
+                        connection.rollback()
+                        raise RuntimeError("Source turn Career Profile binding is invalid")
             safe_context = redact_detail(context)
             safe_context.pop("redacted", None)
             public_context = dict(safe_context)
             public_context.pop("_fresh_agent_session", None)
             connection.execute(
-                "INSERT INTO conversation_turns(turn_id, conversation_id, message_id, source_turn_id, text, context_json, status) VALUES (?, ?, ?, ?, ?, ?, 'running')",
+                """
+                INSERT INTO conversation_turns(
+                    turn_id, conversation_id, message_id, source_turn_id, text,
+                    context_json, status, career_profile_snapshot_id,
+                    career_profile_revision, career_profile_content_hash
+                ) VALUES (?, ?, ?, ?, ?, ?, 'running', ?, ?, ?)
+                """,
                 (
                     turn_id,
                     self.conversation_id,
@@ -228,6 +269,9 @@ class ConversationStore:
                     source_turn_id,
                     safe_text,
                     json.dumps(safe_context, separators=(",", ":"), sort_keys=True),
+                    bound_snapshot.snapshot_id if bound_snapshot else None,
+                    bound_snapshot.profile_revision if bound_snapshot else None,
+                    bound_snapshot.content_hash if bound_snapshot else None,
                 ),
             )
             connection.execute(
@@ -274,6 +318,28 @@ class ConversationStore:
 
     create_conversation_turn = create_turn
 
+    def bound_career_profile_snapshot(
+        self, turn_id: str, *, principal: str
+    ) -> CareerProfileSnapshot:
+        with connect_sqlite(f"file:{self._path}?mode=ro", uri=True) as connection:
+            row = connection.execute(
+                """
+                SELECT career_profile_snapshot_id, career_profile_revision,
+                       career_profile_content_hash
+                FROM conversation_turns
+                WHERE turn_id = ? AND conversation_id = ?
+                """,
+                (turn_id, self.conversation_id),
+            ).fetchone()
+            if row is None or any(value is None for value in row):
+                raise RuntimeError("Turn has no valid Career Profile binding")
+            snapshot = get_snapshot_in_connection(connection, str(row[0]), principal=principal)
+        if snapshot.profile_revision != int(row[1]) or not secrets.compare_digest(
+            snapshot.content_hash, str(row[2])
+        ):
+            raise RuntimeError("Turn Career Profile binding is invalid")
+        return snapshot
+
     def record_agent_continuation(
         self,
         *,
@@ -283,6 +349,7 @@ class ConversationStore:
         summary: str,
         detail: dict[str, object],
         source_event_id: str | None = None,
+        career_profile_principal: str | None = None,
     ) -> bool:
         """Atomically append one terminal assistant-only continuation."""
         if not re.fullmatch(r"turn_[A-Za-z0-9_-]{8,200}", turn_id):
@@ -301,14 +368,59 @@ class ConversationStore:
             ).fetchone():
                 connection.rollback()
                 return False
+            continuation_id = detail.get("continuation_id")
+            continuation_digest = (
+                sha256(continuation_id.encode()).hexdigest()
+                if isinstance(continuation_id, str)
+                and re.fullmatch(r"[A-Za-z0-9_-]{8,200}", continuation_id)
+                else None
+            )
+            binding = (
+                connection.execute(
+                    """
+                    SELECT turn.career_profile_snapshot_id, turn.career_profile_revision,
+                           turn.career_profile_content_hash
+                    FROM conversation_continuation_bindings AS continuation
+                    JOIN conversation_turns AS turn
+                      ON turn.turn_id = continuation.source_turn_id
+                     AND turn.conversation_id = continuation.conversation_id
+                    WHERE continuation.conversation_id = ?
+                      AND continuation.continuation_digest = ?
+                    """,
+                    (self.conversation_id, continuation_digest),
+                ).fetchone()
+                if continuation_digest is not None
+                else None
+            )
+            if career_profile_principal is not None:
+                if binding is None or any(value is None for value in binding):
+                    connection.rollback()
+                    return False
+                snapshot = get_snapshot_in_connection(
+                    connection, str(binding[0]), principal=career_profile_principal
+                )
+                if snapshot.profile_revision != int(binding[1]) or not secrets.compare_digest(
+                    snapshot.content_hash, str(binding[2])
+                ):
+                    connection.rollback()
+                    return False
             connection.execute(
-                "INSERT INTO conversation_turns(turn_id, conversation_id, message_id, source_turn_id, text, context_json, status) VALUES (?, ?, ?, NULL, '', ?, ?)",
+                """
+                INSERT INTO conversation_turns(
+                    turn_id, conversation_id, message_id, source_turn_id, text,
+                    context_json, status, career_profile_snapshot_id,
+                    career_profile_revision, career_profile_content_hash
+                ) VALUES (?, ?, ?, NULL, '', ?, ?, ?, ?, ?)
+                """,
                 (
                     turn_id,
                     self.conversation_id,
                     message_id,
                     json.dumps(context, separators=(",", ":"), sort_keys=True),
                     status,
+                    binding[0] if binding else None,
+                    binding[1] if binding else None,
+                    binding[2] if binding else None,
                 ),
             )
             connection.execute(
@@ -338,6 +450,32 @@ class ConversationStore:
             connection.commit()
         return True
 
+    def bind_agent_continuation(self, *, turn_id: str, continuation_id: str) -> None:
+        """Bind a Hermes background continuation to the turn that spawned it."""
+        if not re.fullmatch(r"turn_[A-Za-z0-9_-]{8,200}", turn_id):
+            raise ValueError("Invalid source turn id")
+        if not re.fullmatch(r"[A-Za-z0-9_-]{8,200}", continuation_id):
+            raise ValueError("Invalid continuation id")
+        digest = sha256(continuation_id.encode()).hexdigest()
+        with connect_sqlite(self._path) as connection:
+            self._require_active(connection)
+            source = connection.execute(
+                """SELECT 1 FROM conversation_turns
+                   WHERE conversation_id = ? AND turn_id = ?""",
+                (self.conversation_id, turn_id),
+            ).fetchone()
+            if source is None:
+                raise ValueError("Unknown source turn")
+            connection.execute(
+                """INSERT INTO conversation_continuation_bindings(
+                       conversation_id, continuation_digest, source_turn_id
+                   ) VALUES (?, ?, ?)
+                   ON CONFLICT(conversation_id, continuation_digest) DO UPDATE SET
+                       source_turn_id = excluded.source_turn_id
+                   WHERE source_turn_id = excluded.source_turn_id""",
+                (self.conversation_id, digest, turn_id),
+            )
+
     def append_event(
         self,
         *,
@@ -347,9 +485,16 @@ class ConversationStore:
         summary: str,
         detail: dict[str, object] | None = None,
         source_event_id: str | None = None,
+        continuation_ids: tuple[str, ...] = (),
     ) -> int | None:
         safe_detail = _conversation_detail(event_type, detail)
+        continuation_digests: list[str] = []
+        for continuation_id in continuation_ids:
+            if not re.fullmatch(r"[A-Za-z0-9_-]{8,200}", continuation_id):
+                raise ValueError("Invalid continuation id")
+            continuation_digests.append(sha256(continuation_id.encode()).hexdigest())
         with connect_sqlite(self._path) as connection:
+            connection.execute("BEGIN IMMEDIATE")
             self._require_active(connection)
             if (
                 turn_id
@@ -374,7 +519,23 @@ class ConversationStore:
                     ),
                 )
             except sqlite3.IntegrityError:
+                connection.rollback()
                 return None
+            if continuation_digests:
+                if turn_id is None:
+                    connection.rollback()
+                    raise ValueError("Continuation binding requires a source turn")
+                for continuation_digest in continuation_digests:
+                    connection.execute(
+                        """INSERT INTO conversation_continuation_bindings(
+                               conversation_id, continuation_digest, source_turn_id
+                           ) VALUES (?, ?, ?)
+                           ON CONFLICT(conversation_id, continuation_digest) DO UPDATE SET
+                               source_turn_id = excluded.source_turn_id
+                           WHERE source_turn_id = excluded.source_turn_id""",
+                        (self.conversation_id, continuation_digest, turn_id),
+                    )
+            connection.commit()
         return int(cursor.lastrowid)
 
     append_conversation_event = append_event
