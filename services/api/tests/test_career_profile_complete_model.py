@@ -597,6 +597,20 @@ def test_agent_sensitive_edit_requires_one_time_exact_payload_user_grant(tmp_pat
             "target_id": None,
             "payload": exact_command,
         }
+        future_revision_grant = client.post(
+            "/v1/career-profile/intent-grants",
+            headers=auth(),
+            json=grant_command
+            | {
+                "expected_profile_revision": 1,
+                "idempotency_key": "reject-future-revision-intent-grant-0001",
+                "payload": exact_command | {"expected_profile_revision": 2},
+            },
+        )
+        assert future_revision_grant.status_code == 422
+        assert future_revision_grant.json()["detail"] == (
+            "Intent grant payload revision must match the grant request revision"
+        )
         grant = client.post(
             "/v1/career-profile/intent-grants",
             headers=auth(),
@@ -977,7 +991,7 @@ def test_full_profile_reset_erases_profile_proposals_snapshots_history_and_all_v
     assert snapshot.projection.work_arrangement is not None
     stale_agent_command = ProfileItemMutation.model_validate(
         {
-            "expected_profile_revision": 0,
+            "expected_profile_revision": 2,
             "idempotency_key": "stale-post-reset-agent-create-0001",
             "value": {"kind": "skill", "name": "(FAKE) stale authority sentinel"},
         }
@@ -1036,7 +1050,7 @@ def test_full_profile_reset_erases_profile_proposals_snapshots_history_and_all_v
     with pytest.raises(CareerProfileValueError, match="Intent grant is missing"):
         store.upsert_item(
             principal="agent:trusted-local-mcp",
-            command=stale_agent_command,
+            command=stale_agent_command.model_copy(update={"expected_profile_revision": 0}),
             mutation_source="authenticated_user_instruction",
             intent_grant_id=stale_grant.grant_id,
         )

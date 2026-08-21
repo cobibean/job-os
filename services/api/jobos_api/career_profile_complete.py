@@ -776,6 +776,10 @@ class CareerProfileCompleteStore:
             normalized_payload = ProfileProposalDecision.model_validate(command.payload).model_dump(
                 mode="json"
             )
+        if normalized_payload["expected_profile_revision"] != command.expected_profile_revision:
+            raise CareerProfileValueError(
+                "Intent grant payload revision must match the grant request revision"
+            )
         payload_sha = sha256(_canonical_json(normalized_payload).encode()).hexdigest()
         request_hash = _request_hash(
             "intent_grant.create",
