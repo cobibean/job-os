@@ -1,0 +1,1076 @@
+from __future__ import annotations
+
+import base64
+import binascii
+import json
+import os
+import re
+import secrets
+import sqlite3
+import stat
+from contextlib import suppress
+from datetime import UTC, date, datetime
+from hashlib import sha256
+from pathlib import Path
+from typing import Annotated, Literal
+
+from pydantic import AfterValidator, BaseModel, ConfigDict, Field, field_validator
+
+from .career_profile import (
+    PROFILE_ID,
+    WORK_ARRANGEMENT_NAMESPACE,
+    CareerProfileIdempotencyConflict,
+    CareerProfileRevisionConflict,
+    IdempotencyKey,
+)
+from .sqlite_connection import connect_sqlite
+
+OpaqueProfileItemId = Annotated[str, Field(pattern=r"^cp[ir]_[A-Za-z0-9_-]{16,64}$")]
+CompleteProfileItemId = Annotated[str, Field(pattern=r"^cpi_[A-Za-z0-9_-]{16,64}$")]
+OpaqueEvidenceId = Annotated[str, Field(pattern=r"^cpe_[A-Za-z0-9_-]{16,64}$")]
+Sha256Digest = Annotated[str, Field(pattern=r"^[a-f0-9]{64}$")]
+MediaType = Annotated[
+    str,
+    Field(
+        min_length=3,
+        max_length=200,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9!#$&^_.+-]*/[A-Za-z0-9][A-Za-z0-9!#$&^_.+-]*$",
+    ),
+]
+DisplayFilename = Annotated[
+    str, Field(min_length=1, max_length=500, pattern=r"^[^\x00-\x1f\x7f]+$")
+]
+ListLabel = Annotated[str, Field(min_length=1, max_length=300)]
+ConstraintText = Annotated[str, Field(min_length=1, max_length=2000)]
+LinkText = Annotated[str, Field(min_length=1, max_length=2000)]
+
+
+def _validate_timestamp(value: str) -> str:
+    try:
+        datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError as error:
+        raise ValueError("timestamp must use ISO-8601 format") from error
+    return value
+
+
+def _validate_aware_timestamp(value: str) -> str:
+    _validate_timestamp(value)
+    parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    if parsed.tzinfo is None:
+        raise ValueError("timestamp must include a timezone")
+    return value
+
+
+def _validate_career_date(value: str) -> str:
+    try:
+        if re.fullmatch(r"\d{4}", value):
+            datetime.strptime(value, "%Y")
+        elif re.fullmatch(r"\d{4}-\d{2}", value):
+            datetime.strptime(value, "%Y-%m")
+        else:
+            date.fromisoformat(value)
+    except ValueError as error:
+        raise ValueError("career date must use YYYY, YYYY-MM, or YYYY-MM-DD format") from error
+    return value
+
+
+TimestampText = Annotated[
+    str,
+    Field(min_length=1, max_length=64),
+    AfterValidator(_validate_timestamp),
+]
+InputTimestampText = Annotated[
+    str,
+    Field(min_length=1, max_length=64),
+    AfterValidator(_validate_aware_timestamp),
+]
+CareerDateText = Annotated[
+    str,
+    Field(min_length=4, max_length=10, pattern=r"^\d{4}(?:-\d{2}(?:-\d{2})?)?$"),
+    AfterValidator(_validate_career_date),
+]
+ReviewStatus = Literal["accepted", "proposed", "conflicting"]
+ImportAssessment = Literal["exact", "inferred", "ambiguous", "conflicting"]
+
+
+class StrictModel(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+
+class IdentityValue(StrictModel):
+    kind: Literal["identity"]
+    professional_name: str = Field(min_length=1, max_length=200)
+    email: str | None = Field(default=None, max_length=320)
+    phone: str | None = Field(default=None, max_length=100)
+    city: str | None = Field(default=None, max_length=200)
+    links: list[LinkText] = Field(default_factory=list, max_length=20)
+
+
+class EducationValue(StrictModel):
+    kind: Literal["education"]
+    institution: str = Field(min_length=1, max_length=300)
+    credential: str = Field(min_length=1, max_length=300)
+    field_of_study: str | None = Field(default=None, max_length=300)
+    started_on: CareerDateText | None = None
+    ended_on: CareerDateText | None = None
+    details: str | None = Field(default=None, max_length=2000)
+
+
+class SkillValue(StrictModel):
+    kind: Literal["skill"]
+    name: str = Field(min_length=1, max_length=200)
+    level: Literal["familiar", "proficient", "advanced", "expert"] | None = None
+    note: str | None = Field(default=None, max_length=1000)
+
+
+class PositioningValue(StrictModel):
+    kind: Literal["positioning"]
+    headline: str = Field(min_length=1, max_length=300)
+    summary: str | None = Field(default=None, max_length=4000)
+
+
+class ExperienceValue(StrictModel):
+    kind: Literal["experience"]
+    organization: str = Field(min_length=1, max_length=300)
+    role: str = Field(min_length=1, max_length=300)
+    location: str | None = Field(default=None, max_length=300)
+    started_on: CareerDateText | None = None
+    ended_on: CareerDateText | None = None
+    current: bool = False
+    summary: str | None = Field(default=None, max_length=4000)
+
+
+class ProjectValue(StrictModel):
+    kind: Literal["project"]
+    name: str = Field(min_length=1, max_length=300)
+    role: str | None = Field(default=None, max_length=300)
+    summary: str = Field(min_length=1, max_length=4000)
+    url: str | None = Field(default=None, max_length=2000)
+
+
+class ClaimValue(StrictModel):
+    kind: Literal["claim"]
+    statement: str = Field(min_length=1, max_length=2000)
+    qualifiers: list[ConstraintText] = Field(default_factory=list, max_length=20)
+    forbidden_uses: list[ConstraintText] = Field(default_factory=list, max_length=20)
+
+
+class TargetRolesValue(StrictModel):
+    kind: Literal["target_roles"]
+    roles: list[ListLabel] = Field(min_length=1, max_length=50)
+    strength: Literal["requirement", "strong_preference", "preference"] = "preference"
+
+
+class CompensationValue(StrictModel):
+    kind: Literal["compensation"]
+    currency: str = Field(default="USD", min_length=3, max_length=3)
+    minimum: int | None = Field(default=None, ge=0)
+    target: int | None = Field(default=None, ge=0)
+    period: Literal["hour", "year"] = "year"
+    note: str | None = Field(default=None, max_length=1000)
+
+
+class LocationPreferenceValue(StrictModel):
+    kind: Literal["location"]
+    locations: list[ListLabel] = Field(min_length=1, max_length=50)
+    relocation: Literal["yes", "no", "consider"] = "consider"
+    strength: Literal["requirement", "strong_preference", "preference", "dealbreaker"]
+
+
+class WorkArrangementProfileValue(StrictModel):
+    kind: Literal["work_arrangement"]
+    mode: Literal["remote", "hybrid", "onsite", "flexible"]
+    strength: Literal["requirement", "strong_preference", "preference", "dealbreaker"]
+    note: str | None = Field(default=None, max_length=1000)
+
+
+class IndustryPreferencesValue(StrictModel):
+    kind: Literal["industries"]
+    industries: list[ListLabel] = Field(min_length=1, max_length=50)
+    strength: Literal["requirement", "strong_preference", "preference", "dealbreaker"]
+
+
+class PriorityValue(StrictModel):
+    kind: Literal["priority"]
+    label: str = Field(min_length=1, max_length=300)
+    explanation: str | None = Field(default=None, max_length=2000)
+    strength: Literal["requirement", "strong_preference", "preference"]
+
+
+class DealbreakerValue(StrictModel):
+    kind: Literal["dealbreaker"]
+    label: str = Field(min_length=1, max_length=300)
+    explanation: str | None = Field(default=None, max_length=2000)
+
+
+ProfileValue = Annotated[
+    IdentityValue
+    | EducationValue
+    | SkillValue
+    | PositioningValue
+    | ExperienceValue
+    | ProjectValue
+    | ClaimValue
+    | TargetRolesValue
+    | CompensationValue
+    | LocationPreferenceValue
+    | WorkArrangementProfileValue
+    | IndustryPreferencesValue
+    | PriorityValue
+    | DealbreakerValue,
+    Field(discriminator="kind"),
+]
+
+
+class ItemProvenance(StrictModel):
+    method: Literal["user_entered", "evidence_import", "tracer_compatibility"]
+    source_label: str | None = Field(default=None, max_length=500)
+    imported_at: TimestampText | None = None
+
+
+class ProfileItemRecord(StrictModel):
+    item_id: OpaqueProfileItemId
+    area: Literal["my_career", "what_im_looking_for", "my_evidence"]
+    value: ProfileValue
+    review_status: ReviewStatus
+    evidence_ids: list[OpaqueEvidenceId] = Field(default_factory=list, max_length=100)
+    provenance: ItemProvenance
+    item_revision: int = Field(ge=1)
+    actor_principal: str
+    created_at: TimestampText
+    updated_at: TimestampText
+
+
+class EvidenceProvenance(StrictModel):
+    source_kind: Literal["resume", "portfolio", "supporting_document", "citation"]
+    source_label: str = Field(min_length=1, max_length=500)
+    method: Literal["user_import", "agent_import", "migration_import"]
+
+
+class SourceEvidenceRecord(StrictModel):
+    evidence_id: OpaqueEvidenceId
+    original_filename: DisplayFilename
+    media_type: MediaType
+    sha256: Sha256Digest
+    byte_count: int = Field(ge=1, le=10 * 1024 * 1024)
+    captured_at: TimestampText
+    imported_at: TimestampText
+    provenance: EvidenceProvenance
+    active: bool
+
+
+class CareerProfileCompleteCurrent(StrictModel):
+    profile_revision: int = Field(ge=0)
+    items: list[ProfileItemRecord]
+    source_evidence: list[SourceEvidenceRecord]
+
+
+class ProfileItemMutation(StrictModel):
+    expected_profile_revision: int = Field(ge=0)
+    idempotency_key: IdempotencyKey
+    value: ProfileValue
+    evidence_ids: list[OpaqueEvidenceId] = Field(default_factory=list, max_length=100)
+
+
+class ProfileItemRemoval(StrictModel):
+    expected_profile_revision: int = Field(ge=0)
+    idempotency_key: IdempotencyKey
+
+
+class EvidenceExtraction(StrictModel):
+    assessment: ImportAssessment
+    value: ProfileValue
+
+
+class EvidenceImportRequest(StrictModel):
+    expected_profile_revision: int = Field(ge=0)
+    idempotency_key: IdempotencyKey
+    original_filename: DisplayFilename
+    media_type: MediaType
+    captured_at: InputTimestampText
+    provenance: EvidenceProvenance
+    content_base64: str = Field(min_length=1, max_length=14 * 1024 * 1024)
+    extractions: list[EvidenceExtraction] = Field(default_factory=list, max_length=100)
+
+    @field_validator("content_base64")
+    @classmethod
+    def validate_content(cls, value: str) -> str:
+        try:
+            decoded = base64.b64decode(value, validate=True)
+        except (binascii.Error, ValueError) as error:
+            raise ValueError("content_base64 must be valid base64") from error
+        if not decoded or len(decoded) > 10 * 1024 * 1024:
+            raise ValueError("evidence content must be between 1 byte and 10 MiB")
+        return value
+
+
+class CareerProfileEvidencePathError(RuntimeError):
+    """Evidence storage escaped its managed regular-file boundary."""
+
+
+class CareerProfileEvidenceIntegrityError(RuntimeError):
+    """Evidence bytes no longer match the immutable imported hash."""
+
+
+class CareerProfileEvidenceNotFound(RuntimeError):
+    """Evidence metadata or bytes do not exist."""
+
+
+class CareerProfileItemNotFound(RuntimeError):
+    """A requested complete-model item does not exist."""
+
+
+class CareerProfileValueError(RuntimeError):
+    """A complete-model mutation is invalid for the current profile."""
+
+
+def _now() -> str:
+    return datetime.now(UTC).isoformat()
+
+
+def _opaque_id(prefix: str) -> str:
+    return f"{prefix}{secrets.token_urlsafe(18)}"
+
+
+def _canonical_json(value: object) -> str:
+    return json.dumps(value, separators=(",", ":"), sort_keys=True)
+
+
+def _request_hash(command: str, payload: object) -> str:
+    return sha256(_canonical_json({"command": command, "payload": payload}).encode()).hexdigest()
+
+
+def _area_for_kind(kind: str) -> Literal["my_career", "what_im_looking_for", "my_evidence"]:
+    if kind in {
+        "identity",
+        "education",
+        "skill",
+        "positioning",
+        "experience",
+        "project",
+        "claim",
+    }:
+        return "my_career"
+    return "what_im_looking_for"
+
+
+class EvidenceVault:
+    def __init__(self, root: Path) -> None:
+        self.root = root
+
+    def initialize(self) -> None:
+        with suppress(FileExistsError):
+            self.root.mkdir(parents=True, mode=0o700)
+        flags = os.O_RDONLY
+        if hasattr(os, "O_DIRECTORY"):
+            flags |= os.O_DIRECTORY
+        if hasattr(os, "O_NOFOLLOW"):
+            flags |= os.O_NOFOLLOW
+        descriptor: int | None = None
+        try:
+            descriptor = os.open(self.root, flags)
+            if not stat.S_ISDIR(os.fstat(descriptor).st_mode):
+                raise CareerProfileEvidencePathError("Evidence vault must be a regular directory")
+            os.fchmod(descriptor, 0o700)
+        except OSError as error:
+            raise CareerProfileEvidencePathError(
+                "Evidence vault could not be opened without following links"
+            ) from error
+        finally:
+            if descriptor is not None:
+                os.close(descriptor)
+
+    @staticmethod
+    def storage_name(evidence_id: str) -> str:
+        if not re.fullmatch(r"cpe_[A-Za-z0-9_-]{16,64}", evidence_id):
+            raise CareerProfileEvidencePathError("Evidence identifier is invalid")
+        return f"{evidence_id}.bin"
+
+    @staticmethod
+    def _validate_storage_name(storage_name: str) -> None:
+        if not re.fullmatch(r"cpe_[A-Za-z0-9_-]{16,64}\.bin", storage_name):
+            raise CareerProfileEvidencePathError("Evidence storage name is invalid")
+
+    def _open_root(self) -> int:
+        self.initialize()
+        flags = os.O_RDONLY
+        if hasattr(os, "O_DIRECTORY"):
+            flags |= os.O_DIRECTORY
+        if hasattr(os, "O_NOFOLLOW"):
+            flags |= os.O_NOFOLLOW
+        try:
+            return os.open(self.root, flags)
+        except OSError as error:
+            raise CareerProfileEvidencePathError(
+                "Evidence vault could not be opened without following links"
+            ) from error
+
+    def write(self, evidence_id: str, content: bytes) -> str:
+        storage_name = self.storage_name(evidence_id)
+        root_descriptor = self._open_root()
+        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+        if hasattr(os, "O_NOFOLLOW"):
+            flags |= os.O_NOFOLLOW
+        descriptor: int | None = None
+        try:
+            descriptor = os.open(storage_name, flags, 0o600, dir_fd=root_descriptor)
+            with os.fdopen(descriptor, "wb") as output:
+                descriptor = None
+                output.write(content)
+                output.flush()
+                os.fsync(output.fileno())
+            os.chmod(storage_name, 0o600, dir_fd=root_descriptor, follow_symlinks=False)
+            os.fsync(root_descriptor)
+        except Exception as error:
+            if descriptor is not None:
+                os.close(descriptor)
+            with suppress(OSError):
+                os.unlink(storage_name, dir_fd=root_descriptor)
+            if isinstance(error, OSError):
+                raise CareerProfileEvidencePathError(
+                    "Evidence could not be written inside its managed vault"
+                ) from error
+            raise
+        finally:
+            os.close(root_descriptor)
+        return storage_name
+
+    def read(self, storage_name: str, expected_hash: str) -> bytes:
+        self._validate_storage_name(storage_name)
+        root_descriptor = self._open_root()
+        flags = os.O_RDONLY
+        if hasattr(os, "O_NONBLOCK"):
+            flags |= os.O_NONBLOCK
+        if hasattr(os, "O_NOFOLLOW"):
+            flags |= os.O_NOFOLLOW
+        descriptor: int | None = None
+        try:
+            metadata = os.stat(storage_name, dir_fd=root_descriptor, follow_symlinks=False)
+            if not stat.S_ISREG(metadata.st_mode):
+                raise CareerProfileEvidencePathError("Evidence must be a regular file")
+            descriptor = os.open(storage_name, flags, dir_fd=root_descriptor)
+            if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+                raise CareerProfileEvidencePathError("Evidence must be a regular file")
+            with os.fdopen(descriptor, "rb") as source:
+                descriptor = None
+                content = source.read(10 * 1024 * 1024 + 1)
+        except FileNotFoundError as error:
+            raise CareerProfileEvidenceNotFound from error
+        except OSError as error:
+            raise CareerProfileEvidencePathError(
+                "Evidence could not be opened without following links"
+            ) from error
+        finally:
+            if descriptor is not None:
+                os.close(descriptor)
+            os.close(root_descriptor)
+        if len(content) > 10 * 1024 * 1024 or not secrets.compare_digest(
+            sha256(content).hexdigest(), expected_hash
+        ):
+            raise CareerProfileEvidenceIntegrityError
+        return content
+
+    def discard_uncommitted(self, storage_name: str) -> None:
+        with suppress(CareerProfileEvidencePathError, OSError):
+            self._validate_storage_name(storage_name)
+            root_descriptor = self._open_root()
+            try:
+                os.unlink(storage_name, dir_fd=root_descriptor)
+            finally:
+                os.close(root_descriptor)
+
+
+class CareerProfileCompleteStore:
+    def __init__(self, database: Path, evidence_root: Path) -> None:
+        self.database = database
+        self.vault = EvidenceVault(evidence_root)
+
+    def initialize(self) -> None:
+        self.vault.initialize()
+        with connect_sqlite(self.database) as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            connection.execute(
+                "INSERT OR IGNORE INTO career_profiles(profile_id) VALUES (?)", (PROFILE_ID,)
+            )
+            connection.commit()
+
+    def current(self) -> CareerProfileCompleteCurrent:
+        with connect_sqlite(f"file:{self.database}?mode=ro", uri=True) as connection:
+            return self._current_in_connection(connection)
+
+    def upsert_item(
+        self,
+        *,
+        principal: str,
+        command: ProfileItemMutation,
+        item_id: str | None = None,
+    ) -> CareerProfileCompleteCurrent:
+        if item_id is not None and not re.fullmatch(r"cpi_[A-Za-z0-9_-]{16,64}", item_id):
+            raise CareerProfileValueError(
+                "Compatibility tracer items must use their dedicated staging endpoint"
+            )
+        if command.value.kind == "work_arrangement":
+            raise CareerProfileValueError(
+                "Work arrangement remains on the staging tracer endpoint until consumer cutover"
+            )
+        payload = command.model_dump(mode="json")
+        if item_id is not None:
+            payload["item_id"] = item_id
+        resolved_item_id = item_id or _opaque_id("cpi_")
+        return self._mutate_item(
+            principal=principal,
+            idempotency_key=command.idempotency_key,
+            request_hash=_request_hash("item.upsert", payload),
+            expected_revision=command.expected_profile_revision,
+            item_id=resolved_item_id,
+            value=command.value,
+            evidence_ids=command.evidence_ids,
+            require_existing=item_id is not None,
+        )
+
+    def remove_item(
+        self,
+        *,
+        principal: str,
+        item_id: str,
+        command: ProfileItemRemoval,
+    ) -> CareerProfileCompleteCurrent:
+        if not re.fullmatch(r"cpi_[A-Za-z0-9_-]{16,64}", item_id):
+            raise CareerProfileValueError(
+                "Compatibility tracer items must use their dedicated staging endpoint"
+            )
+        request_hash = _request_hash(
+            "item.remove", command.model_dump(mode="json") | {"item_id": item_id}
+        )
+        with connect_sqlite(self.database) as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            try:
+                replay = self._replay(connection, principal, command.idempotency_key, request_hash)
+                if replay is not None:
+                    connection.rollback()
+                    return replay
+                head = self._check_head(connection, command.expected_profile_revision)
+                row = connection.execute(
+                    "SELECT value_json, provenance_json, review_status, evidence_ids_json, "
+                    "item_revision, actor_principal, created_at, updated_at "
+                    "FROM career_profile_items WHERE item_id = ? AND active = 1",
+                    (item_id,),
+                ).fetchone()
+                if row is None:
+                    raise CareerProfileItemNotFound
+                before = self._item_from_row((item_id, *row))
+                revision = head + 1
+                connection.execute(
+                    "UPDATE career_profile_items SET active = 0, "
+                    "item_revision = item_revision + 1, "
+                    "actor_principal = ?, updated_at = ? WHERE item_id = ?",
+                    (principal, _now(), item_id),
+                )
+                self._record_revision(
+                    connection,
+                    revision=revision,
+                    base_revision=head,
+                    principal=principal,
+                    operation="item.remove",
+                    item_id=item_id,
+                    evidence_id=None,
+                    before=before.model_dump(mode="json"),
+                    after=None,
+                    affected=[f"items.{item_id}"],
+                )
+                result = self._finish(connection, principal, command.idempotency_key, request_hash)
+                connection.commit()
+                return result
+            except Exception:
+                connection.rollback()
+                raise
+
+    def import_evidence(
+        self,
+        *,
+        principal: str,
+        command: EvidenceImportRequest,
+    ) -> CareerProfileCompleteCurrent:
+        request_hash = _request_hash(
+            "evidence.import",
+            command.model_dump(mode="json", exclude={"content_base64"})
+            | {"content_sha256": sha256(base64.b64decode(command.content_base64)).hexdigest()},
+        )
+        content = base64.b64decode(command.content_base64, validate=True)
+        storage_name: str | None = None
+        with connect_sqlite(self.database) as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            try:
+                replay = self._replay(connection, principal, command.idempotency_key, request_hash)
+                if replay is not None:
+                    connection.rollback()
+                    return replay
+                head = self._check_head(connection, command.expected_profile_revision)
+                if any(item.value.kind == "work_arrangement" for item in command.extractions):
+                    raise CareerProfileValueError(
+                        "Imported work arrangement stays proposed for the later migration candidate"
+                    )
+                evidence_id = _opaque_id("cpe_")
+                storage_name = self.vault.write(evidence_id, content)
+                imported_at = _now()
+                content_hash = sha256(content).hexdigest()
+                connection.execute(
+                    "INSERT INTO career_profile_evidence("
+                    "evidence_id, original_filename, media_type, "
+                    "content_sha256, byte_count, captured_at, imported_at, provenance_json, "
+                    "storage_name, active) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)",
+                    (
+                        evidence_id,
+                        command.original_filename,
+                        command.media_type,
+                        content_hash,
+                        len(content),
+                        command.captured_at,
+                        imported_at,
+                        _canonical_json(command.provenance.model_dump(mode="json")),
+                        storage_name,
+                    ),
+                )
+                created_items: list[ProfileItemRecord] = []
+                for extraction in command.extractions:
+                    item_id = _opaque_id("cpi_")
+                    review_status: ReviewStatus = (
+                        "accepted"
+                        if extraction.assessment == "exact"
+                        else "conflicting"
+                        if extraction.assessment == "conflicting"
+                        else "proposed"
+                    )
+                    provenance = ItemProvenance(
+                        method="evidence_import",
+                        source_label=command.provenance.source_label,
+                        imported_at=imported_at,
+                    )
+                    connection.execute(
+                        "INSERT INTO career_profile_items(item_id, value_json, provenance_json, "
+                        "review_status, evidence_ids_json, item_revision, actor_principal, active, "
+                        "created_at, updated_at) VALUES (?, ?, ?, ?, ?, 1, ?, 1, ?, ?)",
+                        (
+                            item_id,
+                            _canonical_json(extraction.value.model_dump(mode="json")),
+                            _canonical_json(provenance.model_dump(mode="json")),
+                            review_status,
+                            _canonical_json([evidence_id]),
+                            principal,
+                            imported_at,
+                            imported_at,
+                        ),
+                    )
+                    created_row = connection.execute(
+                        "SELECT value_json, provenance_json, review_status, evidence_ids_json, "
+                        "item_revision, actor_principal, created_at, updated_at "
+                        "FROM career_profile_items WHERE item_id = ?",
+                        (item_id,),
+                    ).fetchone()
+                    assert created_row is not None
+                    created_items.append(self._item_from_row((item_id, *created_row)))
+                revision = head + 1
+                evidence_row = connection.execute(
+                    "SELECT original_filename, media_type, content_sha256, byte_count, "
+                    "captured_at, "
+                    "imported_at, provenance_json, active FROM career_profile_evidence "
+                    "WHERE evidence_id = ?",
+                    (evidence_id,),
+                ).fetchone()
+                assert evidence_row is not None
+                imported_evidence = self._evidence_from_row((evidence_id, *evidence_row))
+                self._record_revision(
+                    connection,
+                    revision=revision,
+                    base_revision=head,
+                    principal=principal,
+                    operation="evidence.import",
+                    item_id=None,
+                    evidence_id=evidence_id,
+                    before=None,
+                    after={
+                        "source_evidence": imported_evidence.model_dump(mode="json"),
+                        "items": [item.model_dump(mode="json") for item in created_items],
+                    },
+                    affected=[
+                        "source_evidence",
+                        *[f"items.{item.item_id}" for item in created_items],
+                    ],
+                )
+                result = self._finish(connection, principal, command.idempotency_key, request_hash)
+                connection.commit()
+                return result
+            except Exception:
+                connection.rollback()
+                if storage_name is not None:
+                    self.vault.discard_uncommitted(storage_name)
+                raise
+
+    def remove_evidence(
+        self,
+        *,
+        principal: str,
+        evidence_id: str,
+        command: ProfileItemRemoval,
+    ) -> CareerProfileCompleteCurrent:
+        request_hash = _request_hash(
+            "evidence.remove",
+            command.model_dump(mode="json") | {"evidence_id": evidence_id},
+        )
+        with connect_sqlite(self.database) as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            try:
+                replay = self._replay(connection, principal, command.idempotency_key, request_hash)
+                if replay is not None:
+                    connection.rollback()
+                    return replay
+                head = self._check_head(connection, command.expected_profile_revision)
+                row = connection.execute(
+                    "SELECT original_filename, media_type, content_sha256, "
+                    "byte_count, captured_at, "
+                    "imported_at, provenance_json, active FROM career_profile_evidence "
+                    "WHERE evidence_id = ?",
+                    (evidence_id,),
+                ).fetchone()
+                if row is None or not bool(row[7]):
+                    raise CareerProfileEvidenceNotFound
+                before = self._evidence_from_row((evidence_id, *row))
+                connection.execute(
+                    "UPDATE career_profile_evidence SET active = 0 WHERE evidence_id = ?",
+                    (evidence_id,),
+                )
+                linked = connection.execute(
+                    "SELECT item_id, value_json, provenance_json, review_status, "
+                    "evidence_ids_json, "
+                    "item_revision, actor_principal, created_at, updated_at "
+                    "FROM career_profile_items WHERE active = 1"
+                ).fetchall()
+                affected = ["source_evidence"]
+                linked_before: list[ProfileItemRecord] = []
+                linked_after: list[ProfileItemRecord] = []
+                for linked_row in linked:
+                    item_before = self._item_from_row(linked_row)
+                    if evidence_id not in item_before.evidence_ids:
+                        continue
+                    linked_before.append(item_before)
+                    # Evidence supports provenance; it does not control whether a user-owned
+                    # Career Profile entry remains accepted or active.
+                    linked_after.append(item_before)
+                revision = head + 1
+                inactive_evidence = before.model_copy(update={"active": False})
+                self._record_revision(
+                    connection,
+                    revision=revision,
+                    base_revision=head,
+                    principal=principal,
+                    operation="evidence.remove",
+                    item_id=None,
+                    evidence_id=evidence_id,
+                    before={
+                        "source_evidence": before.model_dump(mode="json"),
+                        "linked_items": [item.model_dump(mode="json") for item in linked_before],
+                    },
+                    after={
+                        "source_evidence": inactive_evidence.model_dump(mode="json"),
+                        "linked_items": [item.model_dump(mode="json") for item in linked_after],
+                    },
+                    affected=affected,
+                )
+                result = self._finish(connection, principal, command.idempotency_key, request_hash)
+                connection.commit()
+                return result
+            except Exception:
+                connection.rollback()
+                raise
+
+    def read_evidence(self, evidence_id: str) -> bytes:
+        with connect_sqlite(f"file:{self.database}?mode=ro", uri=True) as connection:
+            row = connection.execute(
+                "SELECT storage_name, content_sha256 FROM career_profile_evidence "
+                "WHERE evidence_id = ?",
+                (evidence_id,),
+            ).fetchone()
+        if row is None:
+            raise CareerProfileEvidenceNotFound
+        return self.vault.read(str(row[0]), str(row[1]))
+
+    def evidence_metadata(self, evidence_id: str) -> SourceEvidenceRecord:
+        with connect_sqlite(f"file:{self.database}?mode=ro", uri=True) as connection:
+            row = connection.execute(
+                "SELECT original_filename, media_type, content_sha256, byte_count, captured_at, "
+                "imported_at, provenance_json, active FROM career_profile_evidence "
+                "WHERE evidence_id = ?",
+                (evidence_id,),
+            ).fetchone()
+        if row is None:
+            raise CareerProfileEvidenceNotFound
+        return self._evidence_from_row((evidence_id, *row))
+
+    def _mutate_item(
+        self,
+        *,
+        principal: str,
+        idempotency_key: str,
+        request_hash: str,
+        expected_revision: int,
+        item_id: str,
+        value: ProfileValue,
+        evidence_ids: list[str],
+        require_existing: bool,
+    ) -> CareerProfileCompleteCurrent:
+        with connect_sqlite(self.database) as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            try:
+                replay = self._replay(connection, principal, idempotency_key, request_hash)
+                if replay is not None:
+                    connection.rollback()
+                    return replay
+                head = self._check_head(connection, expected_revision)
+                for evidence_id in evidence_ids:
+                    row = connection.execute(
+                        "SELECT active FROM career_profile_evidence WHERE evidence_id = ?",
+                        (evidence_id,),
+                    ).fetchone()
+                    if row is None or not bool(row[0]):
+                        raise CareerProfileValueError("Evidence link is missing or inactive")
+                previous_row = connection.execute(
+                    "SELECT value_json, provenance_json, review_status, evidence_ids_json, "
+                    "item_revision, actor_principal, created_at, updated_at "
+                    "FROM career_profile_items WHERE item_id = ?",
+                    (item_id,),
+                ).fetchone()
+                previous = (
+                    self._item_from_row((item_id, *previous_row))
+                    if previous_row is not None
+                    else None
+                )
+                if require_existing and previous is None:
+                    raise CareerProfileItemNotFound
+                item_revision = previous.item_revision + 1 if previous else 1
+                timestamp = _now()
+                provenance = ItemProvenance(method="user_entered")
+                connection.execute(
+                    "INSERT INTO career_profile_items(item_id, value_json, provenance_json, "
+                    "review_status, evidence_ids_json, item_revision, actor_principal, active, "
+                    "created_at, updated_at) VALUES (?, ?, ?, 'accepted', ?, ?, ?, 1, ?, ?) "
+                    "ON CONFLICT(item_id) DO UPDATE SET value_json = excluded.value_json, "
+                    "provenance_json = excluded.provenance_json, review_status = 'accepted', "
+                    "evidence_ids_json = excluded.evidence_ids_json, "
+                    "item_revision = excluded.item_revision, "
+                    "actor_principal = excluded.actor_principal, active = 1, "
+                    "updated_at = excluded.updated_at",
+                    (
+                        item_id,
+                        _canonical_json(value.model_dump(mode="json")),
+                        _canonical_json(provenance.model_dump(mode="json")),
+                        _canonical_json(evidence_ids),
+                        item_revision,
+                        principal,
+                        previous.created_at if previous else timestamp,
+                        timestamp,
+                    ),
+                )
+                current_row = connection.execute(
+                    "SELECT value_json, provenance_json, review_status, evidence_ids_json, "
+                    "item_revision, actor_principal, created_at, updated_at "
+                    "FROM career_profile_items WHERE item_id = ?",
+                    (item_id,),
+                ).fetchone()
+                assert current_row is not None
+                current = self._item_from_row((item_id, *current_row))
+                revision = head + 1
+                self._record_revision(
+                    connection,
+                    revision=revision,
+                    base_revision=head,
+                    principal=principal,
+                    operation="item.upsert",
+                    item_id=item_id,
+                    evidence_id=None,
+                    before=previous.model_dump(mode="json") if previous else None,
+                    after=current.model_dump(mode="json"),
+                    affected=[f"items.{item_id}"],
+                )
+                result = self._finish(connection, principal, idempotency_key, request_hash)
+                connection.commit()
+                return result
+            except Exception:
+                connection.rollback()
+                raise
+
+    @staticmethod
+    def _head(connection: sqlite3.Connection) -> int:
+        row = connection.execute(
+            "SELECT head_revision FROM career_profiles WHERE profile_id = ?", (PROFILE_ID,)
+        ).fetchone()
+        if row is None:
+            raise RuntimeError("Career Profile storage is not initialized")
+        return int(row[0])
+
+    def _check_head(self, connection: sqlite3.Connection, expected: int) -> int:
+        head = self._head(connection)
+        if head != expected:
+            raise CareerProfileRevisionConflict(head)
+        return head
+
+    def _finish(
+        self,
+        connection: sqlite3.Connection,
+        principal: str,
+        idempotency_key: str,
+        request_hash: str,
+    ) -> CareerProfileCompleteCurrent:
+        result = self._current_in_connection(connection)
+        connection.execute(
+            "INSERT INTO career_profile_complete_idempotency(actor_principal, idempotency_key, "
+            "request_hash, result_json) VALUES (?, ?, ?, ?)",
+            (
+                principal,
+                idempotency_key,
+                request_hash,
+                _canonical_json(result.model_dump(mode="json")),
+            ),
+        )
+        return result
+
+    @staticmethod
+    def _replay(
+        connection: sqlite3.Connection,
+        principal: str,
+        idempotency_key: str,
+        request_hash: str,
+    ) -> CareerProfileCompleteCurrent | None:
+        row = connection.execute(
+            "SELECT request_hash, result_json FROM career_profile_complete_idempotency "
+            "WHERE actor_principal = ? AND idempotency_key = ?",
+            (principal, idempotency_key),
+        ).fetchone()
+        if row is None:
+            return None
+        if not secrets.compare_digest(str(row[0]), request_hash):
+            raise CareerProfileIdempotencyConflict
+        return CareerProfileCompleteCurrent.model_validate_json(str(row[1]))
+
+    def _record_revision(
+        self,
+        connection: sqlite3.Connection,
+        *,
+        revision: int,
+        base_revision: int,
+        principal: str,
+        operation: str,
+        item_id: str | None,
+        evidence_id: str | None,
+        before: object | None,
+        after: object | None,
+        affected: list[str],
+    ) -> None:
+        revision_id = _opaque_id("cpv_")
+        connection.execute(
+            "INSERT INTO career_profile_complete_revisions(revision_id, profile_revision, "
+            "base_profile_revision, actor_principal, operation, item_id, evidence_id, before_json, "
+            "after_json, affected_fields_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                revision_id,
+                revision,
+                base_revision,
+                principal,
+                operation,
+                item_id,
+                evidence_id,
+                _canonical_json(before) if before is not None else None,
+                _canonical_json(after) if after is not None else None,
+                _canonical_json(affected),
+            ),
+        )
+        connection.execute(
+            "UPDATE career_profiles SET head_revision = ?, updated_at = CURRENT_TIMESTAMP "
+            "WHERE profile_id = ?",
+            (revision, PROFILE_ID),
+        )
+        connection.execute(
+            "INSERT INTO career_profile_audit_events(actor_principal, action, profile_revision, "
+            "base_profile_revision, affected_fields_json, revision_id) VALUES (?, ?, ?, ?, ?, ?)",
+            (
+                principal,
+                f"career_profile.{operation}",
+                revision,
+                base_revision,
+                _canonical_json(affected),
+                revision_id,
+            ),
+        )
+
+    def _current_in_connection(
+        self, connection: sqlite3.Connection
+    ) -> CareerProfileCompleteCurrent:
+        head = self._head(connection)
+        rows = connection.execute(
+            "SELECT item_id, value_json, provenance_json, review_status, evidence_ids_json, "
+            "item_revision, actor_principal, created_at, updated_at FROM career_profile_items "
+            "WHERE active = 1 ORDER BY created_at, item_id"
+        ).fetchall()
+        items = [self._item_from_row(row) for row in rows]
+        tracer = connection.execute(
+            "SELECT record_id, value_json, item_revision, actor_principal, created_at, updated_at "
+            "FROM career_profile_records WHERE profile_id = ? AND namespace = ?",
+            (PROFILE_ID, WORK_ARRANGEMENT_NAMESPACE),
+        ).fetchone()
+        if tracer is not None and not any(item.value.kind == "work_arrangement" for item in items):
+            value = json.loads(str(tracer[1]))
+            items.append(
+                ProfileItemRecord(
+                    item_id=str(tracer[0]),
+                    area="what_im_looking_for",
+                    value=WorkArrangementProfileValue(kind="work_arrangement", **value),
+                    review_status="accepted",
+                    evidence_ids=[],
+                    provenance=ItemProvenance(method="tracer_compatibility"),
+                    item_revision=int(tracer[2]),
+                    actor_principal=str(tracer[3]),
+                    created_at=str(tracer[4]),
+                    updated_at=str(tracer[5]),
+                )
+            )
+        evidence_rows = connection.execute(
+            "SELECT evidence_id, original_filename, media_type, content_sha256, byte_count, "
+            "captured_at, imported_at, provenance_json, active FROM career_profile_evidence "
+            "ORDER BY imported_at, evidence_id"
+        ).fetchall()
+        return CareerProfileCompleteCurrent(
+            profile_revision=head,
+            items=items,
+            source_evidence=[self._evidence_from_row(row) for row in evidence_rows],
+        )
+
+    @staticmethod
+    def _item_from_row(row: sqlite3.Row | tuple[object, ...]) -> ProfileItemRecord:
+        value = ProfileItemRecord.model_validate(
+            {
+                "item_id": str(row[0]),
+                "area": _area_for_kind(json.loads(str(row[1]))["kind"]),
+                "value": json.loads(str(row[1])),
+                "provenance": json.loads(str(row[2])),
+                "review_status": str(row[3]),
+                "evidence_ids": json.loads(str(row[4])),
+                "item_revision": int(row[5]),
+                "actor_principal": str(row[6]),
+                "created_at": str(row[7]),
+                "updated_at": str(row[8]),
+            }
+        )
+        return value
+
+    @staticmethod
+    def _evidence_from_row(row: sqlite3.Row | tuple[object, ...]) -> SourceEvidenceRecord:
+        return SourceEvidenceRecord(
+            evidence_id=str(row[0]),
+            original_filename=str(row[1]),
+            media_type=str(row[2]),
+            sha256=str(row[3]),
+            byte_count=int(row[4]),
+            captured_at=str(row[5]),
+            imported_at=str(row[6]),
+            provenance=EvidenceProvenance.model_validate_json(str(row[7])),
+            active=bool(row[8]),
+        )

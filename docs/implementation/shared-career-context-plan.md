@@ -36,8 +36,8 @@ These terms are product and contract language. Implementations must not introduc
 | **What I’m Looking For** | User-facing area for search preferences and constraints. |
 | **My Evidence** | User-facing area for imported sources, proof, citations, qualifiers, and usage boundaries. |
 | **Accomplishment** | User-facing name for a reusable assertion about the user’s work or impact. |
-| **Claim** | Internal typed representation of an Accomplishment, linked to Evidence and optional qualifiers or forbidden uses. |
-| **Evidence** | Supporting material or citation establishing provenance for a Career Profile entry. |
+| **Claim** | Internal typed representation of an Accomplishment. Evidence links are optional support; qualifiers and forbidden uses constrain reuse. |
+| **Evidence** | Optional supporting material or citation that records provenance for a Career Profile entry; it never grants permission for the user to state or use that entry. |
 | **Source Evidence** | Original imported résumé, portfolio item, or supporting document. Its imported bytes never change. |
 | **Revision** | Immutable accepted Career Profile change with actor, base revision, changed fields, timestamp, and resulting head. |
 | **Snapshot** | Immutable, authorized projection of one profile revision bound to an agent turn. |
@@ -75,6 +75,14 @@ Generated outputs consume a snapshot but never become a competing source of user
 - V1 has no agent-specific fact override or inheritance tree.
 - A narrower agent projection is a view, not a copy or fork.
 - The profile remains portable independently of any agent.
+
+### 3.4 User agency
+
+- The user may enter, accept, edit, and use their own Career Profile information without supplying Evidence.
+- Evidence strengthens provenance; it is not a permission gate for a user-authored or user-approved fact or Accomplishment.
+- Removing Evidence never deletes, deactivates, or automatically demotes a user-authored or user-approved profile entry. The historical provenance link may remain visible as unavailable Evidence.
+- Agent-authored inferred, ambiguous, or conflicting information remains proposed until the user accepts it. This protects user control without making JobOS the judge of what the user may say.
+- Product warnings are advisory unless an operation would violate structural validity, authorization, concurrency, privacy/security boundaries, or data integrity.
 
 ## 4. Data architecture
 
@@ -199,7 +207,7 @@ Only the user changes this mode.
 
 ### Review every change
 
-- The agent submits one complete proposal with base revision, reason, Evidence, and every changed field.
+- The agent submits one complete proposal with base revision, reason, any available Evidence, and every changed field.
 - The UI shows an understandable before/after comparison.
 - Approval or rejection is atomic for the exact proposal.
 - A stale base or changed payload requires a regenerated proposal.
@@ -227,8 +235,10 @@ These controls protect factual accuracy and provenance. Contact and identity inf
 - Import each source as an immutable managed copy.
 - Preserve source hash, captured/imported date, provenance, and opaque ID.
 - Structured edits never rewrite imported bytes.
+- User-entered or user-approved facts and Accomplishments may exist without Evidence.
 - Exact structured facts may import directly when provenance is preserved.
 - Extracted, inferred, ambiguous, or conflicting facts remain proposals until reviewed.
+- Removing Evidence preserves the status and content of user-authored or user-approved entries; it only changes the availability of that supporting source.
 - Imported content is untrusted input and cannot override higher-level instructions, policy, or tool permissions.
 
 ### 8.2 Local data and audit
@@ -273,7 +283,7 @@ Preferences must feel like understandable product behavior rather than configura
 - explain the current interpretation in one normal-language sentence;
 - show a concrete pass/filter example when useful;
 - state whether it affects research, browsing, matching, agent focus, or alerts;
-- flag contradictory or impossible rules before save and suggest a correction;
+- warn about contradictory or seemingly impossible rules before save, explain the likely consequence, and let the user intentionally keep them;
 - never expose model weights, raw rule syntax, JSON, or plumbing.
 
 ### 9.3 Editing and conflicts

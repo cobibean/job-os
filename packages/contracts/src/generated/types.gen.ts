@@ -441,6 +441,24 @@ export type BrowserTabMetadata = {
 };
 
 /**
+ * CareerProfileCompleteCurrent
+ */
+export type CareerProfileCompleteCurrent = {
+    /**
+     * Items
+     */
+    items: Array<ProfileItemRecord>;
+    /**
+     * Profile Revision
+     */
+    profile_revision: number;
+    /**
+     * Source Evidence
+     */
+    source_evidence: Array<SourceEvidenceRecord>;
+};
+
+/**
  * CareerProfileProjection
  */
 export type CareerProfileProjection = {
@@ -488,6 +506,58 @@ export type CareerProfileSnapshotRequest = {
     scopes?: [
         'search_preferences.work_arrangement'
     ];
+};
+
+/**
+ * ClaimValue
+ */
+export type ClaimValue = {
+    /**
+     * Forbidden Uses
+     */
+    forbidden_uses?: Array<string>;
+    /**
+     * Kind
+     */
+    kind: 'claim';
+    /**
+     * Qualifiers
+     */
+    qualifiers?: Array<string>;
+    /**
+     * Statement
+     */
+    statement: string;
+};
+
+/**
+ * CompensationValue
+ */
+export type CompensationValue = {
+    /**
+     * Currency
+     */
+    currency?: string;
+    /**
+     * Kind
+     */
+    kind: 'compensation';
+    /**
+     * Minimum
+     */
+    minimum?: number | null;
+    /**
+     * Note
+     */
+    note?: string | null;
+    /**
+     * Period
+     */
+    period?: 'hour' | 'year';
+    /**
+     * Target
+     */
+    target?: number | null;
 };
 
 /**
@@ -771,6 +841,24 @@ export type CreateSnapshotRequest = {
      * Reason
      */
     reason?: 'manual';
+};
+
+/**
+ * DealbreakerValue
+ */
+export type DealbreakerValue = {
+    /**
+     * Explanation
+     */
+    explanation?: string | null;
+    /**
+     * Kind
+     */
+    kind: 'dealbreaker';
+    /**
+     * Label
+     */
+    label: string;
 };
 
 /**
@@ -1217,6 +1305,173 @@ export type EditableDocumentSummary = {
 };
 
 /**
+ * EducationValue
+ */
+export type EducationValue = {
+    /**
+     * Credential
+     */
+    credential: string;
+    /**
+     * Details
+     */
+    details?: string | null;
+    /**
+     * Ended On
+     */
+    ended_on?: string | null;
+    /**
+     * Field Of Study
+     */
+    field_of_study?: string | null;
+    /**
+     * Institution
+     */
+    institution: string;
+    /**
+     * Kind
+     */
+    kind: 'education';
+    /**
+     * Started On
+     */
+    started_on?: string | null;
+};
+
+/**
+ * EvidenceExtraction
+ */
+export type EvidenceExtraction = {
+    /**
+     * Assessment
+     */
+    assessment: 'exact' | 'inferred' | 'ambiguous' | 'conflicting';
+    /**
+     * Value
+     */
+    value: ({
+        kind: 'identity';
+    } & IdentityValue) | ({
+        kind: 'education';
+    } & EducationValue) | ({
+        kind: 'skill';
+    } & SkillValue) | ({
+        kind: 'positioning';
+    } & PositioningValue) | ({
+        kind: 'experience';
+    } & ExperienceValue) | ({
+        kind: 'project';
+    } & ProjectValue) | ({
+        kind: 'claim';
+    } & ClaimValue) | ({
+        kind: 'target_roles';
+    } & TargetRolesValue) | ({
+        kind: 'compensation';
+    } & CompensationValue) | ({
+        kind: 'location';
+    } & LocationPreferenceValue) | ({
+        kind: 'work_arrangement';
+    } & WorkArrangementProfileValue) | ({
+        kind: 'industries';
+    } & IndustryPreferencesValue) | ({
+        kind: 'priority';
+    } & PriorityValue) | ({
+        kind: 'dealbreaker';
+    } & DealbreakerValue);
+};
+
+/**
+ * EvidenceImportRequest
+ */
+export type EvidenceImportRequest = {
+    /**
+     * Captured At
+     */
+    captured_at: string;
+    /**
+     * Content Base64
+     */
+    content_base64: string;
+    /**
+     * Expected Profile Revision
+     */
+    expected_profile_revision: number;
+    /**
+     * Extractions
+     */
+    extractions?: Array<EvidenceExtraction>;
+    /**
+     * Idempotency Key
+     */
+    idempotency_key: string;
+    /**
+     * Media Type
+     */
+    media_type: string;
+    /**
+     * Original Filename
+     */
+    original_filename: string;
+    provenance: EvidenceProvenance;
+};
+
+/**
+ * EvidenceProvenance
+ */
+export type EvidenceProvenance = {
+    /**
+     * Method
+     */
+    method: 'user_import' | 'agent_import' | 'migration_import';
+    /**
+     * Source Kind
+     */
+    source_kind: 'resume' | 'portfolio' | 'supporting_document' | 'citation';
+    /**
+     * Source Label
+     */
+    source_label: string;
+};
+
+/**
+ * ExperienceValue
+ */
+export type ExperienceValue = {
+    /**
+     * Current
+     */
+    current?: boolean;
+    /**
+     * Ended On
+     */
+    ended_on?: string | null;
+    /**
+     * Kind
+     */
+    kind: 'experience';
+    /**
+     * Location
+     */
+    location?: string | null;
+    /**
+     * Organization
+     */
+    organization: string;
+    /**
+     * Role
+     */
+    role: string;
+    /**
+     * Started On
+     */
+    started_on?: string | null;
+    /**
+     * Summary
+     */
+    summary?: string | null;
+};
+
+/**
  * HeaderFooter
  */
 export type HeaderFooter = {
@@ -1277,6 +1532,54 @@ export type HealthResponse = {
 };
 
 /**
+ * IdentityValue
+ */
+export type IdentityValue = {
+    /**
+     * City
+     */
+    city?: string | null;
+    /**
+     * Email
+     */
+    email?: string | null;
+    /**
+     * Kind
+     */
+    kind: 'identity';
+    /**
+     * Links
+     */
+    links?: Array<string>;
+    /**
+     * Phone
+     */
+    phone?: string | null;
+    /**
+     * Professional Name
+     */
+    professional_name: string;
+};
+
+/**
+ * IndustryPreferencesValue
+ */
+export type IndustryPreferencesValue = {
+    /**
+     * Industries
+     */
+    industries: Array<string>;
+    /**
+     * Kind
+     */
+    kind: 'industries';
+    /**
+     * Strength
+     */
+    strength: 'requirement' | 'strong_preference' | 'preference' | 'dealbreaker';
+};
+
+/**
  * InsertBlockAfter
  */
 export type InsertBlockAfter = {
@@ -1300,6 +1603,24 @@ export type InsertBlockAfter = {
      * Type
      */
     type: 'insert_block_after';
+};
+
+/**
+ * ItemProvenance
+ */
+export type ItemProvenance = {
+    /**
+     * Imported At
+     */
+    imported_at?: string | null;
+    /**
+     * Method
+     */
+    method: 'user_entered' | 'evidence_import' | 'tracer_compatibility';
+    /**
+     * Source Label
+     */
+    source_label?: string | null;
 };
 
 /**
@@ -1680,6 +2001,28 @@ export type LeadHistoryResponse = {
 };
 
 /**
+ * LocationPreferenceValue
+ */
+export type LocationPreferenceValue = {
+    /**
+     * Kind
+     */
+    kind: 'location';
+    /**
+     * Locations
+     */
+    locations: Array<string>;
+    /**
+     * Relocation
+     */
+    relocation?: 'yes' | 'no' | 'consider';
+    /**
+     * Strength
+     */
+    strength: 'requirement' | 'strong_preference' | 'preference' | 'dealbreaker';
+};
+
+/**
  * ManualOrderRequest
  */
 export type ManualOrderRequest = {
@@ -1792,6 +2135,207 @@ export type PanelLayout = {
     widths: {
         [key: string]: number;
     };
+};
+
+/**
+ * PositioningValue
+ */
+export type PositioningValue = {
+    /**
+     * Headline
+     */
+    headline: string;
+    /**
+     * Kind
+     */
+    kind: 'positioning';
+    /**
+     * Summary
+     */
+    summary?: string | null;
+};
+
+/**
+ * PriorityValue
+ */
+export type PriorityValue = {
+    /**
+     * Explanation
+     */
+    explanation?: string | null;
+    /**
+     * Kind
+     */
+    kind: 'priority';
+    /**
+     * Label
+     */
+    label: string;
+    /**
+     * Strength
+     */
+    strength: 'requirement' | 'strong_preference' | 'preference';
+};
+
+/**
+ * ProfileItemMutation
+ */
+export type ProfileItemMutation = {
+    /**
+     * Evidence Ids
+     */
+    evidence_ids?: Array<string>;
+    /**
+     * Expected Profile Revision
+     */
+    expected_profile_revision: number;
+    /**
+     * Idempotency Key
+     */
+    idempotency_key: string;
+    /**
+     * Value
+     */
+    value: ({
+        kind: 'identity';
+    } & IdentityValue) | ({
+        kind: 'education';
+    } & EducationValue) | ({
+        kind: 'skill';
+    } & SkillValue) | ({
+        kind: 'positioning';
+    } & PositioningValue) | ({
+        kind: 'experience';
+    } & ExperienceValue) | ({
+        kind: 'project';
+    } & ProjectValue) | ({
+        kind: 'claim';
+    } & ClaimValue) | ({
+        kind: 'target_roles';
+    } & TargetRolesValue) | ({
+        kind: 'compensation';
+    } & CompensationValue) | ({
+        kind: 'location';
+    } & LocationPreferenceValue) | ({
+        kind: 'work_arrangement';
+    } & WorkArrangementProfileValue) | ({
+        kind: 'industries';
+    } & IndustryPreferencesValue) | ({
+        kind: 'priority';
+    } & PriorityValue) | ({
+        kind: 'dealbreaker';
+    } & DealbreakerValue);
+};
+
+/**
+ * ProfileItemRecord
+ */
+export type ProfileItemRecord = {
+    /**
+     * Actor Principal
+     */
+    actor_principal: string;
+    /**
+     * Area
+     */
+    area: 'my_career' | 'what_im_looking_for' | 'my_evidence';
+    /**
+     * Created At
+     */
+    created_at: string;
+    /**
+     * Evidence Ids
+     */
+    evidence_ids?: Array<string>;
+    /**
+     * Item Id
+     */
+    item_id: string;
+    /**
+     * Item Revision
+     */
+    item_revision: number;
+    provenance: ItemProvenance;
+    /**
+     * Review Status
+     */
+    review_status: 'accepted' | 'proposed' | 'conflicting';
+    /**
+     * Updated At
+     */
+    updated_at: string;
+    /**
+     * Value
+     */
+    value: ({
+        kind: 'identity';
+    } & IdentityValue) | ({
+        kind: 'education';
+    } & EducationValue) | ({
+        kind: 'skill';
+    } & SkillValue) | ({
+        kind: 'positioning';
+    } & PositioningValue) | ({
+        kind: 'experience';
+    } & ExperienceValue) | ({
+        kind: 'project';
+    } & ProjectValue) | ({
+        kind: 'claim';
+    } & ClaimValue) | ({
+        kind: 'target_roles';
+    } & TargetRolesValue) | ({
+        kind: 'compensation';
+    } & CompensationValue) | ({
+        kind: 'location';
+    } & LocationPreferenceValue) | ({
+        kind: 'work_arrangement';
+    } & WorkArrangementProfileValue) | ({
+        kind: 'industries';
+    } & IndustryPreferencesValue) | ({
+        kind: 'priority';
+    } & PriorityValue) | ({
+        kind: 'dealbreaker';
+    } & DealbreakerValue);
+};
+
+/**
+ * ProfileItemRemoval
+ */
+export type ProfileItemRemoval = {
+    /**
+     * Expected Profile Revision
+     */
+    expected_profile_revision: number;
+    /**
+     * Idempotency Key
+     */
+    idempotency_key: string;
+};
+
+/**
+ * ProjectValue
+ */
+export type ProjectValue = {
+    /**
+     * Kind
+     */
+    kind: 'project';
+    /**
+     * Name
+     */
+    name: string;
+    /**
+     * Role
+     */
+    role?: string | null;
+    /**
+     * Summary
+     */
+    summary: string;
+    /**
+     * Url
+     */
+    url?: string | null;
 };
 
 /**
@@ -2010,6 +2554,67 @@ export type SetBlockRole = {
 };
 
 /**
+ * SkillValue
+ */
+export type SkillValue = {
+    /**
+     * Kind
+     */
+    kind: 'skill';
+    /**
+     * Level
+     */
+    level?: 'familiar' | 'proficient' | 'advanced' | 'expert' | null;
+    /**
+     * Name
+     */
+    name: string;
+    /**
+     * Note
+     */
+    note?: string | null;
+};
+
+/**
+ * SourceEvidenceRecord
+ */
+export type SourceEvidenceRecord = {
+    /**
+     * Active
+     */
+    active: boolean;
+    /**
+     * Byte Count
+     */
+    byte_count: number;
+    /**
+     * Captured At
+     */
+    captured_at: string;
+    /**
+     * Evidence Id
+     */
+    evidence_id: string;
+    /**
+     * Imported At
+     */
+    imported_at: string;
+    /**
+     * Media Type
+     */
+    media_type: string;
+    /**
+     * Original Filename
+     */
+    original_filename: string;
+    provenance: EvidenceProvenance;
+    /**
+     * Sha256
+     */
+    sha256: string;
+};
+
+/**
  * StatusChangeRequest
  */
 export type StatusChangeRequest = {
@@ -2044,6 +2649,24 @@ export type StatusChangeResponse = {
      */
     event_id: number;
     job: JobDetail;
+};
+
+/**
+ * TargetRolesValue
+ */
+export type TargetRolesValue = {
+    /**
+     * Kind
+     */
+    kind: 'target_roles';
+    /**
+     * Roles
+     */
+    roles: Array<string>;
+    /**
+     * Strength
+     */
+    strength?: 'requirement' | 'strong_preference' | 'preference';
 };
 
 /**
@@ -2128,6 +2751,28 @@ export type WorkArrangementMutation = {
      */
     idempotency_key: string;
     value: WorkArrangementValue;
+};
+
+/**
+ * WorkArrangementProfileValue
+ */
+export type WorkArrangementProfileValue = {
+    /**
+     * Kind
+     */
+    kind: 'work_arrangement';
+    /**
+     * Mode
+     */
+    mode: 'remote' | 'hybrid' | 'onsite' | 'flexible';
+    /**
+     * Note
+     */
+    note?: string | null;
+    /**
+     * Strength
+     */
+    strength: 'requirement' | 'strong_preference' | 'preference' | 'dealbreaker';
 };
 
 /**
@@ -2621,6 +3266,331 @@ export type BrowserCommandV1BrowserCommandsPostResponses = {
 };
 
 export type BrowserCommandV1BrowserCommandsPostResponse = BrowserCommandV1BrowserCommandsPostResponses[keyof BrowserCommandV1BrowserCommandsPostResponses];
+
+export type CareerProfileCompleteGetV1CareerProfileGetData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/v1/career-profile';
+};
+
+export type CareerProfileCompleteGetV1CareerProfileGetErrors = {
+    /**
+     * Device authentication required
+     */
+    401: ApiErrorResponse;
+    /**
+     * Operation is not permitted
+     */
+    403: ApiErrorResponse;
+    /**
+     * Resource not found
+     */
+    404: ApiErrorResponse;
+    /**
+     * Internal server error
+     */
+    500: ApiErrorResponse;
+};
+
+export type CareerProfileCompleteGetV1CareerProfileGetError = CareerProfileCompleteGetV1CareerProfileGetErrors[keyof CareerProfileCompleteGetV1CareerProfileGetErrors];
+
+export type CareerProfileCompleteGetV1CareerProfileGetResponses = {
+    /**
+     * Successful Response
+     */
+    200: CareerProfileCompleteCurrent;
+};
+
+export type CareerProfileCompleteGetV1CareerProfileGetResponse = CareerProfileCompleteGetV1CareerProfileGetResponses[keyof CareerProfileCompleteGetV1CareerProfileGetResponses];
+
+export type CareerProfileEvidenceImportV1CareerProfileEvidencePostData = {
+    body: EvidenceImportRequest;
+    path?: never;
+    query?: never;
+    url: '/v1/career-profile/evidence';
+};
+
+export type CareerProfileEvidenceImportV1CareerProfileEvidencePostErrors = {
+    /**
+     * Device authentication required
+     */
+    401: ApiErrorResponse;
+    /**
+     * Operation is not permitted
+     */
+    403: ApiErrorResponse;
+    /**
+     * Resource not found
+     */
+    404: ApiErrorResponse;
+    /**
+     * Resource state conflict
+     */
+    409: ApiErrorResponse;
+    /**
+     * Request validation failed
+     */
+    422: ApiErrorResponse;
+    /**
+     * Internal server error
+     */
+    500: ApiErrorResponse;
+};
+
+export type CareerProfileEvidenceImportV1CareerProfileEvidencePostError = CareerProfileEvidenceImportV1CareerProfileEvidencePostErrors[keyof CareerProfileEvidenceImportV1CareerProfileEvidencePostErrors];
+
+export type CareerProfileEvidenceImportV1CareerProfileEvidencePostResponses = {
+    /**
+     * Successful Response
+     */
+    201: CareerProfileCompleteCurrent;
+};
+
+export type CareerProfileEvidenceImportV1CareerProfileEvidencePostResponse = CareerProfileEvidenceImportV1CareerProfileEvidencePostResponses[keyof CareerProfileEvidenceImportV1CareerProfileEvidencePostResponses];
+
+export type CareerProfileEvidenceRemoveV1CareerProfileEvidenceEvidenceIdDeleteData = {
+    body: ProfileItemRemoval;
+    path: {
+        /**
+         * Evidence Id
+         */
+        evidence_id: string;
+    };
+    query?: never;
+    url: '/v1/career-profile/evidence/{evidence_id}';
+};
+
+export type CareerProfileEvidenceRemoveV1CareerProfileEvidenceEvidenceIdDeleteErrors = {
+    /**
+     * Device authentication required
+     */
+    401: ApiErrorResponse;
+    /**
+     * Operation is not permitted
+     */
+    403: ApiErrorResponse;
+    /**
+     * Resource not found
+     */
+    404: ApiErrorResponse;
+    /**
+     * Resource state conflict
+     */
+    409: ApiErrorResponse;
+    /**
+     * Request validation failed
+     */
+    422: ApiErrorResponse;
+    /**
+     * Internal server error
+     */
+    500: ApiErrorResponse;
+};
+
+export type CareerProfileEvidenceRemoveV1CareerProfileEvidenceEvidenceIdDeleteError = CareerProfileEvidenceRemoveV1CareerProfileEvidenceEvidenceIdDeleteErrors[keyof CareerProfileEvidenceRemoveV1CareerProfileEvidenceEvidenceIdDeleteErrors];
+
+export type CareerProfileEvidenceRemoveV1CareerProfileEvidenceEvidenceIdDeleteResponses = {
+    /**
+     * Successful Response
+     */
+    200: CareerProfileCompleteCurrent;
+};
+
+export type CareerProfileEvidenceRemoveV1CareerProfileEvidenceEvidenceIdDeleteResponse = CareerProfileEvidenceRemoveV1CareerProfileEvidenceEvidenceIdDeleteResponses[keyof CareerProfileEvidenceRemoveV1CareerProfileEvidenceEvidenceIdDeleteResponses];
+
+export type CareerProfileEvidenceContentV1CareerProfileEvidenceEvidenceIdContentGetData = {
+    body?: never;
+    path: {
+        /**
+         * Evidence Id
+         */
+        evidence_id: string;
+    };
+    query?: never;
+    url: '/v1/career-profile/evidence/{evidence_id}/content';
+};
+
+export type CareerProfileEvidenceContentV1CareerProfileEvidenceEvidenceIdContentGetErrors = {
+    /**
+     * Device authentication required
+     */
+    401: ApiErrorResponse;
+    /**
+     * Operation is not permitted
+     */
+    403: ApiErrorResponse;
+    /**
+     * Resource not found
+     */
+    404: ApiErrorResponse;
+    /**
+     * Resource state conflict
+     */
+    409: ApiErrorResponse;
+    /**
+     * Request validation failed
+     */
+    422: ApiErrorResponse;
+    /**
+     * Internal server error
+     */
+    500: ApiErrorResponse;
+};
+
+export type CareerProfileEvidenceContentV1CareerProfileEvidenceEvidenceIdContentGetError = CareerProfileEvidenceContentV1CareerProfileEvidenceEvidenceIdContentGetErrors[keyof CareerProfileEvidenceContentV1CareerProfileEvidenceEvidenceIdContentGetErrors];
+
+export type CareerProfileEvidenceContentV1CareerProfileEvidenceEvidenceIdContentGetResponses = {
+    /**
+     * Successful Response
+     */
+    200: unknown;
+};
+
+export type CareerProfileItemCreateV1CareerProfileItemsPostData = {
+    body: ProfileItemMutation;
+    path?: never;
+    query?: never;
+    url: '/v1/career-profile/items';
+};
+
+export type CareerProfileItemCreateV1CareerProfileItemsPostErrors = {
+    /**
+     * Device authentication required
+     */
+    401: ApiErrorResponse;
+    /**
+     * Operation is not permitted
+     */
+    403: ApiErrorResponse;
+    /**
+     * Resource not found
+     */
+    404: ApiErrorResponse;
+    /**
+     * Resource state conflict
+     */
+    409: ApiErrorResponse;
+    /**
+     * Request validation failed
+     */
+    422: ApiErrorResponse;
+    /**
+     * Internal server error
+     */
+    500: ApiErrorResponse;
+};
+
+export type CareerProfileItemCreateV1CareerProfileItemsPostError = CareerProfileItemCreateV1CareerProfileItemsPostErrors[keyof CareerProfileItemCreateV1CareerProfileItemsPostErrors];
+
+export type CareerProfileItemCreateV1CareerProfileItemsPostResponses = {
+    /**
+     * Successful Response
+     */
+    201: CareerProfileCompleteCurrent;
+};
+
+export type CareerProfileItemCreateV1CareerProfileItemsPostResponse = CareerProfileItemCreateV1CareerProfileItemsPostResponses[keyof CareerProfileItemCreateV1CareerProfileItemsPostResponses];
+
+export type CareerProfileItemRemoveV1CareerProfileItemsItemIdDeleteData = {
+    body: ProfileItemRemoval;
+    path: {
+        /**
+         * Item Id
+         */
+        item_id: string;
+    };
+    query?: never;
+    url: '/v1/career-profile/items/{item_id}';
+};
+
+export type CareerProfileItemRemoveV1CareerProfileItemsItemIdDeleteErrors = {
+    /**
+     * Device authentication required
+     */
+    401: ApiErrorResponse;
+    /**
+     * Operation is not permitted
+     */
+    403: ApiErrorResponse;
+    /**
+     * Resource not found
+     */
+    404: ApiErrorResponse;
+    /**
+     * Resource state conflict
+     */
+    409: ApiErrorResponse;
+    /**
+     * Request validation failed
+     */
+    422: ApiErrorResponse;
+    /**
+     * Internal server error
+     */
+    500: ApiErrorResponse;
+};
+
+export type CareerProfileItemRemoveV1CareerProfileItemsItemIdDeleteError = CareerProfileItemRemoveV1CareerProfileItemsItemIdDeleteErrors[keyof CareerProfileItemRemoveV1CareerProfileItemsItemIdDeleteErrors];
+
+export type CareerProfileItemRemoveV1CareerProfileItemsItemIdDeleteResponses = {
+    /**
+     * Successful Response
+     */
+    200: CareerProfileCompleteCurrent;
+};
+
+export type CareerProfileItemRemoveV1CareerProfileItemsItemIdDeleteResponse = CareerProfileItemRemoveV1CareerProfileItemsItemIdDeleteResponses[keyof CareerProfileItemRemoveV1CareerProfileItemsItemIdDeleteResponses];
+
+export type CareerProfileItemUpdateV1CareerProfileItemsItemIdPutData = {
+    body: ProfileItemMutation;
+    path: {
+        /**
+         * Item Id
+         */
+        item_id: string;
+    };
+    query?: never;
+    url: '/v1/career-profile/items/{item_id}';
+};
+
+export type CareerProfileItemUpdateV1CareerProfileItemsItemIdPutErrors = {
+    /**
+     * Device authentication required
+     */
+    401: ApiErrorResponse;
+    /**
+     * Operation is not permitted
+     */
+    403: ApiErrorResponse;
+    /**
+     * Resource not found
+     */
+    404: ApiErrorResponse;
+    /**
+     * Resource state conflict
+     */
+    409: ApiErrorResponse;
+    /**
+     * Request validation failed
+     */
+    422: ApiErrorResponse;
+    /**
+     * Internal server error
+     */
+    500: ApiErrorResponse;
+};
+
+export type CareerProfileItemUpdateV1CareerProfileItemsItemIdPutError = CareerProfileItemUpdateV1CareerProfileItemsItemIdPutErrors[keyof CareerProfileItemUpdateV1CareerProfileItemsItemIdPutErrors];
+
+export type CareerProfileItemUpdateV1CareerProfileItemsItemIdPutResponses = {
+    /**
+     * Successful Response
+     */
+    200: CareerProfileCompleteCurrent;
+};
+
+export type CareerProfileItemUpdateV1CareerProfileItemsItemIdPutResponse = CareerProfileItemUpdateV1CareerProfileItemsItemIdPutResponses[keyof CareerProfileItemUpdateV1CareerProfileItemsItemIdPutResponses];
 
 export type CareerProfileSnapshotCreateV1CareerProfileSnapshotsPostData = {
     body: CareerProfileSnapshotRequest;

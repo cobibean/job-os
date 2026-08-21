@@ -15,6 +15,7 @@ FastAPI application core <---- MCP adapter
         |
         +---- Job repository
         +---- Workbench state
+        +---- Career Profile + immutable Evidence vault (staging-only)
         +---- Artifact repository
         +---- Browser/agent capabilities
 ```
@@ -70,6 +71,14 @@ revision. The private `ArtifactGateway` remains the optional seam for JobHunter
 publish, render, and refresh and reports an unconfigured capability when absent.
 This source behavior is not proof that packaged onboarding or clean-clone
 installed-app acceptance has passed.
+
+The dormant Career Profile candidate uses typed records for **My Career**, **What
+I'm Looking For**, and **My Evidence**. Accepted values, proposed or conflicting
+imports, provenance, Claims, qualifiers, and forbidden-use boundaries share the
+existing immutable global profile revision. Imported Source Evidence metadata
+lives in SQLite while original bytes live in a JobOS-owned hash-verified vault;
+API clients receive opaque Evidence IDs rather than local paths. The feature is
+off by default and does not migrate or replace any live profile authority.
 
 Canonical-job mutations commit before the related workbench selection/audit
 event. If the second local write fails, retrying converges through canonical-URL

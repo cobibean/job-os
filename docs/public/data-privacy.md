@@ -18,6 +18,8 @@ The accepted public composition will store:
 - configuration without secrets;
 - canonical jobs and job history in a local SQLite database;
 - workbench/UI state in a separate local SQLite database;
+- dormant typed Career Profile metadata and immutable Source Evidence when the
+  staging-only feature is explicitly enabled;
 - generated and edited artifacts under a configured local artifact root;
 - logs under the user's application-data directory;
 - credentials in the platform credential provider, with a documented restrictive
@@ -37,15 +39,27 @@ The initializer creates this profile layout beneath the selected `--data-dir`:
 config.json
 credentials/        # source fallback only; macOS normally uses Keychain
 state/jobos.db       # workbench/UI state
+state/career-profile-evidence/ # immutable imported Source Evidence (staging-only)
 jobs/jobs.db         # canonical jobs, history, and demo ledger
 artifacts/
 logs/
 ```
 
-Every path can be overridden during source initialization. `config.json` is the
-source of truth for active locations; it contains paths and provider choices but
-no secret values. Installed macOS builds use the user's JobOS Application
-Support directory by default.
+Configured job, artifact, log, and credential paths can be overridden during source
+initialization. The Evidence vault stays beside the configured state database so
+it remains inside JobOS-owned storage. `config.json` is the source of truth for
+active configured locations; it contains paths and provider choices but no secret
+values. Installed macOS builds use the user's JobOS Application Support directory
+by default.
+
+Career Profile and Source Evidence are ordinary local JobOS data in v1. Contact
+and identity facts are returned normally to the authenticated owner; v1 does not
+add masking or field-level content encryption. Imported bytes are copied into the
+managed vault, addressed by opaque IDs, hash-checked on read, and never rewritten
+by structured edits or removal. Removal changes active profile state and preserves
+revision history and original bytes. Inferred, ambiguous, or conflicting imported
+facts remain unaccepted until reviewed. Imported document text is data only and
+cannot change system instructions, agent policy, credentials, or tool permissions.
 
 Do not commit runtime databases, logs, exports, backups, support bundles,
 credentials, `.env` files, local runtime configuration, or `.DS_Store` files.
