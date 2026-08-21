@@ -875,6 +875,30 @@
         "title": "CareerProfileCompleteCurrent",
         "type": "object"
       },
+      "CareerProfileErasureResult": {
+        "additionalProperties": false,
+        "properties": {
+          "completed": {
+            "const": true,
+            "default": true,
+            "title": "Completed",
+            "type": "boolean"
+          },
+          "operation": {
+            "enum": [
+              "evidence_erased",
+              "career_profile_reset"
+            ],
+            "title": "Operation",
+            "type": "string"
+          }
+        },
+        "required": [
+          "operation"
+        ],
+        "title": "CareerProfileErasureResult",
+        "type": "object"
+      },
       "CareerProfileProjection": {
         "additionalProperties": false,
         "properties": {
@@ -893,6 +917,35 @@
           "work_arrangement"
         ],
         "title": "CareerProfileProjection",
+        "type": "object"
+      },
+      "CareerProfileResetRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "confirmation": {
+            "const": "RESET_CAREER_PROFILE_PERMANENTLY",
+            "title": "Confirmation",
+            "type": "string"
+          },
+          "expected_profile_revision": {
+            "minimum": 0.0,
+            "title": "Expected Profile Revision",
+            "type": "integer"
+          },
+          "idempotency_key": {
+            "maxLength": 200,
+            "minLength": 8,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+            "title": "Idempotency Key",
+            "type": "string"
+          }
+        },
+        "required": [
+          "expected_profile_revision",
+          "idempotency_key",
+          "confirmation"
+        ],
+        "title": "CareerProfileResetRequest",
         "type": "object"
       },
       "CareerProfileSnapshot": {
@@ -2553,6 +2606,35 @@
         "title": "EducationValue",
         "type": "object"
       },
+      "EvidenceErasureRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "confirmation": {
+            "const": "ERASE_EVIDENCE_PERMANENTLY",
+            "title": "Confirmation",
+            "type": "string"
+          },
+          "expected_profile_revision": {
+            "minimum": 0.0,
+            "title": "Expected Profile Revision",
+            "type": "integer"
+          },
+          "idempotency_key": {
+            "maxLength": 200,
+            "minLength": 8,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+            "title": "Idempotency Key",
+            "type": "string"
+          }
+        },
+        "required": [
+          "expected_profile_revision",
+          "idempotency_key",
+          "confirmation"
+        ],
+        "title": "EvidenceErasureRequest",
+        "type": "object"
+      },
       "EvidenceExtraction": {
         "additionalProperties": false,
         "properties": {
@@ -3159,6 +3241,7 @@
               "agent_generated",
               "agent_edit",
               "evidence_import",
+              "evidence_erased",
               "tracer_compatibility"
             ],
             "title": "Method",
@@ -7089,6 +7172,114 @@
         ]
       }
     },
+    "/v1/career-profile/evidence/{evidence_id}/erase": {
+      "post": {
+        "operationId": "career_profile_evidence_erase_v1_career_profile_evidence__evidence_id__erase_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "evidence_id",
+            "required": true,
+            "schema": {
+              "pattern": "^cpe_[A-Za-z0-9_-]{16,64}$",
+              "title": "Evidence Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EvidenceErasureRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CareerProfileErasureResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Device authentication required"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Operation is not permitted"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Resource not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Resource state conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Request validation failed"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Internal server error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Career Profile Evidence Erase",
+        "tags": [
+          "career-profile"
+        ]
+      }
+    },
     "/v1/career-profile/intent-grants": {
       "post": {
         "operationId": "career_profile_intent_grant_create_v1_career_profile_intent_grants_post",
@@ -7718,6 +7909,102 @@
           }
         ],
         "summary": "Career Profile Proposal Decide",
+        "tags": [
+          "career-profile"
+        ]
+      }
+    },
+    "/v1/career-profile/reset": {
+      "post": {
+        "operationId": "career_profile_reset_v1_career_profile_reset_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CareerProfileResetRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CareerProfileErasureResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Device authentication required"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Operation is not permitted"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Resource not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Resource state conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Request validation failed"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Internal server error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Career Profile Reset",
         "tags": [
           "career-profile"
         ]

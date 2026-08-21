@@ -728,6 +728,7 @@ def test_document_identity_migration_clears_legacy_docx_approval(tmp_path):
             23,
             24,
             25,
+            26,
         ],
         [2],
     ),

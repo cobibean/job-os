@@ -2768,8 +2768,32 @@ class JobOsStateStore:
                 "SELECT * FROM document_artifacts WHERE job_id = ? ORDER BY rowid DESC",
                 (job_id,),
             ).fetchall()
+            approvals = connection.execute(
+                "SELECT document_key, source_revision, artifact_manifest_json "
+                "FROM document_revision_approvals WHERE job_id = ?",
+                (job_id,),
+            ).fetchall()
+        approved_manifest = {}
+        if state and state["approved_artifact_id"]:
+            approved_manifest = {
+                (str(approval[0]), str(approval[1]), artifact_id): digest
+                for approval in approvals
+                for artifact_id, digest in json.loads(str(approval[2])).items()
+            }
+        artifact_rows = [dict(row) for row in rows]
+        for row in artifact_rows:
+            row["is_logically_approved"] = (
+                approved_manifest.get(
+                    (
+                        str(row["document_key"]),
+                        str(row["source_revision"]),
+                        str(row["artifact_id"]),
+                    )
+                )
+                == row.get("sha256")
+            )
         return (
-            [dict(row) for row in rows],
+            artifact_rows,
             state["current_artifact_id"] if state else None,
             state["last_successful_artifact_id"] if state else None,
             state["approved_artifact_id"] if state else None,
@@ -2873,6 +2897,9 @@ class JobOsStateStore:
         """Remove demo-owned document metadata; artifact bytes remain unregistered on disk."""
         with connect_sqlite(self._path) as connection:
             connection.execute("BEGIN IMMEDIATE")
+            connection.execute(
+                "DELETE FROM document_revision_approvals WHERE job_id = ?", (job_id,)
+            )
             connection.execute("DELETE FROM job_document_state WHERE job_id = ?", (job_id,))
             connection.execute("DELETE FROM document_artifacts WHERE job_id = ?", (job_id,))
             connection.execute(
@@ -2886,24 +2913,83 @@ class JobOsStateStore:
             )
             connection.execute("DELETE FROM editable_documents WHERE job_id = ?", (job_id,))
 
+    def approval_representation_artifacts(
+        self, job_id: str, artifact_id: str
+    ) -> list[dict[str, object]]:
+        with connect_sqlite(f"file:{self._path}?mode=ro", uri=True) as connection:
+            connection.row_factory = sqlite3.Row
+            selected = connection.execute(
+                "SELECT document_key, source_revision FROM document_artifacts "
+                "WHERE artifact_id = ? AND job_id = ?",
+                (artifact_id, job_id),
+            ).fetchone()
+            if selected is None or selected["document_key"] not in {"resume", "cover_letter"}:
+                return []
+            rows = connection.execute(
+                """
+                SELECT * FROM document_artifacts
+                WHERE job_id = ? AND document_key = ? AND source_revision = ?
+                    AND render_status = 'succeeded' AND sha256 IS NOT NULL
+                    AND canonical_path IS NOT NULL
+                ORDER BY media_type, artifact_id
+                """,
+                (job_id, selected["document_key"], selected["source_revision"]),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
     def approve_document_artifact(self, job_id: str, artifact_id: str) -> None:
         with connect_sqlite(self._path) as connection:
+            connection.row_factory = sqlite3.Row
             artifact = connection.execute(
-                "SELECT job_id, document_key, media_type, render_status, sha256 "
+                "SELECT job_id, document_key, source_revision, media_type, render_status, sha256 "
                 "FROM document_artifacts WHERE artifact_id = ?",
                 (artifact_id,),
             ).fetchone()
             if (
                 artifact is None
-                or artifact[0] != job_id
-                or artifact[1] != "resume"
-                or artifact[2] != "application/pdf"
-                or artifact[3] != "succeeded"
-                or not artifact[4]
+                or artifact["job_id"] != job_id
+                or artifact["document_key"] not in {"resume", "cover_letter"}
+                or artifact["media_type"] not in {
+                    "application/pdf",
+                    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                }
+                or artifact["render_status"] != "succeeded"
+                or not artifact["sha256"]
             ):
                 raise ValueError(
-                    "Only a successful artifact registered for this job can be approved"
+                    "Only a successful resume or cover-letter representation registered "
+                    "for this job can be approved"
                 )
+            representations = connection.execute(
+                """
+                SELECT artifact_id, sha256 FROM document_artifacts
+                WHERE job_id = ? AND document_key = ? AND source_revision = ?
+                    AND render_status = 'succeeded' AND sha256 IS NOT NULL
+                    AND canonical_path IS NOT NULL
+                ORDER BY artifact_id
+                """,
+                (job_id, artifact["document_key"], artifact["source_revision"]),
+            ).fetchall()
+            if not representations:
+                raise ValueError("Document revision has no successful representation")
+            manifest = json.dumps(
+                {str(row["artifact_id"]): str(row["sha256"]) for row in representations},
+                separators=(",", ":"),
+                sort_keys=True,
+            )
+            connection.execute(
+                """
+                INSERT INTO document_revision_approvals(
+                    job_id, document_key, source_revision, artifact_manifest_json, approved_by
+                ) VALUES (?, ?, ?, ?, 'user')
+                ON CONFLICT(job_id, document_key) DO UPDATE SET
+                    source_revision = excluded.source_revision,
+                    artifact_manifest_json = excluded.artifact_manifest_json,
+                    approved_by = 'user',
+                    approved_at = CURRENT_TIMESTAMP
+                """,
+                (job_id, artifact["document_key"], artifact["source_revision"], manifest),
+            )
             updated = connection.execute(
                 """
                 UPDATE job_document_state

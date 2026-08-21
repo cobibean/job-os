@@ -22,7 +22,6 @@ from pydantic import (
     field_validator,
     model_validator,
 )
-from pydantic import AfterValidator, BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from .career_profile import (
     PROFILE_ID,
@@ -372,8 +371,8 @@ class ItemProvenance(StrictModel):
         "agent_generated",
         "agent_edit",
         "evidence_import",
+        "evidence_erased",
         "tracer_compatibility",
-        "user_entered", "evidence_import", "evidence_erased", "tracer_compatibility"
     ]
     source_label: str | None = Field(default=None, max_length=500)
     imported_at: TimestampText | None = None
@@ -1513,7 +1512,10 @@ class CareerProfileCompleteStore:
                 connection.execute("DELETE FROM career_profile_items WHERE item_id = ?", (row[0],))
                 continue
             if source_derived:
-                provenance = {"method": "evidence_erased"}
+                provenance = {
+                    "method": "evidence_erased",
+                    "mutation_source": provenance["mutation_source"],
+                }
             connection.execute(
                 "UPDATE career_profile_items SET evidence_ids_json = ?, provenance_json = ? "
                 "WHERE item_id = ?",

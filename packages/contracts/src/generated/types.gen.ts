@@ -459,10 +459,42 @@ export type CareerProfileCompleteCurrent = {
 };
 
 /**
+ * CareerProfileErasureResult
+ */
+export type CareerProfileErasureResult = {
+    /**
+     * Completed
+     */
+    completed?: true;
+    /**
+     * Operation
+     */
+    operation: 'evidence_erased' | 'career_profile_reset';
+};
+
+/**
  * CareerProfileProjection
  */
 export type CareerProfileProjection = {
     work_arrangement: WorkArrangementRecord | null;
+};
+
+/**
+ * CareerProfileResetRequest
+ */
+export type CareerProfileResetRequest = {
+    /**
+     * Confirmation
+     */
+    confirmation: 'RESET_CAREER_PROFILE_PERMANENTLY';
+    /**
+     * Expected Profile Revision
+     */
+    expected_profile_revision: number;
+    /**
+     * Idempotency Key
+     */
+    idempotency_key: string;
 };
 
 /**
@@ -1357,6 +1389,24 @@ export type EducationValue = {
 };
 
 /**
+ * EvidenceErasureRequest
+ */
+export type EvidenceErasureRequest = {
+    /**
+     * Confirmation
+     */
+    confirmation: 'ERASE_EVIDENCE_PERMANENTLY';
+    /**
+     * Expected Profile Revision
+     */
+    expected_profile_revision: number;
+    /**
+     * Idempotency Key
+     */
+    idempotency_key: string;
+};
+
+/**
  * EvidenceExtraction
  */
 export type EvidenceExtraction = {
@@ -1636,7 +1686,7 @@ export type ItemProvenance = {
     /**
      * Method
      */
-    method: 'user_entered' | 'agent_generated' | 'agent_edit' | 'evidence_import' | 'tracer_compatibility';
+    method: 'user_entered' | 'agent_generated' | 'agent_edit' | 'evidence_import' | 'evidence_erased' | 'tracer_compatibility';
     /**
      * Mutation Source
      */
@@ -3567,6 +3617,56 @@ export type CareerProfileEvidenceContentV1CareerProfileEvidenceEvidenceIdContent
     200: unknown;
 };
 
+export type CareerProfileEvidenceEraseV1CareerProfileEvidenceEvidenceIdErasePostData = {
+    body: EvidenceErasureRequest;
+    path: {
+        /**
+         * Evidence Id
+         */
+        evidence_id: string;
+    };
+    query?: never;
+    url: '/v1/career-profile/evidence/{evidence_id}/erase';
+};
+
+export type CareerProfileEvidenceEraseV1CareerProfileEvidenceEvidenceIdErasePostErrors = {
+    /**
+     * Device authentication required
+     */
+    401: ApiErrorResponse;
+    /**
+     * Operation is not permitted
+     */
+    403: ApiErrorResponse;
+    /**
+     * Resource not found
+     */
+    404: ApiErrorResponse;
+    /**
+     * Resource state conflict
+     */
+    409: ApiErrorResponse;
+    /**
+     * Request validation failed
+     */
+    422: ApiErrorResponse;
+    /**
+     * Internal server error
+     */
+    500: ApiErrorResponse;
+};
+
+export type CareerProfileEvidenceEraseV1CareerProfileEvidenceEvidenceIdErasePostError = CareerProfileEvidenceEraseV1CareerProfileEvidenceEvidenceIdErasePostErrors[keyof CareerProfileEvidenceEraseV1CareerProfileEvidenceEvidenceIdErasePostErrors];
+
+export type CareerProfileEvidenceEraseV1CareerProfileEvidenceEvidenceIdErasePostResponses = {
+    /**
+     * Successful Response
+     */
+    200: CareerProfileErasureResult;
+};
+
+export type CareerProfileEvidenceEraseV1CareerProfileEvidenceEvidenceIdErasePostResponse = CareerProfileEvidenceEraseV1CareerProfileEvidenceEvidenceIdErasePostResponses[keyof CareerProfileEvidenceEraseV1CareerProfileEvidenceEvidenceIdErasePostResponses];
+
 export type CareerProfileIntentGrantCreateV1CareerProfileIntentGrantsPostData = {
     body: ProfileIntentGrantRequest;
     path?: never;
@@ -3842,6 +3942,51 @@ export type CareerProfileProposalDecideV1CareerProfileItemsItemIdDecisionPostRes
 };
 
 export type CareerProfileProposalDecideV1CareerProfileItemsItemIdDecisionPostResponse = CareerProfileProposalDecideV1CareerProfileItemsItemIdDecisionPostResponses[keyof CareerProfileProposalDecideV1CareerProfileItemsItemIdDecisionPostResponses];
+
+export type CareerProfileResetV1CareerProfileResetPostData = {
+    body: CareerProfileResetRequest;
+    path?: never;
+    query?: never;
+    url: '/v1/career-profile/reset';
+};
+
+export type CareerProfileResetV1CareerProfileResetPostErrors = {
+    /**
+     * Device authentication required
+     */
+    401: ApiErrorResponse;
+    /**
+     * Operation is not permitted
+     */
+    403: ApiErrorResponse;
+    /**
+     * Resource not found
+     */
+    404: ApiErrorResponse;
+    /**
+     * Resource state conflict
+     */
+    409: ApiErrorResponse;
+    /**
+     * Request validation failed
+     */
+    422: ApiErrorResponse;
+    /**
+     * Internal server error
+     */
+    500: ApiErrorResponse;
+};
+
+export type CareerProfileResetV1CareerProfileResetPostError = CareerProfileResetV1CareerProfileResetPostErrors[keyof CareerProfileResetV1CareerProfileResetPostErrors];
+
+export type CareerProfileResetV1CareerProfileResetPostResponses = {
+    /**
+     * Successful Response
+     */
+    200: CareerProfileErasureResult;
+};
+
+export type CareerProfileResetV1CareerProfileResetPostResponse = CareerProfileResetV1CareerProfileResetPostResponses[keyof CareerProfileResetV1CareerProfileResetPostResponses];
 
 export type CareerProfileSnapshotCreateV1CareerProfileSnapshotsPostData = {
     body: CareerProfileSnapshotRequest;

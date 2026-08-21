@@ -207,7 +207,7 @@ def test_meaningful_partial_records_preserve_unknown_semantics(value, expected_u
     parsed = ProfileItemMutation.model_validate(
         {
             "expected_profile_revision": 0,
-            "idempotency_key": "partial-record-test-0001",
+            "idempotency_key": "partial-record-test-0001",  # gitleaks:allow
             "value": value,
         }
     ).value.model_dump(mode="json")
@@ -239,7 +239,7 @@ def test_empty_partial_records_are_not_meaningful(kind: str):
         ProfileItemMutation.model_validate(
             {
                 "expected_profile_revision": 0,
-                "idempotency_key": "empty-record-test-0001",
+                "idempotency_key": "empty-record-test-0001",  # gitleaks:allow
                 "value": {"kind": kind},
             }
         )
@@ -542,7 +542,7 @@ def test_inactive_historical_evidence_round_trips_but_cannot_be_newly_linked(tmp
         evidence_id=evidence_id,
         command=ProfileItemRemoval(
             expected_profile_revision=1,
-            idempotency_key="remove-historical-evidence-0001",
+            idempotency_key="remove-historical-evidence-0001",  # gitleaks:allow
         ),
     )
     edited = store.upsert_item(
@@ -835,6 +835,7 @@ def test_confirmed_evidence_erasure_removes_managed_bytes_metadata_and_source_hi
     imported = store.import_evidence(
         principal="device:primary-device",
         command=evidence_request(),
+        mutation_source="deterministic_source_mapping",
     )
     evidence = imported.source_evidence[0]
     accepted_item = imported.items[0]
@@ -846,7 +847,7 @@ def test_confirmed_evidence_erasure_removes_managed_bytes_metadata_and_source_hi
             evidence_id=evidence.evidence_id,
             command=EvidenceErasureRequest(
                 expected_profile_revision=0,
-                idempotency_key="erase-stale-synthetic-evidence-0001",
+                idempotency_key="erase-stale-synthetic-evidence-0001",  # gitleaks:allow
                 confirmation="ERASE_EVIDENCE_PERMANENTLY",
             ),
         )
@@ -1016,7 +1017,7 @@ def test_partial_erasure_failure_is_not_reported_and_restart_finishes_pending_wo
             evidence_id=evidence_id,
             command=EvidenceErasureRequest(
                 expected_profile_revision=1,
-                idempotency_key="interrupted-evidence-erasure-0001",
+                idempotency_key="interrupted-evidence-erasure-0001",  # gitleaks:allow
                 confirmation="ERASE_EVIDENCE_PERMANENTLY",
             ),
         )
