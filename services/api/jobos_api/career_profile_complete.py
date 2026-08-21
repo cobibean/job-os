@@ -436,6 +436,8 @@ class ProfileProposalDecision(StrictModel):
 
 
 class ProfileIntentGrantRequest(StrictModel):
+    expected_profile_revision: int = Field(ge=0)
+    idempotency_key: IdempotencyKey
     operation: Literal[
         "item.create",
         "item.update",
@@ -762,8 +764,6 @@ class CareerProfileCompleteStore:
     def create_intent_grant(
         self, *, principal: str, command: ProfileIntentGrantRequest
     ) -> ProfileIntentGrant:
-        grant_id = _opaque_id("cpg_")
-        created_at = _now()
         if command.operation in {"item.create", "item.update"}:
             normalized_payload = ProfileItemMutation.model_validate(command.payload).model_dump(
                 mode="json"
@@ -777,8 +777,28 @@ class CareerProfileCompleteStore:
                 mode="json"
             )
         payload_sha = sha256(_canonical_json(normalized_payload).encode()).hexdigest()
+        request_hash = _request_hash(
+            "intent_grant.create",
+            command.model_dump(mode="json"),
+        )
         with connect_sqlite(self.database) as connection:
             connection.execute("BEGIN IMMEDIATE")
+            ensure_no_pending_erasure(connection)
+            replay = connection.execute(
+                "SELECT request_hash, result_json FROM career_profile_complete_idempotency "
+                "WHERE actor_principal = ? AND idempotency_key = ?",
+                (principal, command.idempotency_key),
+            ).fetchone()
+            if replay is not None:
+                if not secrets.compare_digest(str(replay[0]), request_hash):
+                    connection.rollback()
+                    raise CareerProfileIdempotencyConflict
+                result = ProfileIntentGrant.model_validate_json(str(replay[1]))
+                connection.rollback()
+                return result
+            self._check_head(connection, command.expected_profile_revision)
+            grant_id = _opaque_id("cpg_")
+            created_at = _now()
             connection.execute(
                 "INSERT INTO career_profile_intent_grants("
                 "grant_id, created_by_principal, operation, target_id, payload_sha256, created_at) "
@@ -792,14 +812,26 @@ class CareerProfileCompleteStore:
                     created_at,
                 ),
             )
+            result = ProfileIntentGrant(
+                grant_id=grant_id,
+                operation=command.operation,
+                target_id=command.target_id,
+                payload_sha256=payload_sha,
+                created_at=created_at,
+            )
+            connection.execute(
+                "INSERT INTO career_profile_complete_idempotency("
+                "actor_principal, idempotency_key, request_hash, result_json) "
+                "VALUES (?, ?, ?, ?)",
+                (
+                    principal,
+                    command.idempotency_key,
+                    request_hash,
+                    _canonical_json(result.model_dump(mode="json")),
+                ),
+            )
             connection.commit()
-        return ProfileIntentGrant(
-            grant_id=grant_id,
-            operation=command.operation,
-            target_id=command.target_id,
-            payload_sha256=payload_sha,
-            created_at=created_at,
-        )
+        return result
 
     def upsert_item(
         self,
@@ -1568,6 +1600,7 @@ class CareerProfileCompleteStore:
             "WHERE career_profile_snapshot_id IS NOT NULL"
         )
         for table in (
+            "career_profile_intent_grants",
             "career_profile_complete_idempotency",
             "career_profile_complete_revisions",
             "career_profile_items",

@@ -29,6 +29,7 @@ from jobos_api.career_profile_complete import (
     EvidenceErasureRequest,
     EvidenceImportRequest,
     EvidenceVault,
+    ProfileIntentGrantRequest,
     ProfileItemMutation,
     ProfileItemRemoval,
     ProfileProposalDecision,
@@ -589,12 +590,36 @@ def test_agent_sensitive_edit_requires_one_time_exact_payload_user_grant(tmp_pat
         assert autonomous.json()["items"][0]["review_status"] == "proposed"
 
         exact_command = command | {"expected_profile_revision": 1}
+        grant_command = {
+            "expected_profile_revision": 1,
+            "idempotency_key": "exact-agent-intent-grant-0001",
+            "operation": "item.create",
+            "target_id": None,
+            "payload": exact_command,
+        }
         grant = client.post(
             "/v1/career-profile/intent-grants",
             headers=auth(),
-            json={"operation": "item.create", "target_id": None, "payload": exact_command},
+            json=grant_command,
         )
         assert grant.status_code == 201, grant.text
+        retried_grant = client.post(
+            "/v1/career-profile/intent-grants",
+            headers=auth(),
+            json=grant_command,
+        )
+        assert retried_grant.status_code == 201
+        assert retried_grant.json() == grant.json()
+        conflicting_retry = client.post(
+            "/v1/career-profile/intent-grants",
+            headers=auth(),
+            json=grant_command
+            | {
+                "payload": exact_command
+                | {"value": {"kind": "identity", "professional_name": "Changed"}}
+            },
+        )
+        assert conflicting_retry.status_code == 409
         granted_headers = agent_headers | {"X-JobOS-Intent-Grant": grant.json()["grant_id"]}
 
         mismatched = client.post(
@@ -612,6 +637,16 @@ def test_agent_sensitive_edit_requires_one_time_exact_payload_user_grant(tmp_pat
         assert accepted_item["evidence_ids"] == []
         assert accepted_item["provenance"]["mutation_source"] == ("authenticated_user_instruction")
         assert accepted_item["provenance"]["method"] == "agent_edit"
+
+        stale_revision_grant = client.post(
+            "/v1/career-profile/intent-grants",
+            headers=auth(),
+            json=grant_command
+            | {
+                "idempotency_key": "stale-revision-intent-grant-0001",
+            },
+        )
+        assert stale_revision_grant.status_code == 409
 
         authority_downgrade_replay = client.post(
             "/v1/career-profile/items", headers=agent_headers, json=exact_command
@@ -940,6 +975,22 @@ def test_full_profile_reset_erases_profile_proposals_snapshots_history_and_all_v
         request=CareerProfileSnapshotRequest(),
     )
     assert snapshot.projection.work_arrangement is not None
+    stale_agent_command = ProfileItemMutation.model_validate(
+        {
+            "expected_profile_revision": 0,
+            "idempotency_key": "stale-post-reset-agent-create-0001",
+            "value": {"kind": "skill", "name": "(FAKE) stale authority sentinel"},
+        }
+    )
+    stale_grant = store.create_intent_grant(
+        principal="device:primary-device",
+        command=ProfileIntentGrantRequest(
+            expected_profile_revision=2,
+            idempotency_key="stale-reset-intent-grant-0001",
+            operation="item.create",
+            payload=stale_agent_command.model_dump(mode="json"),
+        ),
+    )
 
     result = store.reset_profile(
         principal="device:primary-device",
@@ -960,6 +1011,7 @@ def test_full_profile_reset_erases_profile_proposals_snapshots_history_and_all_v
     with sqlite3.connect(tmp_path / "state/jobos.db") as connection:
         for table in (
             "career_profile_complete_idempotency",
+            "career_profile_intent_grants",
             "career_profile_complete_revisions",
             "career_profile_items",
             "career_profile_evidence",
@@ -980,6 +1032,14 @@ def test_full_profile_reset_erases_profile_proposals_snapshots_history_and_all_v
         snapshot.snapshot_id,
     ):
         assert sentinel not in database_dump
+
+    with pytest.raises(CareerProfileValueError, match="Intent grant is missing"):
+        store.upsert_item(
+            principal="agent:trusted-local-mcp",
+            command=stale_agent_command,
+            mutation_source="authenticated_user_instruction",
+            intent_grant_id=stale_grant.grant_id,
+        )
 
     restarted = CareerProfileCompleteStore(
         tmp_path / "state/jobos.db", tmp_path / "evidence-vault"
@@ -1241,7 +1301,14 @@ def test_complete_route_contracts_advertise_runtime_auth_not_found_and_conflict_
 
     expected = {
         ("/v1/career-profile", "get"): {"401", "403", "404", "500"},
-        ("/v1/career-profile/intent-grants", "post"): {"401", "403", "404", "422", "500"},
+        ("/v1/career-profile/intent-grants", "post"): {
+            "401",
+            "403",
+            "404",
+            "409",
+            "422",
+            "500",
+        },
         ("/v1/career-profile/items", "post"): {"401", "403", "404", "409", "422", "500"},
         ("/v1/career-profile/items/{item_id}", "put"): {
             "401",

@@ -4433,6 +4433,18 @@
       "ProfileIntentGrantRequest": {
         "additionalProperties": false,
         "properties": {
+          "expected_profile_revision": {
+            "minimum": 0.0,
+            "title": "Expected Profile Revision",
+            "type": "integer"
+          },
+          "idempotency_key": {
+            "maxLength": 200,
+            "minLength": 8,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+            "title": "Idempotency Key",
+            "type": "string"
+          },
           "operation": {
             "enum": [
               "item.create",
@@ -4464,6 +4476,8 @@
           }
         },
         "required": [
+          "expected_profile_revision",
+          "idempotency_key",
           "operation",
           "payload"
         ],
@@ -7333,6 +7347,16 @@
               }
             },
             "description": "Resource not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Revision or idempotency conflict"
           },
           "422": {
             "content": {

@@ -2282,6 +2282,14 @@ export type ProfileIntentGrant = {
  */
 export type ProfileIntentGrantRequest = {
     /**
+     * Expected Profile Revision
+     */
+    expected_profile_revision: number;
+    /**
+     * Idempotency Key
+     */
+    idempotency_key: string;
+    /**
      * Operation
      */
     operation: 'item.create' | 'item.update' | 'item.remove' | 'evidence.remove' | 'proposal.accept' | 'proposal.reject';
@@ -3687,6 +3695,10 @@ export type CareerProfileIntentGrantCreateV1CareerProfileIntentGrantsPostErrors 
      * Resource not found
      */
     404: ApiErrorResponse;
+    /**
+     * Revision or idempotency conflict
+     */
+    409: ApiErrorResponse;
     /**
      * Request validation failed
      */

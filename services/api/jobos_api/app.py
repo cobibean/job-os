@@ -1323,15 +1323,24 @@ def create_app(
         "/v1/career-profile/intent-grants",
         tags=["career-profile"],
         status_code=201,
+        responses={409: {"description": "Revision or idempotency conflict"}},
     )
     def career_profile_intent_grant_create(
         command: ProfileIntentGrantRequest,
         identity: Annotated[DeviceIdentity, Depends(authenticated_device)],
     ) -> ProfileIntentGrant:
         require_career_profile_owner(identity)
-        return complete_career_profile.create_intent_grant(
-            principal=principal_for_device(identity.device_id), command=command
-        )
+        try:
+            return complete_career_profile.create_intent_grant(
+                principal=principal_for_device(identity.device_id), command=command
+            )
+        except (
+            CareerProfileRevisionConflict,
+            CareerProfileIdempotencyConflict,
+            CareerProfileErasureInProgress,
+            CareerProfileValueError,
+        ) as error:
+            raise complete_profile_conflict(error) from error
 
     @app.post(
         "/v1/career-profile/items",
