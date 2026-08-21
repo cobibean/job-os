@@ -367,7 +367,27 @@ export class BrowserManager {
         return { index, role: (element.getAttribute('role') || element.tagName).toLowerCase().slice(0, 40),
           name, disabled: Boolean(element.disabled || element.getAttribute('aria-disabled') === 'true'), type, href };
       }).filter(Boolean);
-      const pageText = (document.body?.innerText || '').trim();
+      const frameTexts = [];
+      const seenDocuments = new Set();
+      const seenTexts = new Set();
+      const collectFrameText = (frameDocument) => {
+        if (!frameDocument || seenDocuments.has(frameDocument)) return;
+        seenDocuments.add(frameDocument);
+        const frameText = (frameDocument.body?.innerText || '').trim();
+        if (frameText && !seenTexts.has(frameText)) {
+          seenTexts.add(frameText);
+          frameTexts.push(frameText);
+        }
+        for (const frame of frameDocument.querySelectorAll('iframe,frame')) {
+          try {
+            collectFrameText(frame.contentDocument);
+          } catch {
+            // Cross-origin frames remain unreadable by design.
+          }
+        }
+      };
+      collectFrameText(document);
+      const pageText = frameTexts.join('\\n\\n');
       const viewportHeight = Math.max(1, window.innerHeight);
       const scrollHeight = Math.max(viewportHeight, document.documentElement.scrollHeight, document.body?.scrollHeight || 0);
       const textStart = Math.min(${requestedTextStart}, pageText.length);

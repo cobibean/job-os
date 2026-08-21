@@ -701,12 +701,12 @@ async def test_mcp_server_exposes_public_v1_parity_tools_while_retaining_job_too
         assert conversation["maxLength"] == 133
         assert conversation["pattern"] == "^conv_[A-Za-z0-9_-]{1,128}$"
     snapshot_schema = tools_by_name["browser_snapshot"].inputSchema
-    assert "text_start" in snapshot_schema["required"]
-    assert "text_length" in snapshot_schema["required"]
-    assert "include_targets" in snapshot_schema["required"]
-    assert "default" not in snapshot_schema["properties"]["text_start"]
-    assert "default" not in snapshot_schema["properties"]["text_length"]
-    assert "default" not in snapshot_schema["properties"]["include_targets"]
+    assert "text_start" not in snapshot_schema["required"]
+    assert "text_length" not in snapshot_schema["required"]
+    assert "include_targets" not in snapshot_schema["required"]
+    assert snapshot_schema["properties"]["text_start"]["default"] == 0
+    assert snapshot_schema["properties"]["text_length"]["default"] == 12_000
+    assert snapshot_schema["properties"]["include_targets"]["default"] is True
     create_schema = tools_by_name["browser_tab_create"].inputSchema
     assert create_schema["properties"]["activate"]["default"] is True
 

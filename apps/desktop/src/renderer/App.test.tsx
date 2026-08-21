@@ -54,8 +54,14 @@ test('browser save navigation only accepts the original listing or its slug-matc
 })
 
 test('browser save failures preserve the exact failed stage instead of reporting tool unavailable', () => {
-  expect(parseAgentJobSaveError('JOBOS_SAVE_RESULT:ERROR_LISTING_COVERAGE_INCOMPLETE')).toBe(
+  expect(parseAgentJobSaveError('JOBOS_SAVE_ERROR:ERROR_LISTING_COVERAGE_INCOMPLETE')).toBe(
     'JobOS could not confirm the complete job listing. No job was saved.'
+  )
+  expect(parseAgentJobSaveError('JOBOS_SAVE_ERROR:ERROR_LISTING_CONTENT_NOT_EXTRACTABLE')).toBe(
+    'JobOS recognized this as a job listing but could not read its description. Paste the listing text into this save session to continue.'
+  )
+  expect(parseAgentJobSaveError('JOBOS_SAVE_ERROR:ERROR_JOB_CREATE_FAILED')).toBe(
+    'JobOS read the listing but could not save the job. You can retry.'
   )
   expect(parseAgentJobSaveError('JOBOS_SAVE_RESULT:ERROR_JOB_CREATE_FAILED')).toBe(
     'JobOS read the listing but could not save the job. You can retry.'
@@ -457,6 +463,7 @@ test('saving dispatches job-hunter and reconciles a failure emitted before send 
   expect(savePrompt).toContain('ERROR_SOURCE_TAB_RECOVERY_FAILED')
   expect(savePrompt).toContain('ERROR_BROWSER_SNAPSHOT_FAILED')
   expect(savePrompt).toContain('ERROR_PAGE_NOT_JOB_LISTING')
+  expect(savePrompt).toContain('ERROR_LISTING_CONTENT_NOT_EXTRACTABLE')
   expect(savePrompt).toContain('ERROR_LISTING_COVERAGE_INCOMPLETE')
   expect(savePrompt).toContain('ERROR_JOB_CREATE_FAILED')
   expect(savePrompt).toContain('ERROR_TAB_ASSOCIATION_FAILED')
@@ -465,6 +472,7 @@ test('saving dispatches job-hunter and reconciles a failure emitted before send 
   expect(savePrompt).not.toContain('concise role description of at most 300 characters')
   expect(savePrompt).not.toContain('Use at most four snapshots')
   expect(savePrompt).toContain('JOBOS_SAVE_RESULT:')
+  expect(savePrompt).toContain('JOBOS_SAVE_ERROR:')
   expect(savePrompt.match(/Call mcp__jobos__job_create_from_browser exactly once/g)).toHaveLength(1)
   expect(savePrompt.match(/call mcp__jobos__browser_tab_associate exactly once/g)).toHaveLength(1)
   expect(savePrompt).toContain('Never call mcp__jobos__browser_navigate')

@@ -791,15 +791,16 @@ def create_server(
     async def browser_snapshot(
         conversation_id: ConversationId,
         tab_id: str,
-        text_start: int,
-        text_length: int,
-        include_targets: bool,
+        text_start: int = 0,
+        text_length: int = 12_000,
+        include_targets: bool = True,
         idempotency_key: str | None = None,
     ) -> dict[str, Any]:
         """Read one bounded page-text segment.
 
-        Always pass every pagination argument and use the returned next_text_start
-        for the next call.
+        Pagination defaults to the first 12,000-character segment with targets.
+        For later segments, pass every pagination argument and use the returned
+        next_text_start.
         """
         return await browser(
             conversation_id,
