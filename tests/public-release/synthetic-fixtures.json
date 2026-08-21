@@ -205,6 +205,54 @@
         "trackedSource": "docs/media/source/capture-media.mjs",
         "method": "Captured from the production renderer, privacy-checked, metadata-stripped, and checksum-pinned by the repository workflow."
       }
+    },
+    {
+      "path": "docs/acceptance/career-profile-first-slice/packaged-save.png",
+      "sha256": "da210efc8ad45917550070b89fedbcbb79f020d53309903efba42f4da50087ef",
+      "classification": "project-asset",
+      "publication": "keep",
+      "source": "Packaged JobOS capture using a disposable visibly FAKE staging profile",
+      "purpose": "Issue #53 Career Profile save acceptance",
+      "provenance": {
+        "trackedSource": "docs/acceptance/career-profile-first-slice/capture.mjs",
+        "method": "Captured from the packaged renderer, visually inspected, metadata-stripped, and checksum-pinned."
+      }
+    },
+    {
+      "path": "docs/acceptance/career-profile-first-slice/packaged-after-restart.png",
+      "sha256": "6070a9f5a588b744c65cef33cd1862515a06a0378b1d48cb775e1b9aa1953047",
+      "classification": "project-asset",
+      "publication": "keep",
+      "source": "Packaged JobOS capture using a disposable visibly FAKE staging profile",
+      "purpose": "Issue #53 Career Profile restart-persistence acceptance",
+      "provenance": {
+        "trackedSource": "docs/acceptance/career-profile-first-slice/capture.mjs",
+        "method": "Captured after restarting the packaged app and API, visually inspected, metadata-stripped, and checksum-pinned."
+      }
+    },
+    {
+      "path": "docs/acceptance/career-profile-first-slice/packaged-history.png",
+      "sha256": "1ce84cf2e2b3df7b6dac6a96a646d9c30e2d1d4ec412248b897fb504087bcae1",
+      "classification": "project-asset",
+      "publication": "keep",
+      "source": "Packaged JobOS capture using a disposable visibly FAKE staging profile",
+      "purpose": "Issue #53 Career Profile immutable-history acceptance",
+      "provenance": {
+        "trackedSource": "docs/acceptance/career-profile-first-slice/capture.mjs",
+        "method": "Captured from the packaged renderer, visually inspected, metadata-stripped, and checksum-pinned."
+      }
+    },
+    {
+      "path": "docs/acceptance/career-profile-first-slice/packaged-undo.png",
+      "sha256": "69c47165a9acf7de2164123bbb6c16a474ced748876b2be4fdd7c266e4466ae8",
+      "classification": "project-asset",
+      "publication": "keep",
+      "source": "Packaged JobOS capture using a disposable visibly FAKE staging profile",
+      "purpose": "Issue #53 Career Profile Undo acceptance",
+      "provenance": {
+        "trackedSource": "docs/acceptance/career-profile-first-slice/capture.mjs",
+        "method": "Captured after using Undo in the packaged renderer, visually inspected, metadata-stripped, and checksum-pinned."
+      }
     }
   ]
 }
