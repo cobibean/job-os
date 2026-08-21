@@ -128,8 +128,12 @@ The model must allow later typed records without creating generic unvalidated JS
 - Idempotent replay returns the original result and does not create another revision.
 - A stale base revision fails closed and never overwrites newer data.
 - Undo writes a compensating revision; it never rewrites or removes history.
-- Prior values and removed active entries remain indefinitely in local history.
-- V1 does not permanently purge individual historical values or Source Evidence.
+- Prior values and removed active entries remain in local history during ordinary
+  edit/remove/Undo flows.
+- Separately confirmed owner erasure is the only exception: one Evidence object can
+  be permanently erased, and the complete local Career Profile can be reset.
+  Destructive operations remove recoverable in-scope history instead of writing a
+  compensating revision.
 
 ### 4.4 Snapshot rules
 
@@ -269,6 +273,11 @@ These controls protect factual accuracy and provenance. Contact and identity inf
 - Exact structured facts may import directly when provenance is preserved.
 - Extracted, inferred, ambiguous, or conflicting facts remain proposals until reviewed.
 - Removing Evidence preserves the status and content of user-authored or user-approved entries; it only changes the availability of that supporting source.
+- Ordinary Evidence removal remains reversible and preserves bytes/history.
+  **Permanently erase Evidence** is a separately named owner operation with exact
+  confirmation; it removes the managed bytes, metadata, source-derived unaccepted
+  proposals, and recoverable references/history for that source while retaining
+  accepted profile information without the source link.
 - Imported content is untrusted input and cannot override higher-level instructions, policy, or tool permissions.
 
 ### 8.2 Local data and audit
@@ -288,6 +297,16 @@ These controls protect factual accuracy and provenance. Contact and identity inf
 - Export excludes prior revision history and agent settings.
 - Import restores current data as a new baseline; it cannot reconstruct the old timeline.
 - Losing local JobOS data can permanently lose revision history. This is an accepted v1 limitation.
+- **Reset Career Profile permanently** is an exact-confirmation owner operation that
+  removes current profile data, proposals, Evidence, snapshots, sensitive revision
+  and idempotency payloads, and Career Profile audit history. It does not reset jobs,
+  documents, generated artifacts, app settings, conversations, or credentials.
+- Erasure covers JobOS-managed local storage only. User-created exports, manual
+  copies, system/cloud backups, screenshots, and copies already shared externally
+  remain outside JobOS control and must be deleted separately.
+- Destructive operations journal intent, fail without a success response on partial
+  failure, recover pending work at startup, durably sync vault deletion, and use
+  SQLite secure-delete/checkpoint/compaction before completion.
 
 ## 9. Career Profile experience
 
@@ -449,6 +468,18 @@ Using a packaged app and fresh disposable profile:
 - Legacy writes fail closed.
 - Installed UI, imports, edits, proposals, history/Undo, snapshots, export, and agent flows survive restart and real workflow verification.
 - Fresh explicit cutover approval is recorded before live mutation.
+- On a disposable synthetic candidate, permanently erase one active and one
+  ordinarily removed Evidence object, restart, and prove their managed bytes,
+  metadata, source references, and sensitive source history cannot be read back.
+- On a separate disposable synthetic candidate, permanently reset the complete
+  Career Profile, restart, and prove current data, proposals, all Evidence bytes,
+  snapshots, revision/idempotency payloads, and sensitive audit history cannot be
+  read back from the filesystem or SQLite database.
+- Inject a partial destructive-operation failure and prove no success is reported;
+  startup recovery must finish the journal or continue failing honestly.
+- Record the local-erasure/external-copy limitation in the reviewed #58 evidence.
+  These proofs are acceptance prerequisites only and do not activate #58 or replace
+  its fresh explicit cutover approval.
 
 ## 14. Explicit non-goals
 
@@ -456,7 +487,8 @@ Using a packaged app and fresh disposable profile:
 - Editing `SOUL.md`, `AGENTS.md`, skills, policy, transcripts, credentials, browser state, or generated document bytes as Career Profile data.
 - Agent-specific fact forks or inheritance in v1.
 - Bidirectional synchronization, shadow authority, or compatibility profile files.
-- Automatic backup, full revision-history export, or permanent historical purge in v1.
+- Automatic backup or full revision-history export. Permanent purge exists only
+  through the two narrowly scoped, exact-confirmation owner erasure operations.
 - Automatic generated-artifact regeneration or stale warnings.
 - Activating complete-profile projection, migration, or live authority as part of the semantic-contract work in Issue #69.
 - Review Brief behavior beyond consuming this foundation in a later separately specified feature.

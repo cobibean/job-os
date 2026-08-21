@@ -27,9 +27,11 @@ from pydantic import AfterValidator, BaseModel, ConfigDict, Field, field_validat
 from .career_profile import (
     PROFILE_ID,
     WORK_ARRANGEMENT_NAMESPACE,
+    CareerProfileErasureInProgress,
     CareerProfileIdempotencyConflict,
     CareerProfileRevisionConflict,
     IdempotencyKey,
+    ensure_no_pending_erasure,
 )
 from .sqlite_connection import connect_sqlite
 
@@ -371,6 +373,7 @@ class ItemProvenance(StrictModel):
         "agent_edit",
         "evidence_import",
         "tracer_compatibility",
+        "user_entered", "evidence_import", "evidence_erased", "tracer_compatibility"
     ]
     source_label: str | None = Field(default=None, max_length=500)
     imported_at: TimestampText | None = None
@@ -475,6 +478,21 @@ class ProfileIntentGrant(StrictModel):
     target_id: str | None
     payload_sha256: Sha256Digest
     created_at: TimestampText
+class EvidenceErasureRequest(StrictModel):
+    expected_profile_revision: int = Field(ge=0)
+    idempotency_key: IdempotencyKey
+    confirmation: Literal["ERASE_EVIDENCE_PERMANENTLY"]
+
+
+class CareerProfileResetRequest(StrictModel):
+    expected_profile_revision: int = Field(ge=0)
+    idempotency_key: IdempotencyKey
+    confirmation: Literal["RESET_CAREER_PROFILE_PERMANENTLY"]
+
+
+class CareerProfileErasureResult(StrictModel):
+    operation: Literal["evidence_erased", "career_profile_reset"]
+    completed: Literal[True] = True
 
 
 class EvidenceExtraction(StrictModel):
@@ -702,6 +720,26 @@ class EvidenceVault:
             finally:
                 os.close(root_descriptor)
 
+    def erase(self, storage_name: str) -> None:
+        """Permanently unlink one managed regular file and durably sync the vault."""
+        self._validate_storage_name(storage_name)
+        root_descriptor = self._open_root()
+        try:
+            try:
+                metadata = os.stat(storage_name, dir_fd=root_descriptor, follow_symlinks=False)
+            except FileNotFoundError:
+                return
+            if not stat.S_ISREG(metadata.st_mode):
+                raise CareerProfileEvidencePathError("Evidence to erase must be a regular file")
+            os.unlink(storage_name, dir_fd=root_descriptor)
+            os.fsync(root_descriptor)
+        except OSError as error:
+            raise CareerProfileEvidencePathError(
+                "Evidence could not be permanently erased from its managed vault"
+            ) from error
+        finally:
+            os.close(root_descriptor)
+
 
 class CareerProfileCompleteStore:
     def __init__(self, database: Path, evidence_root: Path) -> None:
@@ -716,6 +754,7 @@ class CareerProfileCompleteStore:
                 "INSERT OR IGNORE INTO career_profiles(profile_id) VALUES (?)", (PROFILE_ID,)
             )
             connection.commit()
+        self.recover_pending_erasures()
 
     def current(self) -> CareerProfileCompleteCurrent:
         with connect_sqlite(f"file:{self.database}?mode=ro", uri=True) as connection:
@@ -1222,6 +1261,335 @@ class CareerProfileCompleteStore:
             except Exception:
                 connection.rollback()
                 raise
+    def erase_evidence(
+        self,
+        *,
+        principal: str,
+        evidence_id: str,
+        command: EvidenceErasureRequest,
+    ) -> CareerProfileErasureResult:
+        request_hash = _request_hash(
+            "evidence.erase",
+            command.model_dump(mode="json") | {"evidence_id": evidence_id},
+        )
+        replay = self._erasure_receipt(principal, command.idempotency_key, request_hash)
+        if replay is not None:
+            return replay
+        operation_id: str
+        with connect_sqlite(self.database) as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            try:
+                pending = connection.execute(
+                    "SELECT operation_id, actor_principal, idempotency_key, request_hash "
+                    "FROM career_profile_erasure_journal LIMIT 1"
+                ).fetchone()
+                if pending is not None:
+                    if (
+                        str(pending[1]) != principal
+                        or str(pending[2]) != command.idempotency_key
+                        or not secrets.compare_digest(str(pending[3]), request_hash)
+                    ):
+                        raise CareerProfileErasureInProgress(
+                            "A Career Profile erasure is already being recovered"
+                        )
+                    operation_id = str(pending[0])
+                else:
+                    self._check_head(connection, command.expected_profile_revision)
+                    evidence = connection.execute(
+                        "SELECT storage_name FROM career_profile_evidence WHERE evidence_id = ?",
+                        (evidence_id,),
+                    ).fetchone()
+                    if evidence is None:
+                        raise CareerProfileEvidenceNotFound
+                    operation_id = _opaque_id("cpx_")
+                    connection.execute(
+                        "INSERT INTO career_profile_erasure_journal("
+                        "operation_id, operation, actor_principal, idempotency_key, request_hash, "
+                        "target_evidence_id, storage_names_json) "
+                        "VALUES (?, 'evidence.erase', ?, ?, ?, ?, ?)",
+                        (
+                            operation_id,
+                            principal,
+                            command.idempotency_key,
+                            request_hash,
+                            evidence_id,
+                            _canonical_json([str(evidence[0])]),
+                        ),
+                    )
+                connection.commit()
+            except Exception:
+                connection.rollback()
+                raise
+        return self._complete_erasure(operation_id)
+
+    def reset_profile(
+        self,
+        *,
+        principal: str,
+        command: CareerProfileResetRequest,
+    ) -> CareerProfileErasureResult:
+        request_hash = _request_hash("profile.reset", command.model_dump(mode="json"))
+        replay = self._erasure_receipt(principal, command.idempotency_key, request_hash)
+        if replay is not None:
+            return replay
+        operation_id: str
+        with connect_sqlite(self.database) as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            try:
+                pending = connection.execute(
+                    "SELECT operation_id, actor_principal, idempotency_key, request_hash "
+                    "FROM career_profile_erasure_journal LIMIT 1"
+                ).fetchone()
+                if pending is not None:
+                    if (
+                        str(pending[1]) != principal
+                        or str(pending[2]) != command.idempotency_key
+                        or not secrets.compare_digest(str(pending[3]), request_hash)
+                    ):
+                        raise CareerProfileErasureInProgress(
+                            "A Career Profile erasure is already being recovered"
+                        )
+                    operation_id = str(pending[0])
+                else:
+                    self._check_head(connection, command.expected_profile_revision)
+                    storage_names = [
+                        str(row[0])
+                        for row in connection.execute(
+                            "SELECT storage_name FROM career_profile_evidence ORDER BY evidence_id"
+                        ).fetchall()
+                    ]
+                    operation_id = _opaque_id("cpx_")
+                    connection.execute(
+                        "INSERT INTO career_profile_erasure_journal("
+                        "operation_id, operation, actor_principal, idempotency_key, request_hash, "
+                        "target_evidence_id, storage_names_json) "
+                        "VALUES (?, 'profile.reset', ?, ?, ?, NULL, ?)",
+                        (
+                            operation_id,
+                            principal,
+                            command.idempotency_key,
+                            request_hash,
+                            _canonical_json(storage_names),
+                        ),
+                    )
+                connection.commit()
+            except Exception:
+                connection.rollback()
+                raise
+        return self._complete_erasure(operation_id)
+
+    def recover_pending_erasures(self) -> None:
+        with connect_sqlite(f"file:{self.database}?mode=ro", uri=True) as connection:
+            rows = connection.execute(
+                "SELECT operation_id FROM career_profile_erasure_journal ORDER BY created_at"
+            ).fetchall()
+        for row in rows:
+            self._complete_erasure(str(row[0]))
+
+    def _erasure_receipt(
+        self, principal: str, idempotency_key: str, request_hash: str
+    ) -> CareerProfileErasureResult | None:
+        with connect_sqlite(f"file:{self.database}?mode=ro", uri=True) as connection:
+            row = connection.execute(
+                "SELECT request_hash, result_json FROM career_profile_erasure_receipts "
+                "WHERE actor_principal = ? AND idempotency_key = ?",
+                (principal, idempotency_key),
+            ).fetchone()
+        if row is None:
+            return None
+        if not secrets.compare_digest(str(row[0]), request_hash):
+            raise CareerProfileIdempotencyConflict
+        return CareerProfileErasureResult.model_validate_json(str(row[1]))
+
+    def _complete_erasure(self, operation_id: str) -> CareerProfileErasureResult:
+        with connect_sqlite(f"file:{self.database}?mode=ro", uri=True) as connection:
+            row = connection.execute(
+                "SELECT operation, actor_principal, idempotency_key, request_hash, "
+                "target_evidence_id, storage_names_json, phase "
+                "FROM career_profile_erasure_journal WHERE operation_id = ?",
+                (operation_id,),
+            ).fetchone()
+        if row is None:
+            raise RuntimeError("Career Profile erasure journal entry was not found")
+        operation = str(row[0])
+        principal = str(row[1])
+        idempotency_key = str(row[2])
+        request_hash = str(row[3])
+        evidence_id = str(row[4]) if row[4] is not None else None
+        storage_names = [str(value) for value in json.loads(str(row[5]))]
+        phase = str(row[6])
+        if operation not in {"evidence.erase", "profile.reset"}:
+            raise RuntimeError("Career Profile erasure journal operation is invalid")
+        result = CareerProfileErasureResult(
+            operation="evidence_erased" if operation == "evidence.erase" else "career_profile_reset"
+        )
+
+        if phase == "prepared":
+            for storage_name in storage_names:
+                self.vault.erase(storage_name)
+
+            with connect_sqlite(self.database) as connection:
+                connection.execute("PRAGMA secure_delete = ON")
+                connection.execute("BEGIN IMMEDIATE")
+                try:
+                    if operation == "evidence.erase":
+                        if evidence_id is None:
+                            raise RuntimeError("Evidence erasure journal lost its target")
+                        self._purge_evidence_database_scope(connection, evidence_id)
+                    elif operation == "profile.reset":
+                        self._purge_complete_profile_database_scope(connection)
+                    else:
+                        raise RuntimeError("Career Profile erasure journal operation is invalid")
+                    # Scrub source identifiers before the durable hardening phase. The
+                    # remaining marker is sufficient to retry compaction after a crash.
+                    connection.execute(
+                        "UPDATE career_profile_erasure_journal SET phase = 'purged', "
+                        "target_evidence_id = NULL, storage_names_json = '[]' "
+                        "WHERE operation_id = ?",
+                        (operation_id,),
+                    )
+                    connection.commit()
+                except Exception:
+                    connection.rollback()
+                    raise
+        elif phase != "purged":
+            raise RuntimeError("Career Profile erasure journal phase is invalid")
+
+        self._harden_database()
+        with connect_sqlite(self.database) as connection:
+            connection.execute("PRAGMA secure_delete = ON")
+            connection.execute("BEGIN IMMEDIATE")
+            connection.execute(
+                "INSERT OR REPLACE INTO career_profile_erasure_receipts("
+                "actor_principal, idempotency_key, request_hash, result_json) VALUES (?, ?, ?, ?)",
+                (
+                    principal,
+                    idempotency_key,
+                    request_hash,
+                    _canonical_json(result.model_dump(mode="json")),
+                ),
+            )
+            connection.execute(
+                "DELETE FROM career_profile_erasure_journal WHERE operation_id = ?",
+                (operation_id,),
+            )
+            connection.commit()
+        return result
+
+    def _purge_evidence_database_scope(
+        self, connection: sqlite3.Connection, evidence_id: str
+    ) -> None:
+        removed_revision_ids: list[str] = []
+        for row in connection.execute(
+            "SELECT revision_id, evidence_id, before_json, after_json "
+            "FROM career_profile_complete_revisions"
+        ).fetchall():
+            if str(row[1]) == evidence_id or any(
+                self._json_contains_reference(value, evidence_id) for value in row[2:]
+            ):
+                removed_revision_ids.append(str(row[0]))
+        if removed_revision_ids:
+            placeholders = ",".join("?" for _ in removed_revision_ids)
+            connection.execute(
+                f"DELETE FROM career_profile_audit_events WHERE revision_id IN ({placeholders})",
+                removed_revision_ids,
+            )
+            connection.execute(
+                f"DELETE FROM career_profile_complete_revisions "
+                f"WHERE revision_id IN ({placeholders})",
+                removed_revision_ids,
+            )
+
+        for row in connection.execute(
+            "SELECT item_id, provenance_json, review_status, evidence_ids_json, active "
+            "FROM career_profile_items"
+        ).fetchall():
+            evidence_ids = json.loads(str(row[3]))
+            if evidence_id not in evidence_ids:
+                continue
+            provenance = json.loads(str(row[1]))
+            source_derived = provenance.get("method") == "evidence_import"
+            if source_derived and (not bool(row[4]) or str(row[2]) != "accepted"):
+                connection.execute("DELETE FROM career_profile_items WHERE item_id = ?", (row[0],))
+                continue
+            if source_derived:
+                provenance = {"method": "evidence_erased"}
+            connection.execute(
+                "UPDATE career_profile_items SET evidence_ids_json = ?, provenance_json = ? "
+                "WHERE item_id = ?",
+                (
+                    _canonical_json([value for value in evidence_ids if value != evidence_id]),
+                    _canonical_json(provenance),
+                    row[0],
+                ),
+            )
+
+        for row in connection.execute(
+            "SELECT actor_principal, idempotency_key, result_json "
+            "FROM career_profile_complete_idempotency"
+        ).fetchall():
+            if self._json_contains_reference(row[2], evidence_id):
+                connection.execute(
+                    "DELETE FROM career_profile_complete_idempotency "
+                    "WHERE actor_principal = ? AND idempotency_key = ?",
+                    (row[0], row[1]),
+                )
+        connection.execute(
+            "DELETE FROM career_profile_evidence WHERE evidence_id = ?", (evidence_id,)
+        )
+
+    @staticmethod
+    def _json_contains_reference(value: object, reference: str) -> bool:
+        if value is None:
+            return False
+        try:
+            parsed = json.loads(str(value))
+        except (TypeError, ValueError):
+            return False
+
+        def contains(candidate: object) -> bool:
+            if isinstance(candidate, str):
+                return secrets.compare_digest(candidate, reference)
+            if isinstance(candidate, list):
+                return any(contains(item) for item in candidate)
+            if isinstance(candidate, dict):
+                return any(contains(item) for item in candidate.values())
+            return False
+
+        return contains(parsed)
+
+    @staticmethod
+    def _purge_complete_profile_database_scope(connection: sqlite3.Connection) -> None:
+        connection.execute(
+            "UPDATE conversation_turns SET career_profile_snapshot_id = NULL, "
+            "career_profile_revision = NULL, career_profile_content_hash = NULL "
+            "WHERE career_profile_snapshot_id IS NOT NULL"
+        )
+        for table in (
+            "career_profile_complete_idempotency",
+            "career_profile_complete_revisions",
+            "career_profile_items",
+            "career_profile_evidence",
+            "career_profile_idempotency",
+            "career_profile_revisions",
+            "career_profile_records",
+            "career_profile_snapshots",
+            "career_profile_audit_events",
+            "career_profile_erasure_receipts",
+        ):
+            connection.execute(f"DELETE FROM {table}")
+        connection.execute(
+            "UPDATE career_profiles SET head_revision = 0, updated_at = CURRENT_TIMESTAMP "
+            "WHERE profile_id = ?",
+            (PROFILE_ID,),
+        )
+
+    def _harden_database(self) -> None:
+        with connect_sqlite(self.database) as connection:
+            connection.execute("PRAGMA secure_delete = ON")
+            connection.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchall()
+            connection.execute("VACUUM")
+            connection.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchall()
 
     def _mutate_item(
         self,
@@ -1416,6 +1784,7 @@ class CareerProfileCompleteStore:
         return int(row[0])
 
     def _check_head(self, connection: sqlite3.Connection, expected: int) -> int:
+        ensure_no_pending_erasure(connection)
         head = self._head(connection)
         if head != expected:
             raise CareerProfileRevisionConflict(head)
@@ -1448,6 +1817,7 @@ class CareerProfileCompleteStore:
         idempotency_key: str,
         request_hash: str,
     ) -> CareerProfileCompleteCurrent | None:
+        ensure_no_pending_erasure(connection)
         row = connection.execute(
             "SELECT request_hash, result_json FROM career_profile_complete_idempotency "
             "WHERE actor_principal = ? AND idempotency_key = ?",

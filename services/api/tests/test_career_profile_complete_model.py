@@ -11,12 +11,22 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 from jobos_api.app import create_app
-from jobos_api.career_profile import CareerProfileStore, WorkArrangementMutation
+from jobos_api.career_profile import (
+    CareerProfileIdempotencyConflict,
+    CareerProfileRevisionConflict,
+    CareerProfileSnapshotRequest,
+    CareerProfileStore,
+    WorkArrangementMutation,
+)
 from jobos_api.career_profile_complete import (
     CareerProfileCompleteStore,
+    CareerProfileErasureInProgress,
     CareerProfileEvidenceIntegrityError,
+    CareerProfileEvidenceNotFound,
     CareerProfileEvidencePathError,
+    CareerProfileResetRequest,
     CareerProfileValueError,
+    EvidenceErasureRequest,
     EvidenceImportRequest,
     EvidenceVault,
     ProfileItemMutation,
@@ -818,6 +828,237 @@ def test_audit_events_do_not_duplicate_full_values(tmp_path: Path):
     assert sentinel not in json.dumps(audit)
 
 
+def test_confirmed_evidence_erasure_removes_managed_bytes_metadata_and_source_history(
+    tmp_path: Path,
+):
+    store = initialized_store(tmp_path)
+    imported = store.import_evidence(
+        principal="device:primary-device",
+        command=evidence_request(),
+    )
+    evidence = imported.source_evidence[0]
+    accepted_item = imported.items[0]
+    vault_file = tmp_path / "evidence-vault" / EvidenceVault.storage_name(evidence.evidence_id)
+
+    with pytest.raises(CareerProfileRevisionConflict):
+        store.erase_evidence(
+            principal="device:primary-device",
+            evidence_id=evidence.evidence_id,
+            command=EvidenceErasureRequest(
+                expected_profile_revision=0,
+                idempotency_key="erase-stale-synthetic-evidence-0001",
+                confirmation="ERASE_EVIDENCE_PERMANENTLY",
+            ),
+        )
+
+    result = store.erase_evidence(
+        principal="device:primary-device",
+        evidence_id=evidence.evidence_id,
+        command=EvidenceErasureRequest(
+            expected_profile_revision=1,
+            idempotency_key="erase-synthetic-evidence-0001",  # gitleaks:allow
+            confirmation="ERASE_EVIDENCE_PERMANENTLY",
+        ),
+    )
+
+    assert result.model_dump(mode="json") == {
+        "operation": "evidence_erased",
+        "completed": True,
+    }
+    assert not vault_file.exists()
+    current = store.current()
+    assert current.source_evidence == []
+    assert current.items[0].item_id == accepted_item.item_id
+    assert current.items[0].value == accepted_item.value
+    assert current.items[0].review_status == "accepted"
+    assert current.items[0].evidence_ids == []
+    assert current.items[0].provenance.method == "evidence_erased"
+    with pytest.raises(CareerProfileEvidenceNotFound):
+        store.read_evidence(evidence.evidence_id)
+
+    with sqlite3.connect(tmp_path / "state/jobos.db") as connection:
+        database_dump = "\n".join(connection.iterdump())
+        assert evidence.evidence_id not in database_dump
+        assert evidence.original_filename not in database_dump
+        assert evidence.provenance.source_label not in database_dump
+        assert connection.execute(
+            "SELECT COUNT(*) FROM career_profile_erasure_journal"
+        ).fetchone() == (0,)
+
+    restarted = CareerProfileCompleteStore(
+        tmp_path / "state/jobos.db", tmp_path / "evidence-vault"
+    )
+    restarted.initialize()
+    assert restarted.current() == current
+    assert restarted.erase_evidence(
+        principal="device:primary-device",
+        evidence_id=evidence.evidence_id,
+        command=EvidenceErasureRequest(
+            expected_profile_revision=1,
+            idempotency_key="erase-synthetic-evidence-0001",  # gitleaks:allow
+            confirmation="ERASE_EVIDENCE_PERMANENTLY",
+        ),
+    ) == result
+    with pytest.raises(CareerProfileIdempotencyConflict):
+        restarted.reset_profile(
+            principal="device:primary-device",
+            command=CareerProfileResetRequest(
+                expected_profile_revision=1,
+                idempotency_key="erase-synthetic-evidence-0001",  # gitleaks:allow
+                confirmation="RESET_CAREER_PROFILE_PERMANENTLY",
+            ),
+        )
+
+
+def test_full_profile_reset_erases_profile_proposals_snapshots_history_and_all_vault_files(
+    tmp_path: Path,
+):
+    store = initialized_store(tmp_path)
+    tracer = CareerProfileStore(tmp_path / "state/jobos.db")
+    tracer.set_work_arrangement(
+        principal="device:primary-device",
+        command=WorkArrangementMutation.model_validate(
+            {
+                "expected_profile_revision": 0,
+                "idempotency_key": "reset-proof-tracer-0001",
+                "value": {
+                    "mode": "remote",
+                    "strength": "preference",
+                    "note": "(FAKE) reset sentinel",
+                },
+            }
+        ),
+    )
+    request = evidence_request(assessment="inferred").model_copy(
+        update={"expected_profile_revision": 1, "idempotency_key": "reset-proof-import-0001"}
+    )
+    populated = store.import_evidence(principal="device:primary-device", command=request)
+    assert populated.items[0].review_status == "proposed"
+    snapshot = tracer.create_snapshot(
+        principal="device:primary-device",
+        request=CareerProfileSnapshotRequest(),
+    )
+    assert snapshot.projection.work_arrangement is not None
+
+    result = store.reset_profile(
+        principal="device:primary-device",
+        command=CareerProfileResetRequest(
+            expected_profile_revision=2,
+            idempotency_key="reset-synthetic-career-profile-0001",  # gitleaks:allow
+            confirmation="RESET_CAREER_PROFILE_PERMANENTLY",
+        ),
+    )
+
+    assert result.operation == "career_profile_reset"
+    assert list((tmp_path / "evidence-vault").glob("*.bin")) == []
+    assert store.current().model_dump(mode="json") == {
+        "profile_revision": 0,
+        "items": [],
+        "source_evidence": [],
+    }
+    with sqlite3.connect(tmp_path / "state/jobos.db") as connection:
+        for table in (
+            "career_profile_complete_idempotency",
+            "career_profile_complete_revisions",
+            "career_profile_items",
+            "career_profile_evidence",
+            "career_profile_idempotency",
+            "career_profile_revisions",
+            "career_profile_records",
+            "career_profile_snapshots",
+            "career_profile_audit_events",
+            "career_profile_erasure_journal",
+        ):
+            assert connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone() == (0,)
+        database_dump = "\n".join(connection.iterdump())
+    for sentinel in (
+        "(FAKE) reset sentinel",
+        "(FAKE) Alex Morgan",
+        "alex.morgan@example.invalid",
+        populated.source_evidence[0].evidence_id,
+        snapshot.snapshot_id,
+    ):
+        assert sentinel not in database_dump
+
+    restarted = CareerProfileCompleteStore(
+        tmp_path / "state/jobos.db", tmp_path / "evidence-vault"
+    )
+    restarted.initialize()
+    assert restarted.current().profile_revision == 0
+    assert restarted.current().items == []
+    assert restarted.current().source_evidence == []
+
+
+def test_partial_erasure_failure_is_not_reported_and_restart_finishes_pending_work(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    store = initialized_store(tmp_path)
+    imported = store.import_evidence(
+        principal="device:primary-device",
+        command=evidence_request(),
+    )
+    evidence_id = imported.source_evidence[0].evidence_id
+    real_harden = store._harden_database
+    calls = 0
+
+    def fail_first_hardening() -> None:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise OSError("synthetic hardening interruption")
+        real_harden()
+
+    monkeypatch.setattr(store, "_harden_database", fail_first_hardening)
+    with pytest.raises(OSError, match="synthetic hardening interruption"):
+        store.erase_evidence(
+            principal="device:primary-device",
+            evidence_id=evidence_id,
+            command=EvidenceErasureRequest(
+                expected_profile_revision=1,
+                idempotency_key="interrupted-evidence-erasure-0001",
+                confirmation="ERASE_EVIDENCE_PERMANENTLY",
+            ),
+        )
+    with sqlite3.connect(tmp_path / "state/jobos.db") as connection:
+        assert connection.execute(
+            "SELECT phase, target_evidence_id, storage_names_json "
+            "FROM career_profile_erasure_journal"
+        ).fetchone() == ("purged", None, "[]")
+        assert connection.execute(
+            "SELECT COUNT(*) FROM career_profile_erasure_receipts"
+        ).fetchone() == (0,)
+
+    with pytest.raises(CareerProfileErasureInProgress):
+        store.upsert_item(
+            principal="device:primary-device",
+            command=ProfileItemMutation.model_validate(
+                {
+                    "expected_profile_revision": 1,
+                    "idempotency_key": "blocked-during-erasure-0001",
+                    "value": {"kind": "skill", "name": "(FAKE) blocked write"},
+                }
+            ),
+        )
+    with pytest.raises(CareerProfileErasureInProgress):
+        CareerProfileStore(tmp_path / "state/jobos.db").create_snapshot(
+            principal="device:primary-device",
+            request=CareerProfileSnapshotRequest(),
+        )
+
+    restarted = CareerProfileCompleteStore(
+        tmp_path / "state/jobos.db", tmp_path / "evidence-vault"
+    )
+    restarted.initialize()
+    assert restarted.current().source_evidence == []
+    assert list((tmp_path / "evidence-vault").glob("*.bin")) == []
+    with sqlite3.connect(tmp_path / "state/jobos.db") as connection:
+        assert connection.execute(
+            "SELECT COUNT(*) FROM career_profile_erasure_journal"
+        ).fetchone() == (0,)
+        assert evidence_id not in "\n".join(connection.iterdump())
+
+
 def test_complete_model_shares_global_revision_with_tracer_without_copying_its_value(
     tmp_path: Path,
 ):
@@ -876,7 +1117,7 @@ def test_schema_migration_adds_complete_model_tables_without_activating_profile(
     database = tmp_path / "jobos.db"
     health = JobOsStateStore(database).initialize(owner_device_id="primary-device")
 
-    assert health.schema_version == SCHEMA_VERSION == 23
+    assert health.schema_version == SCHEMA_VERSION == 24
     with sqlite3.connect(database) as connection:
         tables = {
             row[0]
@@ -890,6 +1131,8 @@ def test_schema_migration_adds_complete_model_tables_without_activating_profile(
             "career_profile_complete_revisions",
             "career_profile_complete_idempotency",
             "career_profile_intent_grants",
+            "career_profile_erasure_journal",
+            "career_profile_erasure_receipts",
         } <= tables
         assert connection.execute("SELECT COUNT(*) FROM career_profiles").fetchone() == (0,)
 
@@ -940,6 +1183,47 @@ def test_complete_routes_are_authenticated_dormant_by_default_and_read_back_muta
             headers=auth(),
         )
         current = client.get("/v1/career-profile", headers=auth())
+        unconfirmed_erasure = client.post(
+            f"/v1/career-profile/evidence/{evidence_id}/erase",
+            headers=auth(),
+            json={
+                "expected_profile_revision": 1,
+                "idempotency_key": "route-unconfirmed-erasure-0001",
+                "confirmation": "DELETE",
+            },
+        )
+        assert unconfirmed_erasure.status_code == 422
+        assert client.get(
+            f"/v1/career-profile/evidence/{evidence_id}/content", headers=auth()
+        ).content == SYNTHETIC_BYTES
+        erased = client.post(
+            f"/v1/career-profile/evidence/{evidence_id}/erase",
+            headers=auth(),
+            json={
+                "expected_profile_revision": 1,
+                "idempotency_key": "route-confirmed-erasure-0001",
+                "confirmation": "ERASE_EVIDENCE_PERMANENTLY",
+            },
+        )
+        assert erased.json() == {"operation": "evidence_erased", "completed": True}
+        assert client.get(
+            f"/v1/career-profile/evidence/{evidence_id}/content", headers=auth()
+        ).status_code == 404
+        reset = client.post(
+            "/v1/career-profile/reset",
+            headers=auth(),
+            json={
+                "expected_profile_revision": 1,
+                "idempotency_key": "route-confirmed-profile-reset-0001",
+                "confirmation": "RESET_CAREER_PROFILE_PERMANENTLY",
+            },
+        )
+        assert reset.json() == {"operation": "career_profile_reset", "completed": True}
+        assert client.get("/v1/career-profile", headers=auth()).json() == {
+            "profile_revision": 0,
+            "items": [],
+            "source_evidence": [],
+        }
 
     assert content.content == SYNTHETIC_BYTES
     assert content.headers["content-type"].startswith("text/plain")
@@ -991,6 +1275,22 @@ def test_complete_route_contracts_advertise_runtime_auth_not_found_and_conflict_
             "500",
         },
         ("/v1/career-profile/evidence/{evidence_id}", "delete"): {
+            "401",
+            "403",
+            "404",
+            "409",
+            "422",
+            "500",
+        },
+        ("/v1/career-profile/evidence/{evidence_id}/erase", "post"): {
+            "401",
+            "403",
+            "404",
+            "409",
+            "422",
+            "500",
+        },
+        ("/v1/career-profile/reset", "post"): {
             "401",
             "403",
             "404",

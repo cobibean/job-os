@@ -1120,6 +1120,37 @@ MIGRATIONS = (
             """,
         ),
     ),
+    Migration(
+        version=24,
+        statements=(
+            """
+            CREATE TABLE career_profile_erasure_journal (
+                operation_id TEXT PRIMARY KEY,
+                operation TEXT NOT NULL CHECK (
+                    operation IN ('evidence.erase', 'profile.reset')
+                ),
+                actor_principal TEXT NOT NULL,
+                idempotency_key TEXT NOT NULL,
+                request_hash TEXT NOT NULL,
+                target_evidence_id TEXT,
+                storage_names_json TEXT NOT NULL CHECK (json_valid(storage_names_json)),
+                phase TEXT NOT NULL DEFAULT 'prepared' CHECK (phase IN ('prepared', 'purged')),
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(actor_principal, idempotency_key)
+            )
+            """,
+            """
+            CREATE TABLE career_profile_erasure_receipts (
+                actor_principal TEXT NOT NULL,
+                idempotency_key TEXT NOT NULL,
+                request_hash TEXT NOT NULL,
+                result_json TEXT NOT NULL CHECK (json_valid(result_json)),
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY(actor_principal, idempotency_key)
+            )
+            """,
+        ),
+    ),
 )
 SCHEMA_VERSION = MIGRATIONS[-1].version
 

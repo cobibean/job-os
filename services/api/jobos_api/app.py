@@ -76,12 +76,16 @@ from jobos_api.career_profile import (
 from jobos_api.career_profile_complete import (
     CareerProfileCompleteCurrent,
     CareerProfileCompleteStore,
+    CareerProfileErasureInProgress,
+    CareerProfileErasureResult,
     CareerProfileEvidenceIntegrityError,
     CareerProfileEvidenceNotFound,
     CareerProfileEvidencePathError,
     CareerProfileItemNotFound,
+    CareerProfileResetRequest,
     CareerProfileValueError,
     CompleteProfileItemId,
+    EvidenceErasureRequest,
     EvidenceImportRequest,
     OpaqueEvidenceId,
     ProfileIntentGrant,
@@ -235,10 +239,12 @@ _ENDPOINT_ERROR_ROUTES = {
             "career_profile_proposal_decide",
             "career_profile_evidence_content",
             "career_profile_evidence_import",
+            "career_profile_evidence_erase",
             "career_profile_evidence_remove",
             "career_profile_item_create",
             "career_profile_item_remove",
             "career_profile_item_update",
+            "career_profile_reset",
             "career_profile_snapshot_create",
             "career_profile_snapshot_get",
             "career_profile_work_arrangement_get",
@@ -267,10 +273,12 @@ _ENDPOINT_ERROR_ROUTES = {
             "career_profile_proposal_decide",
             "career_profile_evidence_content",
             "career_profile_evidence_import",
+            "career_profile_evidence_erase",
             "career_profile_evidence_remove",
             "career_profile_item_create",
             "career_profile_item_remove",
             "career_profile_item_update",
+            "career_profile_reset",
             "career_profile_snapshot_get",
             "career_profile_work_arrangement_restore",
             "artifact_content",
@@ -311,11 +319,13 @@ _ENDPOINT_ERROR_ROUTES = {
             "approve_job_artifact",
             "career_profile_evidence_content",
             "career_profile_evidence_import",
+            "career_profile_evidence_erase",
             "career_profile_evidence_remove",
             "career_profile_proposal_decide",
             "career_profile_item_create",
             "career_profile_item_remove",
             "career_profile_item_update",
+            "career_profile_reset",
             "career_profile_work_arrangement_put",
             "career_profile_work_arrangement_restore",
             "artifact_content",
@@ -1279,6 +1289,8 @@ def create_app(
             return HTTPException(status_code=404, detail="Career Profile item was not found")
         if isinstance(error, CareerProfileValueError):
             return HTTPException(status_code=422, detail=str(error))
+        if isinstance(error, CareerProfileErasureInProgress):
+            return HTTPException(status_code=409, detail=str(error))
         if isinstance(
             error,
             (CareerProfileEvidenceIntegrityError, CareerProfileEvidencePathError),
@@ -1346,6 +1358,7 @@ def create_app(
         except (
             CareerProfileRevisionConflict,
             CareerProfileIdempotencyConflict,
+            CareerProfileErasureInProgress,
             CareerProfileValueError,
         ) as error:
             raise complete_profile_conflict(error) from error
@@ -1376,6 +1389,7 @@ def create_app(
         except (
             CareerProfileRevisionConflict,
             CareerProfileIdempotencyConflict,
+            CareerProfileErasureInProgress,
             CareerProfileItemNotFound,
             CareerProfileValueError,
         ) as error:
@@ -1438,6 +1452,7 @@ def create_app(
         except (
             CareerProfileRevisionConflict,
             CareerProfileIdempotencyConflict,
+            CareerProfileErasureInProgress,
             CareerProfileItemNotFound,
             CareerProfileValueError,
         ) as error:
@@ -1464,6 +1479,7 @@ def create_app(
         except (
             CareerProfileRevisionConflict,
             CareerProfileIdempotencyConflict,
+            CareerProfileErasureInProgress,
             CareerProfileValueError,
             CareerProfileEvidencePathError,
         ) as error:
@@ -1495,8 +1511,56 @@ def create_app(
         except (
             CareerProfileRevisionConflict,
             CareerProfileIdempotencyConflict,
+            CareerProfileErasureInProgress,
             CareerProfileEvidenceNotFound,
             CareerProfileValueError,
+        ) as error:
+            raise complete_profile_conflict(error) from error
+
+    @app.post(
+        "/v1/career-profile/evidence/{evidence_id}/erase",
+        tags=["career-profile"],
+    )
+    def career_profile_evidence_erase(
+        evidence_id: OpaqueEvidenceId,
+        command: EvidenceErasureRequest,
+        identity: Annotated[DeviceIdentity, Depends(authenticated_device)],
+    ) -> CareerProfileErasureResult:
+        require_career_profile_owner(identity)
+        try:
+            return complete_career_profile.erase_evidence(
+                principal=principal_for_device(identity.device_id),
+                evidence_id=evidence_id,
+                command=command,
+            )
+        except (
+            CareerProfileRevisionConflict,
+            CareerProfileIdempotencyConflict,
+            CareerProfileEvidenceNotFound,
+            CareerProfileEvidencePathError,
+            CareerProfileErasureInProgress,
+        ) as error:
+            raise complete_profile_conflict(error) from error
+
+    @app.post(
+        "/v1/career-profile/reset",
+        tags=["career-profile"],
+    )
+    def career_profile_reset(
+        command: CareerProfileResetRequest,
+        identity: Annotated[DeviceIdentity, Depends(authenticated_device)],
+    ) -> CareerProfileErasureResult:
+        require_career_profile_owner(identity)
+        try:
+            return complete_career_profile.reset_profile(
+                principal=principal_for_device(identity.device_id),
+                command=command,
+            )
+        except (
+            CareerProfileRevisionConflict,
+            CareerProfileIdempotencyConflict,
+            CareerProfileEvidencePathError,
+            CareerProfileErasureInProgress,
         ) as error:
             raise complete_profile_conflict(error) from error
 
@@ -1555,7 +1619,11 @@ def create_app(
                 principal=principal_for_device(identity.device_id),
                 command=command,
             )
-        except (CareerProfileRevisionConflict, CareerProfileIdempotencyConflict) as error:
+        except (
+            CareerProfileRevisionConflict,
+            CareerProfileIdempotencyConflict,
+            CareerProfileErasureInProgress,
+        ) as error:
             raise HTTPException(status_code=409, detail=str(error)) from error
 
     @app.get(
@@ -1587,7 +1655,11 @@ def create_app(
                 status_code=404,
                 detail="Career Profile revision not found",
             ) from error
-        except (CareerProfileRevisionConflict, CareerProfileIdempotencyConflict) as error:
+        except (
+            CareerProfileRevisionConflict,
+            CareerProfileIdempotencyConflict,
+            CareerProfileErasureInProgress,
+        ) as error:
             raise HTTPException(status_code=409, detail=str(error)) from error
 
     @app.post(
@@ -1600,10 +1672,13 @@ def create_app(
         identity: Annotated[DeviceIdentity, Depends(authenticated_device)],
     ) -> CareerProfileSnapshot:
         require_career_profile_owner(identity)
-        return career_profiles.create_snapshot(
-            principal=principal_for_device(identity.device_id),
-            request=command,
-        )
+        try:
+            return career_profiles.create_snapshot(
+                principal=principal_for_device(identity.device_id),
+                request=command,
+            )
+        except CareerProfileErasureInProgress as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
 
     @app.get(
         "/v1/career-profile/snapshots/{snapshot_id}",
