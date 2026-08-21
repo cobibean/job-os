@@ -121,7 +121,11 @@ def test_service_environment_and_uvicorn_command_are_fixed_and_loopback_only(tmp
         device_token="device-secret-value",
         mcp_token="mcp-secret-value",
         hermes_dashboard_token="hermes-secret-value",
-        base_environment={"PATH": "/usr/bin:/bin", "UNRELATED": "omitted"},
+        base_environment={
+            "PATH": "/usr/bin:/bin",
+            "UNRELATED": "omitted",
+            "JOBOS_CAREER_PROFILE_ENABLED": "1",
+        },
     )
 
     assert environment == {
@@ -141,6 +145,7 @@ def test_service_environment_and_uvicorn_command_are_fixed_and_loopback_only(tmp
         "JOBOS_HERMES_DASHBOARD_URL": "ws://127.0.0.1:9119/api/ws",
         "JOBOS_HERMES_DASHBOARD_TOKEN": "hermes-secret-value",
         "JOBOS_HERMES_JOB_HUNTER_CWD": str(tmp_path / "job-hunter"),
+        "JOBOS_CAREER_PROFILE_ENABLED": "1",
     }
     assert build_uvicorn_arguments(config) == [
         str(tmp_path / "job-os/.venv/bin/python"),

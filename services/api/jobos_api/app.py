@@ -58,6 +58,21 @@ from jobos_api.capabilities import (
     DesktopCapabilityPresence,
     DesktopUnavailable,
 )
+from jobos_api.career_profile import (
+    CareerProfileIdempotencyConflict,
+    CareerProfileRevisionConflict,
+    CareerProfileRevisionNotFound,
+    CareerProfileSnapshot,
+    CareerProfileSnapshotForbidden,
+    CareerProfileSnapshotNotFound,
+    CareerProfileSnapshotRequest,
+    CareerProfileStore,
+    WorkArrangementCurrent,
+    WorkArrangementHistory,
+    WorkArrangementMutation,
+    WorkArrangementRestore,
+    principal_for_device,
+)
 from jobos_api.composition import create_job_services
 from jobos_api.conversation_manager import ConversationListResponse, ConversationManager
 from jobos_api.conversations import (
@@ -198,6 +213,12 @@ _ENDPOINT_ERROR_ROUTES = {
     403: frozenset(
         {
             "browser_command",
+            "career_profile_snapshot_create",
+            "career_profile_snapshot_get",
+            "career_profile_work_arrangement_get",
+            "career_profile_work_arrangement_history",
+            "career_profile_work_arrangement_put",
+            "career_profile_work_arrangement_restore",
             "editable_document_outline",
             "editable_operations",
             "editable_snapshot_create",
@@ -215,6 +236,8 @@ _ENDPOINT_ERROR_ROUTES = {
     404: frozenset(
         {
             "approve_job_artifact",
+            "career_profile_snapshot_get",
+            "career_profile_work_arrangement_restore",
             "artifact_content",
             "artifact_download",
             "document_file_get",
@@ -251,6 +274,8 @@ _ENDPOINT_ERROR_ROUTES = {
     409: frozenset(
         {
             "approve_job_artifact",
+            "career_profile_work_arrangement_put",
+            "career_profile_work_arrangement_restore",
             "artifact_content",
             "artifact_download",
             "browser_command",
@@ -381,6 +406,7 @@ def create_app(
     state_store: JobOsStateStore | None = None,
 ) -> FastAPI:
     state_store = state_store or JobOsStateStore(settings.state_db_path)
+    career_profiles = CareerProfileStore(settings.state_db_path)
     artifact_gateway_configured = (
         artifact_gateway is not None or settings.artifact_provider == "gateway"
     )
@@ -506,6 +532,8 @@ def create_app(
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         state_store.initialize(owner_device_id=settings.device_id)
+        if settings.career_profile_enabled:
+            career_profiles.initialize()
         jobs.initialize()
         await conversation_manager.start()
         try:
@@ -724,6 +752,16 @@ def create_app(
         credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer)],
     ) -> DeviceIdentity:
         return device_authenticator.authenticate(credentials)
+
+    def require_career_profile_owner(identity: DeviceIdentity) -> None:
+        """Keep the foundation owner-only until explicit collaborator grants exist."""
+        if not settings.career_profile_enabled:
+            raise HTTPException(status_code=404, detail="Career Profile is not enabled")
+        if identity.device_id != settings.device_id:
+            raise HTTPException(
+                status_code=403,
+                detail="This device is not authorized to access the Career Profile",
+            )
 
     def require_trusted_mcp(
         identity: DeviceIdentity,
@@ -1172,6 +1210,105 @@ def create_app(
         if value is None:
             raise HTTPException(status_code=404, detail="Document file not found")
         return DocumentFileRecord.model_validate(value)
+
+    @app.get(
+        "/v1/career-profile/work-arrangement",
+        tags=["career-profile"],
+    )
+    def career_profile_work_arrangement_get(
+        identity: Annotated[DeviceIdentity, Depends(authenticated_device)],
+    ) -> WorkArrangementCurrent:
+        require_career_profile_owner(identity)
+        return career_profiles.current_work_arrangement()
+
+    @app.put(
+        "/v1/career-profile/work-arrangement",
+        tags=["career-profile"],
+    )
+    def career_profile_work_arrangement_put(
+        command: WorkArrangementMutation,
+        identity: Annotated[DeviceIdentity, Depends(authenticated_device)],
+    ) -> WorkArrangementCurrent:
+        require_career_profile_owner(identity)
+        try:
+            return career_profiles.set_work_arrangement(
+                principal=principal_for_device(identity.device_id),
+                command=command,
+            )
+        except (CareerProfileRevisionConflict, CareerProfileIdempotencyConflict) as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
+
+    @app.get(
+        "/v1/career-profile/work-arrangement/history",
+        tags=["career-profile"],
+    )
+    def career_profile_work_arrangement_history(
+        identity: Annotated[DeviceIdentity, Depends(authenticated_device)],
+    ) -> WorkArrangementHistory:
+        require_career_profile_owner(identity)
+        return career_profiles.work_arrangement_history()
+
+    @app.post(
+        "/v1/career-profile/work-arrangement/restore",
+        tags=["career-profile"],
+    )
+    def career_profile_work_arrangement_restore(
+        command: WorkArrangementRestore,
+        identity: Annotated[DeviceIdentity, Depends(authenticated_device)],
+    ) -> WorkArrangementCurrent:
+        require_career_profile_owner(identity)
+        try:
+            return career_profiles.restore_work_arrangement(
+                principal=principal_for_device(identity.device_id),
+                command=command,
+            )
+        except CareerProfileRevisionNotFound as error:
+            raise HTTPException(
+                status_code=404,
+                detail="Career Profile revision not found",
+            ) from error
+        except (CareerProfileRevisionConflict, CareerProfileIdempotencyConflict) as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
+
+    @app.post(
+        "/v1/career-profile/snapshots",
+        tags=["career-profile"],
+        status_code=201,
+    )
+    def career_profile_snapshot_create(
+        command: CareerProfileSnapshotRequest,
+        identity: Annotated[DeviceIdentity, Depends(authenticated_device)],
+    ) -> CareerProfileSnapshot:
+        require_career_profile_owner(identity)
+        return career_profiles.create_snapshot(
+            principal=principal_for_device(identity.device_id),
+            request=command,
+        )
+
+    @app.get(
+        "/v1/career-profile/snapshots/{snapshot_id}",
+        tags=["career-profile"],
+    )
+    def career_profile_snapshot_get(
+        snapshot_id: str,
+        identity: Annotated[DeviceIdentity, Depends(authenticated_device)],
+    ) -> CareerProfileSnapshot:
+        require_career_profile_owner(identity)
+        try:
+            return career_profiles.get_snapshot(
+                snapshot_id,
+                principal=principal_for_device(identity.device_id),
+            )
+        except CareerProfileSnapshotNotFound as error:
+            raise HTTPException(
+                status_code=404,
+                detail="Career Profile snapshot not found",
+            ) from error
+        except CareerProfileSnapshotForbidden as error:
+            raise HTTPException(
+                status_code=403,
+                detail="This device is not authorized to resolve the Career Profile snapshot",
+            ) from error
 
     @app.get("/v1/device-session", tags=["system"])
     async def device_session(

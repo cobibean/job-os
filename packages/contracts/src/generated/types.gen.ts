@@ -441,6 +441,56 @@ export type BrowserTabMetadata = {
 };
 
 /**
+ * CareerProfileProjection
+ */
+export type CareerProfileProjection = {
+    work_arrangement: WorkArrangementRecord | null;
+};
+
+/**
+ * CareerProfileSnapshot
+ */
+export type CareerProfileSnapshot = {
+    /**
+     * Authorized Principal
+     */
+    authorized_principal: string;
+    /**
+     * Content Hash
+     */
+    content_hash: string;
+    /**
+     * Created At
+     */
+    created_at: string;
+    /**
+     * Profile Revision
+     */
+    profile_revision: number;
+    projection: CareerProfileProjection;
+    /**
+     * Scopes
+     */
+    scopes: Array<'search_preferences.work_arrangement'>;
+    /**
+     * Snapshot Id
+     */
+    snapshot_id: string;
+};
+
+/**
+ * CareerProfileSnapshotRequest
+ */
+export type CareerProfileSnapshotRequest = {
+    /**
+     * Scopes
+     */
+    scopes?: [
+        'search_preferences.work_arrangement'
+    ];
+};
+
+/**
  * ConnectionResponse
  */
 export type ConnectionResponse = {
@@ -2041,6 +2091,160 @@ export type VersionResponse = {
 };
 
 /**
+ * WorkArrangementCurrent
+ */
+export type WorkArrangementCurrent = {
+    /**
+     * Profile Revision
+     */
+    profile_revision: number;
+    record: WorkArrangementRecord | null;
+};
+
+/**
+ * WorkArrangementHistory
+ */
+export type WorkArrangementHistory = {
+    /**
+     * Profile Revision
+     */
+    profile_revision: number;
+    /**
+     * Revisions
+     */
+    revisions: Array<WorkArrangementRevision>;
+};
+
+/**
+ * WorkArrangementMutation
+ */
+export type WorkArrangementMutation = {
+    /**
+     * Expected Profile Revision
+     */
+    expected_profile_revision: number;
+    /**
+     * Idempotency Key
+     */
+    idempotency_key: string;
+    value: WorkArrangementValue;
+};
+
+/**
+ * WorkArrangementRecord
+ */
+export type WorkArrangementRecord = {
+    /**
+     * Actor Principal
+     */
+    actor_principal: string;
+    /**
+     * Item Revision
+     */
+    item_revision: number;
+    /**
+     * Namespace
+     */
+    namespace: 'search_preferences.work_arrangement';
+    /**
+     * Profile Revision
+     */
+    profile_revision: number;
+    /**
+     * Record Id
+     */
+    record_id: string;
+    /**
+     * Updated At
+     */
+    updated_at: string;
+    value: WorkArrangementValue;
+};
+
+/**
+ * WorkArrangementRestore
+ */
+export type WorkArrangementRestore = {
+    /**
+     * Expected Profile Revision
+     */
+    expected_profile_revision: number;
+    /**
+     * Idempotency Key
+     */
+    idempotency_key: string;
+    /**
+     * Target Profile Revision
+     */
+    target_profile_revision: number;
+};
+
+/**
+ * WorkArrangementRevision
+ */
+export type WorkArrangementRevision = {
+    /**
+     * Actor Principal
+     */
+    actor_principal: string;
+    /**
+     * Base Profile Revision
+     */
+    base_profile_revision: number;
+    /**
+     * Changed Fields
+     */
+    changed_fields: Array<string>;
+    /**
+     * Created At
+     */
+    created_at: string;
+    /**
+     * Item Revision
+     */
+    item_revision: number;
+    /**
+     * Operation
+     */
+    operation: 'set' | 'restore';
+    /**
+     * Profile Revision
+     */
+    profile_revision: number;
+    /**
+     * Record Id
+     */
+    record_id: string;
+    /**
+     * Restored From Profile Revision
+     */
+    restored_from_profile_revision?: number | null;
+    /**
+     * Revision Id
+     */
+    revision_id: string;
+    value: WorkArrangementValue;
+};
+
+/**
+ * WorkArrangementValue
+ */
+export type WorkArrangementValue = {
+    /**
+     * Mode
+     */
+    mode: 'remote' | 'hybrid' | 'onsite' | 'flexible';
+    /**
+     * Note
+     */
+    note?: string | null;
+    /**
+     * Strength
+     */
+    strength: 'requirement' | 'strong_preference' | 'preference' | 'dealbreaker';
+};
+
+/**
  * WorkspaceJobsResponse
  */
 export type WorkspaceJobsResponse = {
@@ -2417,6 +2621,241 @@ export type BrowserCommandV1BrowserCommandsPostResponses = {
 };
 
 export type BrowserCommandV1BrowserCommandsPostResponse = BrowserCommandV1BrowserCommandsPostResponses[keyof BrowserCommandV1BrowserCommandsPostResponses];
+
+export type CareerProfileSnapshotCreateV1CareerProfileSnapshotsPostData = {
+    body: CareerProfileSnapshotRequest;
+    path?: never;
+    query?: never;
+    url: '/v1/career-profile/snapshots';
+};
+
+export type CareerProfileSnapshotCreateV1CareerProfileSnapshotsPostErrors = {
+    /**
+     * Device authentication required
+     */
+    401: ApiErrorResponse;
+    /**
+     * Operation is not permitted
+     */
+    403: ApiErrorResponse;
+    /**
+     * Request validation failed
+     */
+    422: ApiErrorResponse;
+    /**
+     * Internal server error
+     */
+    500: ApiErrorResponse;
+};
+
+export type CareerProfileSnapshotCreateV1CareerProfileSnapshotsPostError = CareerProfileSnapshotCreateV1CareerProfileSnapshotsPostErrors[keyof CareerProfileSnapshotCreateV1CareerProfileSnapshotsPostErrors];
+
+export type CareerProfileSnapshotCreateV1CareerProfileSnapshotsPostResponses = {
+    /**
+     * Successful Response
+     */
+    201: CareerProfileSnapshot;
+};
+
+export type CareerProfileSnapshotCreateV1CareerProfileSnapshotsPostResponse = CareerProfileSnapshotCreateV1CareerProfileSnapshotsPostResponses[keyof CareerProfileSnapshotCreateV1CareerProfileSnapshotsPostResponses];
+
+export type CareerProfileSnapshotGetV1CareerProfileSnapshotsSnapshotIdGetData = {
+    body?: never;
+    path: {
+        /**
+         * Snapshot Id
+         */
+        snapshot_id: string;
+    };
+    query?: never;
+    url: '/v1/career-profile/snapshots/{snapshot_id}';
+};
+
+export type CareerProfileSnapshotGetV1CareerProfileSnapshotsSnapshotIdGetErrors = {
+    /**
+     * Device authentication required
+     */
+    401: ApiErrorResponse;
+    /**
+     * Operation is not permitted
+     */
+    403: ApiErrorResponse;
+    /**
+     * Resource not found
+     */
+    404: ApiErrorResponse;
+    /**
+     * Request validation failed
+     */
+    422: ApiErrorResponse;
+    /**
+     * Internal server error
+     */
+    500: ApiErrorResponse;
+};
+
+export type CareerProfileSnapshotGetV1CareerProfileSnapshotsSnapshotIdGetError = CareerProfileSnapshotGetV1CareerProfileSnapshotsSnapshotIdGetErrors[keyof CareerProfileSnapshotGetV1CareerProfileSnapshotsSnapshotIdGetErrors];
+
+export type CareerProfileSnapshotGetV1CareerProfileSnapshotsSnapshotIdGetResponses = {
+    /**
+     * Successful Response
+     */
+    200: CareerProfileSnapshot;
+};
+
+export type CareerProfileSnapshotGetV1CareerProfileSnapshotsSnapshotIdGetResponse = CareerProfileSnapshotGetV1CareerProfileSnapshotsSnapshotIdGetResponses[keyof CareerProfileSnapshotGetV1CareerProfileSnapshotsSnapshotIdGetResponses];
+
+export type CareerProfileWorkArrangementGetV1CareerProfileWorkArrangementGetData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/v1/career-profile/work-arrangement';
+};
+
+export type CareerProfileWorkArrangementGetV1CareerProfileWorkArrangementGetErrors = {
+    /**
+     * Device authentication required
+     */
+    401: ApiErrorResponse;
+    /**
+     * Operation is not permitted
+     */
+    403: ApiErrorResponse;
+    /**
+     * Internal server error
+     */
+    500: ApiErrorResponse;
+};
+
+export type CareerProfileWorkArrangementGetV1CareerProfileWorkArrangementGetError = CareerProfileWorkArrangementGetV1CareerProfileWorkArrangementGetErrors[keyof CareerProfileWorkArrangementGetV1CareerProfileWorkArrangementGetErrors];
+
+export type CareerProfileWorkArrangementGetV1CareerProfileWorkArrangementGetResponses = {
+    /**
+     * Successful Response
+     */
+    200: WorkArrangementCurrent;
+};
+
+export type CareerProfileWorkArrangementGetV1CareerProfileWorkArrangementGetResponse = CareerProfileWorkArrangementGetV1CareerProfileWorkArrangementGetResponses[keyof CareerProfileWorkArrangementGetV1CareerProfileWorkArrangementGetResponses];
+
+export type CareerProfileWorkArrangementPutV1CareerProfileWorkArrangementPutData = {
+    body: WorkArrangementMutation;
+    path?: never;
+    query?: never;
+    url: '/v1/career-profile/work-arrangement';
+};
+
+export type CareerProfileWorkArrangementPutV1CareerProfileWorkArrangementPutErrors = {
+    /**
+     * Device authentication required
+     */
+    401: ApiErrorResponse;
+    /**
+     * Operation is not permitted
+     */
+    403: ApiErrorResponse;
+    /**
+     * Resource state conflict
+     */
+    409: ApiErrorResponse;
+    /**
+     * Request validation failed
+     */
+    422: ApiErrorResponse;
+    /**
+     * Internal server error
+     */
+    500: ApiErrorResponse;
+};
+
+export type CareerProfileWorkArrangementPutV1CareerProfileWorkArrangementPutError = CareerProfileWorkArrangementPutV1CareerProfileWorkArrangementPutErrors[keyof CareerProfileWorkArrangementPutV1CareerProfileWorkArrangementPutErrors];
+
+export type CareerProfileWorkArrangementPutV1CareerProfileWorkArrangementPutResponses = {
+    /**
+     * Successful Response
+     */
+    200: WorkArrangementCurrent;
+};
+
+export type CareerProfileWorkArrangementPutV1CareerProfileWorkArrangementPutResponse = CareerProfileWorkArrangementPutV1CareerProfileWorkArrangementPutResponses[keyof CareerProfileWorkArrangementPutV1CareerProfileWorkArrangementPutResponses];
+
+export type CareerProfileWorkArrangementHistoryV1CareerProfileWorkArrangementHistoryGetData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/v1/career-profile/work-arrangement/history';
+};
+
+export type CareerProfileWorkArrangementHistoryV1CareerProfileWorkArrangementHistoryGetErrors = {
+    /**
+     * Device authentication required
+     */
+    401: ApiErrorResponse;
+    /**
+     * Operation is not permitted
+     */
+    403: ApiErrorResponse;
+    /**
+     * Internal server error
+     */
+    500: ApiErrorResponse;
+};
+
+export type CareerProfileWorkArrangementHistoryV1CareerProfileWorkArrangementHistoryGetError = CareerProfileWorkArrangementHistoryV1CareerProfileWorkArrangementHistoryGetErrors[keyof CareerProfileWorkArrangementHistoryV1CareerProfileWorkArrangementHistoryGetErrors];
+
+export type CareerProfileWorkArrangementHistoryV1CareerProfileWorkArrangementHistoryGetResponses = {
+    /**
+     * Successful Response
+     */
+    200: WorkArrangementHistory;
+};
+
+export type CareerProfileWorkArrangementHistoryV1CareerProfileWorkArrangementHistoryGetResponse = CareerProfileWorkArrangementHistoryV1CareerProfileWorkArrangementHistoryGetResponses[keyof CareerProfileWorkArrangementHistoryV1CareerProfileWorkArrangementHistoryGetResponses];
+
+export type CareerProfileWorkArrangementRestoreV1CareerProfileWorkArrangementRestorePostData = {
+    body: WorkArrangementRestore;
+    path?: never;
+    query?: never;
+    url: '/v1/career-profile/work-arrangement/restore';
+};
+
+export type CareerProfileWorkArrangementRestoreV1CareerProfileWorkArrangementRestorePostErrors = {
+    /**
+     * Device authentication required
+     */
+    401: ApiErrorResponse;
+    /**
+     * Operation is not permitted
+     */
+    403: ApiErrorResponse;
+    /**
+     * Resource not found
+     */
+    404: ApiErrorResponse;
+    /**
+     * Resource state conflict
+     */
+    409: ApiErrorResponse;
+    /**
+     * Request validation failed
+     */
+    422: ApiErrorResponse;
+    /**
+     * Internal server error
+     */
+    500: ApiErrorResponse;
+};
+
+export type CareerProfileWorkArrangementRestoreV1CareerProfileWorkArrangementRestorePostError = CareerProfileWorkArrangementRestoreV1CareerProfileWorkArrangementRestorePostErrors[keyof CareerProfileWorkArrangementRestoreV1CareerProfileWorkArrangementRestorePostErrors];
+
+export type CareerProfileWorkArrangementRestoreV1CareerProfileWorkArrangementRestorePostResponses = {
+    /**
+     * Successful Response
+     */
+    200: WorkArrangementCurrent;
+};
+
+export type CareerProfileWorkArrangementRestoreV1CareerProfileWorkArrangementRestorePostResponse = CareerProfileWorkArrangementRestoreV1CareerProfileWorkArrangementRestorePostResponses[keyof CareerProfileWorkArrangementRestoreV1CareerProfileWorkArrangementRestorePostResponses];
 
 export type ConversationsListV1ConversationsGetData = {
     body?: never;

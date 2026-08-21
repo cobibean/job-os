@@ -165,6 +165,19 @@ def test_token_configured_source_defaults_use_application_data_not_cwd(tmp_path,
     )
 
 
+def test_config_backed_settings_honor_explicit_career_profile_activation(tmp_path, monkeypatch):
+    monkeypatch.setattr("jobos_api.local_config.sys.platform", "linux")
+    initialize_jobos(tmp_path)
+    monkeypatch.delenv("JOBOS_DEVICE_TOKEN", raising=False)
+    monkeypatch.delenv("JOBOS_MCP_TOKEN", raising=False)
+    monkeypatch.setenv("JOBOS_CONFIG_PATH", str(tmp_path / "config.json"))
+    monkeypatch.setenv("JOBOS_CAREER_PROFILE_ENABLED", "1")
+
+    configured = settings_from_environment()
+
+    assert configured.career_profile_enabled is True
+
+
 def test_file_credentials_reject_symlinks(tmp_path):
     target = tmp_path / "outside.json"
     target.write_text('{"deviceToken":"device","mcpToken":"mcp"}', encoding="utf-8")
