@@ -229,17 +229,17 @@ Issue #58 retains its fresh explicit approval gate.
 
 Before any approved live cutover, prove zero-Evidence and sparse profiles, context-scope controls, accepted unsupported claims, historical inactive-Evidence links, explicit local erasure, and rollback/readback behavior. This audit does not authorize a cutover.
 
-## C. Later or dormant risks
+## C. Specification status and later or dormant risks
 
-These are specification or prompt risks, not current blocking product behavior. They should be corrected before the relevant feature becomes active.
+These are specification or prompt concerns, not current blocking product behavior. The Review Brief repository terminology is corrected; the remaining risks should be corrected before the relevant feature becomes active.
 
-### C1. Review Brief terminology is ambiguous, not a current Evidence gate
+### C1. Review Brief terminology corrected before implementation
 
-`docs/ideas.md` and Issue #30 use “trusted facts” and “exact applicant evidence.” No implemented Review Brief currently rejects a candidate because Evidence is absent, but the language could create that rule later.
+`docs/ideas.md` now defines accepted user-authored or user-approved Career Profile information as valid matching context with provenance `user stated`. Supporting Evidence is optional, absent Evidence is not a qualification gap or blocker, and an unsupported agent inference remains a proposal until the user approves it. The proposed Issue #30 body must use the same contract before Review Brief implementation begins.
 
-**Future correction**
+**Status**
 
-Define accepted user-authored/user-approved Career Profile information as valid matching context with provenance `user stated`. Supporting Evidence may be shown when available; no document is required to satisfy a qualification.
+Repository specification corrected by Issue #73. No Review Brief implementation was added.
 
 ### C2. Conflict preservation needs future schema guidance
 
