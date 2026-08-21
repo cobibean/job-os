@@ -3,7 +3,20 @@ import type { IpcRendererEvent } from 'electron'
 
 import type { DocxExternalChangeEvent, SaveDocxRequest } from '../shared/docxDocuments.js'
 
-import type { AgentSessionStreamUpdate, BrowserBounds, BrowserJobExtraction, BrowserRestoreState, BrowserState, JobEvent, JobOsRendererBridge, JobSortMode, JobStatus, WorkspaceSnapshot } from '../shared/contracts.js'
+import type {
+  AgentSessionStreamUpdate,
+  BrowserBounds,
+  BrowserJobExtraction,
+  BrowserRestoreState,
+  BrowserState,
+  JobEvent,
+  JobOsRendererBridge,
+  JobSortMode,
+  JobStatus,
+  WorkArrangementMutationRequest,
+  WorkArrangementRestoreRequest,
+  WorkspaceSnapshot
+} from '../shared/contracts.js'
 import type {
   ApplyEditableDocumentOperationsRequest,
   CreateEditableDocumentSnapshotRequest,
@@ -41,6 +54,20 @@ const bridge: JobOsRendererBridge = Object.freeze({
   }),
   connectivity: Object.freeze({
     get: () => ipcRenderer.invoke('jobos:connectivity:get')
+  }),
+  careerProfile: Object.freeze({
+    availability: () => ipcRenderer.invoke('jobos:career-profile:availability'),
+    validateCachedWorkArrangement: (candidate: unknown) => (
+      ipcRenderer.invoke('jobos:career-profile:cache:validate', candidate)
+    ),
+    getWorkArrangement: () => ipcRenderer.invoke('jobos:career-profile:work-arrangement:get'),
+    saveWorkArrangement: (request: WorkArrangementMutationRequest) => (
+      ipcRenderer.invoke('jobos:career-profile:work-arrangement:save', request)
+    ),
+    getWorkArrangementHistory: () => ipcRenderer.invoke('jobos:career-profile:work-arrangement:history'),
+    restoreWorkArrangement: (request: WorkArrangementRestoreRequest) => (
+      ipcRenderer.invoke('jobos:career-profile:work-arrangement:restore', request)
+    )
   }),
   agent: Object.freeze({
     list: () => ipcRenderer.invoke('jobos:agent:list'),

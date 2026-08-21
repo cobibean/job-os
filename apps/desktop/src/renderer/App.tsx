@@ -4,7 +4,9 @@ import { JobNavigator } from './components/JobNavigator'
 import { SettingsPanel } from './components/SettingsPanel'
 import { StatusBar } from './components/StatusBar'
 import { WorkbenchLayout } from './components/WorkbenchLayout'
-import { WorkspaceBar } from './components/WorkspaceBar'
+import { CareerProfileWorkspace } from './components/CareerProfileWorkspace'
+import { hasCachedCareerProfile } from './hooks/useCareerProfile'
+import { WorkspaceBar, type WorkspaceBarWorkspace } from './components/WorkspaceBar'
 import { BrowseWorkspace } from './components/BrowseWorkspace'
 import { useAgentAvatarPreference } from './agent-avatar/useAgentAvatarPreference'
 import { DocxDocumentEditorShell } from './document-editor/DocxDocumentEditorShell'
@@ -55,6 +57,8 @@ function WorkbenchApp() {
   const agentAvatar = useAgentAvatarPreference()
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [settingsPreparing, setSettingsPreparing] = useState(false)
+  const [careerProfileEnabled, setCareerProfileEnabled] = useState(false)
+  const [careerProfileOpen, setCareerProfileOpen] = useState(false)
   const [browseDetachState, setBrowseDetachState] = useState<'idle' | 'preparing' | 'ready' | 'error'>('idle')
   const [jobListingRequest, setJobListingRequest] = useState<JobListingRequest | null>(null)
   const [documentMutationGeneration, setDocumentMutationGeneration] = useState(0)
@@ -72,7 +76,20 @@ function WorkbenchApp() {
   const activeLayout = layoutState.workspace.layouts[activePreset]
   const browseVisible = activeTopLevelWorkspace === 'browse' && browseDetachState === 'ready'
   const browserTransitionPending = browseDetachState === 'preparing'
-  const nativeBrowserVisible = layoutState.hydrated && activeTopLevelWorkspace !== 'browse' && !browserTransitionPending && !activeLayout.collapsed.includes('center') && !settingsOpen && !settingsPreparing
+  const nativeBrowserVisible = layoutState.hydrated && activeTopLevelWorkspace !== 'browse' && !careerProfileOpen && !browserTransitionPending && !activeLayout.collapsed.includes('center') && !settingsOpen && !settingsPreparing
+
+  useEffect(() => {
+    const bridge = window.jobos?.careerProfile
+    if (!bridge) return
+    let active = true
+    void bridge.availability()
+      .then(result => { if (active) setCareerProfileEnabled(result.enabled) })
+      .catch(async () => {
+        const cached = await hasCachedCareerProfile(bridge)
+        if (active) setCareerProfileEnabled(cached)
+      })
+    return () => { active = false }
+  }, [])
 
   const changePanelReorderInteraction = useCallback(async (active: boolean) => {
     if (!active) {
@@ -217,7 +234,20 @@ function WorkbenchApp() {
     void detachBrowserForBrowse(generation)
   }, [activeTopLevelWorkspace, browseDetachState, detachBrowserForBrowse, layoutState.hydrated])
 
-  const changeTopLevelWorkspace = async (workspaceId: import('./workspaceLayout').TopLevelWorkspace) => {
+  const changeTopLevelWorkspace = async (workspaceId: WorkspaceBarWorkspace) => {
+    if (workspaceId === 'career-profile') {
+      if (!careerProfileEnabled || careerProfileOpen) return
+      browseTransitionGeneration.current += 1
+      setBrowseDetachState('idle')
+      try {
+        await window.jobos?.browser?.setBounds({ x: 0, y: 0, width: 0, height: 0, visible: false })
+      } catch {
+        return
+      }
+      setCareerProfileOpen(true)
+      return
+    }
+    setCareerProfileOpen(false)
     if (workspaceId !== 'browse') {
       browseTransitionGeneration.current += 1
       setBrowseDetachState(current => current === 'preparing' ? current : 'idle')
@@ -234,14 +264,15 @@ function WorkbenchApp() {
   return (
     <div className="app-shell" data-layout={activePreset} data-workspace={activeTopLevelWorkspace}>
       <WorkspaceBar
-        activeWorkspace={activeTopLevelWorkspace}
+        activeWorkspace={careerProfileOpen ? 'career-profile' : activeTopLevelWorkspace}
+        careerProfileEnabled={careerProfileEnabled}
         onWorkspaceChange={workspaceId => { void changeTopLevelWorkspace(workspaceId) }}
         onReset={layoutState.reset}
         onToggleMode={theme.toggleMode}
         themeMode={theme.mode}
       />
       <div className="workspace-content">
-      <div className="workbench-layer" hidden={browseVisible}>
+      <div className="workbench-layer" hidden={browseVisible || careerProfileOpen}>
       {editingDocument ? (
         <DocxDocumentEditorShell
           opened={editingDocument}
@@ -322,6 +353,12 @@ function WorkbenchApp() {
       />
       )}
       </div>
+      {careerProfileOpen ? (
+        <CareerProfileWorkspace
+          hasActiveTurn={Boolean(agentSessions.activeSession?.summary.activeTurn)}
+          online={connectivity.state === 'connected'}
+        />
+      ) : null}
       {browseVisible ? (
         <BrowseWorkspace
           activeJobId={jobState.selectedJobId}

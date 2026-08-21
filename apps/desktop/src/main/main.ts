@@ -13,6 +13,7 @@ import { registerAgentIpc } from './agentIpc.js'
 import { createApiLifecycle } from './apiLifecycle.js'
 import { BROWSER_PARTITION, BrowserManager, remoteBrowserViewOptions } from './browser.js'
 import { canonicalListingUrl, safeApplicationUrl, validatedBrowserJobExtraction } from './browserJobExtraction.js'
+import { createMainCareerProfileClient } from './careerProfile.js'
 import { registerBrowserRestoreHandler } from './browserIpc.js'
 import { startDesktopCapabilityClient } from './capabilityClient.js'
 import { initializeDesktopRuntime } from './desktopRuntime.js'
@@ -239,6 +240,31 @@ function registerConnectivityInterface(): void {
     }
     return snapshot
   })
+}
+
+function registerCareerProfileInterface(): void {
+  const config = jobsConfig()
+  const careerProfile = config ? createMainCareerProfileClient(config) : null
+  const trusted = (event: IpcMainInvokeEvent) => {
+    assertTrustedRenderer(event)
+    if (!careerProfile) throw new Error('Device credential unavailable')
+    return careerProfile
+  }
+
+  ipcMain.handle('jobos:career-profile:availability', event => trusted(event).availability())
+  ipcMain.handle('jobos:career-profile:cache:validate', (event, candidate) => (
+    trusted(event).validateCachedWorkArrangement(candidate)
+  ))
+  ipcMain.handle('jobos:career-profile:work-arrangement:get', event => trusted(event).getWorkArrangement())
+  ipcMain.handle('jobos:career-profile:work-arrangement:save', (event, request) => (
+    trusted(event).saveWorkArrangement(request)
+  ))
+  ipcMain.handle('jobos:career-profile:work-arrangement:history', event => (
+    trusted(event).getWorkArrangementHistory()
+  ))
+  ipcMain.handle('jobos:career-profile:work-arrangement:restore', (event, request) => (
+    trusted(event).restoreWorkArrangement(request)
+  ))
 }
 
 function registerAgentInterface(): void {
@@ -671,6 +697,7 @@ app.whenReady().then(async () => {
   registerDiagnosticsInterface(configPath)
   registerShellInterface()
   registerConnectivityInterface()
+  registerCareerProfileInterface()
   registerAgentInterface()
   registerJobsInterface()
   registerWorkspaceInterface()
