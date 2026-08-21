@@ -14,6 +14,75 @@ import type {
 } from './editableDocuments.js'
 
 export type ConnectivityState = 'connecting' | 'connected' | 'degraded' | 'disconnected'
+
+export type WorkArrangementMode = 'remote' | 'hybrid' | 'onsite' | 'flexible'
+export type WorkArrangementStrength = 'requirement' | 'strong_preference' | 'preference' | 'dealbreaker'
+
+export interface WorkArrangementValue {
+  mode: WorkArrangementMode
+  strength: WorkArrangementStrength
+  note: string | null
+}
+
+export interface WorkArrangementRecord {
+  actorPrincipal: string
+  itemRevision: number
+  profileRevision: number
+  recordId: string
+  updatedAt: string
+  value: WorkArrangementValue
+}
+
+export interface WorkArrangementCurrent {
+  cacheProof?: string
+  profileRevision: number
+  record: WorkArrangementRecord | null
+}
+
+export interface WorkArrangementRevision {
+  actorPrincipal: string
+  baseProfileRevision: number
+  changedFields: string[]
+  createdAt: string
+  itemRevision: number
+  operation: 'set' | 'restore'
+  profileRevision: number
+  recordId: string
+  restoredFromProfileRevision: number | null
+  revisionId: string
+  value: WorkArrangementValue
+}
+
+export interface WorkArrangementHistory {
+  profileRevision: number
+  revisions: WorkArrangementRevision[]
+}
+
+export interface WorkArrangementMutationRequest {
+  expectedProfileRevision: number
+  idempotencyKey: string
+  value: WorkArrangementValue
+}
+
+export interface WorkArrangementRestoreRequest {
+  expectedProfileRevision: number
+  idempotencyKey: string
+  targetProfileRevision: number
+}
+
+export type WorkArrangementMutationResult =
+  | { status: 'saved'; current: WorkArrangementCurrent }
+  | { status: 'conflict'; current: WorkArrangementCurrent }
+
+export interface CareerProfileBridge {
+  availability: () => Promise<{ enabled: boolean }>
+  validateCachedWorkArrangement: (candidate: unknown) => Promise<WorkArrangementCurrent | null>
+  getWorkArrangement: () => Promise<WorkArrangementCurrent>
+  saveWorkArrangement: (request: WorkArrangementMutationRequest) => Promise<WorkArrangementMutationResult>
+  getWorkArrangementHistory: () => Promise<WorkArrangementHistory>
+  restoreWorkArrangement: (request: WorkArrangementRestoreRequest) => Promise<WorkArrangementMutationResult>
+}
+
 export type JobSortMode = 'manual' | 'recent' | 'alphabetical' | 'status'
 export type JobStatus = 'discovered' | 'scored' | 'reviewed' | 'shortlisted' | 'apply_now' | 'maybe' | 'stretch' | 'skipped' | 'applied' | 'interviewing' | 'closed' | 'archived'
 
@@ -346,6 +415,7 @@ export interface JobOsRendererBridge {
   connectivity: {
     get: () => Promise<ConnectivitySnapshot>
   }
+  careerProfile: CareerProfileBridge
   agent: {
     list: () => Promise<AgentSessionSummary[]>
     create: (initialSelectedJobId?: string | null) => Promise<AgentConversationSnapshot>

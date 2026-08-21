@@ -2,22 +2,25 @@ import { Moon, RotateCcw, Sun } from 'lucide-react'
 import type { TopLevelWorkspace } from '../workspaceLayout'
 import type { ThemeMode } from '../theme/themes'
 
+export type WorkspaceBarWorkspace = TopLevelWorkspace | 'career-profile'
+
 interface WorkspaceBarProps {
-  activeWorkspace: TopLevelWorkspace
-  onWorkspaceChange: (workspace: TopLevelWorkspace) => void
+  activeWorkspace: WorkspaceBarWorkspace
+  careerProfileEnabled: boolean
+  onWorkspaceChange: (workspace: WorkspaceBarWorkspace) => void
   onReset: () => void
   onToggleMode: () => void
   themeMode: ThemeMode
 }
 
-const workspaces: Array<{ id: TopLevelWorkspace; label: string }> = [
+const workspaces: Array<{ id: WorkspaceBarWorkspace; label: string }> = [
   { id: 'research', label: 'Research' },
   { id: 'review', label: 'Review' },
   { id: 'agent-focus', label: 'Agent Focus' },
   { id: 'browse', label: 'Browse' }
 ]
 
-export function WorkspaceBar({ activeWorkspace, onWorkspaceChange, onReset, onToggleMode, themeMode }: WorkspaceBarProps) {
+export function WorkspaceBar({ activeWorkspace, careerProfileEnabled, onWorkspaceChange, onReset, onToggleMode, themeMode }: WorkspaceBarProps) {
   const dark = themeMode === 'dark'
   return (
     <header className="workspace-bar">
@@ -26,7 +29,7 @@ export function WorkspaceBar({ activeWorkspace, onWorkspaceChange, onReset, onTo
       </div>
 
       <nav aria-label="Workspace layouts" className="layout-switcher">
-        {workspaces.map(workspace => (
+        {[...workspaces, ...(careerProfileEnabled ? [{ id: 'career-profile' as const, label: 'Career Profile' }] : [])].map(workspace => (
           <button
             aria-pressed={activeWorkspace === workspace.id}
             className="layout-option"
@@ -52,7 +55,7 @@ export function WorkspaceBar({ activeWorkspace, onWorkspaceChange, onReset, onTo
             ? <Sun aria-hidden="true" size={16} strokeWidth={1.5} />
             : <Moon aria-hidden="true" size={16} strokeWidth={1.5} />}
         </button>
-        <button className="reset-layout" disabled={activeWorkspace === 'browse'} onClick={onReset} type="button">
+        <button className="reset-layout" disabled={activeWorkspace === 'browse' || activeWorkspace === 'career-profile'} onClick={onReset} type="button">
           <RotateCcw aria-hidden="true" size={16} strokeWidth={1.5} />
           Reset layout
         </button>
