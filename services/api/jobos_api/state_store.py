@@ -1093,6 +1093,31 @@ MIGRATIONS = (
             FROM career_profile_evidence_v22
             """,
             "DROP TABLE career_profile_evidence_v22",
+            """
+            UPDATE career_profile_items
+            SET provenance_json = json_set(
+                provenance_json,
+                '$.mutation_source',
+                'direct_user'
+            )
+            WHERE json_extract(provenance_json, '$.mutation_source') IS NULL
+            """,
+            """
+            CREATE TABLE career_profile_intent_grants (
+                grant_id TEXT PRIMARY KEY,
+                created_by_principal TEXT NOT NULL,
+                operation TEXT NOT NULL,
+                target_id TEXT,
+                payload_sha256 TEXT NOT NULL CHECK (length(payload_sha256) = 64),
+                created_at TEXT NOT NULL,
+                consumed_at TEXT,
+                consumed_by_principal TEXT,
+                CHECK (
+                    (consumed_at IS NULL AND consumed_by_principal IS NULL)
+                    OR (consumed_at IS NOT NULL AND consumed_by_principal IS NOT NULL)
+                )
+            )
+            """,
         ),
     ),
 )
@@ -1602,9 +1627,7 @@ class JobOsStateStore:
         """Compatibility access to the first active conversation."""
         return self.conversation_store(self.first_active_conversation_id()).stored_session_id()
 
-    def first_active_conversation_id(
-        self, owner_device_id: str = "primary-device"
-    ) -> str:
+    def first_active_conversation_id(self, owner_device_id: str = "primary-device") -> str:
         conversations = self.list_active_conversations(owner_device_id=owner_device_id)
         if not conversations:
             raise ConversationNotFound("No active conversation exists")

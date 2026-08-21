@@ -12,7 +12,7 @@ from contextlib import suppress
 from datetime import UTC, date, datetime
 from hashlib import sha256
 from pathlib import Path
-from typing import Annotated, Literal
+from typing import Annotated, Literal, Self
 
 from pydantic import (
     AfterValidator,
@@ -22,6 +22,7 @@ from pydantic import (
     field_validator,
     model_validator,
 )
+from pydantic import AfterValidator, BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from .career_profile import (
     PROFILE_ID,
@@ -106,6 +107,12 @@ CaptureTimeText = Annotated[
 ]
 ReviewStatus = Literal["accepted", "proposed", "conflicting"]
 ImportAssessment = Literal["exact", "inferred", "ambiguous", "conflicting"]
+MutationSource = Literal[
+    "direct_user",
+    "authenticated_user_instruction",
+    "deterministic_source_mapping",
+    "agent_inference",
+]
 
 PreferenceStrength = (
     Literal["requirement", "strong_preference", "preference", "dealbreaker"]
@@ -358,9 +365,16 @@ ProfileValue = Annotated[
 
 
 class ItemProvenance(StrictModel):
-    method: Literal["user_entered", "evidence_import", "tracer_compatibility"]
+    method: Literal[
+        "user_entered",
+        "agent_generated",
+        "agent_edit",
+        "evidence_import",
+        "tracer_compatibility",
+    ]
     source_label: str | None = Field(default=None, max_length=500)
     imported_at: TimestampText | None = None
+    mutation_source: MutationSource
 
 
 class ProfileItemRecord(StrictModel):
@@ -410,6 +424,57 @@ class ProfileItemMutation(StrictModel):
 class ProfileItemRemoval(StrictModel):
     expected_profile_revision: int = Field(ge=0)
     idempotency_key: IdempotencyKey
+
+
+class ProfileProposalDecision(StrictModel):
+    expected_profile_revision: int = Field(ge=0)
+    idempotency_key: IdempotencyKey
+    proposal_sha256: Sha256Digest
+    decision: Literal["accept", "reject"]
+
+
+class ProfileIntentGrantRequest(StrictModel):
+    operation: Literal[
+        "item.create",
+        "item.update",
+        "item.remove",
+        "evidence.remove",
+        "proposal.accept",
+        "proposal.reject",
+    ]
+    target_id: str | None = Field(default=None, max_length=80)
+    payload: dict[str, object]
+
+    @field_validator("payload")
+    @classmethod
+    def bound_payload(cls, value: dict[str, object]) -> dict[str, object]:
+        if len(_canonical_json(value).encode()) > 64 * 1024:
+            raise ValueError("intent grant payload must not exceed 64 KiB")
+        return value
+
+    @model_validator(mode="after")
+    def target_matches_operation(self) -> Self:
+        if self.operation == "item.create":
+            if self.target_id is not None:
+                raise ValueError("item.create grants cannot name an existing target")
+        elif self.operation == "evidence.remove":
+            if self.target_id is None or not re.fullmatch(
+                r"cpe_[A-Za-z0-9_-]{16,64}", self.target_id
+            ):
+                raise ValueError("evidence.remove grants require an exact Evidence ID")
+        elif self.target_id is None or not re.fullmatch(
+            r"cpi_[A-Za-z0-9_-]{16,64}", self.target_id
+        ):
+            raise ValueError(f"{self.operation} grants require an exact item ID")
+        return self
+
+
+class ProfileIntentGrant(StrictModel):
+    grant_id: Annotated[str, Field(pattern=r"^cpg_[A-Za-z0-9_-]{16,64}$")]
+    operation: str
+    target_id: str | None
+    payload_sha256: Sha256Digest
+    created_at: TimestampText
 
 
 class EvidenceExtraction(StrictModel):
@@ -473,6 +538,28 @@ def _canonical_json(value: object) -> str:
 
 def _request_hash(command: str, payload: object) -> str:
     return sha256(_canonical_json({"command": command, "payload": payload}).encode()).hexdigest()
+
+
+def _actor_bound_request_hash(
+    command: str,
+    payload: object,
+    mutation_source: MutationSource,
+    intent_grant_id: str | None,
+) -> str:
+    """Bind idempotent replay to the authority used for the original call."""
+    return _request_hash(
+        command,
+        {
+            "mutation_source": mutation_source,
+            "intent_grant_id": intent_grant_id,
+            "payload": payload,
+        },
+    )
+
+
+def proposal_sha256(item: ProfileItemRecord) -> str:
+    """Bind a decision to every immutable byte of the currently stored proposal."""
+    return sha256(_canonical_json(item.model_dump(mode="json")).encode()).hexdigest()
 
 
 def _area_for_kind(kind: str) -> Literal["my_career", "what_im_looking_for", "my_evidence"]:
@@ -634,12 +721,58 @@ class CareerProfileCompleteStore:
         with connect_sqlite(f"file:{self.database}?mode=ro", uri=True) as connection:
             return self._current_in_connection(connection)
 
+    def create_intent_grant(
+        self, *, principal: str, command: ProfileIntentGrantRequest
+    ) -> ProfileIntentGrant:
+        grant_id = _opaque_id("cpg_")
+        created_at = _now()
+        if command.operation in {"item.create", "item.update"}:
+            normalized_payload = ProfileItemMutation.model_validate(command.payload).model_dump(
+                mode="json"
+            )
+        elif command.operation in {"item.remove", "evidence.remove"}:
+            normalized_payload = ProfileItemRemoval.model_validate(command.payload).model_dump(
+                mode="json"
+            )
+        else:
+            normalized_payload = ProfileProposalDecision.model_validate(command.payload).model_dump(
+                mode="json"
+            )
+        payload_sha = sha256(_canonical_json(normalized_payload).encode()).hexdigest()
+        with connect_sqlite(self.database) as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            connection.execute(
+                "INSERT INTO career_profile_intent_grants("
+                "grant_id, created_by_principal, operation, target_id, payload_sha256, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (
+                    grant_id,
+                    principal,
+                    command.operation,
+                    command.target_id,
+                    payload_sha,
+                    created_at,
+                ),
+            )
+            connection.commit()
+        return ProfileIntentGrant(
+            grant_id=grant_id,
+            operation=command.operation,
+            target_id=command.target_id,
+            payload_sha256=payload_sha,
+            created_at=created_at,
+        )
+
     def upsert_item(
         self,
         *,
         principal: str,
         command: ProfileItemMutation,
         item_id: str | None = None,
+        mutation_source: Literal[
+            "direct_user", "agent_inference", "authenticated_user_instruction"
+        ] = "direct_user",
+        intent_grant_id: str | None = None,
     ) -> CareerProfileCompleteCurrent:
         if item_id is not None and not re.fullmatch(r"cpi_[A-Za-z0-9_-]{16,64}", item_id):
             raise CareerProfileValueError(
@@ -656,12 +789,18 @@ class CareerProfileCompleteStore:
         return self._mutate_item(
             principal=principal,
             idempotency_key=command.idempotency_key,
-            request_hash=_request_hash("item.upsert", payload),
+            request_hash=_actor_bound_request_hash(
+                "item.upsert", payload, mutation_source, intent_grant_id
+            ),
             expected_revision=command.expected_profile_revision,
             item_id=resolved_item_id,
             value=command.value,
             evidence_ids=command.evidence_ids,
             require_existing=item_id is not None,
+            mutation_source=mutation_source,
+            intent_grant_id=intent_grant_id,
+            operation="item.update" if item_id is not None else "item.create",
+            grant_payload=command.model_dump(mode="json"),
         )
 
     def remove_item(
@@ -670,13 +809,20 @@ class CareerProfileCompleteStore:
         principal: str,
         item_id: str,
         command: ProfileItemRemoval,
+        mutation_source: Literal[
+            "direct_user", "agent_inference", "authenticated_user_instruction"
+        ] = "direct_user",
+        intent_grant_id: str | None = None,
     ) -> CareerProfileCompleteCurrent:
         if not re.fullmatch(r"cpi_[A-Za-z0-9_-]{16,64}", item_id):
             raise CareerProfileValueError(
                 "Compatibility tracer items must use their dedicated staging endpoint"
             )
-        request_hash = _request_hash(
-            "item.remove", command.model_dump(mode="json") | {"item_id": item_id}
+        request_hash = _actor_bound_request_hash(
+            "item.remove",
+            command.model_dump(mode="json") | {"item_id": item_id},
+            mutation_source,
+            intent_grant_id,
         )
         with connect_sqlite(self.database) as connection:
             connection.execute("BEGIN IMMEDIATE")
@@ -686,6 +832,15 @@ class CareerProfileCompleteStore:
                     connection.rollback()
                     return replay
                 head = self._check_head(connection, command.expected_profile_revision)
+                self._authorize_actor(
+                    connection,
+                    principal=principal,
+                    mutation_source=mutation_source,
+                    intent_grant_id=intent_grant_id,
+                    operation="item.remove",
+                    target_id=item_id,
+                    payload=command.model_dump(mode="json"),
+                )
                 row = connection.execute(
                     "SELECT value_json, provenance_json, review_status, evidence_ids_json, "
                     "item_revision, actor_principal, created_at, updated_at "
@@ -726,11 +881,16 @@ class CareerProfileCompleteStore:
         *,
         principal: str,
         command: EvidenceImportRequest,
+        mutation_source: Literal[
+            "direct_user", "agent_inference", "deterministic_source_mapping"
+        ] = "direct_user",
     ) -> CareerProfileCompleteCurrent:
-        request_hash = _request_hash(
+        request_hash = _actor_bound_request_hash(
             "evidence.import",
             command.model_dump(mode="json", exclude={"content_base64"})
             | {"content_sha256": sha256(base64.b64decode(command.content_base64)).hexdigest()},
+            mutation_source,
+            None,
         )
         content = base64.b64decode(command.content_base64, validate=True)
         storage_name: str | None = None
@@ -750,6 +910,16 @@ class CareerProfileCompleteStore:
                 storage_name = self.vault.write(evidence_id, content)
                 imported_at = _now()
                 content_hash = sha256(content).hexdigest()
+                provenance_method = (
+                    "agent_import"
+                    if mutation_source == "agent_inference"
+                    else "user_import"
+                    if mutation_source == "direct_user"
+                    else command.provenance.method
+                )
+                evidence_provenance = command.provenance.model_copy(
+                    update={"method": provenance_method}
+                )
                 connection.execute(
                     "INSERT INTO career_profile_evidence("
                     "evidence_id, original_filename, media_type, "
@@ -763,7 +933,7 @@ class CareerProfileCompleteStore:
                         len(content),
                         command.captured_at,
                         imported_at,
-                        _canonical_json(command.provenance.model_dump(mode="json")),
+                        _canonical_json(evidence_provenance.model_dump(mode="json")),
                         storage_name,
                     ),
                 )
@@ -772,15 +942,17 @@ class CareerProfileCompleteStore:
                     item_id = _opaque_id("cpi_")
                     review_status: ReviewStatus = (
                         "accepted"
-                        if extraction.assessment == "exact"
+                        if mutation_source == "deterministic_source_mapping"
+                        and extraction.assessment == "exact"
                         else "conflicting"
                         if extraction.assessment == "conflicting"
                         else "proposed"
                     )
                     provenance = ItemProvenance(
                         method="evidence_import",
-                        source_label=command.provenance.source_label,
+                        source_label=evidence_provenance.source_label,
                         imported_at=imported_at,
+                        mutation_source=mutation_source,
                     )
                     connection.execute(
                         "INSERT INTO career_profile_items(item_id, value_json, provenance_json, "
@@ -848,10 +1020,16 @@ class CareerProfileCompleteStore:
         principal: str,
         evidence_id: str,
         command: ProfileItemRemoval,
+        mutation_source: Literal[
+            "direct_user", "agent_inference", "authenticated_user_instruction"
+        ] = "direct_user",
+        intent_grant_id: str | None = None,
     ) -> CareerProfileCompleteCurrent:
-        request_hash = _request_hash(
+        request_hash = _actor_bound_request_hash(
             "evidence.remove",
             command.model_dump(mode="json") | {"evidence_id": evidence_id},
+            mutation_source,
+            intent_grant_id,
         )
         with connect_sqlite(self.database) as connection:
             connection.execute("BEGIN IMMEDIATE")
@@ -861,6 +1039,15 @@ class CareerProfileCompleteStore:
                     connection.rollback()
                     return replay
                 head = self._check_head(connection, command.expected_profile_revision)
+                self._authorize_actor(
+                    connection,
+                    principal=principal,
+                    mutation_source=mutation_source,
+                    intent_grant_id=intent_grant_id,
+                    operation="evidence.remove",
+                    target_id=evidence_id,
+                    payload=command.model_dump(mode="json"),
+                )
                 row = connection.execute(
                     "SELECT original_filename, media_type, content_sha256, "
                     "byte_count, captured_at, "
@@ -942,6 +1129,100 @@ class CareerProfileCompleteStore:
             raise CareerProfileEvidenceNotFound
         return self._evidence_from_row((evidence_id, *row))
 
+    def decide_proposal(
+        self,
+        *,
+        principal: str,
+        item_id: str,
+        command: ProfileProposalDecision,
+        mutation_source: Literal[
+            "direct_user", "agent_inference", "authenticated_user_instruction"
+        ] = "direct_user",
+        intent_grant_id: str | None = None,
+    ) -> CareerProfileCompleteCurrent:
+        operation = f"proposal.{command.decision}"
+        payload = command.model_dump(mode="json")
+        request_hash = _actor_bound_request_hash(
+            operation, payload | {"item_id": item_id}, mutation_source, intent_grant_id
+        )
+        with connect_sqlite(self.database) as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            try:
+                replay = self._replay(connection, principal, command.idempotency_key, request_hash)
+                if replay is not None:
+                    connection.rollback()
+                    return replay
+                head = self._check_head(connection, command.expected_profile_revision)
+                self._authorize_actor(
+                    connection,
+                    principal=principal,
+                    mutation_source=mutation_source,
+                    intent_grant_id=intent_grant_id,
+                    operation=operation,
+                    target_id=item_id,
+                    payload=payload,
+                )
+                row = connection.execute(
+                    "SELECT value_json, provenance_json, review_status, evidence_ids_json, "
+                    "item_revision, actor_principal, created_at, updated_at "
+                    "FROM career_profile_items WHERE item_id = ? AND active = 1",
+                    (item_id,),
+                ).fetchone()
+                if row is None:
+                    raise CareerProfileItemNotFound
+                before = self._item_from_row((item_id, *row))
+                if before.review_status not in {"proposed", "conflicting"}:
+                    raise CareerProfileValueError("Only an exact pending proposal can be decided")
+                if not secrets.compare_digest(proposal_sha256(before), command.proposal_sha256):
+                    raise CareerProfileValueError(
+                        "Proposal payload changed; regenerate the decision"
+                    )
+                timestamp = _now()
+                if command.decision == "accept":
+                    connection.execute(
+                        "UPDATE career_profile_items SET review_status = 'accepted', "
+                        "item_revision = item_revision + 1, updated_at = ? WHERE item_id = ?",
+                        (timestamp, item_id),
+                    )
+                    decided_row = connection.execute(
+                        "SELECT value_json, provenance_json, review_status, evidence_ids_json, "
+                        "item_revision, actor_principal, created_at, updated_at "
+                        "FROM career_profile_items WHERE item_id = ?",
+                        (item_id,),
+                    ).fetchone()
+                    assert decided_row is not None
+                    after: object | None = self._item_from_row((item_id, *decided_row)).model_dump(
+                        mode="json"
+                    )
+                    revision_operation = "item.upsert"
+                else:
+                    connection.execute(
+                        "UPDATE career_profile_items SET active = 0, "
+                        "item_revision = item_revision + 1, updated_at = ? WHERE item_id = ?",
+                        (timestamp, item_id),
+                    )
+                    after = None
+                    revision_operation = "item.remove"
+                revision = head + 1
+                self._record_revision(
+                    connection,
+                    revision=revision,
+                    base_revision=head,
+                    principal=principal,
+                    operation=revision_operation,
+                    item_id=item_id,
+                    evidence_id=None,
+                    before=before.model_dump(mode="json"),
+                    after=after,
+                    affected=[f"items.{item_id}"],
+                )
+                result = self._finish(connection, principal, command.idempotency_key, request_hash)
+                connection.commit()
+                return result
+            except Exception:
+                connection.rollback()
+                raise
+
     def _mutate_item(
         self,
         *,
@@ -953,6 +1234,12 @@ class CareerProfileCompleteStore:
         value: ProfileValue,
         evidence_ids: list[str],
         require_existing: bool,
+        mutation_source: Literal[
+            "direct_user", "agent_inference", "authenticated_user_instruction"
+        ],
+        intent_grant_id: str | None,
+        operation: str,
+        grant_payload: dict[str, object],
     ) -> CareerProfileCompleteCurrent:
         with connect_sqlite(self.database) as connection:
             connection.execute("BEGIN IMMEDIATE")
@@ -962,13 +1249,15 @@ class CareerProfileCompleteStore:
                     connection.rollback()
                     return replay
                 head = self._check_head(connection, expected_revision)
-                for evidence_id in evidence_ids:
-                    row = connection.execute(
-                        "SELECT active FROM career_profile_evidence WHERE evidence_id = ?",
-                        (evidence_id,),
-                    ).fetchone()
-                    if row is None or not bool(row[0]):
-                        raise CareerProfileValueError("Evidence link is missing or inactive")
+                self._authorize_actor(
+                    connection,
+                    principal=principal,
+                    mutation_source=mutation_source,
+                    intent_grant_id=intent_grant_id,
+                    operation=operation,
+                    target_id=item_id if require_existing else None,
+                    payload=grant_payload,
+                )
                 previous_row = connection.execute(
                     "SELECT value_json, provenance_json, review_status, evidence_ids_json, "
                     "item_revision, actor_principal, created_at, updated_at "
@@ -982,15 +1271,48 @@ class CareerProfileCompleteStore:
                 )
                 if require_existing and previous is None:
                     raise CareerProfileItemNotFound
+                if mutation_source == "agent_inference" and previous is not None:
+                    raise CareerProfileValueError(
+                        "Autonomous agent updates must be submitted as a separate proposal"
+                    )
+                historical_evidence_ids = set(previous.evidence_ids if previous else [])
+                for evidence_id in evidence_ids:
+                    row = connection.execute(
+                        "SELECT active FROM career_profile_evidence WHERE evidence_id = ?",
+                        (evidence_id,),
+                    ).fetchone()
+                    if row is None or (
+                        not bool(row[0]) and evidence_id not in historical_evidence_ids
+                    ):
+                        raise CareerProfileValueError("New Evidence links must exist and be active")
                 item_revision = previous.item_revision + 1 if previous else 1
                 timestamp = _now()
-                provenance = ItemProvenance(method="user_entered")
+                review_status: ReviewStatus = (
+                    "proposed" if mutation_source == "agent_inference" else "accepted"
+                )
+                provenance = ItemProvenance(
+                    method=(
+                        "agent_generated"
+                        if mutation_source == "agent_inference"
+                        else "agent_edit"
+                        if mutation_source == "authenticated_user_instruction"
+                        else "user_entered"
+                    ),
+                    mutation_source=(
+                        "agent_inference"
+                        if mutation_source == "agent_inference"
+                        else "authenticated_user_instruction"
+                        if mutation_source == "authenticated_user_instruction"
+                        else "direct_user"
+                    ),
+                )
                 connection.execute(
                     "INSERT INTO career_profile_items(item_id, value_json, provenance_json, "
                     "review_status, evidence_ids_json, item_revision, actor_principal, active, "
-                    "created_at, updated_at) VALUES (?, ?, ?, 'accepted', ?, ?, ?, 1, ?, ?) "
+                    "created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?) "
                     "ON CONFLICT(item_id) DO UPDATE SET value_json = excluded.value_json, "
-                    "provenance_json = excluded.provenance_json, review_status = 'accepted', "
+                    "provenance_json = excluded.provenance_json, "
+                    "review_status = excluded.review_status, "
                     "evidence_ids_json = excluded.evidence_ids_json, "
                     "item_revision = excluded.item_revision, "
                     "actor_principal = excluded.actor_principal, active = 1, "
@@ -999,6 +1321,7 @@ class CareerProfileCompleteStore:
                         item_id,
                         _canonical_json(value.model_dump(mode="json")),
                         _canonical_json(provenance.model_dump(mode="json")),
+                        review_status,
                         _canonical_json(evidence_ids),
                         item_revision,
                         principal,
@@ -1033,6 +1356,55 @@ class CareerProfileCompleteStore:
             except Exception:
                 connection.rollback()
                 raise
+
+    @staticmethod
+    def _authorize_actor(
+        connection: sqlite3.Connection,
+        *,
+        principal: str,
+        mutation_source: Literal[
+            "direct_user", "agent_inference", "authenticated_user_instruction"
+        ],
+        intent_grant_id: str | None,
+        operation: str,
+        target_id: str | None,
+        payload: dict[str, object],
+    ) -> None:
+        if mutation_source == "direct_user":
+            if intent_grant_id is not None:
+                raise CareerProfileValueError("Direct user actions do not consume agent grants")
+            return
+        if mutation_source == "agent_inference":
+            if operation != "item.create":
+                raise CareerProfileValueError(
+                    "Autonomous agent destructive or replacement actions require exact user intent"
+                )
+            return
+        if intent_grant_id is None:
+            raise CareerProfileValueError("Authenticated exact-payload user intent is required")
+        row = connection.execute(
+            "SELECT operation, target_id, payload_sha256, consumed_at "
+            "FROM career_profile_intent_grants WHERE grant_id = ?",
+            (intent_grant_id,),
+        ).fetchone()
+        payload_sha = sha256(_canonical_json(payload).encode()).hexdigest()
+        if (
+            row is None
+            or row[3] is not None
+            or str(row[0]) != operation
+            or row[1] != target_id
+            or not secrets.compare_digest(str(row[2]), payload_sha)
+        ):
+            raise CareerProfileValueError(
+                "Intent grant is missing, consumed, or payload-mismatched"
+            )
+        updated = connection.execute(
+            "UPDATE career_profile_intent_grants SET consumed_at = ?, "
+            "consumed_by_principal = ? WHERE grant_id = ? AND consumed_at IS NULL",
+            (_now(), principal, intent_grant_id),
+        )
+        if updated.rowcount != 1:
+            raise CareerProfileValueError("Intent grant was already consumed")
 
     @staticmethod
     def _head(connection: sqlite3.Connection) -> int:
@@ -1161,7 +1533,9 @@ class CareerProfileCompleteStore:
                     value=WorkArrangementProfileValue(kind="work_arrangement", **value),
                     review_status="accepted",
                     evidence_ids=[],
-                    provenance=ItemProvenance(method="tracer_compatibility"),
+                    provenance=ItemProvenance(
+                        method="tracer_compatibility", mutation_source="direct_user"
+                    ),
                     item_revision=int(tracer[2]),
                     actor_principal=str(tracer[3]),
                     created_at=str(tracer[4]),

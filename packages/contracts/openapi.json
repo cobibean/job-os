@@ -3156,10 +3156,22 @@
           "method": {
             "enum": [
               "user_entered",
+              "agent_generated",
+              "agent_edit",
               "evidence_import",
               "tracer_compatibility"
             ],
             "title": "Method",
+            "type": "string"
+          },
+          "mutation_source": {
+            "enum": [
+              "direct_user",
+              "authenticated_user_instruction",
+              "deterministic_source_mapping",
+              "agent_inference"
+            ],
+            "title": "Mutation Source",
             "type": "string"
           },
           "source_label": {
@@ -3176,7 +3188,8 @@
           }
         },
         "required": [
-          "method"
+          "method",
+          "mutation_source"
         ],
         "title": "ItemProvenance",
         "type": "object"
@@ -4289,6 +4302,91 @@
         "title": "PriorityValue",
         "type": "object"
       },
+      "ProfileIntentGrant": {
+        "additionalProperties": false,
+        "properties": {
+          "created_at": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Created At",
+            "type": "string"
+          },
+          "grant_id": {
+            "pattern": "^cpg_[A-Za-z0-9_-]{16,64}$",
+            "title": "Grant Id",
+            "type": "string"
+          },
+          "operation": {
+            "title": "Operation",
+            "type": "string"
+          },
+          "payload_sha256": {
+            "pattern": "^[a-f0-9]{64}$",
+            "title": "Payload Sha256",
+            "type": "string"
+          },
+          "target_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Id"
+          }
+        },
+        "required": [
+          "grant_id",
+          "operation",
+          "target_id",
+          "payload_sha256",
+          "created_at"
+        ],
+        "title": "ProfileIntentGrant",
+        "type": "object"
+      },
+      "ProfileIntentGrantRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "operation": {
+            "enum": [
+              "item.create",
+              "item.update",
+              "item.remove",
+              "evidence.remove",
+              "proposal.accept",
+              "proposal.reject"
+            ],
+            "title": "Operation",
+            "type": "string"
+          },
+          "payload": {
+            "additionalProperties": true,
+            "title": "Payload",
+            "type": "object"
+          },
+          "target_id": {
+            "anyOf": [
+              {
+                "maxLength": 80,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Id"
+          }
+        },
+        "required": [
+          "operation",
+          "payload"
+        ],
+        "title": "ProfileIntentGrantRequest",
+        "type": "object"
+      },
       "ProfileItemMutation": {
         "additionalProperties": false,
         "properties": {
@@ -4557,6 +4655,44 @@
           "idempotency_key"
         ],
         "title": "ProfileItemRemoval",
+        "type": "object"
+      },
+      "ProfileProposalDecision": {
+        "additionalProperties": false,
+        "properties": {
+          "decision": {
+            "enum": [
+              "accept",
+              "reject"
+            ],
+            "title": "Decision",
+            "type": "string"
+          },
+          "expected_profile_revision": {
+            "minimum": 0.0,
+            "title": "Expected Profile Revision",
+            "type": "integer"
+          },
+          "idempotency_key": {
+            "maxLength": 200,
+            "minLength": 8,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+            "title": "Idempotency Key",
+            "type": "string"
+          },
+          "proposal_sha256": {
+            "pattern": "^[a-f0-9]{64}$",
+            "title": "Proposal Sha256",
+            "type": "string"
+          }
+        },
+        "required": [
+          "expected_profile_revision",
+          "idempotency_key",
+          "proposal_sha256",
+          "decision"
+        ],
+        "title": "ProfileProposalDecision",
         "type": "object"
       },
       "ProjectValue": {
@@ -6594,6 +6730,24 @@
     "/v1/career-profile/evidence": {
       "post": {
         "operationId": "career_profile_evidence_import_v1_career_profile_evidence_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-JobOS-MCP-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Jobos-Mcp-Token"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -6699,6 +6853,38 @@
               "pattern": "^cpe_[A-Za-z0-9_-]{16,64}$",
               "title": "Evidence Id",
               "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-JobOS-MCP-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Jobos-Mcp-Token"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-JobOS-Intent-Grant",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Jobos-Intent-Grant"
             }
           }
         ],
@@ -6891,9 +7077,129 @@
         ]
       }
     },
+    "/v1/career-profile/intent-grants": {
+      "post": {
+        "operationId": "career_profile_intent_grant_create_v1_career_profile_intent_grants_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProfileIntentGrantRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProfileIntentGrant"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Device authentication required"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Operation is not permitted"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Resource not found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Request validation failed"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Internal server error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Career Profile Intent Grant Create",
+        "tags": [
+          "career-profile"
+        ]
+      }
+    },
     "/v1/career-profile/items": {
       "post": {
         "operationId": "career_profile_item_create_v1_career_profile_items_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-JobOS-MCP-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Jobos-Mcp-Token"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-JobOS-Intent-Grant",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Jobos-Intent-Grant"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -6999,6 +7305,38 @@
               "pattern": "^cpi_[A-Za-z0-9_-]{16,64}$",
               "title": "Item Id",
               "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-JobOS-MCP-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Jobos-Mcp-Token"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-JobOS-Intent-Grant",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Jobos-Intent-Grant"
             }
           }
         ],
@@ -7106,6 +7444,38 @@
               "title": "Item Id",
               "type": "string"
             }
+          },
+          {
+            "in": "header",
+            "name": "X-JobOS-MCP-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Jobos-Mcp-Token"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-JobOS-Intent-Grant",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Jobos-Intent-Grant"
+            }
           }
         ],
         "requestBody": {
@@ -7196,6 +7566,146 @@
           }
         ],
         "summary": "Career Profile Item Update",
+        "tags": [
+          "career-profile"
+        ]
+      }
+    },
+    "/v1/career-profile/items/{item_id}/decision": {
+      "post": {
+        "operationId": "career_profile_proposal_decide_v1_career_profile_items__item_id__decision_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "item_id",
+            "required": true,
+            "schema": {
+              "pattern": "^cpi_[A-Za-z0-9_-]{16,64}$",
+              "title": "Item Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-JobOS-MCP-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Jobos-Mcp-Token"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-JobOS-Intent-Grant",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Jobos-Intent-Grant"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProfileProposalDecision"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CareerProfileCompleteCurrent"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Device authentication required"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Operation is not permitted"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Resource not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Resource state conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Request validation failed"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Internal server error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Career Profile Proposal Decide",
         "tags": [
           "career-profile"
         ]

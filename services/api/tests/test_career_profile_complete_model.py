@@ -21,7 +21,9 @@ from jobos_api.career_profile_complete import (
     EvidenceVault,
     ProfileItemMutation,
     ProfileItemRemoval,
+    ProfileProposalDecision,
     WorkArrangementProfileValue,
+    proposal_sha256,
 )
 from jobos_api.settings import Settings
 from jobos_api.state_store import SCHEMA_VERSION, JobOsStateStore
@@ -309,11 +311,11 @@ def test_capture_time_is_optional_or_partial_while_import_time_remains_exact(tmp
     assert second.source_evidence[1].imported_at is not None
 
 
-def test_exact_import_is_accepted_and_inferred_ambiguous_conflicting_stay_unaccepted(
+def test_payload_assessment_cannot_self_authorize_acceptance(
     tmp_path: Path,
 ):
     for assessment, expected in (
-        ("exact", "accepted"),
+        ("exact", "proposed"),
         ("inferred", "proposed"),
         ("ambiguous", "proposed"),
         ("conflicting", "conflicting"),
@@ -329,6 +331,15 @@ def test_exact_import_is_accepted_and_inferred_ambiguous_conflicting_stay_unacce
         assert imported.items[0].review_status == expected
         assert imported.items[0].evidence_ids == [imported.source_evidence[0].evidence_id]
         assert imported.items[0].provenance.method == "evidence_import"
+
+    deterministic_store = initialized_store(tmp_path / "server-deterministic")
+    deterministic = deterministic_store.import_evidence(
+        principal="internal:deterministic-importer",
+        mutation_source="deterministic_source_mapping",
+        command=evidence_request(assessment="exact"),
+    )
+    assert deterministic.items[0].review_status == "accepted"
+    assert deterministic.items[0].provenance.mutation_source == "deterministic_source_mapping"
 
 
 def test_imported_bytes_are_immutable_hash_verified_and_content_is_never_executed(
@@ -427,7 +438,7 @@ def test_claims_are_user_owned_accomplishments_and_evidence_is_optional_support(
     )
     claim = imported.items[-1]
     assert claim.area == "my_career"
-    assert claim.review_status == "accepted"
+    assert claim.review_status == "proposed"
     assert claim.evidence_ids == [imported.source_evidence[0].evidence_id]
 
 
@@ -446,7 +457,8 @@ def test_removing_evidence_preserves_linked_accepted_claim(tmp_path: Path):
         }
     ]
     imported = store.import_evidence(
-        principal="device:primary-device",
+        principal="internal:deterministic-importer",
+        mutation_source="deterministic_source_mapping",
         command=EvidenceImportRequest.model_validate(request),
     )
     claim_before = imported.items[0]
@@ -466,6 +478,146 @@ def test_removing_evidence_preserves_linked_accepted_claim(tmp_path: Path):
     assert claim_after.review_status == "accepted"
     assert claim_after.evidence_ids == [evidence.evidence_id]
     assert removed.source_evidence[0].active is False
+
+
+def test_agent_exact_label_stays_proposed_and_exact_user_decision_preserves_provenance(
+    tmp_path: Path,
+):
+    store = initialized_store(tmp_path)
+    imported = store.import_evidence(
+        principal="agent:trusted-local-mcp",
+        mutation_source="agent_inference",
+        command=evidence_request(assessment="exact"),
+    )
+    proposal = imported.items[0]
+    assert proposal.review_status == "proposed"
+    assert proposal.provenance.mutation_source == "agent_inference"
+    assert imported.source_evidence[0].provenance.method == "agent_import"
+
+    with pytest.raises(CareerProfileValueError, match="payload changed"):
+        store.decide_proposal(
+            principal="device:primary-device",
+            item_id=proposal.item_id,
+            command=ProfileProposalDecision(
+                expected_profile_revision=1,
+                idempotency_key="reject-changed-proposal-decision-0001",
+                proposal_sha256="0" * 64,
+                decision="accept",
+            ),
+        )
+    accepted = store.decide_proposal(
+        principal="device:primary-device",
+        item_id=proposal.item_id,
+        command=ProfileProposalDecision(
+            expected_profile_revision=1,
+            idempotency_key="accept-exact-agent-proposal-0001",
+            proposal_sha256=proposal_sha256(proposal),
+            decision="accept",
+        ),
+    )
+    decided = accepted.items[0]
+    assert decided.review_status == "accepted"
+    assert decided.actor_principal == "agent:trusted-local-mcp"
+    assert decided.provenance == proposal.provenance
+    assert decided.evidence_ids == proposal.evidence_ids
+
+
+def test_inactive_historical_evidence_round_trips_but_cannot_be_newly_linked(tmp_path: Path):
+    store = initialized_store(tmp_path)
+    imported = store.import_evidence(principal="device:primary-device", command=evidence_request())
+    item = imported.items[0]
+    evidence_id = imported.source_evidence[0].evidence_id
+    store.remove_evidence(
+        principal="device:primary-device",
+        evidence_id=evidence_id,
+        command=ProfileItemRemoval(
+            expected_profile_revision=1,
+            idempotency_key="remove-historical-evidence-0001",
+        ),
+    )
+    edited = store.upsert_item(
+        principal="device:primary-device",
+        item_id=item.item_id,
+        command=ProfileItemMutation(
+            expected_profile_revision=2,
+            idempotency_key="edit-with-historical-evidence-0001",
+            value=item.value.model_copy(update={"city": "(FAKE) Des Moines, IA"}),
+            evidence_ids=[evidence_id],
+        ),
+    )
+    assert edited.items[0].evidence_ids == [evidence_id]
+
+    with pytest.raises(CareerProfileValueError, match="active"):
+        store.upsert_item(
+            principal="device:primary-device",
+            command=ProfileItemMutation.model_validate(
+                {
+                    "expected_profile_revision": 3,
+                    "idempotency_key": "reject-new-inactive-evidence-link-0001",
+                    "value": {"kind": "skill", "name": "(FAKE) Systems design"},
+                    "evidence_ids": [evidence_id],
+                }
+            ),
+        )
+
+
+def test_agent_sensitive_edit_requires_one_time_exact_payload_user_grant(tmp_path: Path):
+    app = create_app(configured_settings(tmp_path / "jobos.db"))
+    command = {
+        "expected_profile_revision": 0,
+        "idempotency_key": "agent-user-authorized-identity-0001",
+        "value": {"kind": "identity", "professional_name": "(FAKE) Alex Morgan"},
+    }
+    agent_headers = auth() | {"X-JobOS-MCP-Token": MCP_TOKEN}
+    with TestClient(app) as client:
+        autonomous = client.post(
+            "/v1/career-profile/items",
+            headers=agent_headers,
+            json=command | {"idempotency_key": "agent-identity-proposal-0001"},
+        )
+        assert autonomous.status_code == 201
+        assert autonomous.json()["items"][0]["review_status"] == "proposed"
+
+        exact_command = command | {"expected_profile_revision": 1}
+        grant = client.post(
+            "/v1/career-profile/intent-grants",
+            headers=auth(),
+            json={"operation": "item.create", "target_id": None, "payload": exact_command},
+        )
+        assert grant.status_code == 201, grant.text
+        granted_headers = agent_headers | {"X-JobOS-Intent-Grant": grant.json()["grant_id"]}
+
+        mismatched = client.post(
+            "/v1/career-profile/items",
+            headers=granted_headers,
+            json=exact_command | {"value": {"kind": "identity", "professional_name": "Changed"}},
+        )
+        assert mismatched.status_code == 422
+        accepted = client.post(
+            "/v1/career-profile/items", headers=granted_headers, json=exact_command
+        )
+        assert accepted.status_code == 201, accepted.text
+        accepted_item = accepted.json()["items"][-1]
+        assert accepted_item["review_status"] == "accepted"
+        assert accepted_item["evidence_ids"] == []
+        assert accepted_item["provenance"]["mutation_source"] == ("authenticated_user_instruction")
+        assert accepted_item["provenance"]["method"] == "agent_edit"
+
+        authority_downgrade_replay = client.post(
+            "/v1/career-profile/items", headers=agent_headers, json=exact_command
+        )
+        assert authority_downgrade_replay.status_code == 409
+
+        replay_with_changed_key = client.post(
+            "/v1/career-profile/items",
+            headers=granted_headers,
+            json=exact_command
+            | {
+                "expected_profile_revision": 2,
+                "idempotency_key": "cannot-reuse-consumed-grant-0001",
+            },
+        )
+        assert replay_with_changed_key.status_code == 422
 
 
 def test_vault_rejects_symlink_root_and_storage_name_escape(tmp_path: Path):
@@ -633,9 +785,9 @@ def test_manual_values_and_evidence_removal_create_revisions_without_erasing_his
     ]
     assert "Reduced processing time" in history_payload
     assert "(FAKE) Alex Morgan" in imported_history
-    assert '"review_status":"accepted"' in imported_history
+    assert '"review_status":"proposed"' in imported_history
     assert "(FAKE) Alex Morgan" in evidence_removal_history
-    assert '"review_status":"accepted"' in evidence_removal_history
+    assert '"review_status":"proposed"' in evidence_removal_history
 
 
 def test_audit_events_do_not_duplicate_full_values(tmp_path: Path):
@@ -737,6 +889,7 @@ def test_schema_migration_adds_complete_model_tables_without_activating_profile(
             "career_profile_evidence",
             "career_profile_complete_revisions",
             "career_profile_complete_idempotency",
+            "career_profile_intent_grants",
         } <= tables
         assert connection.execute("SELECT COUNT(*) FROM career_profiles").fetchone() == (0,)
 
@@ -803,6 +956,7 @@ def test_complete_route_contracts_advertise_runtime_auth_not_found_and_conflict_
 
     expected = {
         ("/v1/career-profile", "get"): {"401", "403", "404", "500"},
+        ("/v1/career-profile/intent-grants", "post"): {"401", "403", "404", "422", "500"},
         ("/v1/career-profile/items", "post"): {"401", "403", "404", "409", "422", "500"},
         ("/v1/career-profile/items/{item_id}", "put"): {
             "401",
@@ -813,6 +967,14 @@ def test_complete_route_contracts_advertise_runtime_auth_not_found_and_conflict_
             "500",
         },
         ("/v1/career-profile/items/{item_id}", "delete"): {
+            "401",
+            "403",
+            "404",
+            "409",
+            "422",
+            "500",
+        },
+        ("/v1/career-profile/items/{item_id}/decision", "post"): {
             "401",
             "403",
             "404",

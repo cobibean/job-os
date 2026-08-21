@@ -1636,7 +1636,11 @@ export type ItemProvenance = {
     /**
      * Method
      */
-    method: 'user_entered' | 'evidence_import' | 'tracer_compatibility';
+    method: 'user_entered' | 'agent_generated' | 'agent_edit' | 'evidence_import' | 'tracer_compatibility';
+    /**
+     * Mutation Source
+     */
+    mutation_source: 'direct_user' | 'authenticated_user_instruction' | 'deterministic_source_mapping' | 'agent_inference';
     /**
      * Source Label
      */
@@ -2198,6 +2202,52 @@ export type PriorityValue = {
 };
 
 /**
+ * ProfileIntentGrant
+ */
+export type ProfileIntentGrant = {
+    /**
+     * Created At
+     */
+    created_at: string;
+    /**
+     * Grant Id
+     */
+    grant_id: string;
+    /**
+     * Operation
+     */
+    operation: string;
+    /**
+     * Payload Sha256
+     */
+    payload_sha256: string;
+    /**
+     * Target Id
+     */
+    target_id: string | null;
+};
+
+/**
+ * ProfileIntentGrantRequest
+ */
+export type ProfileIntentGrantRequest = {
+    /**
+     * Operation
+     */
+    operation: 'item.create' | 'item.update' | 'item.remove' | 'evidence.remove' | 'proposal.accept' | 'proposal.reject';
+    /**
+     * Payload
+     */
+    payload: {
+        [key: string]: unknown;
+    };
+    /**
+     * Target Id
+     */
+    target_id?: string | null;
+};
+
+/**
  * ProfileItemMutation
  */
 export type ProfileItemMutation = {
@@ -2334,6 +2384,28 @@ export type ProfileItemRemoval = {
      * Idempotency Key
      */
     idempotency_key: string;
+};
+
+/**
+ * ProfileProposalDecision
+ */
+export type ProfileProposalDecision = {
+    /**
+     * Decision
+     */
+    decision: 'accept' | 'reject';
+    /**
+     * Expected Profile Revision
+     */
+    expected_profile_revision: number;
+    /**
+     * Idempotency Key
+     */
+    idempotency_key: string;
+    /**
+     * Proposal Sha256
+     */
+    proposal_sha256: string;
 };
 
 /**
@@ -3330,6 +3402,12 @@ export type CareerProfileCompleteGetV1CareerProfileGetResponse = CareerProfileCo
 
 export type CareerProfileEvidenceImportV1CareerProfileEvidencePostData = {
     body: EvidenceImportRequest;
+    headers?: {
+        /**
+         * X-Jobos-Mcp-Token
+         */
+        'X-JobOS-MCP-Token'?: string | null;
+    };
     path?: never;
     query?: never;
     url: '/v1/career-profile/evidence';
@@ -3375,6 +3453,16 @@ export type CareerProfileEvidenceImportV1CareerProfileEvidencePostResponse = Car
 
 export type CareerProfileEvidenceRemoveV1CareerProfileEvidenceEvidenceIdDeleteData = {
     body: ProfileItemRemoval;
+    headers?: {
+        /**
+         * X-Jobos-Mcp-Token
+         */
+        'X-JobOS-MCP-Token'?: string | null;
+        /**
+         * X-Jobos-Intent-Grant
+         */
+        'X-JobOS-Intent-Grant'?: string | null;
+    };
     path: {
         /**
          * Evidence Id
@@ -3471,8 +3559,59 @@ export type CareerProfileEvidenceContentV1CareerProfileEvidenceEvidenceIdContent
     200: unknown;
 };
 
+export type CareerProfileIntentGrantCreateV1CareerProfileIntentGrantsPostData = {
+    body: ProfileIntentGrantRequest;
+    path?: never;
+    query?: never;
+    url: '/v1/career-profile/intent-grants';
+};
+
+export type CareerProfileIntentGrantCreateV1CareerProfileIntentGrantsPostErrors = {
+    /**
+     * Device authentication required
+     */
+    401: ApiErrorResponse;
+    /**
+     * Operation is not permitted
+     */
+    403: ApiErrorResponse;
+    /**
+     * Resource not found
+     */
+    404: ApiErrorResponse;
+    /**
+     * Request validation failed
+     */
+    422: ApiErrorResponse;
+    /**
+     * Internal server error
+     */
+    500: ApiErrorResponse;
+};
+
+export type CareerProfileIntentGrantCreateV1CareerProfileIntentGrantsPostError = CareerProfileIntentGrantCreateV1CareerProfileIntentGrantsPostErrors[keyof CareerProfileIntentGrantCreateV1CareerProfileIntentGrantsPostErrors];
+
+export type CareerProfileIntentGrantCreateV1CareerProfileIntentGrantsPostResponses = {
+    /**
+     * Successful Response
+     */
+    201: ProfileIntentGrant;
+};
+
+export type CareerProfileIntentGrantCreateV1CareerProfileIntentGrantsPostResponse = CareerProfileIntentGrantCreateV1CareerProfileIntentGrantsPostResponses[keyof CareerProfileIntentGrantCreateV1CareerProfileIntentGrantsPostResponses];
+
 export type CareerProfileItemCreateV1CareerProfileItemsPostData = {
     body: ProfileItemMutation;
+    headers?: {
+        /**
+         * X-Jobos-Mcp-Token
+         */
+        'X-JobOS-MCP-Token'?: string | null;
+        /**
+         * X-Jobos-Intent-Grant
+         */
+        'X-JobOS-Intent-Grant'?: string | null;
+    };
     path?: never;
     query?: never;
     url: '/v1/career-profile/items';
@@ -3518,6 +3657,16 @@ export type CareerProfileItemCreateV1CareerProfileItemsPostResponse = CareerProf
 
 export type CareerProfileItemRemoveV1CareerProfileItemsItemIdDeleteData = {
     body: ProfileItemRemoval;
+    headers?: {
+        /**
+         * X-Jobos-Mcp-Token
+         */
+        'X-JobOS-MCP-Token'?: string | null;
+        /**
+         * X-Jobos-Intent-Grant
+         */
+        'X-JobOS-Intent-Grant'?: string | null;
+    };
     path: {
         /**
          * Item Id
@@ -3568,6 +3717,16 @@ export type CareerProfileItemRemoveV1CareerProfileItemsItemIdDeleteResponse = Ca
 
 export type CareerProfileItemUpdateV1CareerProfileItemsItemIdPutData = {
     body: ProfileItemMutation;
+    headers?: {
+        /**
+         * X-Jobos-Mcp-Token
+         */
+        'X-JobOS-MCP-Token'?: string | null;
+        /**
+         * X-Jobos-Intent-Grant
+         */
+        'X-JobOS-Intent-Grant'?: string | null;
+    };
     path: {
         /**
          * Item Id
@@ -3615,6 +3774,66 @@ export type CareerProfileItemUpdateV1CareerProfileItemsItemIdPutResponses = {
 };
 
 export type CareerProfileItemUpdateV1CareerProfileItemsItemIdPutResponse = CareerProfileItemUpdateV1CareerProfileItemsItemIdPutResponses[keyof CareerProfileItemUpdateV1CareerProfileItemsItemIdPutResponses];
+
+export type CareerProfileProposalDecideV1CareerProfileItemsItemIdDecisionPostData = {
+    body: ProfileProposalDecision;
+    headers?: {
+        /**
+         * X-Jobos-Mcp-Token
+         */
+        'X-JobOS-MCP-Token'?: string | null;
+        /**
+         * X-Jobos-Intent-Grant
+         */
+        'X-JobOS-Intent-Grant'?: string | null;
+    };
+    path: {
+        /**
+         * Item Id
+         */
+        item_id: string;
+    };
+    query?: never;
+    url: '/v1/career-profile/items/{item_id}/decision';
+};
+
+export type CareerProfileProposalDecideV1CareerProfileItemsItemIdDecisionPostErrors = {
+    /**
+     * Device authentication required
+     */
+    401: ApiErrorResponse;
+    /**
+     * Operation is not permitted
+     */
+    403: ApiErrorResponse;
+    /**
+     * Resource not found
+     */
+    404: ApiErrorResponse;
+    /**
+     * Resource state conflict
+     */
+    409: ApiErrorResponse;
+    /**
+     * Request validation failed
+     */
+    422: ApiErrorResponse;
+    /**
+     * Internal server error
+     */
+    500: ApiErrorResponse;
+};
+
+export type CareerProfileProposalDecideV1CareerProfileItemsItemIdDecisionPostError = CareerProfileProposalDecideV1CareerProfileItemsItemIdDecisionPostErrors[keyof CareerProfileProposalDecideV1CareerProfileItemsItemIdDecisionPostErrors];
+
+export type CareerProfileProposalDecideV1CareerProfileItemsItemIdDecisionPostResponses = {
+    /**
+     * Successful Response
+     */
+    200: CareerProfileCompleteCurrent;
+};
+
+export type CareerProfileProposalDecideV1CareerProfileItemsItemIdDecisionPostResponse = CareerProfileProposalDecideV1CareerProfileItemsItemIdDecisionPostResponses[keyof CareerProfileProposalDecideV1CareerProfileItemsItemIdDecisionPostResponses];
 
 export type CareerProfileSnapshotCreateV1CareerProfileSnapshotsPostData = {
     body: CareerProfileSnapshotRequest;
