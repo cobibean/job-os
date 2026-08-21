@@ -1,6 +1,9 @@
 import asyncio
+import builtins
 import json
+import os
 import sqlite3
+from pathlib import Path
 
 import pytest
 from jobos_api.agent_gateway import AgentContext
@@ -371,5 +374,144 @@ def test_idempotent_replay_reuses_turn_and_snapshot(tmp_path):
                 "SELECT COUNT(*) FROM career_profile_snapshots"
             ).fetchone()[0]
         assert count == 1
+
+    asyncio.run(scenario())
+
+
+def test_api_restart_recovery_tracer_keeps_frozen_snapshot_and_bounds_projection(
+    tmp_path, monkeypatch
+):
+    async def scenario():
+        database, profile, service, gateway, principal = configured_service(tmp_path)
+
+        forbidden_authorities = (
+            "candidate-profile",
+            "user.md",
+            "agents.md",
+            "resume",
+        )
+        original_open = builtins.open
+        original_path_open = Path.open
+
+        def reject_legacy_authority(path) -> None:
+            normalized = os.fspath(path).casefold()
+            if any(authority in normalized for authority in forbidden_authorities):
+                pytest.fail(f"legacy Career Profile authority accessed: {path}")
+
+        def guarded_open(path, *args, **kwargs):
+            reject_legacy_authority(path)
+            return original_open(path, *args, **kwargs)
+
+        def guarded_path_open(path, *args, **kwargs):
+            reject_legacy_authority(path)
+            return original_path_open(path, *args, **kwargs)
+
+        monkeypatch.setattr(builtins, "open", guarded_open)
+        monkeypatch.setattr(Path, "open", guarded_path_open)
+
+        set_arrangement(profile, principal, revision=0, mode="remote", key="tracer-set-a-0001")
+        original = await service.send(
+            SendMessageRequest(text="(FAKE) tracer turn A", idempotency_key="tracer-send-a-0001"),
+            actor_id="device-a",
+            context={
+                "selected_job_id": None,
+                "workspace": {},
+                "career_profile": {"work_arrangement": {"mode": "onsite"}},
+                "candidate_profile": {"work_arrangement": {"mode": "onsite"}},
+                "compatibility_projection": {"work_arrangement": {"mode": "onsite"}},
+                "ad_hoc_context": {"work_arrangement": {"mode": "onsite"}},
+            },
+        )
+        frozen_a = gateway.submissions[-1][1].career_profile
+        assert frozen_a is not None
+        assert gateway.submissions[-1][1].workspace == {}
+        assert set(frozen_a) == {"snapshot_id", "profile_revision", "content_hash", "projection"}
+        assert frozen_a["profile_revision"] == 1
+        assert frozen_a["projection"] == {
+            "work_arrangement": {
+                "mode": "remote",
+                "strength": "strong_preference",
+                "note": "Prefer remote",
+            }
+        }
+        set_arrangement(profile, principal, revision=1, mode="hybrid", key="tracer-set-b-0001")
+
+        class RecoveryGateway(CapturingGateway):
+            def __init__(self) -> None:
+                super().__init__()
+                self.recovered: list[tuple[str, str]] = []
+
+            async def recover_active_turn(self, stored_session_id, turn_id):
+                self.recovered.append((stored_session_id, turn_id))
+
+        recovered_gateway = RecoveryGateway()
+        restarted = ConversationService(
+            service.store,
+            recovered_gateway,
+            service.conversation_id,
+            career_profile_principal=principal,
+        )
+        await restarted.start()
+        try:
+            assert recovered_gateway.recovered == [("stored-session", original.turn_id)]
+            interrupted = restarted.store.turn_record(original.turn_id)
+            assert interrupted is not None
+            assert interrupted["status"] == "interrupted"
+            assert interrupted["career_profile_revision"] == 1
+
+            retry = await restarted.retry(
+                original.turn_id,
+                RetryTurnRequest(idempotency_key="tracer-retry-a-0001"),
+                actor_id="device-a",
+            )
+            assert retry is not None
+            assert recovered_gateway.submissions[-1][1].career_profile == frozen_a
+            restarted.store.update_turn_status(retry.turn_id, "completed")
+
+            fresh = await restarted.send(
+                SendMessageRequest(
+                    text="(FAKE) tracer turn B",
+                    idempotency_key="tracer-send-b-0001",
+                ),
+                actor_id="device-a",
+                context={"selected_job_id": None, "workspace": {}},
+            )
+            latest_b = recovered_gateway.submissions[-1][1].career_profile
+            assert latest_b is not None
+            assert latest_b["profile_revision"] == 2
+            assert latest_b["snapshot_id"] != frozen_a["snapshot_id"]
+            assert latest_b["content_hash"] != frozen_a["content_hash"]
+            assert latest_b["projection"] == {
+                "work_arrangement": {
+                    "mode": "hybrid",
+                    "strength": "strong_preference",
+                    "note": "Prefer hybrid",
+                }
+            }
+
+            with sqlite3.connect(database) as connection:
+                bindings = connection.execute(
+                    """SELECT turn_id, career_profile_snapshot_id, career_profile_revision,
+                              career_profile_content_hash
+                       FROM conversation_turns WHERE turn_id IN (?, ?, ?)""",
+                    (original.turn_id, retry.turn_id, fresh.turn_id),
+                ).fetchall()
+                persisted_text = "\n".join(
+                    row[0]
+                    for row in connection.execute("SELECT detail_json FROM conversation_events")
+                )
+            by_turn = {row[0]: row[1:] for row in bindings}
+            assert by_turn[original.turn_id] == by_turn[retry.turn_id]
+            assert by_turn[fresh.turn_id] != by_turn[original.turn_id]
+            for forbidden in (
+                "candidate-profile",
+                "USER.md",
+                "AGENTS.md",
+                "resume",
+            ):
+                assert forbidden not in persisted_text
+            restarted.store.update_turn_status(fresh.turn_id, "completed")
+        finally:
+            await restarted.close()
 
     asyncio.run(scenario())
