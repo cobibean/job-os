@@ -1,6 +1,10 @@
 # JobOS
 
-**The job hunt, in one window.** JobOS is an open-source, local-first desktop workspace that keeps job discovery, a persistent browser, document editing, and an AI agent working side-by-side — so you stop losing context across tabs, spreadsheets, and chat windows.
+**The job hunt, in one window. With your agent.**
+
+JobOS is an open-source, **agent-native**, local-first desktop workspace that keeps job discovery, a persistent browser, document editing, and human-agent collaboration together in one place — so you stop losing context across tabs, spreadsheets, and chat windows.
+
+---
 
 <p>
   <a href="https://github.com/cobibean/job-os/stargazers"><img alt="GitHub stars" src="https://img.shields.io/github/stars/cobibean/job-os?style=flat"></a>
