@@ -363,7 +363,7 @@ class CareerProfileMigrationService:
                     "connected_at, updated_at) VALUES (?, ?, ?, ?, 'review', 1, ?, ?)",
                     (
                         MIGRATION_REVIEW_AGENT_ID,
-                        "(FAKE) Migration reviewer",
+                        "Migration reviewer",
                         MIGRATION_PRINCIPAL,
                         sha256(b"disabled-internal-migration-review-principal").hexdigest(),
                         timestamp,

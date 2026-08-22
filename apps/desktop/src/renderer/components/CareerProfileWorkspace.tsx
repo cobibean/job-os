@@ -254,7 +254,7 @@ export function CareerProfileWorkspace({ active = true, bridge = window.jobos.ca
         <section className="career-state-card" role="alert">
           <Sparkles aria-hidden="true" size={22} />
           <h1>Career Profile is unavailable right now</h1>
-          <p>Your existing JobOS work is safe. Reconnect to the staging service and try again.</p>
+          <p>Your existing JobOS work is safe. Check the JobOS service connection and try again.</p>
           <button className="career-secondary-button" onClick={() => { void profile.load() }} type="button">Try again</button>
         </section>
       </main>
@@ -299,11 +299,11 @@ export function CareerProfileWorkspace({ active = true, bridge = window.jobos.ca
           <button aria-current={activeArea === 'what_im_looking_for' ? 'page' : undefined} className={`career-nav-item ${activeArea === 'what_im_looking_for' ? 'active' : ''}`} onClick={() => setActiveArea('what_im_looking_for')} type="button"><MapPin aria-hidden="true" size={17} /><span><strong>What I’m Looking For</strong><small>{lookingCount} preference{lookingCount === 1 ? '' : 's'}</small></span></button>
           <button aria-current={activeArea === 'my_evidence' ? 'page' : undefined} className={`career-nav-item ${activeArea === 'my_evidence' ? 'active' : ''}`} onClick={() => setActiveArea('my_evidence')} type="button"><Sparkles aria-hidden="true" size={17} /><span><strong>My Evidence</strong><small>{evidenceCount} source{evidenceCount === 1 ? '' : 's'}</small></span></button>
         </nav>
-        <div className="career-staging-note"><span>(FAKE) staging profile</span><p>This preview does not replace your live career context.</p></div>
+        <div className="career-staging-note"><span>JobOS Career Profile</span><p>This is the shared context JobOS and connected agents use.</p></div>
       </aside>
 
       <section className="career-profile-main">
-        <span className="career-mobile-staging">(FAKE) staging profile</span>
+        <span className="career-mobile-staging">JobOS Career Profile</span>
         <label className="career-mobile-nav">
           <span>Profile section</span>
           <select aria-label="Career Profile section" onChange={event => setActiveArea(event.target.value as CareerProfileArea)} value={activeArea}>

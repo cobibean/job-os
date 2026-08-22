@@ -88,6 +88,9 @@ test('explains the saved preference in normal language without exposing plumbing
   render(<CareerProfileWorkspace bridge={bridge()} hasActiveTurn={false} />)
 
   expect(await screen.findByRole('heading', { name: 'Work arrangement' })).not.toBeNull()
+  expect(screen.getAllByText('JobOS Career Profile').length).toBeGreaterThan(0)
+  expect(screen.getByText('This is the shared context JobOS and connected agents use.')).not.toBeNull()
+  expect(screen.queryByText(/staging profile/i)).toBeNull()
   expect(screen.getByText(/Only show roles that support remote work/i)).not.toBeNull()
   expect(screen.getByText(/A fully onsite role would be filtered out/i)).not.toBeNull()
   expect(screen.queryByText(/search_preferences|namespace|JSON|weight/i)).toBeNull()
@@ -342,7 +345,10 @@ test('keeps empty and failure states actionable', async () => {
     .mockResolvedValueOnce({ profileRevision: 0, record: null })
   render(<CareerProfileWorkspace bridge={bridge({ getWorkArrangement: retry })} hasActiveTurn={false} />)
 
-  expect((await screen.findByRole('alert')).textContent).toContain('Career Profile is unavailable right now')
+  const alert = await screen.findByRole('alert')
+  expect(alert.textContent).toContain('Career Profile is unavailable right now')
+  expect(alert.textContent).toContain('Check the JobOS service connection and try again.')
+  expect(alert.textContent).not.toMatch(/staging/i)
   fireEvent.click(screen.getByRole('button', { name: 'Try again' }))
   expect(await screen.findByText('Tell JobOS where you want to work')).not.toBeNull()
 })

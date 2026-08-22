@@ -132,6 +132,7 @@ def test_full_bundle_is_journaled_idempotent_and_preserves_exact_provenance(tmp_
         if proposal.after
     )
     assert any(len(proposal.evidence_ids) == 2 for proposal in proposals)
+    assert {proposal.agent_display_name for proposal in proposals} == {"Migration reviewer"}
 
     collaboration = CareerProfileCollaborationStore(migration.database, complete)
     head = report.profile_revision
