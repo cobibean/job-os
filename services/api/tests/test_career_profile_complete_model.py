@@ -1275,6 +1275,60 @@ def test_schema_migration_adds_complete_model_tables_without_activating_profile(
         assert connection.execute("SELECT COUNT(*) FROM career_profiles").fetchone() == (0,)
 
 
+def test_item_delete_returns_conflict_while_erasure_recovery_is_pending(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    database = tmp_path / "pending-erasure-route.db"
+    settings = configured_settings(database)
+    app = create_app(settings)
+
+    with TestClient(app, raise_server_exceptions=False) as client:
+        created = client.post(
+            "/v1/career-profile/items",
+            headers=auth(),
+            json={
+                "expected_profile_revision": 0,
+                "idempotency_key": "create-before-pending-erasure-0001",
+                "value": {"kind": "skill", "name": "(FAKE) Product systems"},
+            },
+        )
+        assert created.status_code == 201, created.text
+        item_id = created.json()["items"][0]["item_id"]
+
+        interrupted_store = CareerProfileCompleteStore(
+            database,
+            settings.resolved_evidence_vault_root(),
+        )
+
+        def interrupt_hardening() -> None:
+            raise OSError("synthetic hardening interruption")
+
+        monkeypatch.setattr(interrupted_store, "_harden_database", interrupt_hardening)
+        with pytest.raises(OSError, match="synthetic hardening interruption"):
+            interrupted_store.reset_profile(
+                principal="device:primary-device",
+                command=CareerProfileResetRequest(
+                    expected_profile_revision=1,
+                    idempotency_key="interrupt-profile-reset-for-delete-route-0001",
+                    confirmation="RESET_CAREER_PROFILE_PERMANENTLY",
+                ),
+            )
+
+        response = client.request(
+            "DELETE",
+            f"/v1/career-profile/items/{item_id}",
+            headers=auth(),
+            json={
+                "expected_profile_revision": 1,
+                "idempotency_key": "delete-during-pending-erasure-0001",
+            },
+        )
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "A Career Profile erasure is already being recovered"
+
+
 def test_complete_routes_are_authenticated_dormant_by_default_and_read_back_mutations(
     tmp_path: Path,
 ):
