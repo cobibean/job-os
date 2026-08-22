@@ -1379,7 +1379,7 @@ function RestoreDialog({ bridge, hasActiveTurn, onClose, onRestored, online, pro
     <Dialog label="Restore Career Profile baseline" onClose={onClose}>
       <DialogHeading closeLabel="Close restore" eyebrow="High-impact profile change" onClose={onClose} title="Restore Career Profile baseline" />
       <div className="career-product-dialog-body">
-        <div className="career-restore-warning"><ArchiveRestore aria-hidden="true" size={20} /><div><strong>This creates a new baseline.</strong><span>The archive’s current state replaces the staging profile. The old timeline is not restored or mixed into it.</span></div></div>
+        <div className="career-restore-warning"><ArchiveRestore aria-hidden="true" size={20} /><div><strong>This creates a new baseline.</strong><span>The archive’s current state replaces the current Career Profile. The old timeline is not restored or mixed into it.</span></div></div>
         {hasActiveTurn ? <p className="career-feedback error" role="alert">Finish or stop the active agent turn before restoring the Career Profile.</p> : null}
         <button className="career-secondary-button" disabled={!online || hasActiveTurn || status === 'choosing' || status === 'restoring'} onClick={() => { void choose() }} type="button">{status === 'choosing' ? 'Choosing…' : 'Choose archive'}</button>
         {archive ? <div className="career-archive-selection"><FileCheck2 aria-hidden="true" size={18} /><div><strong>{archive.filename}</strong><span>{formatBytes(archive.byteCount)}</span></div></div> : null}
