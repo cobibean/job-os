@@ -5,6 +5,7 @@ import type {
   WorkArrangementRevision as ApiWorkArrangementRevision
 } from '@jobos/contracts'
 import { createHmac, timingSafeEqual } from 'node:crypto'
+import { CAREER_PROFILE_ADDITIONAL_CONTEXT_LIMIT, careerProfileAdditionalContextLength } from '../shared/contracts.js'
 
 import type {
   WorkArrangementCurrent,
@@ -88,9 +89,8 @@ function validateExistingRevision(value: number): number {
 
 function validateValue(value: WorkArrangementValue): WorkArrangementValue {
   if (!modes.has(value.mode) || !strengths.has(value.strength)) throw new Error('Invalid work arrangement')
-  if (value.mode === 'flexible' && value.strength !== 'preference') throw new Error('Flexible work arrangement must use preference strength')
-  const note = value.note?.trim() || null
-  if (note && note.length > 500) throw new Error('Work arrangement note is too long')
+  const note = value.note === '' ? null : value.note
+  if (note && careerProfileAdditionalContextLength(note) > CAREER_PROFILE_ADDITIONAL_CONTEXT_LIMIT) throw new Error('Work arrangement note is too long')
   return { mode: value.mode, strength: value.strength, note }
 }
 
@@ -131,8 +131,7 @@ export function createMainCareerProfileClient(config: JobsConfig) {
       if ((record.profileRevision as number) > (candidate.profileRevision as number)) return null
       if (typeof record.actorPrincipal !== 'string' || typeof record.recordId !== 'string' || typeof record.updatedAt !== 'string') return null
       if (typeof value.mode !== 'string' || !modes.has(value.mode) || typeof value.strength !== 'string' || !strengths.has(value.strength)) return null
-      if (value.note !== null && (typeof value.note !== 'string' || value.note.length > 500)) return null
-      if (value.mode === 'flexible' && value.strength !== 'preference') return null
+      if (value.note !== null && (typeof value.note !== 'string' || careerProfileAdditionalContextLength(value.note) > CAREER_PROFILE_ADDITIONAL_CONTEXT_LIMIT)) return null
     }
     const unsigned = {
       profileRevision: candidate.profileRevision as number,

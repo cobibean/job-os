@@ -76,16 +76,23 @@ from jobos_api.career_profile import (
 from jobos_api.career_profile_complete import (
     CareerProfileCompleteCurrent,
     CareerProfileCompleteStore,
+    CareerProfileErasureInProgress,
+    CareerProfileErasureResult,
     CareerProfileEvidenceIntegrityError,
     CareerProfileEvidenceNotFound,
     CareerProfileEvidencePathError,
     CareerProfileItemNotFound,
+    CareerProfileResetRequest,
     CareerProfileValueError,
     CompleteProfileItemId,
+    EvidenceErasureRequest,
     EvidenceImportRequest,
     OpaqueEvidenceId,
+    ProfileIntentGrant,
+    ProfileIntentGrantRequest,
     ProfileItemMutation,
     ProfileItemRemoval,
+    ProfileProposalDecision,
 )
 from jobos_api.composition import create_job_services
 from jobos_api.conversation_manager import ConversationListResponse, ConversationManager
@@ -228,12 +235,16 @@ _ENDPOINT_ERROR_ROUTES = {
         {
             "browser_command",
             "career_profile_complete_get",
+            "career_profile_intent_grant_create",
+            "career_profile_proposal_decide",
             "career_profile_evidence_content",
             "career_profile_evidence_import",
+            "career_profile_evidence_erase",
             "career_profile_evidence_remove",
             "career_profile_item_create",
             "career_profile_item_remove",
             "career_profile_item_update",
+            "career_profile_reset",
             "career_profile_snapshot_create",
             "career_profile_snapshot_get",
             "career_profile_work_arrangement_get",
@@ -258,12 +269,16 @@ _ENDPOINT_ERROR_ROUTES = {
         {
             "approve_job_artifact",
             "career_profile_complete_get",
+            "career_profile_intent_grant_create",
+            "career_profile_proposal_decide",
             "career_profile_evidence_content",
             "career_profile_evidence_import",
+            "career_profile_evidence_erase",
             "career_profile_evidence_remove",
             "career_profile_item_create",
             "career_profile_item_remove",
             "career_profile_item_update",
+            "career_profile_reset",
             "career_profile_snapshot_get",
             "career_profile_work_arrangement_restore",
             "artifact_content",
@@ -304,10 +319,13 @@ _ENDPOINT_ERROR_ROUTES = {
             "approve_job_artifact",
             "career_profile_evidence_content",
             "career_profile_evidence_import",
+            "career_profile_evidence_erase",
             "career_profile_evidence_remove",
+            "career_profile_proposal_decide",
             "career_profile_item_create",
             "career_profile_item_remove",
             "career_profile_item_update",
+            "career_profile_reset",
             "career_profile_work_arrangement_put",
             "career_profile_work_arrangement_restore",
             "artifact_content",
@@ -1271,6 +1289,8 @@ def create_app(
             return HTTPException(status_code=404, detail="Career Profile item was not found")
         if isinstance(error, CareerProfileValueError):
             return HTTPException(status_code=422, detail=str(error))
+        if isinstance(error, CareerProfileErasureInProgress):
+            return HTTPException(status_code=409, detail=str(error))
         if isinstance(
             error,
             (CareerProfileEvidenceIntegrityError, CareerProfileEvidencePathError),
@@ -1281,6 +1301,47 @@ def create_app(
             )
         return HTTPException(status_code=409, detail=str(error))
 
+    def career_profile_actor(
+        identity: DeviceIdentity,
+        mcp_token: str | None,
+        intent_grant_id: str | None,
+    ) -> tuple[
+        str, Literal["direct_user", "agent_inference", "authenticated_user_instruction"], str | None
+    ]:
+        if mcp_token is None:
+            if intent_grant_id is not None:
+                raise HTTPException(status_code=403, detail="Agent intent grants require MCP auth")
+            return principal_for_device(identity.device_id), "direct_user", None
+        require_trusted_mcp(identity, "mcp", mcp_token)
+        return (
+            "agent:trusted-local-mcp",
+            "authenticated_user_instruction" if intent_grant_id else "agent_inference",
+            intent_grant_id,
+        )
+
+    @app.post(
+        "/v1/career-profile/intent-grants",
+        tags=["career-profile"],
+        status_code=201,
+        responses={409: {"description": "Revision or idempotency conflict"}},
+    )
+    def career_profile_intent_grant_create(
+        command: ProfileIntentGrantRequest,
+        identity: Annotated[DeviceIdentity, Depends(authenticated_device)],
+    ) -> ProfileIntentGrant:
+        require_career_profile_owner(identity)
+        try:
+            return complete_career_profile.create_intent_grant(
+                principal=principal_for_device(identity.device_id), command=command
+            )
+        except (
+            CareerProfileRevisionConflict,
+            CareerProfileIdempotencyConflict,
+            CareerProfileErasureInProgress,
+            CareerProfileValueError,
+        ) as error:
+            raise complete_profile_conflict(error) from error
+
     @app.post(
         "/v1/career-profile/items",
         tags=["career-profile"],
@@ -1289,16 +1350,24 @@ def create_app(
     def career_profile_item_create(
         command: ProfileItemMutation,
         identity: Annotated[DeviceIdentity, Depends(authenticated_device)],
+        mcp_token: Annotated[str | None, Header(alias="X-JobOS-MCP-Token")] = None,
+        intent_grant_id: Annotated[str | None, Header(alias="X-JobOS-Intent-Grant")] = None,
     ) -> CareerProfileCompleteCurrent:
         require_career_profile_owner(identity)
+        principal, mutation_source, grant_id = career_profile_actor(
+            identity, mcp_token, intent_grant_id
+        )
         try:
             return complete_career_profile.upsert_item(
-                principal=principal_for_device(identity.device_id),
+                principal=principal,
                 command=command,
+                mutation_source=mutation_source,
+                intent_grant_id=grant_id,
             )
         except (
             CareerProfileRevisionConflict,
             CareerProfileIdempotencyConflict,
+            CareerProfileErasureInProgress,
             CareerProfileValueError,
         ) as error:
             raise complete_profile_conflict(error) from error
@@ -1311,17 +1380,25 @@ def create_app(
         item_id: CompleteProfileItemId,
         command: ProfileItemMutation,
         identity: Annotated[DeviceIdentity, Depends(authenticated_device)],
+        mcp_token: Annotated[str | None, Header(alias="X-JobOS-MCP-Token")] = None,
+        intent_grant_id: Annotated[str | None, Header(alias="X-JobOS-Intent-Grant")] = None,
     ) -> CareerProfileCompleteCurrent:
         require_career_profile_owner(identity)
+        principal, mutation_source, grant_id = career_profile_actor(
+            identity, mcp_token, intent_grant_id
+        )
         try:
             return complete_career_profile.upsert_item(
-                principal=principal_for_device(identity.device_id),
+                principal=principal,
                 command=command,
                 item_id=item_id,
+                mutation_source=mutation_source,
+                intent_grant_id=grant_id,
             )
         except (
             CareerProfileRevisionConflict,
             CareerProfileIdempotencyConflict,
+            CareerProfileErasureInProgress,
             CareerProfileItemNotFound,
             CareerProfileValueError,
         ) as error:
@@ -1335,17 +1412,56 @@ def create_app(
         item_id: CompleteProfileItemId,
         command: ProfileItemRemoval,
         identity: Annotated[DeviceIdentity, Depends(authenticated_device)],
+        mcp_token: Annotated[str | None, Header(alias="X-JobOS-MCP-Token")] = None,
+        intent_grant_id: Annotated[str | None, Header(alias="X-JobOS-Intent-Grant")] = None,
     ) -> CareerProfileCompleteCurrent:
         require_career_profile_owner(identity)
+        principal, mutation_source, grant_id = career_profile_actor(
+            identity, mcp_token, intent_grant_id
+        )
         try:
             return complete_career_profile.remove_item(
-                principal=principal_for_device(identity.device_id),
+                principal=principal,
                 item_id=item_id,
                 command=command,
+                mutation_source=mutation_source,
+                intent_grant_id=grant_id,
             )
         except (
             CareerProfileRevisionConflict,
             CareerProfileIdempotencyConflict,
+            CareerProfileItemNotFound,
+            CareerProfileValueError,
+        ) as error:
+            raise complete_profile_conflict(error) from error
+
+    @app.post(
+        "/v1/career-profile/items/{item_id}/decision",
+        tags=["career-profile"],
+    )
+    def career_profile_proposal_decide(
+        item_id: CompleteProfileItemId,
+        command: ProfileProposalDecision,
+        identity: Annotated[DeviceIdentity, Depends(authenticated_device)],
+        mcp_token: Annotated[str | None, Header(alias="X-JobOS-MCP-Token")] = None,
+        intent_grant_id: Annotated[str | None, Header(alias="X-JobOS-Intent-Grant")] = None,
+    ) -> CareerProfileCompleteCurrent:
+        require_career_profile_owner(identity)
+        principal, mutation_source, grant_id = career_profile_actor(
+            identity, mcp_token, intent_grant_id
+        )
+        try:
+            return complete_career_profile.decide_proposal(
+                principal=principal,
+                item_id=item_id,
+                command=command,
+                mutation_source=mutation_source,
+                intent_grant_id=grant_id,
+            )
+        except (
+            CareerProfileRevisionConflict,
+            CareerProfileIdempotencyConflict,
+            CareerProfileErasureInProgress,
             CareerProfileItemNotFound,
             CareerProfileValueError,
         ) as error:
@@ -1359,16 +1475,20 @@ def create_app(
     def career_profile_evidence_import(
         command: EvidenceImportRequest,
         identity: Annotated[DeviceIdentity, Depends(authenticated_device)],
+        mcp_token: Annotated[str | None, Header(alias="X-JobOS-MCP-Token")] = None,
     ) -> CareerProfileCompleteCurrent:
         require_career_profile_owner(identity)
+        principal, mutation_source, _ = career_profile_actor(identity, mcp_token, None)
         try:
             return complete_career_profile.import_evidence(
-                principal=principal_for_device(identity.device_id),
+                principal=principal,
                 command=command,
+                mutation_source=mutation_source,
             )
         except (
             CareerProfileRevisionConflict,
             CareerProfileIdempotencyConflict,
+            CareerProfileErasureInProgress,
             CareerProfileValueError,
             CareerProfileEvidencePathError,
         ) as error:
@@ -1382,10 +1502,42 @@ def create_app(
         evidence_id: OpaqueEvidenceId,
         command: ProfileItemRemoval,
         identity: Annotated[DeviceIdentity, Depends(authenticated_device)],
+        mcp_token: Annotated[str | None, Header(alias="X-JobOS-MCP-Token")] = None,
+        intent_grant_id: Annotated[str | None, Header(alias="X-JobOS-Intent-Grant")] = None,
     ) -> CareerProfileCompleteCurrent:
         require_career_profile_owner(identity)
+        principal, mutation_source, grant_id = career_profile_actor(
+            identity, mcp_token, intent_grant_id
+        )
         try:
             return complete_career_profile.remove_evidence(
+                principal=principal,
+                evidence_id=evidence_id,
+                command=command,
+                mutation_source=mutation_source,
+                intent_grant_id=grant_id,
+            )
+        except (
+            CareerProfileRevisionConflict,
+            CareerProfileIdempotencyConflict,
+            CareerProfileErasureInProgress,
+            CareerProfileEvidenceNotFound,
+            CareerProfileValueError,
+        ) as error:
+            raise complete_profile_conflict(error) from error
+
+    @app.post(
+        "/v1/career-profile/evidence/{evidence_id}/erase",
+        tags=["career-profile"],
+    )
+    def career_profile_evidence_erase(
+        evidence_id: OpaqueEvidenceId,
+        command: EvidenceErasureRequest,
+        identity: Annotated[DeviceIdentity, Depends(authenticated_device)],
+    ) -> CareerProfileErasureResult:
+        require_career_profile_owner(identity)
+        try:
+            return complete_career_profile.erase_evidence(
                 principal=principal_for_device(identity.device_id),
                 evidence_id=evidence_id,
                 command=command,
@@ -1394,6 +1546,30 @@ def create_app(
             CareerProfileRevisionConflict,
             CareerProfileIdempotencyConflict,
             CareerProfileEvidenceNotFound,
+            CareerProfileEvidencePathError,
+            CareerProfileErasureInProgress,
+        ) as error:
+            raise complete_profile_conflict(error) from error
+
+    @app.post(
+        "/v1/career-profile/reset",
+        tags=["career-profile"],
+    )
+    def career_profile_reset(
+        command: CareerProfileResetRequest,
+        identity: Annotated[DeviceIdentity, Depends(authenticated_device)],
+    ) -> CareerProfileErasureResult:
+        require_career_profile_owner(identity)
+        try:
+            return complete_career_profile.reset_profile(
+                principal=principal_for_device(identity.device_id),
+                command=command,
+            )
+        except (
+            CareerProfileRevisionConflict,
+            CareerProfileIdempotencyConflict,
+            CareerProfileEvidencePathError,
+            CareerProfileErasureInProgress,
         ) as error:
             raise complete_profile_conflict(error) from error
 
@@ -1452,7 +1628,11 @@ def create_app(
                 principal=principal_for_device(identity.device_id),
                 command=command,
             )
-        except (CareerProfileRevisionConflict, CareerProfileIdempotencyConflict) as error:
+        except (
+            CareerProfileRevisionConflict,
+            CareerProfileIdempotencyConflict,
+            CareerProfileErasureInProgress,
+        ) as error:
             raise HTTPException(status_code=409, detail=str(error)) from error
 
     @app.get(
@@ -1484,7 +1664,11 @@ def create_app(
                 status_code=404,
                 detail="Career Profile revision not found",
             ) from error
-        except (CareerProfileRevisionConflict, CareerProfileIdempotencyConflict) as error:
+        except (
+            CareerProfileRevisionConflict,
+            CareerProfileIdempotencyConflict,
+            CareerProfileErasureInProgress,
+        ) as error:
             raise HTTPException(status_code=409, detail=str(error)) from error
 
     @app.post(
@@ -1497,10 +1681,13 @@ def create_app(
         identity: Annotated[DeviceIdentity, Depends(authenticated_device)],
     ) -> CareerProfileSnapshot:
         require_career_profile_owner(identity)
-        return career_profiles.create_snapshot(
-            principal=principal_for_device(identity.device_id),
-            request=command,
-        )
+        try:
+            return career_profiles.create_snapshot(
+                principal=principal_for_device(identity.device_id),
+                request=command,
+            )
+        except CareerProfileErasureInProgress as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
 
     @app.get(
         "/v1/career-profile/snapshots/{snapshot_id}",
@@ -1601,9 +1788,7 @@ def create_app(
             raise HTTPException(status_code=409, detail=str(error)) from error
         return Response(status_code=204)
 
-    def conversation_context(
-        conversation_id: str, identity: DeviceIdentity
-    ) -> dict[str, object]:
+    def conversation_context(conversation_id: str, identity: DeviceIdentity) -> dict[str, object]:
         context = state_store.conversation_job_context(conversation_id, identity.device_id)
         selection = context["selected_job_id"]
         workspace = state_store.workspace_snapshot(identity.device_id).snapshot
@@ -1633,16 +1818,15 @@ def create_app(
                     "active_center_surface",
                     "active_browser_tab_id",
                 )
-            } | {
+            }
+            | {
                 "active_artifact_id": context["active_artifact_id"],
                 "active_artifact_page": context["active_artifact_page"],
                 "active_artifact_zoom": context["active_artifact_zoom"],
             },
         }
 
-    @app.put(
-        "/v1/conversations/{conversation_id}/workspace/job", tags=["workspace"]
-    )
+    @app.put("/v1/conversations/{conversation_id}/workspace/job", tags=["workspace"])
     def conversation_select_job(
         conversation_id: ConversationId,
         command: JobSelectionRequest,
@@ -1657,9 +1841,7 @@ def create_app(
             event_id=0, job_context=ConversationJobContext.model_validate(context)
         )
 
-    @app.put(
-        "/v1/conversations/{conversation_id}/workspace/document", tags=["workspace"]
-    )
+    @app.put("/v1/conversations/{conversation_id}/workspace/document", tags=["workspace"])
     def conversation_save_document_view(
         conversation_id: ConversationId,
         command: ConversationDocumentViewRequest,
@@ -2973,10 +3155,19 @@ def create_app(
         if current["revision"] != command.expected_revision:
             raise editable_conflict(EditableDocumentConflict(current))
         content = cast(dict[str, object], current["content"])
-        if unresolved_suggestion_count(content):
+        unresolved = unresolved_suggestion_count(content)
+        if unresolved != command.unresolved_suggestion_count:
             raise HTTPException(
                 status_code=409,
-                detail="Resolve all document suggestions before publication",
+                detail="Document suggestions changed; review the current revision again",
+            )
+        if unresolved and not command.confirm_current_state:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "Publishing with unresolved JobHunter suggestions requires explicit "
+                    "confirmation of the deterministic current state"
+                ),
             )
         canonical_bytes = json.dumps(
             {
@@ -3182,21 +3373,39 @@ def create_app(
         command: ArtifactApprovalRequest | None = None,
     ) -> JobArtifactsResponse:
         command = command or ArtifactApprovalRequest()
+        if command.origin != "user":
+            raise HTTPException(
+                status_code=403,
+                detail=(
+                    "Agents may endorse a document, but only the authenticated user "
+                    "can approve it"
+                ),
+            )
         ensure_job(job_id)
         artifact = state_store.get_document_artifact(artifact_id)
         if (
             artifact is None
             or artifact["job_id"] != job_id
-            or artifact["document_key"] != "resume"
-            or artifact["media_type"] != PDF_MEDIA_TYPE
+            or artifact["document_key"] not in {"resume", "cover_letter"}
+            or artifact["media_type"] not in {PDF_MEDIA_TYPE, DOCX_MEDIA_TYPE}
             or artifact["render_status"] != "succeeded"
             or not artifact["canonical_path"]
         ):
             raise HTTPException(
                 status_code=409,
-                detail="Only a successful artifact registered for this job can be approved",
+                detail=(
+                    "Only a successful resume or cover-letter representation registered "
+                    "for this job can be approved"
+                ),
             )
-        registered_artifact_payload(artifact)
+        representations = state_store.approval_representation_artifacts(job_id, artifact_id)
+        if not representations:
+            raise HTTPException(
+                status_code=409,
+                detail="Document revision has no successful representation",
+            )
+        for representation in representations:
+            registered_artifact_payload(representation)
         request_hash = mutation_hash(
             "document.approve",
             {"job_id": job_id, "artifact_id": artifact_id, "origin": command.origin},

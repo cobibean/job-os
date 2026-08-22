@@ -17,6 +17,10 @@ export type ConnectivityState = 'connecting' | 'connected' | 'degraded' | 'disco
 
 export type WorkArrangementMode = 'remote' | 'hybrid' | 'onsite' | 'flexible'
 export type WorkArrangementStrength = 'requirement' | 'strong_preference' | 'preference' | 'dealbreaker'
+export const CAREER_PROFILE_ADDITIONAL_CONTEXT_LIMIT = 1000
+export function careerProfileAdditionalContextLength(value: string): number {
+  return Array.from(value).length
+}
 
 export interface WorkArrangementValue {
   mode: WorkArrangementMode

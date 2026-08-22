@@ -445,6 +445,10 @@ export type BrowserTabMetadata = {
  */
 export type CareerProfileCompleteCurrent = {
     /**
+     * Authority Epoch
+     */
+    authority_epoch: number;
+    /**
      * Items
      */
     items: Array<ProfileItemRecord>;
@@ -459,10 +463,42 @@ export type CareerProfileCompleteCurrent = {
 };
 
 /**
+ * CareerProfileErasureResult
+ */
+export type CareerProfileErasureResult = {
+    /**
+     * Completed
+     */
+    completed?: true;
+    /**
+     * Operation
+     */
+    operation: 'evidence_erased' | 'career_profile_reset';
+};
+
+/**
  * CareerProfileProjection
  */
 export type CareerProfileProjection = {
     work_arrangement: WorkArrangementRecord | null;
+};
+
+/**
+ * CareerProfileResetRequest
+ */
+export type CareerProfileResetRequest = {
+    /**
+     * Confirmation
+     */
+    confirmation: 'RESET_CAREER_PROFILE_PERMANENTLY';
+    /**
+     * Expected Profile Revision
+     */
+    expected_profile_revision: number;
+    /**
+     * Idempotency Key
+     */
+    idempotency_key: string;
 };
 
 /**
@@ -527,7 +563,7 @@ export type ClaimValue = {
     /**
      * Statement
      */
-    statement: string;
+    statement?: string | null;
 };
 
 /**
@@ -537,7 +573,7 @@ export type CompensationValue = {
     /**
      * Currency
      */
-    currency?: string;
+    currency?: string | null;
     /**
      * Kind
      */
@@ -553,7 +589,7 @@ export type CompensationValue = {
     /**
      * Period
      */
-    period?: 'hour' | 'year';
+    period?: 'hour' | 'year' | string | null;
     /**
      * Target
      */
@@ -844,6 +880,24 @@ export type CreateSnapshotRequest = {
 };
 
 /**
+ * CustomValue
+ */
+export type CustomValue = {
+    /**
+     * Kind
+     */
+    kind: 'custom';
+    /**
+     * Label
+     */
+    label: string;
+    /**
+     * Text
+     */
+    text: string;
+};
+
+/**
  * DealbreakerValue
  */
 export type DealbreakerValue = {
@@ -858,7 +912,7 @@ export type DealbreakerValue = {
     /**
      * Label
      */
-    label: string;
+    label?: string | null;
 };
 
 /**
@@ -1311,7 +1365,7 @@ export type EducationValue = {
     /**
      * Credential
      */
-    credential: string;
+    credential?: string | null;
     /**
      * Details
      */
@@ -1327,7 +1381,7 @@ export type EducationValue = {
     /**
      * Institution
      */
-    institution: string;
+    institution?: string | null;
     /**
      * Kind
      */
@@ -1336,6 +1390,24 @@ export type EducationValue = {
      * Started On
      */
     started_on?: string | null;
+};
+
+/**
+ * EvidenceErasureRequest
+ */
+export type EvidenceErasureRequest = {
+    /**
+     * Confirmation
+     */
+    confirmation: 'ERASE_EVIDENCE_PERMANENTLY';
+    /**
+     * Expected Profile Revision
+     */
+    expected_profile_revision: number;
+    /**
+     * Idempotency Key
+     */
+    idempotency_key: string;
 };
 
 /**
@@ -1377,7 +1449,9 @@ export type EvidenceExtraction = {
         kind: 'priority';
     } & PriorityValue) | ({
         kind: 'dealbreaker';
-    } & DealbreakerValue);
+    } & DealbreakerValue) | ({
+        kind: 'custom';
+    } & CustomValue);
 };
 
 /**
@@ -1387,7 +1461,7 @@ export type EvidenceImportRequest = {
     /**
      * Captured At
      */
-    captured_at: string;
+    captured_at?: string | null;
     /**
      * Content Base64
      */
@@ -1440,7 +1514,7 @@ export type ExperienceValue = {
     /**
      * Current
      */
-    current?: boolean;
+    current?: boolean | null;
     /**
      * Ended On
      */
@@ -1456,11 +1530,11 @@ export type ExperienceValue = {
     /**
      * Organization
      */
-    organization: string;
+    organization?: string | null;
     /**
      * Role
      */
-    role: string;
+    role?: string | null;
     /**
      * Started On
      */
@@ -1558,7 +1632,7 @@ export type IdentityValue = {
     /**
      * Professional Name
      */
-    professional_name: string;
+    professional_name?: string | null;
 };
 
 /**
@@ -1568,7 +1642,7 @@ export type IndustryPreferencesValue = {
     /**
      * Industries
      */
-    industries: Array<string>;
+    industries?: Array<string>;
     /**
      * Kind
      */
@@ -1576,7 +1650,7 @@ export type IndustryPreferencesValue = {
     /**
      * Strength
      */
-    strength: 'requirement' | 'strong_preference' | 'preference' | 'dealbreaker';
+    strength?: 'requirement' | 'strong_preference' | 'preference' | 'dealbreaker' | string | null;
 };
 
 /**
@@ -1616,7 +1690,11 @@ export type ItemProvenance = {
     /**
      * Method
      */
-    method: 'user_entered' | 'evidence_import' | 'tracer_compatibility';
+    method: 'user_entered' | 'agent_generated' | 'agent_edit' | 'evidence_import' | 'evidence_erased' | 'tracer_compatibility';
+    /**
+     * Mutation Source
+     */
+    mutation_source: 'direct_user' | 'authenticated_user_instruction' | 'deterministic_source_mapping' | 'agent_inference';
     /**
      * Source Label
      */
@@ -2011,15 +2089,15 @@ export type LocationPreferenceValue = {
     /**
      * Locations
      */
-    locations: Array<string>;
+    locations?: Array<string>;
     /**
      * Relocation
      */
-    relocation?: 'yes' | 'no' | 'consider';
+    relocation?: 'yes' | 'no' | 'consider' | string | null;
     /**
      * Strength
      */
-    strength: 'requirement' | 'strong_preference' | 'preference' | 'dealbreaker';
+    strength?: 'requirement' | 'strong_preference' | 'preference' | 'dealbreaker' | string | null;
 };
 
 /**
@@ -2144,7 +2222,7 @@ export type PositioningValue = {
     /**
      * Headline
      */
-    headline: string;
+    headline?: string | null;
     /**
      * Kind
      */
@@ -2170,11 +2248,69 @@ export type PriorityValue = {
     /**
      * Label
      */
-    label: string;
+    label?: string | null;
     /**
      * Strength
      */
-    strength: 'requirement' | 'strong_preference' | 'preference';
+    strength?: 'requirement' | 'strong_preference' | 'preference' | string | null;
+};
+
+/**
+ * ProfileIntentGrant
+ */
+export type ProfileIntentGrant = {
+    /**
+     * Created At
+     */
+    created_at: string;
+    /**
+     * Grant Id
+     */
+    grant_id: string;
+    /**
+     * Operation
+     */
+    operation: string;
+    /**
+     * Payload Sha256
+     */
+    payload_sha256: string;
+    /**
+     * Target Id
+     */
+    target_id: string | null;
+};
+
+/**
+ * ProfileIntentGrantRequest
+ */
+export type ProfileIntentGrantRequest = {
+    /**
+     * Expected Authority Epoch
+     */
+    expected_authority_epoch: number;
+    /**
+     * Expected Profile Revision
+     */
+    expected_profile_revision: number;
+    /**
+     * Idempotency Key
+     */
+    idempotency_key: string;
+    /**
+     * Operation
+     */
+    operation: 'item.create' | 'item.update' | 'item.remove' | 'evidence.remove' | 'proposal.accept' | 'proposal.reject';
+    /**
+     * Payload
+     */
+    payload: {
+        [key: string]: unknown;
+    };
+    /**
+     * Target Id
+     */
+    target_id?: string | null;
 };
 
 /**
@@ -2224,7 +2360,9 @@ export type ProfileItemMutation = {
         kind: 'priority';
     } & PriorityValue) | ({
         kind: 'dealbreaker';
-    } & DealbreakerValue);
+    } & DealbreakerValue) | ({
+        kind: 'custom';
+    } & CustomValue);
 };
 
 /**
@@ -2295,7 +2433,9 @@ export type ProfileItemRecord = {
         kind: 'priority';
     } & PriorityValue) | ({
         kind: 'dealbreaker';
-    } & DealbreakerValue);
+    } & DealbreakerValue) | ({
+        kind: 'custom';
+    } & CustomValue);
 };
 
 /**
@@ -2313,6 +2453,28 @@ export type ProfileItemRemoval = {
 };
 
 /**
+ * ProfileProposalDecision
+ */
+export type ProfileProposalDecision = {
+    /**
+     * Decision
+     */
+    decision: 'accept' | 'reject';
+    /**
+     * Expected Profile Revision
+     */
+    expected_profile_revision: number;
+    /**
+     * Idempotency Key
+     */
+    idempotency_key: string;
+    /**
+     * Proposal Sha256
+     */
+    proposal_sha256: string;
+};
+
+/**
  * ProjectValue
  */
 export type ProjectValue = {
@@ -2323,7 +2485,7 @@ export type ProjectValue = {
     /**
      * Name
      */
-    name: string;
+    name?: string | null;
     /**
      * Role
      */
@@ -2331,7 +2493,7 @@ export type ProjectValue = {
     /**
      * Summary
      */
-    summary: string;
+    summary?: string | null;
     /**
      * Url
      */
@@ -2342,6 +2504,10 @@ export type ProjectValue = {
  * PublishEditableDocumentRequest
  */
 export type PublishEditableDocumentRequest = {
+    /**
+     * Confirm Current State
+     */
+    confirm_current_state?: boolean;
     /**
      * Docx Base64
      */
@@ -2374,6 +2540,10 @@ export type PublishEditableDocumentRequest = {
      * Pdf Sha256
      */
     pdf_sha256: string;
+    /**
+     * Unresolved Suggestion Count
+     */
+    unresolved_suggestion_count?: number;
 };
 
 /**
@@ -2564,11 +2734,11 @@ export type SkillValue = {
     /**
      * Level
      */
-    level?: 'familiar' | 'proficient' | 'advanced' | 'expert' | null;
+    level?: 'familiar' | 'proficient' | 'advanced' | 'expert' | string | null;
     /**
      * Name
      */
-    name: string;
+    name?: string | null;
     /**
      * Note
      */
@@ -2590,7 +2760,7 @@ export type SourceEvidenceRecord = {
     /**
      * Captured At
      */
-    captured_at: string;
+    captured_at?: string | null;
     /**
      * Evidence Id
      */
@@ -2662,11 +2832,11 @@ export type TargetRolesValue = {
     /**
      * Roles
      */
-    roles: Array<string>;
+    roles?: Array<string>;
     /**
      * Strength
      */
-    strength?: 'requirement' | 'strong_preference' | 'preference';
+    strength?: 'requirement' | 'strong_preference' | 'preference' | string | null;
 };
 
 /**
@@ -2764,7 +2934,7 @@ export type WorkArrangementProfileValue = {
     /**
      * Mode
      */
-    mode: 'remote' | 'hybrid' | 'onsite' | 'flexible';
+    mode: 'remote' | 'hybrid' | 'onsite' | 'flexible' | string;
     /**
      * Note
      */
@@ -2772,7 +2942,7 @@ export type WorkArrangementProfileValue = {
     /**
      * Strength
      */
-    strength: 'requirement' | 'strong_preference' | 'preference' | 'dealbreaker';
+    strength?: 'requirement' | 'strong_preference' | 'preference' | 'dealbreaker' | string | null;
 };
 
 /**
@@ -3306,6 +3476,12 @@ export type CareerProfileCompleteGetV1CareerProfileGetResponse = CareerProfileCo
 
 export type CareerProfileEvidenceImportV1CareerProfileEvidencePostData = {
     body: EvidenceImportRequest;
+    headers?: {
+        /**
+         * X-Jobos-Mcp-Token
+         */
+        'X-JobOS-MCP-Token'?: string | null;
+    };
     path?: never;
     query?: never;
     url: '/v1/career-profile/evidence';
@@ -3351,6 +3527,16 @@ export type CareerProfileEvidenceImportV1CareerProfileEvidencePostResponse = Car
 
 export type CareerProfileEvidenceRemoveV1CareerProfileEvidenceEvidenceIdDeleteData = {
     body: ProfileItemRemoval;
+    headers?: {
+        /**
+         * X-Jobos-Mcp-Token
+         */
+        'X-JobOS-MCP-Token'?: string | null;
+        /**
+         * X-Jobos-Intent-Grant
+         */
+        'X-JobOS-Intent-Grant'?: string | null;
+    };
     path: {
         /**
          * Evidence Id
@@ -3447,8 +3633,113 @@ export type CareerProfileEvidenceContentV1CareerProfileEvidenceEvidenceIdContent
     200: unknown;
 };
 
+export type CareerProfileEvidenceEraseV1CareerProfileEvidenceEvidenceIdErasePostData = {
+    body: EvidenceErasureRequest;
+    path: {
+        /**
+         * Evidence Id
+         */
+        evidence_id: string;
+    };
+    query?: never;
+    url: '/v1/career-profile/evidence/{evidence_id}/erase';
+};
+
+export type CareerProfileEvidenceEraseV1CareerProfileEvidenceEvidenceIdErasePostErrors = {
+    /**
+     * Device authentication required
+     */
+    401: ApiErrorResponse;
+    /**
+     * Operation is not permitted
+     */
+    403: ApiErrorResponse;
+    /**
+     * Resource not found
+     */
+    404: ApiErrorResponse;
+    /**
+     * Resource state conflict
+     */
+    409: ApiErrorResponse;
+    /**
+     * Request validation failed
+     */
+    422: ApiErrorResponse;
+    /**
+     * Internal server error
+     */
+    500: ApiErrorResponse;
+};
+
+export type CareerProfileEvidenceEraseV1CareerProfileEvidenceEvidenceIdErasePostError = CareerProfileEvidenceEraseV1CareerProfileEvidenceEvidenceIdErasePostErrors[keyof CareerProfileEvidenceEraseV1CareerProfileEvidenceEvidenceIdErasePostErrors];
+
+export type CareerProfileEvidenceEraseV1CareerProfileEvidenceEvidenceIdErasePostResponses = {
+    /**
+     * Successful Response
+     */
+    200: CareerProfileErasureResult;
+};
+
+export type CareerProfileEvidenceEraseV1CareerProfileEvidenceEvidenceIdErasePostResponse = CareerProfileEvidenceEraseV1CareerProfileEvidenceEvidenceIdErasePostResponses[keyof CareerProfileEvidenceEraseV1CareerProfileEvidenceEvidenceIdErasePostResponses];
+
+export type CareerProfileIntentGrantCreateV1CareerProfileIntentGrantsPostData = {
+    body: ProfileIntentGrantRequest;
+    path?: never;
+    query?: never;
+    url: '/v1/career-profile/intent-grants';
+};
+
+export type CareerProfileIntentGrantCreateV1CareerProfileIntentGrantsPostErrors = {
+    /**
+     * Device authentication required
+     */
+    401: ApiErrorResponse;
+    /**
+     * Operation is not permitted
+     */
+    403: ApiErrorResponse;
+    /**
+     * Resource not found
+     */
+    404: ApiErrorResponse;
+    /**
+     * Revision or idempotency conflict
+     */
+    409: ApiErrorResponse;
+    /**
+     * Request validation failed
+     */
+    422: ApiErrorResponse;
+    /**
+     * Internal server error
+     */
+    500: ApiErrorResponse;
+};
+
+export type CareerProfileIntentGrantCreateV1CareerProfileIntentGrantsPostError = CareerProfileIntentGrantCreateV1CareerProfileIntentGrantsPostErrors[keyof CareerProfileIntentGrantCreateV1CareerProfileIntentGrantsPostErrors];
+
+export type CareerProfileIntentGrantCreateV1CareerProfileIntentGrantsPostResponses = {
+    /**
+     * Successful Response
+     */
+    201: ProfileIntentGrant;
+};
+
+export type CareerProfileIntentGrantCreateV1CareerProfileIntentGrantsPostResponse = CareerProfileIntentGrantCreateV1CareerProfileIntentGrantsPostResponses[keyof CareerProfileIntentGrantCreateV1CareerProfileIntentGrantsPostResponses];
+
 export type CareerProfileItemCreateV1CareerProfileItemsPostData = {
     body: ProfileItemMutation;
+    headers?: {
+        /**
+         * X-Jobos-Mcp-Token
+         */
+        'X-JobOS-MCP-Token'?: string | null;
+        /**
+         * X-Jobos-Intent-Grant
+         */
+        'X-JobOS-Intent-Grant'?: string | null;
+    };
     path?: never;
     query?: never;
     url: '/v1/career-profile/items';
@@ -3494,6 +3785,16 @@ export type CareerProfileItemCreateV1CareerProfileItemsPostResponse = CareerProf
 
 export type CareerProfileItemRemoveV1CareerProfileItemsItemIdDeleteData = {
     body: ProfileItemRemoval;
+    headers?: {
+        /**
+         * X-Jobos-Mcp-Token
+         */
+        'X-JobOS-MCP-Token'?: string | null;
+        /**
+         * X-Jobos-Intent-Grant
+         */
+        'X-JobOS-Intent-Grant'?: string | null;
+    };
     path: {
         /**
          * Item Id
@@ -3544,6 +3845,16 @@ export type CareerProfileItemRemoveV1CareerProfileItemsItemIdDeleteResponse = Ca
 
 export type CareerProfileItemUpdateV1CareerProfileItemsItemIdPutData = {
     body: ProfileItemMutation;
+    headers?: {
+        /**
+         * X-Jobos-Mcp-Token
+         */
+        'X-JobOS-MCP-Token'?: string | null;
+        /**
+         * X-Jobos-Intent-Grant
+         */
+        'X-JobOS-Intent-Grant'?: string | null;
+    };
     path: {
         /**
          * Item Id
@@ -3591,6 +3902,111 @@ export type CareerProfileItemUpdateV1CareerProfileItemsItemIdPutResponses = {
 };
 
 export type CareerProfileItemUpdateV1CareerProfileItemsItemIdPutResponse = CareerProfileItemUpdateV1CareerProfileItemsItemIdPutResponses[keyof CareerProfileItemUpdateV1CareerProfileItemsItemIdPutResponses];
+
+export type CareerProfileProposalDecideV1CareerProfileItemsItemIdDecisionPostData = {
+    body: ProfileProposalDecision;
+    headers?: {
+        /**
+         * X-Jobos-Mcp-Token
+         */
+        'X-JobOS-MCP-Token'?: string | null;
+        /**
+         * X-Jobos-Intent-Grant
+         */
+        'X-JobOS-Intent-Grant'?: string | null;
+    };
+    path: {
+        /**
+         * Item Id
+         */
+        item_id: string;
+    };
+    query?: never;
+    url: '/v1/career-profile/items/{item_id}/decision';
+};
+
+export type CareerProfileProposalDecideV1CareerProfileItemsItemIdDecisionPostErrors = {
+    /**
+     * Device authentication required
+     */
+    401: ApiErrorResponse;
+    /**
+     * Operation is not permitted
+     */
+    403: ApiErrorResponse;
+    /**
+     * Resource not found
+     */
+    404: ApiErrorResponse;
+    /**
+     * Resource state conflict
+     */
+    409: ApiErrorResponse;
+    /**
+     * Request validation failed
+     */
+    422: ApiErrorResponse;
+    /**
+     * Internal server error
+     */
+    500: ApiErrorResponse;
+};
+
+export type CareerProfileProposalDecideV1CareerProfileItemsItemIdDecisionPostError = CareerProfileProposalDecideV1CareerProfileItemsItemIdDecisionPostErrors[keyof CareerProfileProposalDecideV1CareerProfileItemsItemIdDecisionPostErrors];
+
+export type CareerProfileProposalDecideV1CareerProfileItemsItemIdDecisionPostResponses = {
+    /**
+     * Successful Response
+     */
+    200: CareerProfileCompleteCurrent;
+};
+
+export type CareerProfileProposalDecideV1CareerProfileItemsItemIdDecisionPostResponse = CareerProfileProposalDecideV1CareerProfileItemsItemIdDecisionPostResponses[keyof CareerProfileProposalDecideV1CareerProfileItemsItemIdDecisionPostResponses];
+
+export type CareerProfileResetV1CareerProfileResetPostData = {
+    body: CareerProfileResetRequest;
+    path?: never;
+    query?: never;
+    url: '/v1/career-profile/reset';
+};
+
+export type CareerProfileResetV1CareerProfileResetPostErrors = {
+    /**
+     * Device authentication required
+     */
+    401: ApiErrorResponse;
+    /**
+     * Operation is not permitted
+     */
+    403: ApiErrorResponse;
+    /**
+     * Resource not found
+     */
+    404: ApiErrorResponse;
+    /**
+     * Resource state conflict
+     */
+    409: ApiErrorResponse;
+    /**
+     * Request validation failed
+     */
+    422: ApiErrorResponse;
+    /**
+     * Internal server error
+     */
+    500: ApiErrorResponse;
+};
+
+export type CareerProfileResetV1CareerProfileResetPostError = CareerProfileResetV1CareerProfileResetPostErrors[keyof CareerProfileResetV1CareerProfileResetPostErrors];
+
+export type CareerProfileResetV1CareerProfileResetPostResponses = {
+    /**
+     * Successful Response
+     */
+    200: CareerProfileErasureResult;
+};
+
+export type CareerProfileResetV1CareerProfileResetPostResponse = CareerProfileResetV1CareerProfileResetPostResponses[keyof CareerProfileResetV1CareerProfileResetPostResponses];
 
 export type CareerProfileSnapshotCreateV1CareerProfileSnapshotsPostData = {
     body: CareerProfileSnapshotRequest;

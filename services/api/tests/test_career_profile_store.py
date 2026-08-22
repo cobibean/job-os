@@ -79,6 +79,35 @@ def test_fresh_store_initializes_and_persists_typed_work_arrangement(tmp_path: P
     assert restarted.record.actor_principal == "device:device-primary"
 
 
+@pytest.mark.parametrize("mode", ["remote", "hybrid", "onsite", "flexible"])
+@pytest.mark.parametrize(
+    "strength", ["requirement", "strong_preference", "preference", "dealbreaker"]
+)
+def test_every_work_arrangement_mode_strength_combination_round_trips(
+    tmp_path: Path, mode: str, strength: str
+) -> None:
+    store = initialized_store(tmp_path / f"{mode}-{strength}.db")
+    note = "x" * 1000
+    saved = store.set_work_arrangement(
+        principal="device:primary",
+        command=mutation(
+            revision=0,
+            key=f"round-trip-{mode}-{strength}",
+            mode=mode,
+            strength=strength,
+            note=note,
+        ),
+    )
+    assert saved.record is not None
+    assert saved.record.value.model_dump(mode="json") == {
+        "mode": mode,
+        "strength": strength,
+        "note": note,
+    }
+    restarted = CareerProfileStore(tmp_path / f"{mode}-{strength}.db")
+    assert restarted.current_work_arrangement() == saved
+
+
 def test_mutation_is_one_immutable_revision_and_replay_is_idempotent(tmp_path: Path) -> None:
     database = tmp_path / "jobos.db"
     store = initialized_store(database)

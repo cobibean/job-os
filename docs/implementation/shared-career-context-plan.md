@@ -4,6 +4,9 @@
 **Wayfinder:** [#40](https://github.com/cobibean/job-os/issues/40)  
 **Planning ticket:** [#49](https://github.com/cobibean/job-os/issues/49)
 
+**Context/export semantic contract:**
+[`career-profile-context-and-export-contract.md`](career-profile-context-and-export-contract.md)
+
 **Goal:** Make one user-owned Career Profile the durable source of career facts, preferences, and Evidence used by JobOS and authorized connected agents.
 
 **Architecture:** JobOS owns a typed, versioned Career Profile store and immutable Evidence vault. The desktop and connected agents use authenticated JobOS API/MCP contracts; every new user turn atomically binds to one authorized immutable profile snapshot before dispatch. Development starts with a staging-only work-arrangement tracer bullet, expands to the complete product, and ends in one explicitly approved all-at-once authority cutover.
@@ -110,6 +113,8 @@ The tracer bullet introduces `search_preferences.work_arrangement` with:
 - `mode`: `remote | hybrid | onsite | flexible`;
 - `strength`: `requirement | strong_preference | preference | dealbreaker` where semantically applicable;
 - optional plain-language `note`;
+- one 1,000-Unicode-code-point cross-layer resource limit for that additional context, preserved
+  unchanged by API, desktop validation, cache validation, and renderer input;
 - stable opaque record ID;
 - profile revision and item revision;
 - actor and timestamp metadata.
@@ -123,8 +128,12 @@ The model must allow later typed records without creating generic unvalidated JS
 - Idempotent replay returns the original result and does not create another revision.
 - A stale base revision fails closed and never overwrites newer data.
 - Undo writes a compensating revision; it never rewrites or removes history.
-- Prior values and removed active entries remain indefinitely in local history.
-- V1 does not permanently purge individual historical values or Source Evidence.
+- Prior values and removed active entries remain in local history during ordinary
+  edit/remove/Undo flows.
+- Separately confirmed owner erasure is the only exception: one Evidence object can
+  be permanently erased, and the complete local Career Profile can be reset.
+  Destructive operations remove recoverable in-scope history instead of writing a
+  compensating revision.
 
 ### 4.4 Snapshot rules
 
@@ -138,6 +147,14 @@ A snapshot contains:
 - creation timestamp.
 
 A snapshot is immutable. Expansion requires a separately authorized operation; possession of a snapshot ID or local credential does not imply access to every namespace.
+
+The complete product must offer exactly three user-understandable scope choices:
+none, selected items or areas, or a broader authorized projection. `none` binds
+an empty projection rather than skipping authorization. A selected scope records
+the exact item IDs and/or canonical areas. A broader projection is limited by an
+explicit grant and is never inferred from agent connection, credentials, or a
+prior snapshot. Retry, recovery, continuation, and subagent follow-up preserve
+the exact bound scope; unauthorized expansion fails closed before dispatch.
 
 ## 5. API and authorization contract
 
@@ -158,7 +175,8 @@ Later operations add:
 - Source Evidence import/status/read/remove workflows;
 - proposal creation, approval, rejection, and direct-edit audit;
 - per-agent grants and editing modes;
-- portable current-state export and baseline restore.
+- portable current-state export with an explicit profile-only, profile plus
+  selected Evidence, or profile plus all Evidence choice, and baseline restore.
 
 Server enforcement distinguishes user, desktop, connected agent, migration, and internal dispatch principals. Unauthorized principals cannot read, mutate, expand, bind, approve, or restore data outside their grant.
 
@@ -189,7 +207,23 @@ The full profile payload is not copied into conversation event or audit JSON.
 - An old turn never silently upgrades to a newer snapshot.
 - An explicitly requested new generation is a new turn and resolves the latest authorized snapshot.
 
-### 6.3 Generated outputs
+### 6.3 Complete-profile context selection (future, dormant)
+
+- The user can choose no Career Profile context, selected items/areas, or a
+  broader projection within the agent's explicit grant.
+- Selection is part of the immutable turn binding alongside profile revision and
+  content hash.
+- Retries, transport recovery, resumed execution, continuations, and subagents
+  reuse the exact original selection.
+- Any attempted scope widening fails before dispatch and requires a separately
+  authorized operation plus a new turn.
+- Accepted user-authored or user-approved content remains eligible for the
+  selected projection without Evidence. Autonomous unapproved agent content
+  remains proposed whether or not Evidence exists.
+- This contract does not activate complete-profile projection; the staging-only
+  work-arrangement boundary remains in force until later approved work.
+
+### 6.4 Generated outputs
 
 - Generated artifacts remain immutable after profile edits.
 - V1 does not auto-regenerate, label them stale, or prompt regeneration.
@@ -239,6 +273,11 @@ These controls protect factual accuracy and provenance. Contact and identity inf
 - Exact structured facts may import directly when provenance is preserved.
 - Extracted, inferred, ambiguous, or conflicting facts remain proposals until reviewed.
 - Removing Evidence preserves the status and content of user-authored or user-approved entries; it only changes the availability of that supporting source.
+- Ordinary Evidence removal remains reversible and preserves bytes/history.
+  **Permanently erase Evidence** is a separately named owner operation with exact
+  confirmation; it removes the managed bytes, metadata, source-derived unaccepted
+  proposals, and recoverable references/history for that source while retaining
+  accepted profile information without the source link.
 - Imported content is untrusted input and cannot override higher-level instructions, policy, or tool permissions.
 
 ### 8.2 Local data and audit
@@ -251,10 +290,23 @@ These controls protect factual accuracy and provenance. Contact and identity inf
 ### 8.3 Export and recovery
 
 - V1 creates no automatic app-managed backup.
-- Portable export contains the current structured Career Profile, current Source Evidence, hashes, and provenance.
+- Every portable export requires an explicit Evidence inclusion choice: profile-only, profile plus selected Evidence, or profile plus all Evidence.
+- Profile-only exports include the current structured Career Profile and provenance metadata but no Source Evidence bytes.
+- Selected-Evidence exports include exactly the selected active Source Evidence, hashes, and provenance. All-Evidence export is a separately explicit choice; Source Evidence is never silently bundled because it is linked or present.
+- An unavailable historical Evidence link may remain in profile provenance without demoting the accepted item; unavailable bytes are not represented as included files.
 - Export excludes prior revision history and agent settings.
 - Import restores current data as a new baseline; it cannot reconstruct the old timeline.
 - Losing local JobOS data can permanently lose revision history. This is an accepted v1 limitation.
+- **Reset Career Profile permanently** is an exact-confirmation owner operation that
+  removes current profile data, proposals, Evidence, snapshots, sensitive revision
+  and idempotency payloads, and Career Profile audit history. It does not reset jobs,
+  documents, generated artifacts, app settings, conversations, or credentials.
+- Erasure covers JobOS-managed local storage only. User-created exports, manual
+  copies, system/cloud backups, screenshots, and copies already shared externally
+  remain outside JobOS control and must be deleted separately.
+- Destructive operations journal intent, fail without a success response on partial
+  failure, recover pending work at startup, durably sync vault deletion, and use
+  SQLite secure-delete/checkpoint/compaction before completion.
 
 ## 9. Career Profile experience
 
@@ -300,13 +352,14 @@ Preferences must feel like understandable product behavior rather than configura
 - Default provenance uses normal language: source name, origin/extraction method, captured/import date, and verification state.
 - Hashes, analyzer versions, confidence values, and dense diagnostics are progressively disclosed in deeper Evidence details.
 - Use actionable freshness states such as **Source changed**, **Review suggested**, or **Last confirmed [date]**.
-- Do not use an opaque context-health percentage. A summary may show actionable counts for pending reviews, conflicts, missing Evidence, and sources worth refreshing.
+- Do not use an opaque context-health percentage. A summary may show actionable counts for pending reviews, conflicts, changed sources, and sources the user chose to review.
+- Absent Evidence is not profile debt: no score, task, filter, or generation rule may treat it as a defect.
 - Trust modes live in **Settings → Connected agents**, never on an Evidence source.
 
 ### 9.5 Required states
 
 - **Loading:** stable skeletons preserve structure; background refresh does not blank existing content.
-- **Empty profile:** explain the benefit and offer manual entry or source import.
+- **Empty profile:** explain the benefit and offer manual entry or optional source import without presenting Evidence as required.
 - **Empty section:** section-specific guidance and one primary action.
 - **Importing/analyzing:** per-source progress persists while the user leaves the page; completion/failure remains recoverable.
 - **Failure:** preserve entered data when possible, explain plainly, and offer Retry or Save again.
@@ -328,6 +381,7 @@ Exact colors, spacing, animation, iconography, and breakpoints remain implementa
 Build and test the complete Career Profile and all required consumers before authority changes:
 
 - import all three Career Profile areas;
+- preserve sparse areas, unknown values, and accepted user-authored or user-approved content with no Evidence;
 - preserve exact-fact provenance and immutable original Evidence;
 - leave inferred/ambiguous/conflicting entries as proposals;
 - migrate required JobOS and Job Hunter consumers to direct JobOS API/MCP projections;
@@ -406,11 +460,26 @@ Using a packaged app and fresh disposable profile:
 ### Full cutover acceptance
 
 - Exact migration and consumer contract gates pass.
+- Sparse and zero-Evidence profiles are first-class migration and cutover acceptance cases.
+- None, selected, and broader authorized context scopes bind exactly, survive retry/recovery/continuation, and reject unauthorized expansion before dispatch.
+- Accepted Evidence-free claims remain usable, and export proves profile-only, selected-Evidence, and explicit all-Evidence choices.
 - The complete profile migrates as one authority set.
 - Required consumers switch together.
 - Legacy writes fail closed.
 - Installed UI, imports, edits, proposals, history/Undo, snapshots, export, and agent flows survive restart and real workflow verification.
 - Fresh explicit cutover approval is recorded before live mutation.
+- On a disposable synthetic candidate, permanently erase one active and one
+  ordinarily removed Evidence object, restart, and prove their managed bytes,
+  metadata, source references, and sensitive source history cannot be read back.
+- On a separate disposable synthetic candidate, permanently reset the complete
+  Career Profile, restart, and prove current data, proposals, all Evidence bytes,
+  snapshots, revision/idempotency payloads, and sensitive audit history cannot be
+  read back from the filesystem or SQLite database.
+- Inject a partial destructive-operation failure and prove no success is reported;
+  startup recovery must finish the journal or continue failing honestly.
+- Record the local-erasure/external-copy limitation in the reviewed #58 evidence.
+  These proofs are acceptance prerequisites only and do not activate #58 or replace
+  its fresh explicit cutover approval.
 
 ## 14. Explicit non-goals
 
@@ -418,8 +487,10 @@ Using a packaged app and fresh disposable profile:
 - Editing `SOUL.md`, `AGENTS.md`, skills, policy, transcripts, credentials, browser state, or generated document bytes as Career Profile data.
 - Agent-specific fact forks or inheritance in v1.
 - Bidirectional synchronization, shadow authority, or compatibility profile files.
-- Automatic backup, full revision-history export, or permanent historical purge in v1.
+- Automatic backup or full revision-history export. Permanent purge exists only
+  through the two narrowly scoped, exact-confirmation owner erasure operations.
 - Automatic generated-artifact regeneration or stale warnings.
+- Activating complete-profile projection, migration, or live authority as part of the semantic-contract work in Issue #69.
 - Review Brief behavior beyond consuming this foundation in a later separately specified feature.
 
 ## 15. Completion definition

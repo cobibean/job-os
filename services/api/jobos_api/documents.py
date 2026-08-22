@@ -503,7 +503,7 @@ def artifact_record(
         created_at=str(row["created_at"]),
         is_current=artifact_id == current_id,
         is_last_successful=artifact_id == last_successful_id,
-        is_approved=artifact_id == approved_id,
+        is_approved=bool(row.get("is_logically_approved", artifact_id == approved_id)),
         preview_available=(
             row["render_status"] == "succeeded" and row["media_type"] == PDF_MEDIA_TYPE
         ),

@@ -56,10 +56,33 @@ Career Profile and Source Evidence are ordinary local JobOS data in v1. Contact
 and identity facts are returned normally to the authenticated owner; v1 does not
 add masking or field-level content encryption. Imported bytes are copied into the
 managed vault, addressed by opaque IDs, hash-checked on read, and never rewritten
-by structured edits or removal. Removal changes active profile state and preserves
-revision history and original bytes. Inferred, ambiguous, or conflicting imported
+by structured edits or ordinary removal. Ordinary removal changes active profile
+state and preserves revision history and original bytes so it remains auditable and
+reversible. Inferred, ambiguous, or conflicting imported
 facts remain unaccepted until reviewed. Imported document text is data only and
 cannot change system instructions, agent policy, credentials, or tool permissions.
+
+Career Profile has two separately named destructive operations for the authenticated
+owner. **Permanently erase Evidence** requires the exact
+`ERASE_EVIDENCE_PERMANENTLY` confirmation and removes that managed file, its source
+metadata and recoverable source references/history. Accepted profile information is
+kept, with the erased Evidence link marked unavailable rather than used as a reason
+to demote the user's information. Source-derived unaccepted proposals are removed.
+**Reset Career Profile permanently** requires the exact
+`RESET_CAREER_PROFILE_PERMANENTLY` confirmation and removes current profile data,
+proposals, Evidence, snapshots, idempotency payloads, and sensitive Career Profile
+revision/audit history. It leaves the staging feature initialized as a new empty
+profile and does not reset jobs, documents, generated artifacts, settings,
+conversations, or credentials.
+
+Both operations first journal their intent, durably unlink managed files, securely
+delete the in-scope SQLite rows, truncate SQLite write-ahead state, and compact the
+database before reporting completion. A partial operation returns an error rather
+than claiming deletion; the next Career Profile startup resumes the pending journal.
+This is local erasure of copies JobOS manages. JobOS cannot erase a file the user
+previously exported, a manually copied profile directory, Time Machine or another
+external backup, synced/cloud copies, screenshots, or data already shared with an
+external service. Those copies must be deleted through their owner/provider.
 
 Do not commit runtime databases, logs, exports, backups, support bundles,
 credentials, `.env` files, local runtime configuration, or `.DS_Store` files.
@@ -103,6 +126,11 @@ restore either item. The explicit reset restores the one demo job and its one
 starter resume; it does not reset other jobs.
 For a completely fresh source profile, initialize a new `--data-dir`; move old
 runtime data aside instead of deleting it until its backup is verified.
+
+When only Career Profile data must be removed, use its confirmed permanent reset
+instead of deleting the whole JobOS data directory. Do not test either destructive
+operation against live or irreplaceable data; release proof uses only disposable
+`(FAKE)` profiles and verifies filesystem and SQLite readback after restart.
 
 Removing the application or source checkout does not intentionally remove the
 separate Application Support/runtime data. Remove that data separately only

@@ -684,7 +684,7 @@ describe('trusted document workspace', () => {
     await waitFor(() => expect(documents.export).toHaveBeenCalledWith(lastGoodDocx.artifactId))
   })
 
-  it('navigates ordered logical documents, scopes revisions, resets the view, and hides cover letter approval', async () => {
+  it('navigates ordered logical documents, scopes revisions, resets the view, and permits cover letter approval', async () => {
     const resumePdf = artifact({
       artifactId: 'art_RESUMEPDFABCDEFGHIJKLMNOP',
       sourceRevision: 'resume-source',
@@ -741,7 +741,7 @@ describe('trusted document workspace', () => {
       'cover-2 · succeeded · newest',
       'cover-1 · succeeded'
     ])
-    expect(screen.queryByRole('button', { name: /Approve/ })).toBeNull()
+    expect(screen.getByRole('button', { name: /Approve/ })).not.toBeNull()
   })
 
   it('exports the chosen succeeded PDF or latest DOCX variant from one logical revision', async () => {

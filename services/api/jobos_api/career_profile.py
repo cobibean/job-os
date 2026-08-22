@@ -113,6 +113,17 @@ class CareerProfileIdempotencyConflict(RuntimeError):
         super().__init__("Idempotency key was already used for a different Career Profile command")
 
 
+class CareerProfileErasureInProgress(RuntimeError):
+    """A destructive Career Profile operation must finish before other writes."""
+
+
+def ensure_no_pending_erasure(connection: sqlite3.Connection) -> None:
+    if connection.execute("SELECT 1 FROM career_profile_erasure_journal LIMIT 1").fetchone():
+        raise CareerProfileErasureInProgress(
+            "A Career Profile erasure is already being recovered"
+        )
+
+
 class CareerProfileRevisionNotFound(RuntimeError):
     """The requested Career Profile revision does not exist for this record."""
 
@@ -168,6 +179,7 @@ def create_snapshot_in_transaction(
     request: CareerProfileSnapshotRequest,
 ) -> CareerProfileSnapshot:
     """Create an immutable authorized projection inside the caller's transaction."""
+    ensure_no_pending_erasure(connection)
     scopes = list(dict.fromkeys(request.scopes))
     head_row = connection.execute(
         "SELECT head_revision FROM career_profiles WHERE profile_id = ?",
@@ -335,6 +347,7 @@ class CareerProfileStore:
                 if replay is not None:
                     connection.rollback()
                     return WorkArrangementCurrent.model_validate(replay)
+                ensure_no_pending_erasure(connection)
                 head = self._head_revision(connection)
                 if head != command.expected_profile_revision:
                     raise CareerProfileRevisionConflict(head)
@@ -452,6 +465,7 @@ class CareerProfileStore:
                 if replay is not None:
                     connection.rollback()
                     return WorkArrangementCurrent.model_validate(replay)
+                ensure_no_pending_erasure(connection)
                 head = self._head_revision(connection)
                 if head != expected_profile_revision:
                     raise CareerProfileRevisionConflict(head)
@@ -608,6 +622,7 @@ class CareerProfileStore:
         idempotency_key: str,
         request_hash: str,
     ) -> dict[str, object] | None:
+        ensure_no_pending_erasure(connection)
         row = connection.execute(
             """
             SELECT request_hash, result_json

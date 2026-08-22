@@ -653,7 +653,6 @@ async def test_mcp_server_exposes_public_v1_parity_tools_while_retaining_job_too
         "document_register",
         "document_publication_prepare",
         "document_publish",
-        "document_approve",
         "document_select",
         "document_file_inspect",
         "document_file_apply",

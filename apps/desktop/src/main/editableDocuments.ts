@@ -70,6 +70,27 @@ async function confirmDroppedImport(
   return result.response === 0
 }
 
+async function confirmUnresolvedCurrentState(
+  document: EditableDocument,
+  action: 'export' | 'publish',
+  native: EditableDocumentsNative | undefined
+): Promise<boolean> {
+  const count = unresolvedSuggestionCount(document.content)
+  if (count === 0) return true
+  if (!native?.dialog.showMessageBox) throw new Error('Suggestion confirmation is unavailable')
+  const result = await native.dialog.showMessageBox({
+    type: 'warning',
+    buttons: [`${action === 'publish' ? 'Publish' : 'Export'} current state`, 'Cancel'],
+    defaultId: 1,
+    cancelId: 1,
+    title: `${count} unresolved JobHunter suggestion${count === 1 ? '' : 's'}`,
+    message: `The ${action} will use the exact current state shown in preview.`,
+    detail: 'JobHunter insertions and rewrites will be included; suggested deletions will be omitted. Your saved draft and its unresolved suggestions will not be changed.',
+    noLink: true
+  })
+  return result.response === 0
+}
+
 
 interface ApiSettings {
   page_size: DocumentSettings['pageSize']
@@ -425,15 +446,12 @@ export function createMainEditableDocumentsClient(
     allowUnresolvedSuggestions = false
   ): Promise<Uint8Array> => {
     const hasUnresolvedSuggestions = unresolvedSuggestionCount(document.content) > 0
-    if (hasUnresolvedSuggestions && allowUnresolvedSuggestions) {
-      return exportEditableDocumentPdf(document, { allowUnresolvedSuggestions: true })
-    }
-    if (hasUnresolvedSuggestions) {
-      throw new Error('Resolve every suggestion before export or publication')
+    if (hasUnresolvedSuggestions && !allowUnresolvedSuggestions) {
+      throw new Error('Confirm the current state before export or publication')
     }
     const cached = pdfCache.get(document.documentId)
     if (cached?.revision === document.revision) return cached.bytes
-    const bytes = await exportEditableDocumentPdf(document)
+    const bytes = await exportEditableDocumentPdf(document, { allowUnresolvedSuggestions })
     pdfCache.set(document.documentId, { revision: document.revision, bytes })
     return bytes
   }
@@ -607,9 +625,13 @@ export function createMainEditableDocumentsClient(
     ): Promise<EditableDocumentExportResult> {
       if (!native) throw new Error('Native document export is unavailable')
       const document = await loadEditableDocument(config, documentId)
+      const unresolved = unresolvedSuggestionCount(document.content)
+      if (!(await confirmUnresolvedCurrentState(document, 'export', native))) {
+        return { cancelled: true, filename: null, message: 'Export cancelled' }
+      }
       const bytes = format === 'docx'
-        ? await exportEditableDocumentDocx(document)
-        : await pdfFor(document)
+        ? await exportEditableDocumentDocx(document, { allowUnresolvedSuggestions: unresolved > 0 })
+        : await pdfFor(document, unresolved > 0)
       const filename = generatedFilename(document, format)
       const selection = await native.dialog.showSaveDialog({
         title: `Export ${document.documentLabel}`,
@@ -626,13 +648,17 @@ export function createMainEditableDocumentsClient(
       return {
         cancelled: false,
         filename: path.basename(selection.filePath),
-        message: `${format.toUpperCase()} exported`
+        message: unresolved > 0
+          ? `${format.toUpperCase()} exported from the confirmed current state; the saved suggestions remain unresolved`
+          : `${format.toUpperCase()} exported`
       }
     },
     async publish(documentId: string): Promise<EditableDocument> {
       const document = await loadEditableDocument(config, documentId)
-      const docx = await exportEditableDocumentDocx(document)
-      const pdf = await pdfFor(document)
+      const unresolved = unresolvedSuggestionCount(document.content)
+      if (!(await confirmUnresolvedCurrentState(document, 'publish', native))) throw new Error('Publication cancelled')
+      const docx = await exportEditableDocumentDocx(document, { allowUnresolvedSuggestions: unresolved > 0 })
+      const pdf = await pdfFor(document, unresolved > 0)
       return toDocument(await apiJson<ApiDocument>(
         config,
         `/v1/editable-documents/${encodeURIComponent(document.documentId)}/publish`,
@@ -640,6 +666,8 @@ export function createMainEditableDocumentsClient(
           method: 'POST',
           body: jsonBody({
             expected_revision: document.revision,
+            unresolved_suggestion_count: unresolved,
+            confirm_current_state: unresolved > 0,
             docx_filename: generatedFilename(document, 'docx'),
             docx_base64: Buffer.from(docx).toString('base64'),
             docx_sha256: createHash('sha256').update(docx).digest('hex'),

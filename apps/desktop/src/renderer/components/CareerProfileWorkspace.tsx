@@ -2,7 +2,7 @@ import { BriefcaseBusiness, Check, Clock3, MapPin, RotateCcw, Save, Sparkles } f
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react'
 import { createPortal } from 'react-dom'
 
-import type { CareerProfileBridge, WorkArrangementMode, WorkArrangementStrength, WorkArrangementValue } from '../../shared/contracts'
+import { CAREER_PROFILE_ADDITIONAL_CONTEXT_LIMIT, careerProfileAdditionalContextLength, type CareerProfileBridge, type WorkArrangementMode, type WorkArrangementStrength, type WorkArrangementValue } from '../../shared/contracts'
 import { useCareerProfile } from '../hooks/useCareerProfile'
 
 interface CareerProfileWorkspaceProps {
@@ -75,8 +75,7 @@ export function CareerProfileWorkspace({ bridge = window.jobos.careerProfile, ha
     setValidation('')
     profile.setDraft(current => ({
       ...current,
-      [key]: value,
-      ...(key === 'mode' && value === 'flexible' ? { strength: 'preference' as const } : {})
+      [key]: value
     }))
   }
 
@@ -85,12 +84,8 @@ export function CareerProfileWorkspace({ bridge = window.jobos.careerProfile, ha
       setValidation('Reconnect to JobOS before saving. Your edit will stay here.')
       return
     }
-    if (profile.draft.mode === 'flexible' && profile.draft.strength !== 'preference') {
-      setValidation('Flexible work keeps every arrangement open, so its strength must stay as Preference.')
-      return
-    }
-    if ((profile.draft.note?.length ?? 0) > 500) {
-      setValidation('Keep the note to 500 characters or fewer.')
+    if (careerProfileAdditionalContextLength(profile.draft.note ?? '') > CAREER_PROFILE_ADDITIONAL_CONTEXT_LIMIT) {
+      setValidation(`Keep the note to ${CAREER_PROFILE_ADDITIONAL_CONTEXT_LIMIT} characters or fewer.`)
       return
     }
     setValidation('')
@@ -194,16 +189,16 @@ export function CareerProfileWorkspace({ bridge = window.jobos.careerProfile, ha
 
             <fieldset className="career-strength-field">
               <legend>How important is this?</legend>
-              <select aria-label="How important is this?" disabled={profile.status === 'saving' || profile.draft.mode === 'flexible'} onChange={event => update('strength', event.target.value as WorkArrangementStrength)} value={profile.draft.strength}>
+              <select aria-label="How important is this?" disabled={profile.status === 'saving'} onChange={event => update('strength', event.target.value as WorkArrangementStrength)} value={profile.draft.strength}>
                 {Object.entries(strengthLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
               </select>
-              <p>{profile.draft.mode === 'flexible' ? 'Flexible keeps every arrangement open, so no additional strength is applied.' : 'Requirements and dealbreakers filter roles. Preferences change how opportunities are ranked.'}</p>
+              <p>{profile.draft.mode === 'flexible' ? 'Flexible can be paired with any strength. JobOS will preserve your choice even when the combination is unusual.' : 'Requirements and dealbreakers filter roles. Preferences change how opportunities are ranked.'}</p>
             </fieldset>
 
             <label className="career-field">
               <span>Additional context <small>Optional</small></span>
-              <textarea aria-describedby="career-note-count" aria-label="Additional context" disabled={profile.status === 'saving'} maxLength={550} onChange={event => update('note', event.target.value)} placeholder="(FAKE) Two office days per week are okay…" rows={4} value={profile.draft.note ?? ''} />
-              <small id="career-note-count">{profile.draft.note?.length ?? 0}/500</small>
+              <textarea aria-describedby="career-note-count" aria-label="Additional context" disabled={profile.status === 'saving'} onChange={event => update('note', event.target.value)} placeholder="(FAKE) Two office days per week are okay…" rows={4} value={profile.draft.note ?? ''} />
+              <small id="career-note-count">{careerProfileAdditionalContextLength(profile.draft.note ?? '')}/{CAREER_PROFILE_ADDITIONAL_CONTEXT_LIMIT}</small>
             </label>
 
             {validation ? <p className="career-inline-alert" role="alert">{validation}</p> : null}

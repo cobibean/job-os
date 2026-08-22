@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from datetime import UTC, datetime
 from typing import Any
 from uuid import uuid4
 
@@ -84,6 +85,39 @@ def apply_operations(
     changed: list[str] = []
     changes: list[dict[str, str]] = []
 
+    def suggestion(kind: str, **extra: str) -> dict[str, str]:
+        return {
+            "suggestionId": f"sug_{uuid4()}",
+            "kind": kind,
+            "author": "jobhunter",
+            "createdAt": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
+            **extra,
+        }
+
+    def suggested_text(
+        text: str,
+        kind: str,
+        suggestion_id: str,
+        marks: list[dict[str, Any]] | None = None,
+    ) -> list[dict[str, Any]]:
+        if not text:
+            return []
+        retained = [
+            deepcopy(mark) for mark in (marks or []) if mark.get("type") != "suggestion"
+        ]
+        retained.append(
+            {
+                "type": "suggestion",
+                "attrs": {
+                    "suggestionId": suggestion_id,
+                    "kind": kind,
+                    "author": "jobhunter",
+                    "createdAt": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
+                },
+            }
+        )
+        return _plain_content(text, retained)
+
     for operation in command.operations:
         index = _index(content)
         kind = operation.type
@@ -108,7 +142,11 @@ def apply_operations(
                 (child for child in node.get("content", []) if child.get("type") == "text"), None
             )
             marks = first_text.get("marks") if first_text else None
-            node["content"] = _plain_content(operation.replacement_text, marks)
+            suggestion_id = suggestion("insert")["suggestionId"]
+            node["content"] = [
+                *suggested_text(before, "delete", suggestion_id, marks),
+                *suggested_text(operation.replacement_text, "insert", suggestion_id, marks),
+            ]
             changed.append(operation.block_id)
             changes.append(
                 {
@@ -125,7 +163,7 @@ def apply_operations(
                 "semanticRole": operation.semantic_role,
                 "locked": False,
                 "origin": "jobhunter",
-                "structuralSuggestion": None,
+                "structuralSuggestion": suggestion("insert"),
             }
             if operation.node_type == "listItem":
                 if parent_node.get("type") not in {"bulletList", "orderedList"}:
@@ -183,7 +221,7 @@ def apply_operations(
                 raise ValueError("delete would empty a required container")
             if parent_node.get("type") == "listItem" and position == 0:
                 raise ValueError("a list item's leading paragraph cannot be deleted")
-            parent.pop(position)
+            node["attrs"]["structuralSuggestion"] = suggestion("delete")
             changed.append(operation.block_id)
             changes.append({"block_id": operation.block_id, "before": before[:500], "after": ""})
         elif kind == "move_block_after":
@@ -205,18 +243,18 @@ def apply_operations(
                 content, operation.after_block_id
             ):
                 raise ValueError("move target is locked")
-            source_parent.pop(source_position)
-            refreshed = _index(content).get(operation.after_block_id)
-            if refreshed is None:
-                raise ValueError("move target became invalid")
-            refreshed[2].insert(refreshed[3] + 1, source_node)
+            source_node["attrs"]["structuralSuggestion"] = suggestion(
+                "move", afterBlockId=operation.after_block_id
+            )
             changed.append(operation.block_id)
             text = plain_text(source_node)[:500]
             changes.append({"block_id": operation.block_id, "before": text, "after": text})
         else:
             assert isinstance(operation, SetBlockRole)
             before = str((node.get("attrs") or {}).get("semanticRole") or "")
-            node["attrs"]["semanticRole"] = operation.semantic_role
+            node["attrs"]["structuralSuggestion"] = suggestion(
+                "set_role", semanticRole=operation.semantic_role
+            )
             changed.append(operation.block_id)
             changes.append(
                 {"block_id": operation.block_id, "before": before, "after": operation.semantic_role}

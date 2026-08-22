@@ -1065,6 +1065,133 @@ MIGRATIONS = (
             """,
         ),
     ),
+    Migration(
+        version=23,
+        statements=(
+            "ALTER TABLE career_profile_evidence RENAME TO career_profile_evidence_v22",
+            """
+            CREATE TABLE career_profile_evidence (
+                evidence_id TEXT PRIMARY KEY,
+                original_filename TEXT NOT NULL,
+                media_type TEXT NOT NULL,
+                content_sha256 TEXT NOT NULL,
+                byte_count INTEGER NOT NULL CHECK (byte_count > 0),
+                captured_at TEXT,
+                imported_at TEXT NOT NULL,
+                provenance_json TEXT NOT NULL CHECK (json_valid(provenance_json)),
+                storage_name TEXT NOT NULL UNIQUE,
+                active INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0, 1))
+            )
+            """,
+            """
+            INSERT INTO career_profile_evidence(
+                evidence_id, original_filename, media_type, content_sha256, byte_count,
+                captured_at, imported_at, provenance_json, storage_name, active
+            )
+            SELECT evidence_id, original_filename, media_type, content_sha256, byte_count,
+                   captured_at, imported_at, provenance_json, storage_name, active
+            FROM career_profile_evidence_v22
+            """,
+            "DROP TABLE career_profile_evidence_v22",
+            """
+            UPDATE career_profile_items
+            SET provenance_json = json_set(
+                provenance_json,
+                '$.mutation_source',
+                'direct_user'
+            )
+            WHERE json_extract(provenance_json, '$.mutation_source') IS NULL
+            """,
+            """
+            CREATE TABLE career_profile_intent_grants (
+                grant_id TEXT PRIMARY KEY,
+                created_by_principal TEXT NOT NULL,
+                operation TEXT NOT NULL,
+                target_id TEXT,
+                payload_sha256 TEXT NOT NULL CHECK (length(payload_sha256) = 64),
+                created_at TEXT NOT NULL,
+                consumed_at TEXT,
+                consumed_by_principal TEXT,
+                CHECK (
+                    (consumed_at IS NULL AND consumed_by_principal IS NULL)
+                    OR (consumed_at IS NOT NULL AND consumed_by_principal IS NOT NULL)
+                )
+            )
+            """,
+        ),
+    ),
+    Migration(
+        version=24,
+        statements=(
+            """
+            CREATE TABLE career_profile_erasure_journal (
+                operation_id TEXT PRIMARY KEY,
+                operation TEXT NOT NULL CHECK (
+                    operation IN ('evidence.erase', 'profile.reset')
+                ),
+                actor_principal TEXT NOT NULL,
+                idempotency_key TEXT NOT NULL,
+                request_hash TEXT NOT NULL,
+                target_evidence_id TEXT,
+                storage_names_json TEXT NOT NULL CHECK (json_valid(storage_names_json)),
+                phase TEXT NOT NULL DEFAULT 'prepared' CHECK (phase IN ('prepared', 'purged')),
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(actor_principal, idempotency_key)
+            )
+            """,
+            """
+            CREATE TABLE career_profile_erasure_receipts (
+                actor_principal TEXT NOT NULL,
+                idempotency_key TEXT NOT NULL,
+                request_hash TEXT NOT NULL,
+                result_json TEXT NOT NULL CHECK (json_valid(result_json)),
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY(actor_principal, idempotency_key)
+            )
+            """,
+        ),
+    ),
+    Migration(
+        version=25,
+        statements=(
+            """
+            CREATE TABLE document_revision_approvals (
+                job_id TEXT NOT NULL,
+                document_key TEXT NOT NULL CHECK (document_key IN ('resume', 'cover_letter')),
+                source_revision TEXT NOT NULL,
+                artifact_manifest_json TEXT NOT NULL CHECK (json_valid(artifact_manifest_json)),
+                approved_by TEXT NOT NULL CHECK (approved_by = 'user'),
+                approved_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY(job_id, document_key)
+            )
+            """,
+            """
+            INSERT INTO document_revision_approvals(
+                job_id, document_key, source_revision, artifact_manifest_json,
+                approved_by, approved_at
+            )
+            SELECT artifact.job_id, artifact.document_key, artifact.source_revision,
+                   json_object(artifact.artifact_id, artifact.sha256), 'user',
+                   COALESCE(state.approved_at, CURRENT_TIMESTAMP)
+            FROM job_document_state AS state
+            JOIN document_artifacts AS artifact
+                ON artifact.artifact_id = state.approved_artifact_id
+            WHERE artifact.document_key IN ('resume', 'cover_letter')
+                AND artifact.render_status = 'succeeded'
+                AND artifact.sha256 IS NOT NULL
+            """,
+        ),
+    ),
+    Migration(
+        version=26,
+        statements=(
+            """
+            ALTER TABLE career_profiles
+            ADD COLUMN authority_epoch INTEGER NOT NULL DEFAULT 0
+                CHECK (authority_epoch >= 0)
+            """,
+        ),
+    ),
 )
 SCHEMA_VERSION = MIGRATIONS[-1].version
 
@@ -1572,9 +1699,7 @@ class JobOsStateStore:
         """Compatibility access to the first active conversation."""
         return self.conversation_store(self.first_active_conversation_id()).stored_session_id()
 
-    def first_active_conversation_id(
-        self, owner_device_id: str = "primary-device"
-    ) -> str:
+    def first_active_conversation_id(self, owner_device_id: str = "primary-device") -> str:
         conversations = self.list_active_conversations(owner_device_id=owner_device_id)
         if not conversations:
             raise ConversationNotFound("No active conversation exists")
@@ -2653,8 +2778,32 @@ class JobOsStateStore:
                 "SELECT * FROM document_artifacts WHERE job_id = ? ORDER BY rowid DESC",
                 (job_id,),
             ).fetchall()
+            approvals = connection.execute(
+                "SELECT document_key, source_revision, artifact_manifest_json "
+                "FROM document_revision_approvals WHERE job_id = ?",
+                (job_id,),
+            ).fetchall()
+        approved_manifest = {}
+        if state and state["approved_artifact_id"]:
+            approved_manifest = {
+                (str(approval[0]), str(approval[1]), artifact_id): digest
+                for approval in approvals
+                for artifact_id, digest in json.loads(str(approval[2])).items()
+            }
+        artifact_rows = [dict(row) for row in rows]
+        for row in artifact_rows:
+            row["is_logically_approved"] = (
+                approved_manifest.get(
+                    (
+                        str(row["document_key"]),
+                        str(row["source_revision"]),
+                        str(row["artifact_id"]),
+                    )
+                )
+                == row.get("sha256")
+            )
         return (
-            [dict(row) for row in rows],
+            artifact_rows,
             state["current_artifact_id"] if state else None,
             state["last_successful_artifact_id"] if state else None,
             state["approved_artifact_id"] if state else None,
@@ -2758,6 +2907,9 @@ class JobOsStateStore:
         """Remove demo-owned document metadata; artifact bytes remain unregistered on disk."""
         with connect_sqlite(self._path) as connection:
             connection.execute("BEGIN IMMEDIATE")
+            connection.execute(
+                "DELETE FROM document_revision_approvals WHERE job_id = ?", (job_id,)
+            )
             connection.execute("DELETE FROM job_document_state WHERE job_id = ?", (job_id,))
             connection.execute("DELETE FROM document_artifacts WHERE job_id = ?", (job_id,))
             connection.execute(
@@ -2771,24 +2923,83 @@ class JobOsStateStore:
             )
             connection.execute("DELETE FROM editable_documents WHERE job_id = ?", (job_id,))
 
+    def approval_representation_artifacts(
+        self, job_id: str, artifact_id: str
+    ) -> list[dict[str, object]]:
+        with connect_sqlite(f"file:{self._path}?mode=ro", uri=True) as connection:
+            connection.row_factory = sqlite3.Row
+            selected = connection.execute(
+                "SELECT document_key, source_revision FROM document_artifacts "
+                "WHERE artifact_id = ? AND job_id = ?",
+                (artifact_id, job_id),
+            ).fetchone()
+            if selected is None or selected["document_key"] not in {"resume", "cover_letter"}:
+                return []
+            rows = connection.execute(
+                """
+                SELECT * FROM document_artifacts
+                WHERE job_id = ? AND document_key = ? AND source_revision = ?
+                    AND render_status = 'succeeded' AND sha256 IS NOT NULL
+                    AND canonical_path IS NOT NULL
+                ORDER BY media_type, artifact_id
+                """,
+                (job_id, selected["document_key"], selected["source_revision"]),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
     def approve_document_artifact(self, job_id: str, artifact_id: str) -> None:
         with connect_sqlite(self._path) as connection:
+            connection.row_factory = sqlite3.Row
             artifact = connection.execute(
-                "SELECT job_id, document_key, media_type, render_status, sha256 "
+                "SELECT job_id, document_key, source_revision, media_type, render_status, sha256 "
                 "FROM document_artifacts WHERE artifact_id = ?",
                 (artifact_id,),
             ).fetchone()
             if (
                 artifact is None
-                or artifact[0] != job_id
-                or artifact[1] != "resume"
-                or artifact[2] != "application/pdf"
-                or artifact[3] != "succeeded"
-                or not artifact[4]
+                or artifact["job_id"] != job_id
+                or artifact["document_key"] not in {"resume", "cover_letter"}
+                or artifact["media_type"] not in {
+                    "application/pdf",
+                    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                }
+                or artifact["render_status"] != "succeeded"
+                or not artifact["sha256"]
             ):
                 raise ValueError(
-                    "Only a successful artifact registered for this job can be approved"
+                    "Only a successful resume or cover-letter representation registered "
+                    "for this job can be approved"
                 )
+            representations = connection.execute(
+                """
+                SELECT artifact_id, sha256 FROM document_artifacts
+                WHERE job_id = ? AND document_key = ? AND source_revision = ?
+                    AND render_status = 'succeeded' AND sha256 IS NOT NULL
+                    AND canonical_path IS NOT NULL
+                ORDER BY artifact_id
+                """,
+                (job_id, artifact["document_key"], artifact["source_revision"]),
+            ).fetchall()
+            if not representations:
+                raise ValueError("Document revision has no successful representation")
+            manifest = json.dumps(
+                {str(row["artifact_id"]): str(row["sha256"]) for row in representations},
+                separators=(",", ":"),
+                sort_keys=True,
+            )
+            connection.execute(
+                """
+                INSERT INTO document_revision_approvals(
+                    job_id, document_key, source_revision, artifact_manifest_json, approved_by
+                ) VALUES (?, ?, ?, ?, 'user')
+                ON CONFLICT(job_id, document_key) DO UPDATE SET
+                    source_revision = excluded.source_revision,
+                    artifact_manifest_json = excluded.artifact_manifest_json,
+                    approved_by = 'user',
+                    approved_at = CURRENT_TIMESTAMP
+                """,
+                (job_id, artifact["document_key"], artifact["source_revision"], manifest),
+            )
             updated = connection.execute(
                 """
                 UPDATE job_document_state

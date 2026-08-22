@@ -83,7 +83,7 @@ describe('immersive document editor', () => {
     await waitFor(() => expect(onExit).toHaveBeenCalledTimes(1))
   })
 
-  it('keeps export and publish gated when unresolved suggestions exist', () => {
+  it('warns without blocking export or publish when unresolved suggestions exist', () => {
     installEditorBridge()
     const document = editableDocument()
     const firstParagraph = document.content.content?.[0]?.content?.[0]
@@ -103,9 +103,16 @@ describe('immersive document editor', () => {
     }]
     render(<DocumentEditorShell document={document} jobLabel="Northstar · Product Lead" onDocumentChange={vi.fn()} onExit={vi.fn()} />)
 
-    expect(screen.getByRole('button', { name: 'DOCX' }).hasAttribute('disabled')).toBe(true)
-    expect(screen.getByRole('button', { name: 'PDF' }).hasAttribute('disabled')).toBe(true)
-    expect(screen.getByRole('button', { name: 'Publish revision' }).hasAttribute('disabled')).toBe(true)
+    const docxButton = screen.getByRole('button', { name: 'DOCX' })
+    const pdfButton = screen.getByRole('button', { name: 'PDF' })
+    const publishButton = screen.getByRole('button', { name: 'Publish revision' })
+
+    expect(docxButton.hasAttribute('disabled')).toBe(false)
+    expect(pdfButton.hasAttribute('disabled')).toBe(false)
+    expect(publishButton.hasAttribute('disabled')).toBe(false)
+    expect(docxButton.getAttribute('title')).toBe('Review a warning, then export the exact current state')
+    expect(pdfButton.getAttribute('title')).toBe('Review a warning, then export the exact current state')
+    expect(publishButton.getAttribute('title')).toBe('Review a warning, then publish the exact current state')
   })
 
   it('uses authoritative PDF bytes for the generated print preview', async () => {

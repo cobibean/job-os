@@ -20,7 +20,7 @@ import {
 } from 'docx'
 
 import type { DocumentSettings, EditableDocument, TiptapMarkJson, TiptapNodeJson } from '../../shared/editableDocuments.js'
-import { unresolvedSuggestionCount, validateEditableContent } from '../../shared/editableDocumentSchema.js'
+import { materializeDocumentCurrentState, unresolvedSuggestionCount, validateEditableContent } from '../../shared/editableDocumentSchema.js'
 
 const SAFE_LINK = /^(https?:|mailto:)/i
 const IMAGE = /^data:image\/(png|jpeg|gif);base64,([A-Za-z0-9+/]*={0,2})$/
@@ -237,11 +237,17 @@ function orderedListNumbering(content: TiptapNodeJson) {
   return { references, config }
 }
 
-export async function exportEditableDocumentDocx(document: EditableDocument): Promise<Uint8Array> {
+export async function exportEditableDocumentDocx(
+  document: EditableDocument,
+  options: { allowUnresolvedSuggestions?: boolean } = {}
+): Promise<Uint8Array> {
   validateEditableContent(document.content, document.settings, document.comments)
-  if (unresolvedSuggestionCount(document.content) > 0) throw new Error('Resolve every suggestion before preview or export')
+  if (!options.allowUnresolvedSuggestions && unresolvedSuggestionCount(document.content) > 0) throw new Error('Resolve every suggestion before preview or export')
+  const content = options.allowUnresolvedSuggestions
+    ? materializeDocumentCurrentState(document.content)
+    : document.content
   const settings = document.settings
-  const numbering = orderedListNumbering(document.content)
+  const numbering = orderedListNumbering(content)
   const titlePage = settings.header.firstPageDifferent || settings.footer.firstPageDifferent
   const wordDocument = new Document({
     creator: 'JobOS',
@@ -258,7 +264,7 @@ export async function exportEditableDocumentDocx(document: EditableDocument): Pr
         default: new Footer({ children: headerFooterParagraphs([settings.footer.left, settings.footer.center, settings.footer.right], settings.showPageNumbers) }),
         ...(titlePage ? { first: new Footer({ children: [new Paragraph('')] }) } : {})
       },
-      children: blocks(document.content, numbering.references)
+      children: blocks(content, numbering.references)
     }]
   })
   return Uint8Array.from(await Packer.toBuffer(wordDocument))

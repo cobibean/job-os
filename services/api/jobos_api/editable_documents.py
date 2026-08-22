@@ -484,7 +484,7 @@ def validate_content(
             if mark_type == "suggestion" and (
                 not SUGGESTION_ID.fullmatch(str(attrs.get("suggestionId", "")))
                 or attrs.get("kind") not in {"insert", "delete"}
-                or attrs.get("author") != "user"
+                or attrs.get("author") not in {"user", "jobhunter"}
                 or not isinstance(attrs.get("createdAt"), str)
                 or not _valid_iso_timestamp(attrs.get("createdAt"))
                 or set(attrs).difference({"suggestionId", "kind", "author", "createdAt"})
@@ -516,10 +516,28 @@ def validate_content(
             if structural is not None and (
                 not isinstance(structural, dict)
                 or not SUGGESTION_ID.fullmatch(str(structural.get("suggestionId", "")))
-                or structural.get("kind") not in {"insert", "delete"}
-                or structural.get("author") != "user"
+                or structural.get("kind") not in {"insert", "delete", "move", "set_role"}
+                or structural.get("author") not in {"user", "jobhunter"}
                 or not isinstance(structural.get("createdAt"), str)
-                or set(structural).difference({"suggestionId", "kind", "author", "createdAt"})
+                or set(structural).difference({
+                    "suggestionId", "kind", "author", "createdAt", "afterBlockId", "semanticRole"
+                })
+                or (
+                    structural.get("kind") == "move"
+                    and not NODE_ID.fullmatch(str(structural.get("afterBlockId", "")))
+                )
+                or (
+                    structural.get("kind") == "set_role"
+                    and structural.get("semanticRole") not in ROLES
+                )
+                or (
+                    structural.get("kind") != "move"
+                    and "afterBlockId" in structural
+                )
+                or (
+                    structural.get("kind") != "set_role"
+                    and "semanticRole" in structural
+                )
             ):
                 raise ValueError("invalid structural suggestion")
         if node_type == "image":
@@ -673,6 +691,8 @@ class RestoreSnapshotRequest(StrictModel):
 
 class PublishEditableDocumentRequest(StrictModel):
     expected_revision: int = Field(ge=1)
+    unresolved_suggestion_count: int = Field(default=0, ge=0, le=5000)
+    confirm_current_state: bool = False
     docx_filename: str = Field(min_length=1, max_length=255)
     docx_base64: str = Field(min_length=1, max_length=28_000_000)
     docx_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")

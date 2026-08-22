@@ -241,9 +241,9 @@ export function DocumentEditorShell(props: DocumentEditorShellProps) {
         <div className="document-editor-title"><span>{props.jobLabel}</span><strong>{props.document.documentLabel}</strong></div>
         <span className={`document-save-state ${autosave.state}`} role="status">{autosave.message}</span>
         <button disabled={publicationBusy} onClick={() => { void generatePreview() }} type="button"><Eye aria-hidden="true" size={15} />Preview</button>
-        <button disabled={publicationBusy || unresolved > 0} onClick={() => { void exportDocument('docx') }} title={unresolved ? 'Resolve suggestions before export' : 'Export Word document'} type="button"><Download aria-hidden="true" size={15} />DOCX</button>
-        <button disabled={publicationBusy || unresolved > 0} onClick={() => { void exportDocument('pdf') }} title={unresolved ? 'Resolve suggestions before export' : 'Export PDF document'} type="button"><Download aria-hidden="true" size={15} />PDF</button>
-        <button className="publish-document" disabled={publicationBusy || unresolved > 0} onClick={() => { void publishRevision() }} title={unresolved ? 'Resolve suggestions before publishing' : 'Publish revision'} type="button"><Send aria-hidden="true" size={15} />Publish revision</button>
+        <button disabled={publicationBusy} onClick={() => { void exportDocument('docx') }} title={unresolved ? 'Review a warning, then export the exact current state' : 'Export Word document'} type="button"><Download aria-hidden="true" size={15} />DOCX</button>
+        <button disabled={publicationBusy} onClick={() => { void exportDocument('pdf') }} title={unresolved ? 'Review a warning, then export the exact current state' : 'Export PDF document'} type="button"><Download aria-hidden="true" size={15} />PDF</button>
+        <button className="publish-document" disabled={publicationBusy} onClick={() => { void publishRevision() }} title={unresolved ? 'Review a warning, then publish the exact current state' : 'Publish revision'} type="button"><Send aria-hidden="true" size={15} />Publish revision</button>
       </header>
       <div className="document-editor-viewtabs" role="tablist" aria-label="Document views">
         <button aria-selected={view === 'edit'} onClick={() => setView('edit')} role="tab" type="button">Edit</button>
