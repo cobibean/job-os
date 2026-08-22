@@ -24,6 +24,13 @@ const current = {
   }
 }
 
+const completeCurrent = {
+  authorityEpoch: 1,
+  items: [],
+  profileRevision: 2,
+  sourceEvidence: []
+}
+
 function bridge(overrides: Partial<CareerProfileBridge> = {}): CareerProfileBridge {
   return {
     availability: vi.fn().mockResolvedValue({ enabled: true }),
@@ -53,6 +60,20 @@ function bridge(overrides: Partial<CareerProfileBridge> = {}): CareerProfileBrid
     decideCareerProfileProposal: vi.fn(),
     getCareerProfileChangeHistory: vi.fn().mockResolvedValue({ profileRevision: 2, revisions: [] }),
     undoCareerProfileChange: vi.fn(),
+    getCareerProfile: vi.fn().mockResolvedValue(completeCurrent),
+    createCareerProfileItem: vi.fn().mockResolvedValue({ status: 'saved', current: completeCurrent }),
+    updateCareerProfileItem: vi.fn().mockResolvedValue({ status: 'saved', current: completeCurrent }),
+    removeCareerProfileItem: vi.fn().mockResolvedValue({ status: 'saved', current: completeCurrent }),
+    importCareerProfileEvidence: vi.fn().mockResolvedValue({ status: 'saved', current: completeCurrent }),
+    removeCareerProfileEvidence: vi.fn().mockResolvedValue({ status: 'saved', current: completeCurrent }),
+    getCareerProfileContext: vi.fn().mockResolvedValue({
+      agentId: 'job-hunter', mode: 'none', selectedAreas: [], selectedItemIds: [], updatedAt: '2026-08-21T15:00:00Z'
+    }),
+    updateCareerProfileContext: vi.fn(),
+    previewCareerProfileContext: vi.fn(),
+    exportCareerProfile: vi.fn().mockResolvedValue({ status: 'cancelled' }),
+    chooseCareerProfileArchive: vi.fn().mockResolvedValue(null),
+    restoreCareerProfile: vi.fn(),
     ...overrides
   }
 }
@@ -430,8 +451,10 @@ test('surfaces a direct agent edit as a lightweight confirmation with prominent 
 })
 
 test('refreshes agent proposals and history when the app regains focus', async () => {
+  const initialHistory = { profileRevision: 2, revisions: [] }
   const getCareerProfileChangeHistory = vi.fn()
-    .mockResolvedValueOnce({ profileRevision: 2, revisions: [] })
+    .mockResolvedValueOnce(initialHistory)
+    .mockResolvedValueOnce(initialHistory)
     .mockResolvedValue({
       profileRevision: 3,
       revisions: [{
@@ -456,9 +479,10 @@ test('refreshes agent proposals and history when the app regains focus', async (
   const api = bridge({ getCareerProfileChangeHistory })
   render(<CareerProfileWorkspace bridge={api} hasActiveTurn={false} />)
 
-  await waitFor(() => expect(getCareerProfileChangeHistory).toHaveBeenCalledTimes(1))
+  await waitFor(() => expect(getCareerProfileChangeHistory).toHaveBeenCalledTimes(2))
+  const initialCallCount = getCareerProfileChangeHistory.mock.calls.length
   window.dispatchEvent(new Event('focus'))
 
-  await waitFor(() => expect(getCareerProfileChangeHistory).toHaveBeenCalledTimes(2))
+  await waitFor(() => expect(getCareerProfileChangeHistory.mock.calls.length).toBeGreaterThan(initialCallCount))
   expect(await screen.findByText(/Job Hunter updated your Career Profile/i)).not.toBeNull()
 })

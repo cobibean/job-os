@@ -17,6 +17,7 @@ from jobos_api.career_profile_complete import (
     EvidenceImportRequest,
     ProfileIntentGrantRequest,
     ProfileItemMutation,
+    ProfileItemRemoval,
 )
 from jobos_api.settings import Settings
 
@@ -44,7 +45,8 @@ def user_headers() -> dict[str, str]:
 
 
 def agent_headers() -> dict[str, str]:
-    return user_headers() | {
+    return {
+        "Authorization": f"Bearer {MCP_TOKEN}",
         "X-JobOS-MCP-Token": MCP_TOKEN,
         "X-JobOS-Agent-Id": AGENT_ID,
         "X-JobOS-Agent-Token": AGENT_TOKEN,
@@ -298,6 +300,79 @@ def test_direct_ordinary_edit_has_history_and_compensating_undo(tmp_path: Path):
         assert latest["actor_kind"] == "direct_user"
 
 
+def test_evidence_removal_is_reversible_through_history_undo(tmp_path: Path):
+    settings = configured_settings(tmp_path / "jobos.db")
+    app = create_app(settings)
+    evidence_bytes = b"(FAKE) retained Evidence bytes for Undo"
+
+    with TestClient(app):
+        complete = CareerProfileCompleteStore(
+            settings.state_db_path,
+            settings.resolved_evidence_vault_root(),
+        )
+        collaboration = CareerProfileCollaborationStore(settings.state_db_path, complete)
+        imported = complete.import_evidence(
+            principal="device:primary-device",
+            command=EvidenceImportRequest.model_validate(
+                {
+                    "expected_profile_revision": 0,
+                    "idempotency_key": "import-evidence-before-undo-0001",
+                    "original_filename": "(FAKE)-evidence-for-undo.txt",
+                    "media_type": "text/plain",
+                    "captured_at": None,
+                    "provenance": {
+                        "source_kind": "supporting_document",
+                        "source_label": "(FAKE) Evidence for Undo",
+                        "method": "user_import",
+                    },
+                    "content_base64": base64.b64encode(evidence_bytes).decode(),
+                    "extractions": [],
+                }
+            ),
+        )
+        evidence_id = imported.source_evidence[0].evidence_id
+        complete.remove_evidence(
+            principal="device:primary-device",
+            evidence_id=evidence_id,
+            command=ProfileItemRemoval(
+                expected_profile_revision=1,
+                idempotency_key="remove-evidence-before-undo-0001",
+            ),
+        )
+
+        removed_revision = collaboration.history().revisions[0]
+        assert removed_revision.operation == "evidence.remove"
+        assert removed_revision.evidence_id == evidence_id
+        assert removed_revision.undoable is True
+
+        command = ProfileUndoRequest(
+            expected_profile_revision=2,
+            idempotency_key="undo-evidence-removal-0001",
+        )
+        restored = collaboration.undo(
+            revision_id=removed_revision.revision_id,
+            principal="device:primary-device",
+            command=command,
+        )
+        assert restored.profile_revision == 3
+        assert restored.source_evidence[0].active is True
+        assert complete.read_evidence(evidence_id) == evidence_bytes
+        assert collaboration.undo(
+            revision_id=removed_revision.revision_id,
+            principal="device:primary-device",
+            command=command,
+        ) == restored
+
+        restoration_revision = collaboration.history().revisions[0]
+        assert restoration_revision.operation == "evidence.import"
+        assert restoration_revision.evidence_id == evidence_id
+        assert restoration_revision.undo_of_revision_id == removed_revision.revision_id
+        assert restoration_revision.reason == (
+            "Restored the previously removed Evidence source"
+        )
+        assert restoration_revision.undoable is False
+
+
 def test_direct_edit_and_retry_receipt_roll_back_together(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
@@ -481,7 +556,9 @@ def test_disconnect_revokes_future_agent_access_without_changing_profile(tmp_pat
         )
         assert applied.status_code == 200, applied.text
         before = applied.json()["profile"]
-        assert client.get("/v1/career-profile", headers=agent_headers()).json() == before
+        assert client.get("/v1/career-profile", headers=user_headers()).json() == before
+        owner_only_read = client.get("/v1/career-profile", headers=agent_headers())
+        assert owner_only_read.status_code == 403
 
         disconnected = client.delete(
             f"/v1/career-profile/agents/{AGENT_ID}", headers=user_headers()
@@ -504,6 +581,18 @@ def test_disconnect_revokes_future_agent_access_without_changing_profile(tmp_pat
             ),
         )
         assert revoked.status_code == 403
+
+        revoked_generic_mutation = client.post(
+            "/v1/career-profile/items",
+            headers=agent_headers(),
+            json={
+                "expected_profile_revision": 1,
+                "idempotency_key": "generic-edit-after-agent-disconnect-0001",
+                "value": {"kind": "skill", "name": "SQL"},
+                "evidence_ids": [],
+            },
+        )
+        assert revoked_generic_mutation.status_code == 403
 
 
 def test_transaction_rechecks_stale_agent_mode_and_disconnect(tmp_path: Path):

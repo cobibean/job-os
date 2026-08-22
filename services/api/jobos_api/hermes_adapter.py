@@ -14,6 +14,7 @@ import websockets
 from .activity import ActivityNormalizer
 from .agent_gateway import AgentContext, ConnectionState, GatewayEvent
 from .browser_policy import browser_title_contains_credentials
+from .career_profile_context import CareerProfileContextSnapshot
 from .redaction import (
     redact_detail,
     safe_error_summary,
@@ -102,11 +103,22 @@ def _bounded_prompt_context(context: dict[str, object]) -> dict[str, object]:
                 "projection": {"work_arrangement": work_arrangement},
             }
 
+    career_profile_context = None
+    raw_profile_context = context.get("career_profile_context")
+    if isinstance(raw_profile_context, dict):
+        try:
+            career_profile_context = CareerProfileContextSnapshot.model_validate(
+                raw_profile_context
+            ).model_dump(mode="json")
+        except ValueError:
+            career_profile_context = None
+
     return {
         "selected_job_id": selected_job_id,
         "selected_job": selected_job,
         "workspace": workspace,
         "career_profile": career_profile,
+        "career_profile_context": career_profile_context,
     }
 
 
@@ -476,6 +488,7 @@ class HermesWebSocketGateway:
             "selected_job": context.selected_job,
             "workspace": context.workspace,
             "career_profile": context.career_profile,
+            "career_profile_context": context.career_profile_context,
         }
         prompt = _prompt_with_context(text, bounded_context, context.conversation_id)
         try:

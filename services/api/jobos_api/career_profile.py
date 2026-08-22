@@ -14,6 +14,7 @@ from .sqlite_connection import connect_sqlite
 
 PROFILE_ID = "career_profile_global"
 WORK_ARRANGEMENT_NAMESPACE = "search_preferences.work_arrangement"
+RESTORE_RECEIPT_ERASURE_TOMBSTONE = '{"invalidated_by":"permanent_erasure"}'
 OpaqueRecordId = Annotated[str, Field(pattern=r"^cpr_[A-Za-z0-9_-]{16,64}$")]
 OpaqueSnapshotId = Annotated[str, Field(pattern=r"^cps_[A-Za-z0-9_-]{16,64}$")]
 IdempotencyKey = Annotated[
@@ -114,14 +115,53 @@ class CareerProfileIdempotencyConflict(RuntimeError):
 
 
 class CareerProfileErasureInProgress(RuntimeError):
-    """A destructive Career Profile operation must finish before other writes."""
+    """A destructive Career Profile operation must finish before other work."""
+
+
+class CareerProfileRestoreInProgress(CareerProfileErasureInProgress):
+    """A baseline restore must finish before other Career Profile work."""
+
+
+def ensure_no_active_conversation_turn(
+    connection: sqlite3.Connection,
+    *,
+    conflict_type: type[Exception],
+    message: str,
+) -> None:
+    """Fence profile lifecycle changes from queued or executing agent work."""
+    if connection.execute(
+        "SELECT 1 FROM conversation_turns "
+        "WHERE status IN ('queued', 'running', 'waiting') LIMIT 1"
+    ).fetchone():
+        raise conflict_type(message)
+
+
+def ensure_no_pending_erasure_operation(connection: sqlite3.Connection) -> None:
+    """Reject work while an owner erasure still has durable recovery state."""
+    if connection.execute("SELECT 1 FROM career_profile_erasure_journal LIMIT 1").fetchone():
+        raise CareerProfileErasureInProgress("A Career Profile erasure is already being recovered")
+
+
+def ensure_no_pending_restore(connection: sqlite3.Connection) -> None:
+    """Reject work while a portable baseline restore still owns the profile."""
+    if connection.execute("SELECT 1 FROM career_profile_restore_journal LIMIT 1").fetchone():
+        raise CareerProfileRestoreInProgress("A Career Profile restore is already being recovered")
+
+
+def ensure_no_pending_profile_operation(connection: sqlite3.Connection) -> None:
+    """Fence ordinary profile work from every destructive lifecycle journal."""
+    ensure_no_pending_erasure_operation(connection)
+    ensure_no_pending_restore(connection)
 
 
 def ensure_no_pending_erasure(connection: sqlite3.Connection) -> None:
-    if connection.execute("SELECT 1 FROM career_profile_erasure_journal LIMIT 1").fetchone():
-        raise CareerProfileErasureInProgress(
-            "A Career Profile erasure is already being recovered"
-        )
+    """Compatibility name for the full destructive-operation fence.
+
+    Context and collaboration modules imported this guard before portable restore
+    existed. Keeping the compatibility guard broad prevents those writers from
+    bypassing a pending restore without requiring a cross-module lifecycle cycle.
+    """
+    ensure_no_pending_profile_operation(connection)
 
 
 class CareerProfileRevisionNotFound(RuntimeError):

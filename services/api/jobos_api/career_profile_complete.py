@@ -30,7 +30,9 @@ from .career_profile import (
     CareerProfileIdempotencyConflict,
     CareerProfileRevisionConflict,
     IdempotencyKey,
-    ensure_no_pending_erasure,
+    ensure_no_active_conversation_turn,
+    ensure_no_pending_profile_operation,
+    ensure_no_pending_restore,
 )
 from .sqlite_connection import connect_sqlite
 
@@ -128,9 +130,9 @@ def _history_actor_kind(mutation_source: MutationSource) -> HistoryActorKind:
         return "autonomous_agent"
     return mutation_source
 
+
 PreferenceStrength = (
-    Literal["requirement", "strong_preference", "preference", "dealbreaker"]
-    | CustomEnumText
+    Literal["requirement", "strong_preference", "preference", "dealbreaker"] | CustomEnumText
 )
 PositivePreferenceStrength = (
     Literal["requirement", "strong_preference", "preference"] | CustomEnumText
@@ -494,6 +496,8 @@ class ProfileIntentGrant(StrictModel):
     target_id: str | None
     payload_sha256: Sha256Digest
     created_at: TimestampText
+
+
 class EvidenceErasureRequest(StrictModel):
     expected_profile_revision: int = Field(ge=0)
     idempotency_key: IdempotencyKey
@@ -802,7 +806,7 @@ class CareerProfileCompleteStore:
         )
         with connect_sqlite(self.database) as connection:
             connection.execute("BEGIN IMMEDIATE")
-            ensure_no_pending_erasure(connection)
+            ensure_no_pending_profile_operation(connection)
             replay = connection.execute(
                 "SELECT request_hash, result_json FROM career_profile_complete_idempotency "
                 "WHERE actor_principal = ? AND idempotency_key = ?",
@@ -1212,27 +1216,46 @@ class CareerProfileCompleteStore:
                 raise
 
     def read_evidence(self, evidence_id: str) -> bytes:
-        with connect_sqlite(f"file:{self.database}?mode=ro", uri=True) as connection:
-            row = connection.execute(
-                "SELECT storage_name, content_sha256 FROM career_profile_evidence "
-                "WHERE evidence_id = ?",
-                (evidence_id,),
-            ).fetchone()
-        if row is None:
-            raise CareerProfileEvidenceNotFound
-        return self.vault.read(str(row[0]), str(row[1]))
+        # Hold the same write-intent lock used by restore preparation until the
+        # verified vault read completes. A restore can therefore never swap the
+        # vault between metadata lookup and byte read.
+        with connect_sqlite(self.database) as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            try:
+                ensure_no_pending_profile_operation(connection)
+                row = connection.execute(
+                    "SELECT storage_name, content_sha256, active "
+                    "FROM career_profile_evidence WHERE evidence_id = ?",
+                    (evidence_id,),
+                ).fetchone()
+                if row is None or not bool(row[2]):
+                    raise CareerProfileEvidenceNotFound
+                content = self.vault.read(str(row[0]), str(row[1]))
+                connection.rollback()
+                return content
+            except Exception:
+                connection.rollback()
+                raise
 
     def evidence_metadata(self, evidence_id: str) -> SourceEvidenceRecord:
-        with connect_sqlite(f"file:{self.database}?mode=ro", uri=True) as connection:
-            row = connection.execute(
-                "SELECT original_filename, media_type, content_sha256, byte_count, captured_at, "
-                "imported_at, provenance_json, active FROM career_profile_evidence "
-                "WHERE evidence_id = ?",
-                (evidence_id,),
-            ).fetchone()
-        if row is None:
-            raise CareerProfileEvidenceNotFound
-        return self._evidence_from_row((evidence_id, *row))
+        with connect_sqlite(self.database) as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            try:
+                ensure_no_pending_profile_operation(connection)
+                row = connection.execute(
+                    "SELECT original_filename, media_type, content_sha256, byte_count, "
+                    "captured_at, imported_at, provenance_json, active "
+                    "FROM career_profile_evidence WHERE evidence_id = ?",
+                    (evidence_id,),
+                ).fetchone()
+                if row is None:
+                    raise CareerProfileEvidenceNotFound
+                result = self._evidence_from_row((evidence_id, *row))
+                connection.rollback()
+                return result
+            except Exception:
+                connection.rollback()
+                raise
 
     def decide_proposal(
         self,
@@ -1328,6 +1351,7 @@ class CareerProfileCompleteStore:
             except Exception:
                 connection.rollback()
                 raise
+
     def erase_evidence(
         self,
         *,
@@ -1361,6 +1385,13 @@ class CareerProfileCompleteStore:
                         )
                     operation_id = str(pending[0])
                 else:
+                    ensure_no_active_conversation_turn(
+                        connection,
+                        conflict_type=CareerProfileErasureInProgress,
+                        message=(
+                            "Finish or stop active agent work before erasing Career Profile data"
+                        ),
+                    )
                     self._check_head(connection, command.expected_profile_revision)
                     evidence = connection.execute(
                         "SELECT storage_name FROM career_profile_evidence WHERE evidence_id = ?",
@@ -1418,6 +1449,13 @@ class CareerProfileCompleteStore:
                         )
                     operation_id = str(pending[0])
                 else:
+                    ensure_no_active_conversation_turn(
+                        connection,
+                        conflict_type=CareerProfileErasureInProgress,
+                        message=(
+                            "Finish or stop active agent work before erasing Career Profile data"
+                        ),
+                    )
                     self._check_head(connection, command.expected_profile_revision)
                     storage_names = [
                         str(row[0])
@@ -1457,6 +1495,10 @@ class CareerProfileCompleteStore:
         self, principal: str, idempotency_key: str, request_hash: str
     ) -> CareerProfileErasureResult | None:
         with connect_sqlite(f"file:{self.database}?mode=ro", uri=True) as connection:
+            # A completed erasure replay is still fenced while restore owns the
+            # vault/database pair; otherwise callers could observe success amid
+            # an inconsistent restore swap.
+            ensure_no_pending_restore(connection)
             row = connection.execute(
                 "SELECT request_hash, result_json FROM career_profile_erasure_receipts "
                 "WHERE actor_principal = ? AND idempotency_key = ?",
@@ -1546,6 +1588,32 @@ class CareerProfileCompleteStore:
     def _purge_evidence_database_scope(
         self, connection: sqlite3.Connection, evidence_id: str
     ) -> None:
+        context_snapshot_ids = [
+            str(row[0])
+            for row in connection.execute(
+                "SELECT snapshot_id, scope_json, projection_json "
+                "FROM career_profile_context_snapshots"
+            ).fetchall()
+            if any(self._json_contains_reference(value, evidence_id) for value in row[1:])
+        ]
+        if context_snapshot_ids:
+            placeholders = ",".join("?" for _ in context_snapshot_ids)
+            connection.execute(
+                "UPDATE conversation_turns SET "
+                "career_profile_context_snapshot_id = NULL, "
+                "career_profile_context_agent_id = NULL, "
+                "career_profile_context_revision = NULL, "
+                "career_profile_context_authority_epoch = NULL, "
+                "career_profile_context_content_hash = NULL "
+                f"WHERE career_profile_context_snapshot_id IN ({placeholders})",
+                context_snapshot_ids,
+            )
+            connection.execute(
+                f"DELETE FROM career_profile_context_snapshots "
+                f"WHERE snapshot_id IN ({placeholders})",
+                context_snapshot_ids,
+            )
+
         removed_revision_ids: list[str] = []
         for row in connection.execute(
             "SELECT revision_id, evidence_id, before_json, after_json "
@@ -1595,12 +1663,39 @@ class CareerProfileCompleteStore:
             )
 
         for row in connection.execute(
+            "SELECT proposal_id, before_json, after_json, evidence_ids_json "
+            "FROM career_profile_change_proposals"
+        ).fetchall():
+            if any(self._json_contains_reference(value, evidence_id) for value in row[1:]):
+                connection.execute(
+                    "DELETE FROM career_profile_change_proposals WHERE proposal_id = ?",
+                    (row[0],),
+                )
+
+        for table in (
+            "career_profile_complete_idempotency",
+            "career_profile_collaboration_idempotency",
+            "career_profile_context_idempotency",
+        ):
+            for row in connection.execute(
+                f"SELECT actor_principal, idempotency_key, result_json FROM {table}"
+            ).fetchall():
+                if self._json_contains_reference(row[2], evidence_id):
+                    connection.execute(
+                        f"DELETE FROM {table} WHERE actor_principal = ? AND idempotency_key = ?",
+                        (row[0], row[1]),
+                    )
+
+        # Restore receipts are durable stale-retry fences. Remove their profile
+        # payload without removing the request hash/key that prevents an old
+        # archive command from silently resurrecting permanently erased data.
+        for row in connection.execute(
             "SELECT actor_principal, idempotency_key, result_json "
-            "FROM career_profile_complete_idempotency"
+            "FROM career_profile_restore_receipts WHERE result_json IS NOT NULL"
         ).fetchall():
             if self._json_contains_reference(row[2], evidence_id):
                 connection.execute(
-                    "DELETE FROM career_profile_complete_idempotency "
+                    "UPDATE career_profile_restore_receipts SET result_json = NULL "
                     "WHERE actor_principal = ? AND idempotency_key = ?",
                     (row[0], row[1]),
                 )
@@ -1635,13 +1730,19 @@ class CareerProfileCompleteStore:
     def _purge_complete_profile_database_scope(connection: sqlite3.Connection) -> None:
         connection.execute(
             "UPDATE conversation_turns SET career_profile_snapshot_id = NULL, "
-            "career_profile_revision = NULL, career_profile_content_hash = NULL "
-            "WHERE career_profile_snapshot_id IS NOT NULL"
+            "career_profile_revision = NULL, career_profile_content_hash = NULL, "
+            "career_profile_context_snapshot_id = NULL, "
+            "career_profile_context_agent_id = NULL, "
+            "career_profile_context_revision = NULL, "
+            "career_profile_context_authority_epoch = NULL, "
+            "career_profile_context_content_hash = NULL"
         )
         for table in (
             "career_profile_intent_grants",
             "career_profile_collaboration_idempotency",
             "career_profile_change_proposals",
+            "career_profile_context_idempotency",
+            "career_profile_context_snapshots",
             "career_profile_complete_idempotency",
             "career_profile_complete_revisions",
             "career_profile_items",
@@ -1654,6 +1755,14 @@ class CareerProfileCompleteStore:
             "career_profile_erasure_receipts",
         ):
             connection.execute(f"DELETE FROM {table}")
+        connection.execute("DELETE FROM career_profile_context_grants")
+        connection.execute(
+            "INSERT INTO career_profile_context_grants("
+            "agent_id, mode, selected_item_ids_json, selected_areas_json, updated_at) "
+            "SELECT agent_id, 'none', '[]', '[]', CURRENT_TIMESTAMP "
+            "FROM career_profile_connected_agents"
+        )
+        connection.execute("UPDATE career_profile_restore_receipts SET result_json = NULL")
         connection.execute(
             "UPDATE career_profiles SET head_revision = 0, authority_epoch = authority_epoch + 1, "
             "updated_at = CURRENT_TIMESTAMP WHERE profile_id = ?",
@@ -1872,7 +1981,7 @@ class CareerProfileCompleteStore:
         return int(row[0])
 
     def _check_head(self, connection: sqlite3.Connection, expected: int) -> int:
-        ensure_no_pending_erasure(connection)
+        ensure_no_pending_profile_operation(connection)
         head = self._head(connection)
         if head != expected:
             raise CareerProfileRevisionConflict(head)
@@ -1905,7 +2014,7 @@ class CareerProfileCompleteStore:
         idempotency_key: str,
         request_hash: str,
     ) -> CareerProfileCompleteCurrent | None:
-        ensure_no_pending_erasure(connection)
+        ensure_no_pending_profile_operation(connection)
         row = connection.execute(
             "SELECT request_hash, result_json FROM career_profile_complete_idempotency "
             "WHERE actor_principal = ? AND idempotency_key = ?",

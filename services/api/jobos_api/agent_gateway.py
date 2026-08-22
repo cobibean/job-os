@@ -13,6 +13,7 @@ class AgentContext:
     conversation_id: str
     selected_job: dict[str, str] | None = None
     career_profile: dict[str, object] | None = None
+    career_profile_context: dict[str, object] | None = None
 
 
 @dataclass(frozen=True)

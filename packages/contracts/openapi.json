@@ -1203,6 +1203,161 @@
         "title": "CareerProfileCompleteCurrent",
         "type": "object"
       },
+      "CareerProfileContextPreview": {
+        "additionalProperties": false,
+        "properties": {
+          "agent_id": {
+            "title": "Agent Id",
+            "type": "string"
+          },
+          "authority_epoch": {
+            "minimum": 0.0,
+            "title": "Authority Epoch",
+            "type": "integer"
+          },
+          "content_hash": {
+            "pattern": "^[a-f0-9]{64}$",
+            "title": "Content Hash",
+            "type": "string"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "profile_revision": {
+            "minimum": 0.0,
+            "title": "Profile Revision",
+            "type": "integer"
+          },
+          "projection": {
+            "$ref": "#/components/schemas/CareerProfileCompleteCurrent"
+          },
+          "scope": {
+            "$ref": "#/components/schemas/CareerProfileContextScope"
+          }
+        },
+        "required": [
+          "agent_id",
+          "profile_revision",
+          "authority_epoch",
+          "scope",
+          "content_hash",
+          "projection",
+          "created_at"
+        ],
+        "title": "CareerProfileContextPreview",
+        "type": "object"
+      },
+      "CareerProfileContextScope": {
+        "additionalProperties": false,
+        "properties": {
+          "agent_id": {
+            "title": "Agent Id",
+            "type": "string"
+          },
+          "mode": {
+            "enum": [
+              "none",
+              "selected",
+              "broader"
+            ],
+            "title": "Mode",
+            "type": "string"
+          },
+          "selected_areas": {
+            "items": {
+              "enum": [
+                "my_career",
+                "what_im_looking_for",
+                "my_evidence"
+              ],
+              "type": "string"
+            },
+            "title": "Selected Areas",
+            "type": "array"
+          },
+          "selected_item_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Selected Item Ids",
+            "type": "array"
+          },
+          "updated_at": {
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "agent_id",
+          "mode",
+          "selected_item_ids",
+          "selected_areas",
+          "updated_at"
+        ],
+        "title": "CareerProfileContextScope",
+        "type": "object"
+      },
+      "CareerProfileContextScopeUpdate": {
+        "additionalProperties": false,
+        "properties": {
+          "expected_authority_epoch": {
+            "minimum": 0.0,
+            "title": "Expected Authority Epoch",
+            "type": "integer"
+          },
+          "expected_profile_revision": {
+            "minimum": 0.0,
+            "title": "Expected Profile Revision",
+            "type": "integer"
+          },
+          "idempotency_key": {
+            "maxLength": 200,
+            "minLength": 8,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+            "title": "Idempotency Key",
+            "type": "string"
+          },
+          "mode": {
+            "enum": [
+              "none",
+              "selected",
+              "broader"
+            ],
+            "title": "Mode",
+            "type": "string"
+          },
+          "selected_areas": {
+            "items": {
+              "enum": [
+                "my_career",
+                "what_im_looking_for",
+                "my_evidence"
+              ],
+              "type": "string"
+            },
+            "maxItems": 3,
+            "title": "Selected Areas",
+            "type": "array"
+          },
+          "selected_item_ids": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 200,
+            "title": "Selected Item Ids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "expected_profile_revision",
+          "expected_authority_epoch",
+          "idempotency_key",
+          "mode"
+        ],
+        "title": "CareerProfileContextScopeUpdate",
+        "type": "object"
+      },
       "CareerProfileErasureResult": {
         "additionalProperties": false,
         "properties": {
@@ -1225,6 +1380,87 @@
           "operation"
         ],
         "title": "CareerProfileErasureResult",
+        "type": "object"
+      },
+      "CareerProfileExportRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "evidence_mode": {
+            "enum": [
+              "profile_only",
+              "selected",
+              "all"
+            ],
+            "title": "Evidence Mode",
+            "type": "string"
+          },
+          "expected_profile_revision": {
+            "minimum": 0.0,
+            "title": "Expected Profile Revision",
+            "type": "integer"
+          },
+          "selected_evidence_ids": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 1000,
+            "title": "Selected Evidence Ids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "expected_profile_revision",
+          "evidence_mode"
+        ],
+        "title": "CareerProfileExportRequest",
+        "type": "object"
+      },
+      "CareerProfileExportResult": {
+        "additionalProperties": false,
+        "properties": {
+          "byte_count": {
+            "maximum": 104857600.0,
+            "minimum": 1.0,
+            "title": "Byte Count",
+            "type": "integer"
+          },
+          "content_base64": {
+            "title": "Content Base64",
+            "type": "string"
+          },
+          "filename": {
+            "title": "Filename",
+            "type": "string"
+          },
+          "included_evidence_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Included Evidence Ids",
+            "type": "array"
+          },
+          "omitted_evidence_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Omitted Evidence Ids",
+            "type": "array"
+          },
+          "sha256": {
+            "pattern": "^[a-f0-9]{64}$",
+            "title": "Sha256",
+            "type": "string"
+          }
+        },
+        "required": [
+          "filename",
+          "sha256",
+          "byte_count",
+          "content_base64",
+          "included_evidence_ids",
+          "omitted_evidence_ids"
+        ],
+        "title": "CareerProfileExportResult",
         "type": "object"
       },
       "CareerProfileProjection": {
@@ -1291,6 +1527,83 @@
           "confirmation"
         ],
         "title": "CareerProfileResetRequest",
+        "type": "object"
+      },
+      "CareerProfileRestoreRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "archive_base64": {
+            "maxLength": 146800640,
+            "minLength": 1,
+            "title": "Archive Base64",
+            "type": "string"
+          },
+          "confirmation": {
+            "const": "RESTORE_CAREER_PROFILE_BASELINE",
+            "title": "Confirmation",
+            "type": "string"
+          },
+          "expected_profile_revision": {
+            "minimum": 0.0,
+            "title": "Expected Profile Revision",
+            "type": "integer"
+          },
+          "idempotency_key": {
+            "maxLength": 200,
+            "minLength": 8,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+            "title": "Idempotency Key",
+            "type": "string"
+          }
+        },
+        "required": [
+          "expected_profile_revision",
+          "idempotency_key",
+          "confirmation",
+          "archive_base64"
+        ],
+        "title": "CareerProfileRestoreRequest",
+        "type": "object"
+      },
+      "CareerProfileRestoreResult": {
+        "additionalProperties": false,
+        "properties": {
+          "archive_sha256": {
+            "pattern": "^[a-f0-9]{64}$",
+            "title": "Archive Sha256",
+            "type": "string"
+          },
+          "baseline_created": {
+            "const": true,
+            "default": true,
+            "title": "Baseline Created",
+            "type": "boolean"
+          },
+          "profile": {
+            "$ref": "#/components/schemas/CareerProfileCompleteCurrent"
+          },
+          "restored_evidence_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Restored Evidence Ids",
+            "type": "array"
+          },
+          "unavailable_evidence_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Unavailable Evidence Ids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "profile",
+          "archive_sha256",
+          "restored_evidence_ids",
+          "unavailable_evidence_ids"
+        ],
+        "title": "CareerProfileRestoreResult",
         "type": "object"
       },
       "CareerProfileSnapshot": {
@@ -7075,6 +7388,24 @@
     "/v1/activity": {
       "post": {
         "operationId": "report_activity_v1_activity_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-JobOS-MCP-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Jobos-Mcp-Token"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -7159,6 +7490,22 @@
             "schema": {
               "title": "Artifact Id",
               "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-JobOS-MCP-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Jobos-Mcp-Token"
             }
           }
         ],
@@ -7264,6 +7611,22 @@
             "schema": {
               "title": "Artifact Id",
               "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-JobOS-MCP-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Jobos-Mcp-Token"
             }
           }
         ],
@@ -7707,6 +8070,24 @@
     "/v1/career-profile/agents": {
       "get": {
         "operationId": "career_profile_agents_list_v1_career_profile_agents_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-JobOS-MCP-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Jobos-Mcp-Token"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -7727,6 +8108,16 @@
               }
             },
             "description": "Device authentication required"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Request validation failed"
           },
           "500": {
             "content": {
@@ -7924,6 +8315,313 @@
         ]
       }
     },
+    "/v1/career-profile/agents/{agent_id}/context": {
+      "get": {
+        "operationId": "career_profile_context_get_v1_career_profile_agents__agent_id__context_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "agent_id",
+            "required": true,
+            "schema": {
+              "title": "Agent Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-JobOS-MCP-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Jobos-Mcp-Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CareerProfileContextScope"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Device authentication required"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Operation is not permitted"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Resource not found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Request validation failed"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Internal server error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Career Profile Context Get",
+        "tags": [
+          "career-profile"
+        ]
+      },
+      "put": {
+        "operationId": "career_profile_context_update_v1_career_profile_agents__agent_id__context_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "agent_id",
+            "required": true,
+            "schema": {
+              "title": "Agent Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-JobOS-MCP-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Jobos-Mcp-Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CareerProfileContextScopeUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CareerProfileContextScope"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Device authentication required"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Operation is not permitted"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Resource state conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Request validation failed"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Internal server error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Career Profile Context Update",
+        "tags": [
+          "career-profile"
+        ]
+      }
+    },
+    "/v1/career-profile/agents/{agent_id}/context/preview": {
+      "post": {
+        "operationId": "career_profile_context_preview_v1_career_profile_agents__agent_id__context_preview_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "agent_id",
+            "required": true,
+            "schema": {
+              "title": "Agent Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-JobOS-MCP-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Jobos-Mcp-Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CareerProfileContextPreview"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Device authentication required"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Operation is not permitted"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Request validation failed"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Internal server error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Career Profile Context Preview",
+        "tags": [
+          "career-profile"
+        ]
+      }
+    },
     "/v1/career-profile/evidence": {
       "post": {
         "operationId": "career_profile_evidence_import_v1_career_profile_evidence_post",
@@ -7942,6 +8640,38 @@
                 }
               ],
               "title": "X-Jobos-Mcp-Token"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-JobOS-Agent-Id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Jobos-Agent-Id"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-JobOS-Agent-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Jobos-Agent-Token"
             }
           }
         ],
@@ -8083,6 +8813,38 @@
               ],
               "title": "X-Jobos-Intent-Grant"
             }
+          },
+          {
+            "in": "header",
+            "name": "X-JobOS-Agent-Id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Jobos-Agent-Id"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-JobOS-Agent-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Jobos-Agent-Token"
+            }
           }
         ],
         "requestBody": {
@@ -8191,6 +8953,22 @@
               "title": "Evidence Id",
               "type": "string"
             }
+          },
+          {
+            "in": "header",
+            "name": "X-JobOS-MCP-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Jobos-Mcp-Token"
+            }
           }
         ],
         "responses": {
@@ -8287,6 +9065,22 @@
               "title": "Evidence Id",
               "type": "string"
             }
+          },
+          {
+            "in": "header",
+            "name": "X-JobOS-MCP-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Jobos-Mcp-Token"
+            }
           }
         ],
         "requestBody": {
@@ -8382,9 +9176,131 @@
         ]
       }
     },
+    "/v1/career-profile/export": {
+      "post": {
+        "operationId": "career_profile_export_v1_career_profile_export_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-JobOS-MCP-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Jobos-Mcp-Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CareerProfileExportRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CareerProfileExportResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Device authentication required"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Operation is not permitted"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Resource state conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Request validation failed"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Internal server error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Career Profile Export",
+        "tags": [
+          "career-profile"
+        ]
+      }
+    },
     "/v1/career-profile/history": {
       "get": {
         "operationId": "career_profile_history_v1_career_profile_history_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-JobOS-MCP-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Jobos-Mcp-Token"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -8405,6 +9321,16 @@
               }
             },
             "description": "Device authentication required"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Request validation failed"
           },
           "500": {
             "content": {
@@ -8524,6 +9450,24 @@
     "/v1/career-profile/intent-grants": {
       "post": {
         "operationId": "career_profile_intent_grant_create_v1_career_profile_intent_grants_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-JobOS-MCP-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Jobos-Mcp-Token"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -8651,6 +9595,38 @@
                 }
               ],
               "title": "X-Jobos-Intent-Grant"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-JobOS-Agent-Id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Jobos-Agent-Id"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-JobOS-Agent-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Jobos-Agent-Token"
             }
           }
         ],
@@ -8792,6 +9768,38 @@
               ],
               "title": "X-Jobos-Intent-Grant"
             }
+          },
+          {
+            "in": "header",
+            "name": "X-JobOS-Agent-Id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Jobos-Agent-Id"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-JobOS-Agent-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Jobos-Agent-Token"
+            }
           }
         ],
         "requestBody": {
@@ -8929,6 +9937,38 @@
                 }
               ],
               "title": "X-Jobos-Intent-Grant"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-JobOS-Agent-Id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Jobos-Agent-Id"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-JobOS-Agent-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Jobos-Agent-Token"
             }
           }
         ],
@@ -9070,6 +10110,38 @@
               ],
               "title": "X-Jobos-Intent-Grant"
             }
+          },
+          {
+            "in": "header",
+            "name": "X-JobOS-Agent-Id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Jobos-Agent-Id"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-JobOS-Agent-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Jobos-Agent-Token"
+            }
           }
         ],
         "requestBody": {
@@ -9189,6 +10261,22 @@
               ],
               "default": "pending",
               "title": "Status"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-JobOS-MCP-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Jobos-Mcp-Token"
             }
           }
         ],
@@ -9341,6 +10429,24 @@
     "/v1/career-profile/reset": {
       "post": {
         "operationId": "career_profile_reset_v1_career_profile_reset_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-JobOS-MCP-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Jobos-Mcp-Token"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -9434,9 +10540,131 @@
         ]
       }
     },
+    "/v1/career-profile/restore": {
+      "post": {
+        "operationId": "career_profile_restore_v1_career_profile_restore_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-JobOS-MCP-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Jobos-Mcp-Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CareerProfileRestoreRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CareerProfileRestoreResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Device authentication required"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Operation is not permitted"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Resource state conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Request validation failed"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Internal server error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Career Profile Restore",
+        "tags": [
+          "career-profile"
+        ]
+      }
+    },
     "/v1/career-profile/snapshots": {
       "post": {
         "operationId": "career_profile_snapshot_create_v1_career_profile_snapshots_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-JobOS-MCP-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Jobos-Mcp-Token"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -9522,6 +10750,22 @@
               "title": "Snapshot Id",
               "type": "string"
             }
+          },
+          {
+            "in": "header",
+            "name": "X-JobOS-MCP-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Jobos-Mcp-Token"
+            }
           }
         ],
         "responses": {
@@ -9600,6 +10844,24 @@
     "/v1/career-profile/work-arrangement": {
       "get": {
         "operationId": "career_profile_work_arrangement_get_v1_career_profile_work_arrangement_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-JobOS-MCP-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Jobos-Mcp-Token"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -9631,6 +10893,16 @@
             },
             "description": "Operation is not permitted"
           },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Request validation failed"
+          },
           "500": {
             "content": {
               "application/json": {
@@ -9654,6 +10926,24 @@
       },
       "put": {
         "operationId": "career_profile_work_arrangement_put_v1_career_profile_work_arrangement_put",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-JobOS-MCP-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Jobos-Mcp-Token"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -9740,6 +11030,24 @@
     "/v1/career-profile/work-arrangement/history": {
       "get": {
         "operationId": "career_profile_work_arrangement_history_v1_career_profile_work_arrangement_history_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-JobOS-MCP-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Jobos-Mcp-Token"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -9771,6 +11079,16 @@
             },
             "description": "Operation is not permitted"
           },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Request validation failed"
+          },
           "500": {
             "content": {
               "application/json": {
@@ -9796,6 +11114,24 @@
     "/v1/career-profile/work-arrangement/restore": {
       "post": {
         "operationId": "career_profile_work_arrangement_restore_v1_career_profile_work_arrangement_restore_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-JobOS-MCP-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Jobos-Mcp-Token"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -9892,6 +11228,24 @@
     "/v1/conversations": {
       "get": {
         "operationId": "conversations_list_v1_conversations_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-JobOS-MCP-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Jobos-Mcp-Token"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -9912,6 +11266,16 @@
               }
             },
             "description": "Device authentication required"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Request validation failed"
           },
           "500": {
             "content": {
@@ -9936,6 +11300,24 @@
       },
       "post": {
         "operationId": "conversation_create_v1_conversations_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-JobOS-MCP-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Jobos-Mcp-Token"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -10020,6 +11402,24 @@
       "get": {
         "deprecated": true,
         "operationId": "conversation_current_v1_conversations_current_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-JobOS-MCP-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Jobos-Mcp-Token"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -10040,6 +11440,16 @@
               }
             },
             "description": "Device authentication required"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Request validation failed"
           },
           "500": {
             "content": {
@@ -10091,6 +11501,22 @@
               "default": false,
               "title": "Once",
               "type": "boolean"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-JobOS-MCP-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Jobos-Mcp-Token"
             }
           }
         ],
@@ -10161,6 +11587,22 @@
               "pattern": "^conv_[A-Za-z0-9_-]{1,128}$",
               "title": "Conversation Id",
               "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-JobOS-MCP-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Jobos-Mcp-Token"
             }
           }
         ],
@@ -10242,6 +11684,22 @@
               "title": "Conversation Id",
               "type": "string"
             }
+          },
+          {
+            "in": "header",
+            "name": "X-JobOS-MCP-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Jobos-Mcp-Token"
+            }
           }
         ],
         "responses": {
@@ -10320,6 +11778,22 @@
               "pattern": "^conv_[A-Za-z0-9_-]{1,128}$",
               "title": "Conversation Id",
               "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-JobOS-MCP-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Jobos-Mcp-Token"
             }
           }
         ],
@@ -10421,6 +11895,22 @@
               "title": "Turn Id",
               "type": "string"
             }
+          },
+          {
+            "in": "header",
+            "name": "X-JobOS-MCP-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Jobos-Mcp-Token"
+            }
           }
         ],
         "responses": {
@@ -10510,6 +12000,22 @@
               "pattern": "^turn_[A-Za-z0-9_-]{1,128}$",
               "title": "Turn Id",
               "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-JobOS-MCP-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Jobos-Mcp-Token"
             }
           }
         ],
@@ -10610,6 +12116,22 @@
               "title": "Conversation Id",
               "type": "string"
             }
+          },
+          {
+            "in": "header",
+            "name": "X-JobOS-MCP-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Jobos-Mcp-Token"
+            }
           }
         ],
         "requestBody": {
@@ -10689,6 +12211,22 @@
               "title": "Conversation Id",
               "type": "string"
             }
+          },
+          {
+            "in": "header",
+            "name": "X-JobOS-MCP-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Jobos-Mcp-Token"
+            }
           }
         ],
         "requestBody": {
@@ -10757,6 +12295,24 @@
     "/v1/desktop/capabilities": {
       "get": {
         "operationId": "desktop_capability_presence_v1_desktop_capabilities_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-JobOS-MCP-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Jobos-Mcp-Token"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -10777,6 +12333,16 @@
               }
             },
             "description": "Device authentication required"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Request validation failed"
           },
           "500": {
             "content": {
@@ -10803,6 +12369,24 @@
     "/v1/device-session": {
       "get": {
         "operationId": "device_session_v1_device_session_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-JobOS-MCP-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Jobos-Mcp-Token"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -10823,6 +12407,16 @@
               }
             },
             "description": "Device authentication required"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Request validation failed"
           },
           "500": {
             "content": {
@@ -10857,6 +12451,22 @@
             "schema": {
               "title": "Document Id",
               "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-JobOS-MCP-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Jobos-Mcp-Token"
             }
           }
         ],
@@ -10935,6 +12545,22 @@
               "title": "Document Id",
               "type": "string"
             }
+          },
+          {
+            "in": "header",
+            "name": "X-JobOS-MCP-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Jobos-Mcp-Token"
+            }
           }
         ],
         "responses": {
@@ -11009,6 +12635,22 @@
             "schema": {
               "title": "Document Id",
               "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-JobOS-MCP-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Jobos-Mcp-Token"
             }
           }
         ],
@@ -11106,6 +12748,22 @@
             "schema": {
               "title": "Document Id",
               "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-JobOS-MCP-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Jobos-Mcp-Token"
             }
           }
         ],
@@ -11337,6 +12995,22 @@
               "title": "Document Id",
               "type": "string"
             }
+          },
+          {
+            "in": "header",
+            "name": "X-JobOS-MCP-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Jobos-Mcp-Token"
+            }
           }
         ],
         "requestBody": {
@@ -11443,6 +13117,22 @@
             "schema": {
               "title": "Document Id",
               "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-JobOS-MCP-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Jobos-Mcp-Token"
             }
           }
         ],
@@ -11651,6 +13341,22 @@
               "title": "Snapshot Id",
               "type": "string"
             }
+          },
+          {
+            "in": "header",
+            "name": "X-JobOS-MCP-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Jobos-Mcp-Token"
+            }
           }
         ],
         "requestBody": {
@@ -11749,6 +13455,22 @@
               "title": "After",
               "type": "integer"
             }
+          },
+          {
+            "in": "header",
+            "name": "X-JobOS-MCP-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Jobos-Mcp-Token"
+            }
           }
         ],
         "responses": {
@@ -11826,6 +13548,22 @@
               "default": false,
               "title": "Once",
               "type": "boolean"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-JobOS-MCP-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Jobos-Mcp-Token"
             }
           }
         ],
@@ -12010,6 +13748,22 @@
                 }
               ],
               "title": "Idempotency Key"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-JobOS-MCP-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Jobos-Mcp-Token"
             }
           }
         ],
@@ -12347,6 +14101,22 @@
               ],
               "title": "Idempotency Key"
             }
+          },
+          {
+            "in": "header",
+            "name": "X-JobOS-MCP-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Jobos-Mcp-Token"
+            }
           }
         ],
         "responses": {
@@ -12466,6 +14236,22 @@
                 }
               ],
               "title": "Idempotency Key"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-JobOS-MCP-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Jobos-Mcp-Token"
             }
           }
         ],
@@ -12687,6 +14473,22 @@
               "title": "Job Id",
               "type": "string"
             }
+          },
+          {
+            "in": "header",
+            "name": "X-JobOS-MCP-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Jobos-Mcp-Token"
+            }
           }
         ],
         "requestBody": {
@@ -12801,6 +14603,22 @@
               "title": "Job Id",
               "type": "string"
             }
+          },
+          {
+            "in": "header",
+            "name": "X-JobOS-MCP-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Jobos-Mcp-Token"
+            }
           }
         ],
         "requestBody": {
@@ -12907,6 +14725,22 @@
             "schema": {
               "title": "Job Id",
               "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-JobOS-MCP-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Jobos-Mcp-Token"
             }
           }
         ],
@@ -13023,6 +14857,22 @@
             "schema": {
               "title": "Artifact Id",
               "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-JobOS-MCP-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Jobos-Mcp-Token"
             }
           }
         ],
@@ -13404,6 +15254,22 @@
               "title": "Job Id",
               "type": "string"
             }
+          },
+          {
+            "in": "header",
+            "name": "X-JobOS-MCP-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Jobos-Mcp-Token"
+            }
           }
         ],
         "responses": {
@@ -13651,6 +15517,22 @@
               "title": "Job Id",
               "type": "string"
             }
+          },
+          {
+            "in": "header",
+            "name": "X-JobOS-MCP-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Jobos-Mcp-Token"
+            }
           }
         ],
         "responses": {
@@ -13735,6 +15617,22 @@
             "schema": {
               "title": "Job Id",
               "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-JobOS-MCP-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Jobos-Mcp-Token"
             }
           }
         ],
@@ -13876,6 +15774,22 @@
               "title": "Document Key",
               "type": "string"
             }
+          },
+          {
+            "in": "header",
+            "name": "X-JobOS-MCP-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Jobos-Mcp-Token"
+            }
           }
         ],
         "responses": {
@@ -13962,6 +15876,22 @@
             "schema": {
               "title": "Job Id",
               "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-JobOS-MCP-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Jobos-Mcp-Token"
             }
           }
         ],
@@ -14254,6 +16184,22 @@
               ],
               "title": "Conversation Id"
             }
+          },
+          {
+            "in": "header",
+            "name": "X-JobOS-MCP-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Jobos-Mcp-Token"
+            }
           }
         ],
         "responses": {
@@ -14430,6 +16376,22 @@
               ],
               "title": "Conversation Id"
             }
+          },
+          {
+            "in": "header",
+            "name": "X-JobOS-MCP-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Jobos-Mcp-Token"
+            }
           }
         ],
         "responses": {
@@ -14489,6 +16451,24 @@
       "put": {
         "deprecated": true,
         "operationId": "workspace_select_job_deprecated_v1_workspace_jobs_selection_put",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-JobOS-MCP-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Jobos-Mcp-Token"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {

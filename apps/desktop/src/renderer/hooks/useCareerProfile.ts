@@ -74,8 +74,8 @@ export function useCareerProfile(bridge: CareerProfileBridge) {
     setDraft(value.record?.value ?? emptyValue)
   }, [])
 
-  const load = useCallback(async () => {
-    setStatus('loading')
+  const load = useCallback(async (showLoading = true) => {
+    if (showLoading) setStatus('loading')
     setMessage('')
     try {
       applyCurrent(await bridge.getWorkArrangement())

@@ -9,7 +9,13 @@ import type {
   BrowserJobExtraction,
   BrowserRestoreState,
   BrowserState,
+  CareerProfileContextUpdateRequest,
+  CareerProfileEvidenceImportRequest,
+  CareerProfileExportRequest,
+  CareerProfileItemMutationRequest,
   CareerProfileProposalDecisionRequest,
+  CareerProfileRemovalRequest,
+  CareerProfileRestoreRequest,
   CareerProfileTrustMode,
   CareerProfileUndoRequest,
   JobEvent,
@@ -85,6 +91,38 @@ const bridge: JobOsRendererBridge = Object.freeze({
     getCareerProfileChangeHistory: () => ipcRenderer.invoke('jobos:career-profile:history:get'),
     undoCareerProfileChange: (revisionId: string, request: CareerProfileUndoRequest) => (
       ipcRenderer.invoke('jobos:career-profile:history:undo', revisionId, request)
+    ),
+    getCareerProfile: () => ipcRenderer.invoke('jobos:career-profile:get'),
+    createCareerProfileItem: (request: CareerProfileItemMutationRequest) => (
+      ipcRenderer.invoke('jobos:career-profile:items:create', request)
+    ),
+    updateCareerProfileItem: (itemId: string, request: CareerProfileItemMutationRequest) => (
+      ipcRenderer.invoke('jobos:career-profile:items:update', itemId, request)
+    ),
+    removeCareerProfileItem: (itemId: string, request: CareerProfileRemovalRequest) => (
+      ipcRenderer.invoke('jobos:career-profile:items:remove', itemId, request)
+    ),
+    importCareerProfileEvidence: (request: CareerProfileEvidenceImportRequest) => (
+      ipcRenderer.invoke('jobos:career-profile:evidence:import', request)
+    ),
+    removeCareerProfileEvidence: (evidenceId: string, request: CareerProfileRemovalRequest) => (
+      ipcRenderer.invoke('jobos:career-profile:evidence:remove', evidenceId, request)
+    ),
+    getCareerProfileContext: (agentId: string) => (
+      ipcRenderer.invoke('jobos:career-profile:context:get', agentId)
+    ),
+    updateCareerProfileContext: (agentId: string, request: CareerProfileContextUpdateRequest) => (
+      ipcRenderer.invoke('jobos:career-profile:context:update', agentId, request)
+    ),
+    previewCareerProfileContext: (agentId: string) => (
+      ipcRenderer.invoke('jobos:career-profile:context:preview', agentId)
+    ),
+    exportCareerProfile: (request: CareerProfileExportRequest) => (
+      ipcRenderer.invoke('jobos:career-profile:export', request)
+    ),
+    chooseCareerProfileArchive: () => ipcRenderer.invoke('jobos:career-profile:restore:choose'),
+    restoreCareerProfile: (request: CareerProfileRestoreRequest) => (
+      ipcRenderer.invoke('jobos:career-profile:restore', request)
     )
   }),
   agent: Object.freeze({

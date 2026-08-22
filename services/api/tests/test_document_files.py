@@ -13,8 +13,12 @@ TOKEN = "document-files-device-token"
 
 
 def headers():
+    return {"Authorization": f"Bearer {TOKEN}"}
+
+
+def mcp_headers():
     return {
-        "Authorization": f"Bearer {TOKEN}",
+        "Authorization": "Bearer document-files-mcp-token",
         "X-JobOS-MCP-Token": "document-files-mcp-token",
     }
 
@@ -217,7 +221,7 @@ def test_mcp_document_commands_require_an_explicit_active_conversation(tmp_path)
         conversation_id = client.get("/v1/conversations", headers=headers()).json()[
             "conversations"
         ][0]["conversation_id"]
-        missing = client.post("/v1/browser/commands", headers=headers(), json=command)
+        missing = client.post("/v1/browser/commands", headers=mcp_headers(), json=command)
         started = client.post(
             f"/v1/conversations/{conversation_id}/messages",
             headers=headers(),
@@ -225,7 +229,7 @@ def test_mcp_document_commands_require_an_explicit_active_conversation(tmp_path)
         )
         accepted = client.post(
             "/v1/browser/commands",
-            headers=headers(),
+            headers=mcp_headers(),
             json={**command, "conversation_id": conversation_id},
         )
 

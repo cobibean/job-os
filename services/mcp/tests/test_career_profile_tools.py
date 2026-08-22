@@ -7,13 +7,11 @@ from jobos_mcp.server import create_server
 
 
 @pytest.mark.anyio
-async def test_career_profile_client_reads_and_submits_exact_agent_edit_contract():
+async def test_career_profile_client_submits_exact_agent_edit_contract():
     requests: list[httpx.Request] = []
 
     async def handler(request: httpx.Request) -> httpx.Response:
         requests.append(request)
-        if request.method == "GET":
-            return httpx.Response(200, json={"profile_revision": 4, "items": []})
         return httpx.Response(
             200,
             json={
@@ -32,7 +30,6 @@ async def test_career_profile_client_reads_and_submits_exact_agent_edit_contract
         transport=httpx.MockTransport(handler),
     )
 
-    profile = await client.get_career_profile()
     result = await client.edit_career_profile(
         expected_profile_revision=4,
         operation="item.create",
@@ -43,14 +40,13 @@ async def test_career_profile_client_reads_and_submits_exact_agent_edit_contract
     )
     await client.aclose()
 
-    assert profile["profile_revision"] == 4
     assert result["outcome"] == "proposal"
     assert [(request.method, request.url.path) for request in requests] == [
-        ("GET", "/v1/career-profile"),
         ("POST", "/v1/career-profile/agent-edits"),
     ]
     assert all(
-        request.headers["authorization"] == "Bearer test-device-token" for request in requests
+        request.headers["authorization"] == "Bearer test-mcp-trusted-token"
+        for request in requests
     )
     assert all(
         request.headers["x-jobos-mcp-token"] == "test-mcp-trusted-token"
@@ -61,7 +57,7 @@ async def test_career_profile_client_reads_and_submits_exact_agent_edit_contract
         request.headers["x-jobos-agent-token"] == "test-career-profile-agent-token"
         for request in requests
     )
-    assert json.loads(requests[1].content) == {
+    assert json.loads(requests[0].content) == {
         "expected_profile_revision": 4,
         "idempotency_key": "career-profile-edit-0001",
         "operation": "item.create",
@@ -78,8 +74,6 @@ async def test_career_profile_mcp_tools_keep_review_decisions_user_owned():
 
     async def handler(request: httpx.Request) -> httpx.Response:
         requests.append(request)
-        if request.method == "GET":
-            return httpx.Response(200, json={"profile_revision": 0, "items": []})
         return httpx.Response(
             200,
             json={
@@ -97,7 +91,6 @@ async def test_career_profile_mcp_tools_keep_review_decisions_user_owned():
     )
     server = create_server(client)
 
-    _, profile = await server.call_tool("career_profile_get", {})
     _, edit = await server.call_tool(
         "career_profile_edit",
         {
@@ -112,13 +105,11 @@ async def test_career_profile_mcp_tools_keep_review_decisions_user_owned():
     tools = {tool.name for tool in await server.list_tools()}
     await client.aclose()
 
-    assert isinstance(profile, dict) and profile["profile_revision"] == 0
     assert isinstance(edit, dict) and edit["outcome"] == "proposal"
-    assert "career_profile_get" in tools
+    assert "career_profile_get" not in tools
     assert "career_profile_edit" in tools
     assert "career_profile_proposal_accept" not in tools
     assert "career_profile_trust_mode_update" not in tools
     assert [request.url.path for request in requests] == [
-        "/v1/career-profile",
         "/v1/career-profile/agent-edits",
     ]

@@ -110,6 +110,22 @@ from jobos_api.career_profile_complete import (
     ProfileItemRemoval,
     ProfileProposalDecision,
 )
+from jobos_api.career_profile_context import (
+    CareerProfileContextPreview,
+    CareerProfileContextScope,
+    CareerProfileContextScopeUpdate,
+    CareerProfileContextSelectionError,
+    CareerProfileContextStore,
+)
+from jobos_api.career_profile_portability import (
+    CareerProfileExportRequest,
+    CareerProfileExportResult,
+    CareerProfilePortabilityError,
+    CareerProfilePortabilityService,
+    CareerProfileRestoreBusy,
+    CareerProfileRestoreRequest,
+    CareerProfileRestoreResult,
+)
 from jobos_api.composition import create_job_services
 from jobos_api.conversation_manager import ConversationListResponse, ConversationManager
 from jobos_api.conversations import (
@@ -214,7 +230,7 @@ from jobos_api.responses import (
     HealthResponse,
     VersionResponse,
 )
-from jobos_api.settings import Settings
+from jobos_api.settings import MCP_RUNTIME_DEVICE_ID, Settings
 from jobos_api.state_store import (
     ConversationBusy,
     ConversationLimit,
@@ -251,6 +267,10 @@ _ENDPOINT_ERROR_ROUTES = {
         {
             "browser_command",
             "career_profile_complete_get",
+            "career_profile_context_get",
+            "career_profile_context_preview",
+            "career_profile_context_update",
+            "career_profile_export",
             "career_profile_intent_grant_create",
             "career_profile_proposal_decide",
             "career_profile_evidence_content",
@@ -261,6 +281,7 @@ _ENDPOINT_ERROR_ROUTES = {
             "career_profile_item_remove",
             "career_profile_item_update",
             "career_profile_reset",
+            "career_profile_restore",
             "career_profile_snapshot_create",
             "career_profile_snapshot_get",
             "career_profile_work_arrangement_get",
@@ -285,6 +306,8 @@ _ENDPOINT_ERROR_ROUTES = {
         {
             "approve_job_artifact",
             "career_profile_complete_get",
+            "career_profile_context_get",
+            "career_profile_context_snapshot_get",
             "career_profile_intent_grant_create",
             "career_profile_proposal_decide",
             "career_profile_evidence_content",
@@ -333,6 +356,8 @@ _ENDPOINT_ERROR_ROUTES = {
     409: frozenset(
         {
             "approve_job_artifact",
+            "career_profile_context_snapshot_create",
+            "career_profile_context_update",
             "career_profile_evidence_content",
             "career_profile_evidence_import",
             "career_profile_evidence_erase",
@@ -341,7 +366,9 @@ _ENDPOINT_ERROR_ROUTES = {
             "career_profile_item_create",
             "career_profile_item_remove",
             "career_profile_item_update",
+            "career_profile_export",
             "career_profile_reset",
+            "career_profile_restore",
             "career_profile_work_arrangement_put",
             "career_profile_work_arrangement_restore",
             "artifact_content",
@@ -483,6 +510,14 @@ def create_app(
         settings.state_db_path,
         complete_career_profile,
     )
+    career_profile_context = CareerProfileContextStore(
+        settings.state_db_path,
+        complete_career_profile,
+    )
+    career_profile_portability = CareerProfilePortabilityService(
+        settings.state_db_path,
+        settings.resolved_evidence_vault_root(),
+    )
     artifact_gateway_configured = (
         artifact_gateway is not None or settings.artifact_provider == "gateway"
     )
@@ -544,6 +579,12 @@ def create_app(
         gateway_factory or OfflineAgentGatewayFactory(),
         career_profile_principal=(
             principal_for_device(settings.device_id) if settings.career_profile_enabled else None
+        ),
+        career_profile_context=(
+            career_profile_context if settings.career_profile_enabled else None
+        ),
+        career_profile_agent_id=(
+            settings.career_profile_agent_id if settings.career_profile_enabled else None
         ),
     )
     browser_capabilities = capability_broker or CapabilityBroker()
@@ -620,6 +661,8 @@ def create_app(
                 display_name=settings.career_profile_agent_display_name,
                 token=settings.resolved_career_profile_agent_token(),
             )
+            career_profile_context.initialize()
+            career_profile_portability.recover_pending_restores()
         jobs.initialize()
         await conversation_manager.start()
         try:
@@ -836,8 +879,21 @@ def create_app(
 
     def authenticated_device(
         credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer)],
+        mcp_token: Annotated[str | None, Header(alias="X-JobOS-MCP-Token")] = None,
     ) -> DeviceIdentity:
-        return device_authenticator.authenticate(credentials)
+        identity = device_authenticator.authenticate(credentials)
+        is_mcp_principal = identity.device_id == MCP_RUNTIME_DEVICE_ID
+        has_valid_mcp_header = mcp_token is not None and hmac.compare_digest(
+            mcp_token, settings.mcp_token
+        )
+        if (is_mcp_principal and not has_valid_mcp_header) or (
+            not is_mcp_principal and mcp_token is not None
+        ):
+            raise HTTPException(
+                status_code=403,
+                detail="MCP credentials must use the dedicated local runtime principal",
+            )
+        return identity
 
     def require_career_profile_owner(identity: DeviceIdentity) -> None:
         """Keep the foundation owner-only until explicit collaborator grants exist."""
@@ -854,10 +910,13 @@ def create_app(
         origin: str | None,
         mcp_token: str | None,
     ) -> None:
-        if origin == "mcp" and (
-            identity.device_id != settings.device_id
-            or mcp_token is None
-            or not hmac.compare_digest(mcp_token, settings.mcp_token)
+        trusted_runtime = (
+            identity.device_id == MCP_RUNTIME_DEVICE_ID
+            and mcp_token is not None
+            and hmac.compare_digest(mcp_token, settings.mcp_token)
+        )
+        if (origin == "mcp" and not trusted_runtime) or (
+            origin != "mcp" and identity.device_id == MCP_RUNTIME_DEVICE_ID
         ):
             raise HTTPException(
                 status_code=403,
@@ -882,7 +941,6 @@ def create_app(
         agent_id: str | None,
         agent_token: str | None,
     ) -> ConnectedAgent:
-        require_career_profile_owner(identity)
         require_trusted_mcp(identity, "mcp", mcp_token)
         if agent_id is None or agent_token is None:
             raise HTTPException(
@@ -940,12 +998,12 @@ def create_app(
         identity = device_authenticator.authenticate(
             HTTPAuthorizationCredentials(scheme=scheme, credentials=token)
         )
-        if identity.device_id != settings.device_id:
+        if identity.device_id != MCP_RUNTIME_DEVICE_ID:
             return error_response(
                 request,
                 status_code=403,
                 code="mcp_local_device_required",
-                message="MCP operations require the trusted local device credential",
+                message="MCP operations require the dedicated local runtime credential",
                 retryable=False,
             )
         try:
@@ -1340,15 +1398,7 @@ def create_app(
         agent_id: Annotated[str | None, Header(alias="X-JobOS-Agent-Id")] = None,
         agent_token: Annotated[str | None, Header(alias="X-JobOS-Agent-Token")] = None,
     ) -> CareerProfileCompleteCurrent:
-        if mcp_token is None:
-            require_career_profile_owner(identity)
-        else:
-            authenticated_career_profile_agent(
-                identity,
-                mcp_token,
-                agent_id,
-                agent_token,
-            )
+        require_direct_career_profile_user(identity, mcp_token)
         return complete_career_profile.current()
 
     @app.get(
@@ -1360,6 +1410,111 @@ def create_app(
     ) -> ConnectedAgentList:
         require_career_profile_owner(identity)
         return career_profile_collaboration.list_agents()
+
+    @app.get(
+        "/v1/career-profile/agents/{agent_id}/context",
+        tags=["career-profile"],
+    )
+    def career_profile_context_get(
+        agent_id: str,
+        identity: Annotated[DeviceIdentity, Depends(authenticated_device)],
+    ) -> CareerProfileContextScope:
+        require_career_profile_owner(identity)
+        try:
+            return career_profile_context.get_scope(agent_id)
+        except CareerProfileContextSelectionError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+
+    @app.put(
+        "/v1/career-profile/agents/{agent_id}/context",
+        tags=["career-profile"],
+    )
+    @serialized_mutation_route
+    def career_profile_context_update(
+        agent_id: str,
+        command: CareerProfileContextScopeUpdate,
+        identity: Annotated[DeviceIdentity, Depends(authenticated_device)],
+        mcp_token: Annotated[str | None, Header(alias="X-JobOS-MCP-Token")] = None,
+    ) -> CareerProfileContextScope:
+        principal = require_direct_career_profile_user(identity, mcp_token)
+        try:
+            return career_profile_context.update_scope(
+                principal=principal,
+                agent_id=agent_id,
+                command=command,
+            )
+        except (
+            CareerProfileRevisionConflict,
+            CareerProfileIdempotencyConflict,
+            CareerProfileErasureInProgress,
+            CareerProfileContextSelectionError,
+        ) as error:
+            raise complete_profile_conflict(error) from error
+
+    @app.post(
+        "/v1/career-profile/agents/{agent_id}/context/preview",
+        tags=["career-profile"],
+    )
+    def career_profile_context_preview(
+        agent_id: str,
+        identity: Annotated[DeviceIdentity, Depends(authenticated_device)],
+        mcp_token: Annotated[str | None, Header(alias="X-JobOS-MCP-Token")] = None,
+    ) -> CareerProfileContextPreview:
+        require_direct_career_profile_user(identity, mcp_token)
+        try:
+            return career_profile_context.preview(agent_id=agent_id)
+        except (
+            CareerProfileErasureInProgress,
+            CareerProfileContextSelectionError,
+        ) as error:
+            raise complete_profile_conflict(error) from error
+
+    @app.post(
+        "/v1/career-profile/export",
+        tags=["career-profile"],
+    )
+    def career_profile_export(
+        command: CareerProfileExportRequest,
+        identity: Annotated[DeviceIdentity, Depends(authenticated_device)],
+    ) -> CareerProfileExportResult:
+        require_career_profile_owner(identity)
+        try:
+            return career_profile_portability.export_archive(command)
+        except CareerProfilePortabilityError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
+        except (
+            CareerProfileRevisionConflict,
+            CareerProfileEvidenceNotFound,
+            CareerProfileEvidenceIntegrityError,
+            CareerProfileEvidencePathError,
+        ) as error:
+            raise complete_profile_conflict(error) from error
+
+    @app.post(
+        "/v1/career-profile/restore",
+        tags=["career-profile"],
+    )
+    @serialized_mutation_route
+    def career_profile_restore(
+        command: CareerProfileRestoreRequest,
+        identity: Annotated[DeviceIdentity, Depends(authenticated_device)],
+    ) -> CareerProfileRestoreResult:
+        require_career_profile_owner(identity)
+        try:
+            return career_profile_portability.restore_archive(
+                principal=principal_for_device(identity.device_id),
+                command=command,
+            )
+        except CareerProfilePortabilityError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
+        except (
+            CareerProfileRevisionConflict,
+            CareerProfileIdempotencyConflict,
+            CareerProfileErasureInProgress,
+            CareerProfileRestoreBusy,
+            CareerProfileEvidencePathError,
+        ) as error:
+            raise complete_profile_conflict(error) from error
 
     @app.patch(
         "/v1/career-profile/agents/{agent_id}",
@@ -1520,16 +1675,24 @@ def create_app(
         identity: DeviceIdentity,
         mcp_token: str | None,
         intent_grant_id: str | None,
+        agent_id: str | None,
+        agent_token: str | None,
     ) -> tuple[
         str, Literal["direct_user", "agent_inference", "authenticated_user_instruction"], str | None
     ]:
         if mcp_token is None:
             if intent_grant_id is not None:
                 raise HTTPException(status_code=403, detail="Agent intent grants require MCP auth")
+            require_career_profile_owner(identity)
             return principal_for_device(identity.device_id), "direct_user", None
-        require_trusted_mcp(identity, "mcp", mcp_token)
+        agent = authenticated_career_profile_agent(
+            identity,
+            mcp_token,
+            agent_id,
+            agent_token,
+        )
         return (
-            "agent:trusted-local-mcp",
+            agent.principal,
             "authenticated_user_instruction" if intent_grant_id else "agent_inference",
             intent_grant_id,
         )
@@ -1567,10 +1730,11 @@ def create_app(
         identity: Annotated[DeviceIdentity, Depends(authenticated_device)],
         mcp_token: Annotated[str | None, Header(alias="X-JobOS-MCP-Token")] = None,
         intent_grant_id: Annotated[str | None, Header(alias="X-JobOS-Intent-Grant")] = None,
+        agent_id: Annotated[str | None, Header(alias="X-JobOS-Agent-Id")] = None,
+        agent_token: Annotated[str | None, Header(alias="X-JobOS-Agent-Token")] = None,
     ) -> CareerProfileCompleteCurrent:
-        require_career_profile_owner(identity)
         principal, mutation_source, grant_id = career_profile_actor(
-            identity, mcp_token, intent_grant_id
+            identity, mcp_token, intent_grant_id, agent_id, agent_token
         )
         try:
             return complete_career_profile.upsert_item(
@@ -1597,10 +1761,11 @@ def create_app(
         identity: Annotated[DeviceIdentity, Depends(authenticated_device)],
         mcp_token: Annotated[str | None, Header(alias="X-JobOS-MCP-Token")] = None,
         intent_grant_id: Annotated[str | None, Header(alias="X-JobOS-Intent-Grant")] = None,
+        agent_id: Annotated[str | None, Header(alias="X-JobOS-Agent-Id")] = None,
+        agent_token: Annotated[str | None, Header(alias="X-JobOS-Agent-Token")] = None,
     ) -> CareerProfileCompleteCurrent:
-        require_career_profile_owner(identity)
         principal, mutation_source, grant_id = career_profile_actor(
-            identity, mcp_token, intent_grant_id
+            identity, mcp_token, intent_grant_id, agent_id, agent_token
         )
         try:
             return complete_career_profile.upsert_item(
@@ -1629,10 +1794,11 @@ def create_app(
         identity: Annotated[DeviceIdentity, Depends(authenticated_device)],
         mcp_token: Annotated[str | None, Header(alias="X-JobOS-MCP-Token")] = None,
         intent_grant_id: Annotated[str | None, Header(alias="X-JobOS-Intent-Grant")] = None,
+        agent_id: Annotated[str | None, Header(alias="X-JobOS-Agent-Id")] = None,
+        agent_token: Annotated[str | None, Header(alias="X-JobOS-Agent-Token")] = None,
     ) -> CareerProfileCompleteCurrent:
-        require_career_profile_owner(identity)
         principal, mutation_source, grant_id = career_profile_actor(
-            identity, mcp_token, intent_grant_id
+            identity, mcp_token, intent_grant_id, agent_id, agent_token
         )
         try:
             return complete_career_profile.remove_item(
@@ -1661,10 +1827,11 @@ def create_app(
         identity: Annotated[DeviceIdentity, Depends(authenticated_device)],
         mcp_token: Annotated[str | None, Header(alias="X-JobOS-MCP-Token")] = None,
         intent_grant_id: Annotated[str | None, Header(alias="X-JobOS-Intent-Grant")] = None,
+        agent_id: Annotated[str | None, Header(alias="X-JobOS-Agent-Id")] = None,
+        agent_token: Annotated[str | None, Header(alias="X-JobOS-Agent-Token")] = None,
     ) -> CareerProfileCompleteCurrent:
-        require_career_profile_owner(identity)
         principal, mutation_source, grant_id = career_profile_actor(
-            identity, mcp_token, intent_grant_id
+            identity, mcp_token, intent_grant_id, agent_id, agent_token
         )
         try:
             return complete_career_profile.decide_proposal(
@@ -1692,9 +1859,12 @@ def create_app(
         command: EvidenceImportRequest,
         identity: Annotated[DeviceIdentity, Depends(authenticated_device)],
         mcp_token: Annotated[str | None, Header(alias="X-JobOS-MCP-Token")] = None,
+        agent_id: Annotated[str | None, Header(alias="X-JobOS-Agent-Id")] = None,
+        agent_token: Annotated[str | None, Header(alias="X-JobOS-Agent-Token")] = None,
     ) -> CareerProfileCompleteCurrent:
-        require_career_profile_owner(identity)
-        principal, mutation_source, _ = career_profile_actor(identity, mcp_token, None)
+        principal, mutation_source, _ = career_profile_actor(
+            identity, mcp_token, None, agent_id, agent_token
+        )
         try:
             return complete_career_profile.import_evidence(
                 principal=principal,
@@ -1720,10 +1890,11 @@ def create_app(
         identity: Annotated[DeviceIdentity, Depends(authenticated_device)],
         mcp_token: Annotated[str | None, Header(alias="X-JobOS-MCP-Token")] = None,
         intent_grant_id: Annotated[str | None, Header(alias="X-JobOS-Intent-Grant")] = None,
+        agent_id: Annotated[str | None, Header(alias="X-JobOS-Agent-Id")] = None,
+        agent_token: Annotated[str | None, Header(alias="X-JobOS-Agent-Token")] = None,
     ) -> CareerProfileCompleteCurrent:
-        require_career_profile_owner(identity)
         principal, mutation_source, grant_id = career_profile_actor(
-            identity, mcp_token, intent_grant_id
+            identity, mcp_token, intent_grant_id, agent_id, agent_token
         )
         try:
             return complete_career_profile.remove_evidence(
@@ -2047,11 +2218,28 @@ def create_app(
         conversation_id: ConversationId,
         command: JobSelectionRequest,
         identity: Annotated[DeviceIdentity, Depends(authenticated_device)],
+        mcp_token: Annotated[str | None, Header(alias="X-JobOS-MCP-Token")] = None,
     ) -> ConversationJobContextMutation:
-        conversation_service(conversation_id, identity)
+        require_trusted_mcp(identity, command.origin, mcp_token)
+        owner_device_id = identity.device_id
+        if command.origin == "mcp":
+            conversation_manager.get(conversation_id)
+            owner = next(
+                (
+                    value
+                    for value in state_store.list_active_conversations()
+                    if value["conversation_id"] == conversation_id
+                ),
+                None,
+            )
+            if owner is None:
+                raise ConversationNotFound("Conversation not found")
+            owner_device_id = str(owner["owner_device_id"])
+        else:
+            conversation_service(conversation_id, identity)
         ensure_job(command.job_id)
         context = state_store.select_conversation_job(
-            conversation_id, identity.device_id, command.job_id
+            conversation_id, owner_device_id, command.job_id
         )
         return ConversationJobContextMutation(
             event_id=0, job_context=ConversationJobContext.model_validate(context)

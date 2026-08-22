@@ -1,3 +1,8 @@
+import { createHash } from 'node:crypto'
+import { constants } from 'node:fs'
+import { appendFile, mkdtemp, open, readFile, readdir, rm, stat, symlink, truncate, writeFile } from 'node:fs/promises'
+import os from 'node:os'
+import path from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { createMainCareerProfileClient } from './careerProfile.js'
@@ -15,6 +20,13 @@ const current = {
     updated_at: '2026-08-21T15:00:00Z',
     value: { mode: 'remote', strength: 'requirement', note: '(FAKE) Iowa-based role' }
   }
+}
+
+const emptyCompleteProfile = {
+  authority_epoch: 4,
+  items: [],
+  profile_revision: 7,
+  source_evidence: []
 }
 
 afterEach(() => {
@@ -271,6 +283,525 @@ describe('Career Profile desktop client', () => {
       expectedProfileRevision: 3,
       idempotencyKey: 'direct-undo-1'
     })).resolves.toEqual({ profileRevision: 4 })
+  })
+
+  it('sends exact connected-agent context choices and maps the immutable preview', async () => {
+    const scope = {
+      agent_id: 'job-hunter',
+      mode: 'selected',
+      selected_areas: ['my_career'],
+      selected_item_ids: ['cpi_abcdefghijklmnop'],
+      updated_at: '2026-08-21T16:00:00Z'
+    }
+    const fetchMock = vi.fn(async (input, init) => {
+      const url = String(input)
+      if (url.endsWith('/context') && init?.method === 'PUT') {
+        expect(JSON.parse(String(init.body))).toEqual({
+          expected_authority_epoch: 4,
+          expected_profile_revision: 7,
+          idempotency_key: 'context-choice-1',
+          mode: 'selected',
+          selected_areas: ['my_career'],
+          selected_item_ids: ['cpi_abcdefghijklmnop']
+        })
+        return new Response(JSON.stringify(scope), { status: 200 })
+      }
+      if (url.endsWith('/context/preview')) {
+        expect(init?.method).toBe('POST')
+        return new Response(JSON.stringify({
+          agent_id: 'job-hunter',
+          authority_epoch: 4,
+          content_hash: 'a'.repeat(64),
+          created_at: '2026-08-21T16:00:00Z',
+          profile_revision: 7,
+          projection: emptyCompleteProfile,
+          scope
+        }), { status: 200 })
+      }
+      return new Response(JSON.stringify(scope), { status: 200 })
+    })
+    globalThis.fetch = fetchMock as typeof fetch
+
+    await expect(client().getCareerProfileContext('job-hunter')).resolves.toMatchObject({
+      mode: 'selected',
+      selectedAreas: ['my_career']
+    })
+    await expect(client().updateCareerProfileContext('job-hunter', {
+      expectedAuthorityEpoch: 4,
+      expectedProfileRevision: 7,
+      idempotencyKey: 'context-choice-1',
+      mode: 'selected',
+      selectedAreas: ['my_career'],
+      selectedItemIds: ['cpi_abcdefghijklmnop']
+    })).resolves.toMatchObject({ selectedItemIds: ['cpi_abcdefghijklmnop'] })
+    await expect(client().previewCareerProfileContext('job-hunter')).resolves.toMatchObject({
+      contentHash: 'a'.repeat(64),
+      profile: { authorityEpoch: 4, profileRevision: 7 }
+    })
+  })
+
+  it('atomically replaces an export through a private no-follow sibling and syncs its directory', async () => {
+    const directory = await mkdtemp(path.join(os.tmpdir(), 'jobos-career-profile-export-'))
+    try {
+      const target = path.join(directory, 'verified-profile.zip')
+      const bytes = Buffer.from('(FAKE) bounded Career Profile ZIP')
+      const digest = createHash('sha256').update(bytes).digest('hex')
+      await writeFile(target, '(FAKE) previous export')
+      const chooseExportPath = vi.fn(async () => target)
+      let directorySyncs = 0
+      const openArchiveFile = vi.fn(async (filePath: string, flags: number, mode?: number) => {
+        const handle = await open(filePath, flags, mode)
+        if (filePath === directory) {
+          const syncDirectory = handle.sync.bind(handle)
+          Object.defineProperty(handle, 'sync', {
+            configurable: true,
+            value: async () => {
+              directorySyncs += 1
+              await syncDirectory()
+            }
+          })
+        }
+        return handle
+      })
+      const fetchMock = vi.fn(async (_input, init) => {
+        expect(JSON.parse(String(init?.body))).toEqual({
+          evidence_mode: 'selected',
+          expected_profile_revision: 7,
+          selected_evidence_ids: ['cpe_abcdefghijklmnop']
+        })
+        return new Response(JSON.stringify({
+          byte_count: bytes.length,
+          content_base64: bytes.toString('base64'),
+          filename: 'career-profile.zip',
+          included_evidence_ids: ['cpe_abcdefghijklmnop'],
+          omitted_evidence_ids: [],
+          sha256: digest
+        }), { status: 200 })
+      })
+      globalThis.fetch = fetchMock as typeof fetch
+      const nativeClient = createMainCareerProfileClient({
+        baseUrl: 'http://127.0.0.1:8766',
+        deviceToken: 'test-device-token'
+      }, {
+        chooseArchivePath: async () => null,
+        chooseExportPath
+      }, {
+        archiveFileSystem: { open: openArchiveFile }
+      })
+
+      await expect(nativeClient.exportCareerProfile({
+        evidenceMode: 'selected',
+        expectedProfileRevision: 7,
+        selectedEvidenceIds: ['cpe_abcdefghijklmnop']
+      })).resolves.toEqual({
+        status: 'saved',
+        byteCount: bytes.length,
+        filename: 'verified-profile.zip',
+        includedEvidenceIds: ['cpe_abcdefghijklmnop'],
+        omittedEvidenceIds: [],
+        sha256: digest
+      })
+      expect(await readFile(target)).toEqual(bytes)
+      expect(chooseExportPath).toHaveBeenCalledWith('career-profile.zip')
+      const temporaryOpen = openArchiveFile.mock.calls.find(call => call[2] === 0o600)
+      expect(temporaryOpen).toBeDefined()
+      const [temporaryPath, flags, mode] = temporaryOpen!
+      expect(path.dirname(temporaryPath)).toBe(directory)
+      expect(temporaryPath).not.toBe(target)
+      expect(flags & constants.O_CREAT).toBe(constants.O_CREAT)
+      expect(flags & constants.O_EXCL).toBe(constants.O_EXCL)
+      if (typeof constants.O_NOFOLLOW === 'number') {
+        expect(flags & constants.O_NOFOLLOW).toBe(constants.O_NOFOLLOW)
+      }
+      expect(mode).toBe(0o600)
+      if (process.platform !== 'win32') expect((await stat(target)).mode & 0o777).toBe(0o600)
+      expect((await readdir(directory)).sort()).toEqual(['verified-profile.zip'])
+      if (process.platform !== 'win32') expect(directorySyncs).toBe(1)
+    } finally {
+      await rm(directory, { force: true, recursive: true })
+    }
+  })
+
+  it('cleans an interrupted temporary export without touching the existing target', async () => {
+    const directory = await mkdtemp(path.join(os.tmpdir(), 'jobos-career-profile-interrupted-export-'))
+    try {
+      const target = path.join(directory, 'career-profile.zip')
+      const previousBytes = Buffer.from('(FAKE) previous complete export')
+      const bytes = Buffer.from('(FAKE) replacement Career Profile ZIP')
+      await writeFile(target, previousBytes)
+      globalThis.fetch = vi.fn(async () => new Response(JSON.stringify({
+        byte_count: bytes.length,
+        content_base64: bytes.toString('base64'),
+        filename: 'career-profile.zip',
+        included_evidence_ids: [],
+        omitted_evidence_ids: [],
+        sha256: createHash('sha256').update(bytes).digest('hex')
+      }), { status: 200 })) as typeof fetch
+      const openArchiveFile = async (filePath: string, flags: number, mode?: number) => {
+        const handle = await open(filePath, flags, mode)
+        if (mode === 0o600) {
+          const writeTemporary = handle.writeFile.bind(handle)
+          Object.defineProperty(handle, 'writeFile', {
+            configurable: true,
+            value: async (data: string | Uint8Array) => {
+              const partial = Buffer.from(data).subarray(0, 5)
+              await writeTemporary(partial)
+              throw new Error('simulated interrupted write')
+            }
+          })
+        }
+        return handle
+      }
+      const nativeClient = createMainCareerProfileClient({
+        baseUrl: 'http://127.0.0.1:8766',
+        deviceToken: 'test-device-token'
+      }, {
+        chooseArchivePath: async () => null,
+        chooseExportPath: async () => target
+      }, {
+        archiveFileSystem: { open: openArchiveFile }
+      })
+
+      await expect(nativeClient.exportCareerProfile({
+        evidenceMode: 'profile_only',
+        expectedProfileRevision: 7,
+        selectedEvidenceIds: []
+      })).rejects.toThrow('simulated interrupted write')
+      expect(await readFile(target)).toEqual(previousBytes)
+      expect(await readdir(directory)).toEqual(['career-profile.zip'])
+    } finally {
+      await rm(directory, { force: true, recursive: true })
+    }
+  })
+
+  it('verifies the temporary export bytes before replacing an existing target', async () => {
+    const directory = await mkdtemp(path.join(os.tmpdir(), 'jobos-career-profile-corrupt-export-'))
+    try {
+      const target = path.join(directory, 'career-profile.zip')
+      const previousBytes = Buffer.from('(FAKE) previous complete export')
+      const bytes = Buffer.from('(FAKE) replacement Career Profile ZIP')
+      await writeFile(target, previousBytes)
+      globalThis.fetch = vi.fn(async () => new Response(JSON.stringify({
+        byte_count: bytes.length,
+        content_base64: bytes.toString('base64'),
+        filename: 'career-profile.zip',
+        included_evidence_ids: [],
+        omitted_evidence_ids: [],
+        sha256: createHash('sha256').update(bytes).digest('hex')
+      }), { status: 200 })) as typeof fetch
+      const openArchiveFile = async (filePath: string, flags: number, mode?: number) => {
+        const handle = await open(filePath, flags, mode)
+        if (mode === 0o600) {
+          const writeTemporary = handle.writeFile.bind(handle)
+          Object.defineProperty(handle, 'writeFile', {
+            configurable: true,
+            value: async (data: string | Uint8Array) => {
+              const corrupted = Buffer.from(data)
+              corrupted[0] = (corrupted[0] ?? 0) ^ 0xff
+              await writeTemporary(corrupted)
+            }
+          })
+        }
+        return handle
+      }
+      const nativeClient = createMainCareerProfileClient({
+        baseUrl: 'http://127.0.0.1:8766',
+        deviceToken: 'test-device-token'
+      }, {
+        chooseArchivePath: async () => null,
+        chooseExportPath: async () => target
+      }, {
+        archiveFileSystem: { open: openArchiveFile }
+      })
+
+      await expect(nativeClient.exportCareerProfile({
+        evidenceMode: 'profile_only',
+        expectedProfileRevision: 7,
+        selectedEvidenceIds: []
+      })).rejects.toThrow('integrity')
+      expect(await readFile(target)).toEqual(previousBytes)
+      expect(await readdir(directory)).toEqual(['career-profile.zip'])
+    } finally {
+      await rm(directory, { force: true, recursive: true })
+    }
+  })
+
+  it('rejects malformed export integrity metadata before asking where to save', async () => {
+    const chooseExportPath = vi.fn(async () => '/unused')
+    globalThis.fetch = vi.fn(async () => new Response(JSON.stringify({
+      byte_count: 4,
+      content_base64: Buffer.from('fake').toString('base64'),
+      filename: 'career-profile.zip',
+      included_evidence_ids: [],
+      omitted_evidence_ids: [],
+      sha256: 'short'
+    }), { status: 200 })) as typeof fetch
+    const nativeClient = createMainCareerProfileClient({
+      baseUrl: 'http://127.0.0.1:8766',
+      deviceToken: 'test-device-token'
+    }, {
+      chooseArchivePath: async () => null,
+      chooseExportPath
+    })
+
+    await expect(nativeClient.exportCareerProfile({
+      evidenceMode: 'profile_only',
+      expectedProfileRevision: 7,
+      selectedEvidenceIds: []
+    })).rejects.toThrow('integrity')
+    expect(chooseExportPath).not.toHaveBeenCalled()
+  })
+
+  it('fstats and reads an archive through one no-follow descriptor', async () => {
+    const directory = await mkdtemp(path.join(os.tmpdir(), 'jobos-career-profile-descriptor-'))
+    try {
+      const archivePath = path.join(directory, 'career-profile.zip')
+      const bytes = Buffer.from('(FAKE) same descriptor restore archive')
+      await writeFile(archivePath, bytes)
+      let descriptorReads = 0
+      let descriptorStats = 0
+      const openArchiveFile = vi.fn(async (filePath: string, flags: number, mode?: number) => {
+        const handle = await open(filePath, flags, mode)
+        if (filePath === archivePath) {
+          const statDescriptor = handle.stat.bind(handle)
+          const readDescriptor = handle.read.bind(handle)
+          Object.defineProperty(handle, 'stat', {
+            configurable: true,
+            value: (options: { bigint: true }) => {
+              descriptorStats += 1
+              return statDescriptor(options)
+            }
+          })
+          Object.defineProperty(handle, 'read', {
+            configurable: true,
+            value: (buffer: Buffer, offset: number, length: number, position: number) => {
+              descriptorReads += 1
+              return readDescriptor(buffer, offset, length, position)
+            }
+          })
+        }
+        return handle
+      })
+      const fetchMock = vi.fn(async (_input, init) => {
+        expect(JSON.parse(String(init?.body)).archive_base64).toBe(bytes.toString('base64'))
+        return new Response(JSON.stringify({
+          archive_sha256: createHash('sha256').update(bytes).digest('hex'),
+          baseline_created: true,
+          profile: { ...emptyCompleteProfile, profile_revision: 1 },
+          restored_evidence_ids: [],
+          unavailable_evidence_ids: []
+        }), { status: 200 })
+      })
+      globalThis.fetch = fetchMock as typeof fetch
+      const nativeClient = createMainCareerProfileClient({
+        baseUrl: 'http://127.0.0.1:8766',
+        deviceToken: 'test-device-token'
+      }, {
+        chooseArchivePath: async () => archivePath,
+        chooseExportPath: async () => null
+      }, {
+        archiveFileSystem: { open: openArchiveFile }
+      })
+
+      const selection = await nativeClient.chooseCareerProfileArchive()
+      expect(selection).toMatchObject({ byteCount: bytes.length, filename: 'career-profile.zip' })
+      const archiveOpens = openArchiveFile.mock.calls.filter(call => call[0] === archivePath)
+      expect(archiveOpens).toHaveLength(1)
+      if (typeof constants.O_NOFOLLOW === 'number') {
+        expect(archiveOpens[0]![1] & constants.O_NOFOLLOW).toBe(constants.O_NOFOLLOW)
+      }
+      expect(descriptorStats).toBeGreaterThanOrEqual(2)
+      expect(descriptorReads).toBeGreaterThan(0)
+      await expect(nativeClient.restoreCareerProfile({
+        archiveToken: selection!.archiveToken,
+        confirmation: 'RESTORE_CAREER_PROFILE_BASELINE',
+        expectedProfileRevision: 7,
+        idempotencyKey: 'same-descriptor-1'
+      })).resolves.toMatchObject({ baselineCreated: true })
+    } finally {
+      await rm(directory, { force: true, recursive: true })
+    }
+  })
+
+  it('rejects an archive that changes while its descriptor is being read', async () => {
+    const directory = await mkdtemp(path.join(os.tmpdir(), 'jobos-career-profile-changing-'))
+    try {
+      const archivePath = path.join(directory, 'career-profile.zip')
+      const bytes = Buffer.from('(FAKE) changing restore archive')
+      await writeFile(archivePath, bytes)
+      let changed = false
+      const openArchiveFile = async (filePath: string, flags: number, mode?: number) => {
+        const handle = await open(filePath, flags, mode)
+        if (filePath === archivePath) {
+          const readDescriptor = handle.read.bind(handle)
+          Object.defineProperty(handle, 'read', {
+            configurable: true,
+            value: async (buffer: Buffer, offset: number, length: number, position: number) => {
+              const result = await readDescriptor(buffer, offset, length, position)
+              if (!changed && result.bytesRead > 0) {
+                changed = true
+                await appendFile(archivePath, '!')
+              }
+              return result
+            }
+          })
+        }
+        return handle
+      }
+      const nativeClient = createMainCareerProfileClient({
+        baseUrl: 'http://127.0.0.1:8766',
+        deviceToken: 'test-device-token'
+      }, {
+        chooseArchivePath: async () => archivePath,
+        chooseExportPath: async () => null
+      }, {
+        archiveFileSystem: { open: openArchiveFile }
+      })
+
+      await expect(nativeClient.chooseCareerProfileArchive()).rejects.toThrow('changed while it was being read')
+      expect(changed).toBe(true)
+    } finally {
+      await rm(directory, { force: true, recursive: true })
+    }
+  })
+
+  it('rejects non-regular and oversized restore selections from descriptor metadata', async () => {
+    const directory = await mkdtemp(path.join(os.tmpdir(), 'jobos-career-profile-invalid-'))
+    try {
+      const oversizedPath = path.join(directory, 'oversized.zip')
+      await writeFile(oversizedPath, '')
+      await truncate(oversizedPath, (100 * 1024 * 1024) + 1)
+      for (const selectedPath of [directory, oversizedPath]) {
+        const nativeClient = createMainCareerProfileClient({
+          baseUrl: 'http://127.0.0.1:8766',
+          deviceToken: 'test-device-token'
+        }, {
+          chooseArchivePath: async () => selectedPath,
+          chooseExportPath: async () => null
+        })
+        await expect(nativeClient.chooseCareerProfileArchive()).rejects.toThrow('regular')
+      }
+    } finally {
+      await rm(directory, { force: true, recursive: true })
+    }
+  })
+
+  it('keeps restore archive bytes in main, rejects symlinks, and consumes a successful token', async () => {
+    const directory = await mkdtemp(path.join(os.tmpdir(), 'jobos-career-profile-restore-'))
+    try {
+      const archivePath = path.join(directory, 'career-profile.zip')
+      const symlinkPath = path.join(directory, 'linked-profile.zip')
+      const bytes = Buffer.from('(FAKE) restore archive')
+      await writeFile(archivePath, bytes)
+      await symlink(archivePath, symlinkPath)
+
+      const symlinkClient = createMainCareerProfileClient({
+        baseUrl: 'http://127.0.0.1:8766',
+        deviceToken: 'test-device-token'
+      }, {
+        chooseArchivePath: async () => symlinkPath,
+        chooseExportPath: async () => null
+      })
+      await expect(symlinkClient.chooseCareerProfileArchive()).rejects.toThrow('regular')
+
+      const fetchMock = vi.fn(async (_input, init) => {
+        const body = JSON.parse(String(init?.body))
+        expect(body).toEqual({
+          archive_base64: bytes.toString('base64'),
+          confirmation: 'RESTORE_CAREER_PROFILE_BASELINE',
+          expected_profile_revision: 7,
+          idempotency_key: 'restore-archive-1'
+        })
+        expect(JSON.stringify(body)).not.toContain(archivePath)
+        return new Response(JSON.stringify({
+          archive_sha256: createHash('sha256').update(bytes).digest('hex'),
+          baseline_created: true,
+          profile: { ...emptyCompleteProfile, profile_revision: 1 },
+          restored_evidence_ids: [],
+          unavailable_evidence_ids: []
+        }), { status: 200 })
+      })
+      globalThis.fetch = fetchMock as typeof fetch
+      const nativeClient = createMainCareerProfileClient({
+        baseUrl: 'http://127.0.0.1:8766',
+        deviceToken: 'test-device-token'
+      }, {
+        chooseArchivePath: async () => archivePath,
+        chooseExportPath: async () => null
+      })
+      const selection = await nativeClient.chooseCareerProfileArchive()
+      expect(selection).toMatchObject({ byteCount: bytes.length, filename: 'career-profile.zip' })
+      expect(selection?.archiveToken).toMatch(/^cpa_[a-f0-9]{32}$/)
+      const request = {
+        archiveToken: selection!.archiveToken,
+        confirmation: 'RESTORE_CAREER_PROFILE_BASELINE' as const,
+        expectedProfileRevision: 7,
+        idempotencyKey: 'restore-archive-1'
+      }
+      await expect(nativeClient.restoreCareerProfile(request)).resolves.toMatchObject({
+        baselineCreated: true,
+        profile: { profileRevision: 1 }
+      })
+      await expect(nativeClient.restoreCareerProfile(request)).rejects.toThrow('expired')
+      expect(fetchMock).toHaveBeenCalledTimes(1)
+    } finally {
+      await rm(directory, { force: true, recursive: true })
+    }
+  })
+
+  it('expires pending restore bytes on schedule without another archive operation', async () => {
+    vi.useFakeTimers()
+    const directory = await mkdtemp(path.join(os.tmpdir(), 'jobos-career-profile-expiry-'))
+    try {
+      const archivePath = path.join(directory, 'career-profile.zip')
+      await writeFile(archivePath, '(FAKE) expiring restore archive')
+      const nativeClient = createMainCareerProfileClient({
+        baseUrl: 'http://127.0.0.1:8766', deviceToken: 'test-device-token'
+      }, { chooseArchivePath: async () => archivePath, chooseExportPath: async () => null })
+      const selection = await nativeClient.chooseCareerProfileArchive()
+      await vi.advanceTimersByTimeAsync(30 * 60 * 1000)
+      await expect(nativeClient.restoreCareerProfile({
+        archiveToken: selection!.archiveToken,
+        confirmation: 'RESTORE_CAREER_PROFILE_BASELINE',
+        expectedProfileRevision: 7,
+        idempotencyKey: 'expired-archive-1'
+      })).rejects.toThrow('expired')
+    } finally {
+      vi.useRealTimers()
+      await rm(directory, { force: true, recursive: true })
+    }
+  })
+
+  it('cancels the scheduled expiry when restore consumes the archive', async () => {
+    vi.useFakeTimers()
+    const directory = await mkdtemp(path.join(os.tmpdir(), 'jobos-career-profile-consumed-timer-'))
+    try {
+      const archivePath = path.join(directory, 'career-profile.zip')
+      const bytes = Buffer.from('(FAKE) consumed restore archive')
+      await writeFile(archivePath, bytes)
+      globalThis.fetch = vi.fn(async () => new Response(JSON.stringify({
+        archive_sha256: createHash('sha256').update(bytes).digest('hex'),
+        baseline_created: true,
+        profile: { ...emptyCompleteProfile, profile_revision: 1 },
+        restored_evidence_ids: [],
+        unavailable_evidence_ids: []
+      }), { status: 200 })) as typeof fetch
+      const nativeClient = createMainCareerProfileClient({
+        baseUrl: 'http://127.0.0.1:8766', deviceToken: 'test-device-token'
+      }, { chooseArchivePath: async () => archivePath, chooseExportPath: async () => null })
+      const selection = await nativeClient.chooseCareerProfileArchive()
+      expect(vi.getTimerCount()).toBe(1)
+      await nativeClient.restoreCareerProfile({
+        archiveToken: selection!.archiveToken,
+        confirmation: 'RESTORE_CAREER_PROFILE_BASELINE',
+        expectedProfileRevision: 7,
+        idempotencyKey: 'consumed-archive-1'
+      })
+      expect(vi.getTimerCount()).toBe(0)
+    } finally {
+      vi.useRealTimers()
+      await rm(directory, { force: true, recursive: true })
+    }
   })
 
   it('rejects a restore target that the API cannot represent', async () => {

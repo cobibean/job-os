@@ -1,7 +1,12 @@
 from pathlib import Path
 
 import pytest
-from jobos_api.settings import DeviceCredential, Settings, parse_device_credentials
+from jobos_api.settings import (
+    MCP_RUNTIME_DEVICE_ID,
+    DeviceCredential,
+    Settings,
+    parse_device_credentials,
+)
 from pydantic import ValidationError
 
 
@@ -28,6 +33,7 @@ def test_settings_builds_a_secret_safe_device_credential_registry():
 
     assert settings.device_credential_registry() == {
         "mini-device": "mini-device-token-value",
+        MCP_RUNTIME_DEVICE_ID: "trusted-mcp-token-value",
         "macbook-device": "macbook-device-token-value",
     }
     assert "mini-device-token-value" not in repr(settings)
