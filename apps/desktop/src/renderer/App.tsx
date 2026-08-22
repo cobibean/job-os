@@ -389,6 +389,7 @@ function WorkbenchApp() {
         <SettingsPanel
           activeAgentAvatarId={agentAvatar.avatarId}
           activeThemeId={theme.themeId}
+          careerProfileBridge={window.jobos.careerProfile}
           mode={theme.mode}
           onClose={() => setSettingsOpen(false)}
           onSelectAgentAvatar={agentAvatar.selectAvatar}

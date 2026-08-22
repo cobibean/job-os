@@ -54,7 +54,7 @@ def test_health_reports_truthful_public_capability_states(tmp_path):
         "status": "ready",
         "service": "jobos-api",
         "version": "0.1.0",
-        "state_schema": 26,
+        "state_schema": 28,
         "transport": "local-loopback",
         "agent": "not-configured",
         "artifact_storage": "available",
@@ -188,6 +188,13 @@ def test_version_and_openapi_describe_the_shared_workspace_contract(tmp_path):
         "/v1/career-profile/items/{item_id}",
         "/v1/career-profile/items/{item_id}/decision",
         "/v1/career-profile/intent-grants",
+        "/v1/career-profile/agents",
+        "/v1/career-profile/agents/{agent_id}",
+        "/v1/career-profile/agent-edits",
+        "/v1/career-profile/proposals",
+        "/v1/career-profile/proposals/{proposal_id}/decision",
+        "/v1/career-profile/history",
+        "/v1/career-profile/history/{revision_id}/undo",
         "/v1/career-profile/evidence",
         "/v1/career-profile/evidence/{evidence_id}",
         "/v1/career-profile/evidence/{evidence_id}/content",
@@ -313,7 +320,7 @@ def test_version_and_openapi_describe_the_shared_workspace_contract(tmp_path):
                 assert response["content"]["application/json"]["schema"] == {
                     "$ref": "#/components/schemas/ApiErrorResponse"
                 }
-    assert documented_errors < 350
+    assert documented_errors < 375
     assert set(schemas["JobListItem"]["required"]) == {
         "job_id",
         "company",

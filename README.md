@@ -56,7 +56,9 @@ AI agents are great at researching companies and tailoring applications — but 
 
 ## Quick start
 
-> **Heads up:** JobOS is pre-release **alpha** and runs **from source on macOS**. There's no downloadable app yet. Interfaces and storage may still change.
+> **Heads up:** JobOS is **pre-release alpha** and runs **from source on macOS**. There's no downloadable app yet. Interfaces and storage may still change.
+>
+> The source-first clean-clone path is accepted. There is no supported public JobOS binary yet.
 
 **Prerequisites** (use the pinned versions):
 
@@ -90,7 +92,7 @@ pnpm dev
 <details>
 <summary><b>Connect an external agent through MCP</b></summary>
 
-JobOS exposes a local stdio MCP server so any MCP-capable agent can operate your JobOS jobs, workspace, documents, activity, and validated browser tools. This does **not** power the embedded JobOS chat — that stays offline in the public source config.
+JobOS exposes a local stdio MCP server so any MCP-capable agent can operate your JobOS jobs, workspace, documents, activity, and validated browser tools. It does not power or replace the embedded JobOS chat — that stays offline in the public source config.
 
 Finish first-run setup above and keep JobOS open. Then add a stdio MCP server to your agent. Clients differ, but most accept this `command`/`args` shape:
 
@@ -182,7 +184,7 @@ Pre-release **alpha**, honest about where it is:
 | Area | Where it stands |
 |---|---|
 | **Maturity** | Alpha — interfaces and storage may change |
-| **Distribution** | Source-first; no supported public binary yet |
+| **Distribution** | source-first; no supported public binary yet |
 | **Desktop** | macOS is the target. Linux runs backend + source checks in CI. Windows unsupported. |
 | **Privacy** | Local-first defaults — no private network, private data, or second repo needed |
 

@@ -146,6 +146,8 @@ def test_service_environment_and_uvicorn_command_are_fixed_and_loopback_only(tmp
         "JOBOS_HERMES_DASHBOARD_TOKEN": "hermes-secret-value",
         "JOBOS_HERMES_JOB_HUNTER_CWD": str(tmp_path / "job-hunter"),
         "JOBOS_CAREER_PROFILE_ENABLED": "1",
+        "JOBOS_CAREER_PROFILE_AGENT_ID": "trusted-local-mcp",
+        "JOBOS_CAREER_PROFILE_AGENT_DISPLAY_NAME": "JobOS Agent",
     }
     assert build_uvicorn_arguments(config) == [
         str(tmp_path / "job-os/.venv/bin/python"),

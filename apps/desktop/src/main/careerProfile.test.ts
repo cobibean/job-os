@@ -151,6 +151,128 @@ describe('Career Profile desktop client', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1)
   })
 
+  it('maps connected-agent review, exact decisions, history, and Undo through authenticated routes', async () => {
+    const agent = {
+      active: true,
+      agent_id: 'job-hunter',
+      connected_at: '2026-08-21T15:00:00Z',
+      disconnected_at: null,
+      display_name: 'Job Hunter',
+      principal: 'agent:job-hunter',
+      trust_mode: 'review',
+      updated_at: '2026-08-21T15:00:00Z'
+    }
+    const item = {
+      actor_principal: 'agent:job-hunter',
+      area: 'my_career',
+      created_at: '2026-08-21T15:00:00Z',
+      evidence_ids: [],
+      item_id: 'cpi_fakeproposalitem1234',
+      item_revision: 1,
+      provenance: { method: 'agent_edit', mutation_source: 'agent_inference' },
+      review_status: 'accepted',
+      updated_at: '2026-08-21T15:00:00Z',
+      value: { kind: 'skill', name: 'TypeScript' }
+    }
+    const proposal = {
+      after: item,
+      agent_display_name: 'Job Hunter',
+      agent_id: 'job-hunter',
+      base_profile_revision: 2,
+      before: null,
+      created_at: '2026-08-21T15:00:00Z',
+      evidence_ids: [],
+      operation: 'item.create',
+      proposal_id: 'cpp_fakeproposal123456',
+      proposal_sha256: 'a'.repeat(64),
+      reason: 'Add the skill you asked me to capture.',
+      review_reason: 'This agent is set to Review every change.',
+      status: 'pending',
+      target_id: item.item_id
+    }
+    const revision = {
+      actor_kind: 'autonomous_agent',
+      actor_principal: 'agent:job-hunter',
+      affected_fields: ['value'],
+      after: item,
+      base_profile_revision: 2,
+      before: null,
+      created_at: '2026-08-21T15:00:00Z',
+      evidence_id: null,
+      item_id: item.item_id,
+      operation: 'item.upsert',
+      profile_revision: 3,
+      proposal_id: null,
+      reason: proposal.reason,
+      revision_id: 'cpv_fakedirectrevision1',
+      undo_of_revision_id: null,
+      undoable: true
+    }
+
+    const fetchMock = vi.fn(async (input, init) => {
+      const url = String(input)
+      expect(new Headers(init?.headers).get('Authorization')).toBe('Bearer test-device-token')
+      if (url.endsWith('/agents') && !init?.method) {
+        return new Response(JSON.stringify({ agents: [agent] }), { status: 200 })
+      }
+      if (url.endsWith('/agents/job-hunter') && init?.method === 'PATCH') {
+        expect(JSON.parse(String(init.body))).toEqual({ trust_mode: 'direct' })
+        return new Response(JSON.stringify({ ...agent, trust_mode: 'direct' }), { status: 200 })
+      }
+      if (url.endsWith('/agents/job-hunter') && init?.method === 'DELETE') {
+        return new Response(JSON.stringify({ ...agent, active: false }), { status: 200 })
+      }
+      if (url.endsWith('/proposals') && !init?.method) {
+        return new Response(JSON.stringify({ proposals: [proposal] }), { status: 200 })
+      }
+      if (url.endsWith('/proposals/cpp_fakeproposal123456/decision')) {
+        expect(JSON.parse(String(init?.body))).toEqual({
+          decision: 'accept',
+          expected_profile_revision: 2,
+          idempotency_key: 'proposal-decision-1',
+          proposal_sha256: 'a'.repeat(64)
+        })
+        return new Response(JSON.stringify({
+          profile: { authority_epoch: 1, items: [item], profile_revision: 3, source_evidence: [] },
+          proposal: { ...proposal, status: 'accepted' }
+        }), { status: 200 })
+      }
+      if (url.endsWith('/history') && !init?.method) {
+        return new Response(JSON.stringify({ profile_revision: 3, revisions: [revision] }), { status: 200 })
+      }
+      if (url.endsWith('/history/cpv_fakedirectrevision1/undo')) {
+        expect(JSON.parse(String(init?.body))).toEqual({
+          expected_profile_revision: 3,
+          idempotency_key: 'direct-undo-1'
+        })
+        return new Response(JSON.stringify({ authority_epoch: 1, items: [], profile_revision: 4, source_evidence: [] }), { status: 200 })
+      }
+      return new Response(null, { status: 404 })
+    })
+    globalThis.fetch = fetchMock as typeof fetch
+
+    await expect(client().listConnectedAgents()).resolves.toMatchObject([{ agentId: 'job-hunter', trustMode: 'review' }])
+    await expect(client().updateConnectedAgentTrustMode('job-hunter', 'direct')).resolves.toMatchObject({ trustMode: 'direct' })
+    await expect(client().disconnectConnectedAgent('job-hunter')).resolves.toMatchObject({ active: false })
+    await expect(client().listCareerProfileProposals()).resolves.toMatchObject([{
+      agentDisplayName: 'Job Hunter', evidenceIds: [], proposalId: 'cpp_fakeproposal123456'
+    }])
+    await expect(client().decideCareerProfileProposal('cpp_fakeproposal123456', {
+      decision: 'accept',
+      expectedProfileRevision: 2,
+      idempotencyKey: 'proposal-decision-1',
+      proposalSha256: 'a'.repeat(64)
+    })).resolves.toMatchObject({ profileRevision: 3, proposal: { status: 'accepted' } })
+    await expect(client().getCareerProfileChangeHistory()).resolves.toMatchObject({
+      profileRevision: 3,
+      revisions: [{ actorKind: 'autonomous_agent', revisionId: 'cpv_fakedirectrevision1', undoable: true }]
+    })
+    await expect(client().undoCareerProfileChange('cpv_fakedirectrevision1', {
+      expectedProfileRevision: 3,
+      idempotencyKey: 'direct-undo-1'
+    })).resolves.toEqual({ profileRevision: 4 })
+  })
+
   it('rejects a restore target that the API cannot represent', async () => {
     const fetchMock = vi.fn()
     globalThis.fetch = fetchMock as typeof fetch

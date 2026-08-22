@@ -55,6 +55,21 @@ class Settings(BaseModel):
     hermes_job_hunter_cwd: Path | None = None
     hermes_request_timeout: float = Field(default=5.0, gt=0, le=30)
     career_profile_enabled: bool = False
+    career_profile_agent_id: str = Field(
+        default="trusted-local-mcp",
+        min_length=1,
+        max_length=100,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]*$",
+    )
+    career_profile_agent_display_name: str = Field(
+        default="JobOS Agent", min_length=1, max_length=120
+    )
+    career_profile_agent_token: str | None = Field(
+        default=None,
+        min_length=16,
+        max_length=4096,
+        repr=False,
+    )
 
     @model_validator(mode="after")
     def validate_unique_device_credentials(self) -> "Settings":
@@ -63,6 +78,7 @@ class Settings(BaseModel):
             self.device_token,
             self.mcp_token,
             *(item.token for item in self.device_credentials),
+            *([self.career_profile_agent_token] if self.career_profile_agent_token else []),
         ]
         if len(set(device_ids)) != len(device_ids):
             raise ValueError("device identifiers must be unique")
@@ -75,6 +91,10 @@ class Settings(BaseModel):
             self.device_id: self.device_token,
             **{item.device_id: item.token for item in self.device_credentials},
         }
+
+    def resolved_career_profile_agent_token(self) -> str:
+        """Resolve an optional agent credential with local-runtime compatibility."""
+        return self.career_profile_agent_token or self.mcp_token
 
     def resolved_jobs_db_path(self) -> Path:
         return self.jobs_db_path or self.state_db_path.parent / "jobs.db"

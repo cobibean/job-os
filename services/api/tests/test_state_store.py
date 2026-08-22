@@ -143,7 +143,7 @@ def test_initialization_applies_every_migration_once(tmp_path):
     first = store.initialize()
     second = store.initialize()
 
-    assert first.schema_version == SCHEMA_VERSION == 26
+    assert first.schema_version == SCHEMA_VERSION == 28
     assert second.schema_version == SCHEMA_VERSION
     assert applied_versions(database) == [
         1,
@@ -172,6 +172,8 @@ def test_initialization_applies_every_migration_once(tmp_path):
         24,
         25,
         26,
+        27,
+        28,
     ]
     assert metadata_columns(database) == {"key", "value", "updated_at"}
 
@@ -236,6 +238,8 @@ def test_initialization_upgrades_a_behind_database(tmp_path):
         24,
         25,
         26,
+        27,
+        28,
     ]
     assert metadata_columns(database) == {"key", "value", "updated_at"}
 
@@ -333,7 +337,7 @@ def test_migration_15_reconciles_dirty_v14_publications_deterministically(tmp_pa
             (document_id,),
         ).fetchone()
 
-    assert health.schema_version == 26
+    assert health.schema_version == 28
     assert associated == [
         ("art_old_pdf_1234567", "application/pdf", "source-shared"),
         ("art_old_docx_123456", docx_media, "source-shared"),
@@ -447,7 +451,7 @@ def test_migration_15_preserves_valid_owner_and_clears_mixed_wrong_owner_pointer
             (document_id,),
         ).fetchall()
 
-    assert health.schema_version == 26
+    assert health.schema_version == 28
     assert owner_state == (
         "art_owner_pdf_123456",
         "art_owner_pdf_123456",
@@ -635,7 +639,7 @@ def test_migration_15_detaches_every_malformed_v14_publication_and_allows_republ
             connection=connection,
         )
 
-    assert health.schema_version == 26
+    assert health.schema_version == 28
     assert detached == sorted((row[0],) for row in legacy_rows)
     assert state == (None, None, None, None)
     assert published == (None,)
@@ -732,6 +736,8 @@ def test_document_identity_migration_clears_legacy_docx_approval(tmp_path):
             25,
             26,
             27,
+            28,
+            29,
         ],
         [2],
     ),

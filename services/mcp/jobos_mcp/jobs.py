@@ -121,11 +121,19 @@ class JobOsMcpClient:
         base_url: str,
         device_token: str,
         mcp_token: str,
+        agent_id: str = "trusted-local-mcp",
+        agent_token: str | None = None,
         transport: httpx.AsyncBaseTransport | None = None,
     ) -> None:
+        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,99}", agent_id):
+            raise ValueError("Invalid Career Profile agent ID")
         self._conversation_scope: ContextVar[str | None] = ContextVar(
             "jobos_mcp_conversation_id", default=None
         )
+        self._career_profile_agent_headers = {
+            "X-JobOS-Agent-Id": agent_id,
+            "X-JobOS-Agent-Token": agent_token or mcp_token,
+        }
         self._client = httpx.AsyncClient(
             base_url=base_url,
             headers={
@@ -165,6 +173,41 @@ class JobOsMcpClient:
             "GET",
             f"/v1/jobs/{self._segment(job_id, 'job ID')}",
             params={"origin": "mcp", "idempotency_key": self._key(idempotency_key)},
+        )
+
+    async def get_career_profile(self) -> dict[str, Any]:
+        """Read the canonical Career Profile and its current revision."""
+        return await self._request(
+            "GET",
+            "/v1/career-profile",
+            headers=self._career_profile_agent_headers,
+        )
+
+    async def edit_career_profile(
+        self,
+        *,
+        expected_profile_revision: int,
+        operation: str,
+        reason: str,
+        value: dict[str, Any] | None = None,
+        target_id: str | None = None,
+        evidence_ids: list[str] | None = None,
+        idempotency_key: str | None = None,
+    ) -> dict[str, Any]:
+        """Apply or propose one Career Profile edit under the user's selected mode."""
+        return await self._request(
+            "POST",
+            "/v1/career-profile/agent-edits",
+            headers=self._career_profile_agent_headers,
+            json={
+                "expected_profile_revision": expected_profile_revision,
+                "idempotency_key": self._key(idempotency_key),
+                "operation": operation,
+                "target_id": target_id,
+                "reason": reason,
+                "value": value,
+                "evidence_ids": evidence_ids or [],
+            },
         )
 
     async def create_job(

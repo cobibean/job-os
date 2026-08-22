@@ -46,6 +46,13 @@ function bridge(overrides: Partial<CareerProfileBridge> = {}): CareerProfileBrid
       }]
     }),
     restoreWorkArrangement: vi.fn().mockResolvedValue({ status: 'saved', current }),
+    listConnectedAgents: vi.fn().mockResolvedValue([]),
+    updateConnectedAgentTrustMode: vi.fn(),
+    disconnectConnectedAgent: vi.fn(),
+    listCareerProfileProposals: vi.fn().mockResolvedValue([]),
+    decideCareerProfileProposal: vi.fn(),
+    getCareerProfileChangeHistory: vi.fn().mockResolvedValue({ profileRevision: 2, revisions: [] }),
+    undoCareerProfileChange: vi.fn(),
     ...overrides
   }
 }
@@ -317,4 +324,141 @@ test('keeps empty and failure states actionable', async () => {
   expect((await screen.findByRole('alert')).textContent).toContain('Career Profile is unavailable right now')
   fireEvent.click(screen.getByRole('button', { name: 'Try again' }))
   expect(await screen.findByText('Tell JobOS where you want to work')).not.toBeNull()
+})
+
+test('shows an exact zero-Evidence proposal and binds approval to its revision and payload', async () => {
+  const proposal = {
+    after: {
+      actorPrincipal: 'agent:job-hunter',
+      area: 'my_career' as const,
+      createdAt: '2026-08-21T15:00:00Z',
+      evidenceIds: [],
+      itemId: 'cpi_fakeproposalitem1234',
+      itemRevision: 2,
+      provenance: { method: 'agent_edit', mutation_source: 'agent_inference' },
+      reviewStatus: 'accepted' as const,
+      updatedAt: '2026-08-21T15:00:00Z',
+      value: { kind: 'skill', name: 'TypeScript', level: 'advanced' }
+    },
+    agentDisplayName: 'Job Hunter',
+    agentId: 'job-hunter',
+    baseProfileRevision: 2,
+    before: {
+      actorPrincipal: 'primary-device',
+      area: 'my_career' as const,
+      createdAt: '2026-08-20T15:00:00Z',
+      evidenceIds: [],
+      itemId: 'cpi_fakeproposalitem1234',
+      itemRevision: 1,
+      provenance: { method: 'user_entered', mutation_source: 'direct_user_edit' },
+      reviewStatus: 'accepted' as const,
+      updatedAt: '2026-08-20T15:00:00Z',
+      value: { kind: 'skill', name: 'TypeScript', level: 'intermediate' }
+    },
+    createdAt: '2026-08-21T15:00:00Z',
+    evidenceIds: [],
+    operation: 'item.update' as const,
+    proposalId: 'cpp_fakeproposal123456',
+    proposalSha256: 'a'.repeat(64),
+    reason: 'Your recent project shows deeper TypeScript work.',
+    reviewReason: 'This agent is set to Review every change.',
+    status: 'pending' as const,
+    targetId: 'cpi_fakeproposalitem1234'
+  }
+  const decideCareerProfileProposal = vi.fn().mockResolvedValue({
+    profileRevision: 3,
+    proposal: { ...proposal, status: 'accepted' }
+  })
+  const api = bridge({
+    listCareerProfileProposals: vi.fn().mockResolvedValue([proposal]),
+    decideCareerProfileProposal
+  })
+  render(<CareerProfileWorkspace bridge={api} hasActiveTurn={false} />)
+
+  expect(await screen.findByRole('heading', { name: /Review Job Hunter’s change/i })).not.toBeNull()
+  expect(screen.getByText(/No Evidence attached — that’s okay/i)).not.toBeNull()
+  expect(screen.getByText(/intermediate/)).not.toBeNull()
+  expect(screen.getByText(/advanced/)).not.toBeNull()
+  expect(screen.getAllByText('Level')).toHaveLength(2)
+  expect(screen.queryByText(/"level":/)).toBeNull()
+
+  fireEvent.click(screen.getByRole('button', { name: 'Accept exact change' }))
+  await waitFor(() => expect(decideCareerProfileProposal).toHaveBeenCalledWith(
+    'cpp_fakeproposal123456',
+    expect.objectContaining({
+      decision: 'accept',
+      expectedProfileRevision: 2,
+      proposalSha256: 'a'.repeat(64)
+    })
+  ))
+})
+
+test('surfaces a direct agent edit as a lightweight confirmation with prominent Undo', async () => {
+  const undoCareerProfileChange = vi.fn().mockResolvedValue({ profileRevision: 4 })
+  const api = bridge({
+    getCareerProfileChangeHistory: vi.fn().mockResolvedValue({
+      profileRevision: 3,
+      revisions: [{
+        actorKind: 'autonomous_agent',
+        actorPrincipal: 'agent:job-hunter',
+        affectedFields: ['value'],
+        after: { value: { kind: 'skill', name: 'TypeScript' } },
+        baseProfileRevision: 2,
+        before: null,
+        createdAt: '2026-08-21T15:00:00Z',
+        evidenceId: null,
+        itemId: 'cpi_fakedirectitem12345',
+        operation: 'item.upsert',
+        profileRevision: 3,
+        proposalId: null,
+        reason: 'Added the skill you asked me to capture.',
+        revisionId: 'cpv_fakedirectrevision1',
+        undoOfRevisionId: null,
+        undoable: true
+      }]
+    }),
+    undoCareerProfileChange
+  })
+  render(<CareerProfileWorkspace bridge={api} hasActiveTurn={false} />)
+
+  expect(await screen.findByText(/Job Hunter updated your Career Profile/i)).not.toBeNull()
+  fireEvent.click(screen.getByRole('button', { name: 'Undo agent change' }))
+  await waitFor(() => expect(undoCareerProfileChange).toHaveBeenCalledWith(
+    'cpv_fakedirectrevision1',
+    expect.objectContaining({ expectedProfileRevision: 3 })
+  ))
+})
+
+test('refreshes agent proposals and history when the app regains focus', async () => {
+  const getCareerProfileChangeHistory = vi.fn()
+    .mockResolvedValueOnce({ profileRevision: 2, revisions: [] })
+    .mockResolvedValue({
+      profileRevision: 3,
+      revisions: [{
+        actorKind: 'autonomous_agent',
+        actorPrincipal: 'agent:job-hunter',
+        affectedFields: ['value'],
+        after: { value: { kind: 'skill', name: 'TypeScript' } },
+        baseProfileRevision: 2,
+        before: null,
+        createdAt: '2026-08-21T15:00:00Z',
+        evidenceId: null,
+        itemId: 'cpi_fakefocusitem123456',
+        operation: 'item.upsert',
+        profileRevision: 3,
+        proposalId: null,
+        reason: 'Captured a skill while JobOS was in the background.',
+        revisionId: 'cpv_fakefocusrevision1',
+        undoOfRevisionId: null,
+        undoable: true
+      }]
+    })
+  const api = bridge({ getCareerProfileChangeHistory })
+  render(<CareerProfileWorkspace bridge={api} hasActiveTurn={false} />)
+
+  await waitFor(() => expect(getCareerProfileChangeHistory).toHaveBeenCalledTimes(1))
+  window.dispatchEvent(new Event('focus'))
+
+  await waitFor(() => expect(getCareerProfileChangeHistory).toHaveBeenCalledTimes(2))
+  expect(await screen.findByText(/Job Hunter updated your Career Profile/i)).not.toBeNull()
 })

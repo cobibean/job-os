@@ -8,7 +8,7 @@ import subprocess
 import sys
 from hashlib import sha256
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 from mcp.server.fastmcp import FastMCP
 from pydantic import Field
@@ -420,6 +420,37 @@ def create_server(
             job_id,
             description_text,
             source_note=source_note,
+            idempotency_key=idempotency_key,
+        )
+
+    @server.tool(name="career_profile_get", structured_output=True)
+    async def career_profile_get() -> dict[str, Any]:
+        """Read the user's canonical Career Profile and current revision."""
+        return await client.get_career_profile()
+
+    @server.tool(name="career_profile_edit", structured_output=True)
+    async def career_profile_edit(
+        expected_profile_revision: int,
+        operation: Literal["item.create", "item.update", "item.remove"],
+        reason: str,
+        value: dict[str, Any] | None = None,
+        target_id: str | None = None,
+        evidence_ids: list[str] | None = None,
+        idempotency_key: str | None = None,
+    ) -> dict[str, Any]:
+        """Submit one exact Career Profile edit under the user's selected review mode.
+
+        Ordinary edits may apply immediately when the user allows direct edits. Review-mode
+        edits, identity changes, removals, Evidence removal, and loosened claim boundaries
+        become proposals for the user. Evidence is optional.
+        """
+        return await client.edit_career_profile(
+            expected_profile_revision=expected_profile_revision,
+            operation=operation,
+            reason=reason,
+            value=value,
+            target_id=target_id,
+            evidence_ids=evidence_ids,
             idempotency_key=idempotency_key,
         )
 
@@ -868,7 +899,13 @@ def main() -> None:
     if not device_token:
         raise RuntimeError("JOBOS_DEVICE_TOKEN is required")
     mcp_token = local_mcp_token()
-    client = JobOsMcpClient(base_url=base_url, device_token=device_token, mcp_token=mcp_token)
+    client = JobOsMcpClient(
+        base_url=base_url,
+        device_token=device_token,
+        mcp_token=mcp_token,
+        agent_id=os.environ.get("JOBOS_CAREER_PROFILE_AGENT_ID", "trusted-local-mcp"),
+        agent_token=os.environ.get("JOBOS_CAREER_PROFILE_AGENT_TOKEN"),
+    )
     try:
         create_server(client).run(transport="stdio")
     finally:

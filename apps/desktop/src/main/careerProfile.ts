@@ -1,4 +1,13 @@
 import type {
+  CareerProfileChangeProposal as ApiCareerProfileChangeProposal,
+  CareerProfileCompleteCurrent as ApiCareerProfileCompleteCurrent,
+  CareerProfileProposalList as ApiCareerProfileProposalList,
+  ConnectedAgent as ApiConnectedAgent,
+  ConnectedAgentList as ApiConnectedAgentList,
+  ProfileHistory as ApiProfileHistory,
+  ProfileHistoryRevision as ApiProfileHistoryRevision,
+  ProfileItemRecord as ApiProfileItemRecord,
+  ProposalDecisionResult as ApiProposalDecisionResult,
   WorkArrangementCurrent as ApiWorkArrangementCurrent,
   WorkArrangementHistory as ApiWorkArrangementHistory,
   WorkArrangementRecord as ApiWorkArrangementRecord,
@@ -8,6 +17,15 @@ import { createHmac, timingSafeEqual } from 'node:crypto'
 import { CAREER_PROFILE_ADDITIONAL_CONTEXT_LIMIT, careerProfileAdditionalContextLength } from '../shared/contracts.js'
 
 import type {
+  CareerProfileChangeHistory,
+  CareerProfileChangeProposal,
+  CareerProfileChangeRevision,
+  CareerProfileItemSnapshot,
+  CareerProfileProposalDecisionRequest,
+  CareerProfileProposalDecisionResult,
+  CareerProfileTrustMode,
+  CareerProfileUndoRequest,
+  ConnectedCareerProfileAgent,
   WorkArrangementCurrent,
   WorkArrangementHistory,
   WorkArrangementMutationRequest,
@@ -20,8 +38,10 @@ import type {
 import type { JobsConfig } from './jobs.js'
 
 const ROUTE = '/v1/career-profile/work-arrangement'
+const COLLABORATION_ROUTE = '/v1/career-profile'
 const modes = new Set(['remote', 'hybrid', 'onsite', 'flexible'])
 const strengths = new Set(['requirement', 'strong_preference', 'preference', 'dealbreaker'])
+const trustModes = new Set<CareerProfileTrustMode>(['review', 'direct'])
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
@@ -72,6 +92,81 @@ function mapHistory(history: ApiWorkArrangementHistory): WorkArrangementHistory 
   }
 }
 
+function mapConnectedAgent(agent: ApiConnectedAgent): ConnectedCareerProfileAgent {
+  return {
+    active: agent.active,
+    agentId: agent.agent_id,
+    connectedAt: agent.connected_at,
+    disconnectedAt: agent.disconnected_at ?? null,
+    displayName: agent.display_name,
+    principal: agent.principal,
+    trustMode: agent.trust_mode,
+    updatedAt: agent.updated_at
+  }
+}
+
+function mapItemSnapshot(item: ApiProfileItemRecord): CareerProfileItemSnapshot {
+  return {
+    actorPrincipal: item.actor_principal,
+    area: item.area,
+    createdAt: item.created_at,
+    evidenceIds: item.evidence_ids ?? [],
+    itemId: item.item_id,
+    itemRevision: item.item_revision,
+    provenance: { ...item.provenance },
+    reviewStatus: item.review_status,
+    updatedAt: item.updated_at,
+    value: { ...item.value }
+  }
+}
+
+function mapProposal(proposal: ApiCareerProfileChangeProposal): CareerProfileChangeProposal {
+  return {
+    after: proposal.after ? mapItemSnapshot(proposal.after) : null,
+    agentDisplayName: proposal.agent_display_name,
+    agentId: proposal.agent_id,
+    baseProfileRevision: proposal.base_profile_revision,
+    before: proposal.before ? mapItemSnapshot(proposal.before) : null,
+    createdAt: proposal.created_at,
+    evidenceIds: proposal.evidence_ids,
+    operation: proposal.operation,
+    proposalId: proposal.proposal_id,
+    proposalSha256: proposal.proposal_sha256,
+    reason: proposal.reason,
+    reviewReason: proposal.review_reason,
+    status: proposal.status,
+    targetId: proposal.target_id
+  }
+}
+
+function mapChangeRevision(revision: ApiProfileHistoryRevision): CareerProfileChangeRevision {
+  return {
+    actorKind: revision.actor_kind,
+    actorPrincipal: revision.actor_principal,
+    affectedFields: revision.affected_fields,
+    after: revision.after,
+    baseProfileRevision: revision.base_profile_revision,
+    before: revision.before,
+    createdAt: revision.created_at,
+    evidenceId: revision.evidence_id,
+    itemId: revision.item_id,
+    operation: revision.operation,
+    profileRevision: revision.profile_revision,
+    proposalId: revision.proposal_id,
+    reason: revision.reason,
+    revisionId: revision.revision_id,
+    undoOfRevisionId: revision.undo_of_revision_id,
+    undoable: revision.undoable
+  }
+}
+
+function mapChangeHistory(history: ApiProfileHistory): CareerProfileChangeHistory {
+  return {
+    profileRevision: history.profile_revision,
+    revisions: history.revisions.map(mapChangeRevision)
+  }
+}
+
 function validateIdempotencyKey(value: string): string {
   if (!/^[A-Za-z0-9_-]{8,128}$/.test(value)) throw new Error('Invalid Career Profile request')
   return value
@@ -84,6 +179,31 @@ function validateRevision(value: number): number {
 
 function validateExistingRevision(value: number): number {
   if (!Number.isSafeInteger(value) || value < 1) throw new Error('Invalid Career Profile revision')
+  return value
+}
+
+function validateAgentId(value: string): string {
+  if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/.test(value)) throw new Error('Invalid connected agent')
+  return value
+}
+
+function validateProposalId(value: string): string {
+  if (!/^cpp_[A-Za-z0-9_-]{16,64}$/.test(value)) throw new Error('Invalid Career Profile proposal')
+  return value
+}
+
+function validateChangeRevisionId(value: string): string {
+  if (!/^cpv_[A-Za-z0-9_-]{16,64}$/.test(value)) throw new Error('Invalid Career Profile revision')
+  return value
+}
+
+function validateTrustMode(value: CareerProfileTrustMode): CareerProfileTrustMode {
+  if (!trustModes.has(value)) throw new Error('Invalid agent edit mode')
+  return value
+}
+
+function validateProposalDigest(value: string): string {
+  if (!/^[a-f0-9]{64}$/.test(value)) throw new Error('Invalid Career Profile proposal')
   return value
 }
 
@@ -186,6 +306,77 @@ export function createMainCareerProfileClient(config: JobsConfig) {
         target_profile_revision: validateExistingRevision(requestBody.targetProfileRevision)
       }
       return mutationResult(await request(config, `${ROUTE}/restore`, { method: 'POST', body: JSON.stringify(body) }))
+    },
+    async listConnectedAgents(): Promise<ConnectedCareerProfileAgent[]> {
+      const response = await request(config, `${COLLABORATION_ROUTE}/agents`)
+      if (!response.ok) throw new Error(await errorMessage(response))
+      return (await response.json() as ApiConnectedAgentList).agents.map(mapConnectedAgent)
+    },
+    async updateConnectedAgentTrustMode(
+      agentId: string,
+      trustMode: CareerProfileTrustMode
+    ): Promise<ConnectedCareerProfileAgent> {
+      const response = await request(
+        config,
+        `${COLLABORATION_ROUTE}/agents/${encodeURIComponent(validateAgentId(agentId))}`,
+        { method: 'PATCH', body: JSON.stringify({ trust_mode: validateTrustMode(trustMode) }) }
+      )
+      if (!response.ok) throw new Error(await errorMessage(response))
+      return mapConnectedAgent(await response.json() as ApiConnectedAgent)
+    },
+    async disconnectConnectedAgent(agentId: string): Promise<ConnectedCareerProfileAgent> {
+      const response = await request(
+        config,
+        `${COLLABORATION_ROUTE}/agents/${encodeURIComponent(validateAgentId(agentId))}`,
+        { method: 'DELETE' }
+      )
+      if (!response.ok) throw new Error(await errorMessage(response))
+      return mapConnectedAgent(await response.json() as ApiConnectedAgent)
+    },
+    async listCareerProfileProposals(): Promise<CareerProfileChangeProposal[]> {
+      const response = await request(config, `${COLLABORATION_ROUTE}/proposals`)
+      if (!response.ok) throw new Error(await errorMessage(response))
+      return (await response.json() as ApiCareerProfileProposalList).proposals.map(mapProposal)
+    },
+    async decideCareerProfileProposal(
+      proposalId: string,
+      requestBody: CareerProfileProposalDecisionRequest
+    ): Promise<CareerProfileProposalDecisionResult> {
+      const body = {
+        decision: requestBody.decision,
+        expected_profile_revision: validateRevision(requestBody.expectedProfileRevision),
+        idempotency_key: validateIdempotencyKey(requestBody.idempotencyKey),
+        proposal_sha256: validateProposalDigest(requestBody.proposalSha256)
+      }
+      const response = await request(
+        config,
+        `${COLLABORATION_ROUTE}/proposals/${encodeURIComponent(validateProposalId(proposalId))}/decision`,
+        { method: 'POST', body: JSON.stringify(body) }
+      )
+      if (!response.ok) throw new Error(await errorMessage(response))
+      const result = await response.json() as ApiProposalDecisionResult
+      return { profileRevision: result.profile.profile_revision, proposal: mapProposal(result.proposal) }
+    },
+    async getCareerProfileChangeHistory(): Promise<CareerProfileChangeHistory> {
+      const response = await request(config, `${COLLABORATION_ROUTE}/history`)
+      if (!response.ok) throw new Error(await errorMessage(response))
+      return mapChangeHistory(await response.json() as ApiProfileHistory)
+    },
+    async undoCareerProfileChange(
+      revisionId: string,
+      requestBody: CareerProfileUndoRequest
+    ): Promise<{ profileRevision: number }> {
+      const body = {
+        expected_profile_revision: validateExistingRevision(requestBody.expectedProfileRevision),
+        idempotency_key: validateIdempotencyKey(requestBody.idempotencyKey)
+      }
+      const response = await request(
+        config,
+        `${COLLABORATION_ROUTE}/history/${encodeURIComponent(validateChangeRevisionId(revisionId))}/undo`,
+        { method: 'POST', body: JSON.stringify(body) }
+      )
+      if (!response.ok) throw new Error(await errorMessage(response))
+      return { profileRevision: (await response.json() as ApiCareerProfileCompleteCurrent).profile_revision }
     }
   }
 }

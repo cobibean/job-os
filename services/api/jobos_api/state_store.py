@@ -1192,6 +1192,71 @@ MIGRATIONS = (
             """,
         ),
     ),
+    Migration(
+        version=27,
+        statements=(
+            """
+            CREATE TABLE career_profile_connected_agents (
+                agent_id TEXT PRIMARY KEY,
+                display_name TEXT NOT NULL,
+                principal TEXT NOT NULL UNIQUE,
+                token_sha256 TEXT NOT NULL CHECK (length(token_sha256) = 64),
+                trust_mode TEXT NOT NULL DEFAULT 'review' CHECK (
+                    trust_mode IN ('review', 'direct')
+                ),
+                active INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0, 1)),
+                connected_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                disconnected_at TEXT
+            )
+            """,
+            """
+            CREATE TABLE career_profile_change_proposals (
+                proposal_id TEXT PRIMARY KEY,
+                agent_id TEXT NOT NULL,
+                reason TEXT NOT NULL,
+                review_reason TEXT NOT NULL,
+                base_profile_revision INTEGER NOT NULL CHECK (base_profile_revision >= 0),
+                operation TEXT NOT NULL CHECK (
+                    operation IN ('item.create', 'item.update', 'item.remove')
+                ),
+                target_id TEXT NOT NULL,
+                before_json TEXT CHECK (before_json IS NULL OR json_valid(before_json)),
+                after_json TEXT CHECK (after_json IS NULL OR json_valid(after_json)),
+                evidence_ids_json TEXT NOT NULL CHECK (json_valid(evidence_ids_json)),
+                payload_sha256 TEXT NOT NULL CHECK (length(payload_sha256) = 64),
+                status TEXT NOT NULL DEFAULT 'pending' CHECK (
+                    status IN ('pending', 'accepted', 'rejected')
+                ),
+                created_at TEXT NOT NULL,
+                decided_at TEXT,
+                decided_by_principal TEXT,
+                FOREIGN KEY(agent_id) REFERENCES career_profile_connected_agents(agent_id)
+            )
+            """,
+            """CREATE INDEX career_profile_change_proposals_status
+               ON career_profile_change_proposals(status, created_at, proposal_id)""",
+            """
+            CREATE TABLE career_profile_collaboration_idempotency (
+                actor_principal TEXT NOT NULL,
+                idempotency_key TEXT NOT NULL,
+                request_hash TEXT NOT NULL,
+                result_json TEXT NOT NULL CHECK (json_valid(result_json)),
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY(actor_principal, idempotency_key)
+            )
+            """,
+            "ALTER TABLE career_profile_complete_revisions ADD COLUMN reason TEXT",
+            "ALTER TABLE career_profile_complete_revisions ADD COLUMN proposal_id TEXT",
+            "ALTER TABLE career_profile_complete_revisions ADD COLUMN undo_of_revision_id TEXT",
+        ),
+    ),
+    Migration(
+        version=28,
+        statements=(
+            "ALTER TABLE career_profile_complete_revisions ADD COLUMN actor_kind TEXT",
+        ),
+    ),
 )
 SCHEMA_VERSION = MIGRATIONS[-1].version
 

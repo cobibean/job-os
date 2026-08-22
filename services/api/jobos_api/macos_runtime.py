@@ -306,6 +306,14 @@ def build_service_environment(
         )
     if source.get("JOBOS_CAREER_PROFILE_ENABLED") == "1":
         environment["JOBOS_CAREER_PROFILE_ENABLED"] = "1"
+        environment["JOBOS_CAREER_PROFILE_AGENT_ID"] = source.get(
+            "JOBOS_CAREER_PROFILE_AGENT_ID", "trusted-local-mcp"
+        )
+        environment["JOBOS_CAREER_PROFILE_AGENT_DISPLAY_NAME"] = source.get(
+            "JOBOS_CAREER_PROFILE_AGENT_DISPLAY_NAME", "JobOS Agent"
+        )
+        if agent_token := source.get("JOBOS_CAREER_PROFILE_AGENT_TOKEN"):
+            environment["JOBOS_CAREER_PROFILE_AGENT_TOKEN"] = agent_token
     return environment
 
 

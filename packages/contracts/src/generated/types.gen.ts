@@ -43,6 +43,92 @@ export type ActivityReportResponse = {
 };
 
 /**
+ * AgentEditResult
+ */
+export type AgentEditResult = {
+    /**
+     * Outcome
+     */
+    outcome: 'applied' | 'proposal';
+    profile: CareerProfileCompleteCurrent;
+    proposal?: CareerProfileChangeProposal | null;
+};
+
+/**
+ * AgentProfileEditRequest
+ */
+export type AgentProfileEditRequest = {
+    /**
+     * Evidence Ids
+     */
+    evidence_ids?: Array<string>;
+    /**
+     * Expected Profile Revision
+     */
+    expected_profile_revision: number;
+    /**
+     * Idempotency Key
+     */
+    idempotency_key: string;
+    /**
+     * Operation
+     */
+    operation: 'item.create' | 'item.update' | 'item.remove';
+    /**
+     * Reason
+     */
+    reason: string;
+    /**
+     * Target Id
+     */
+    target_id?: string | null;
+    /**
+     * Value
+     */
+    value?: ({
+        kind: 'identity';
+    } & IdentityValue) | ({
+        kind: 'education';
+    } & EducationValue) | ({
+        kind: 'skill';
+    } & SkillValue) | ({
+        kind: 'positioning';
+    } & PositioningValue) | ({
+        kind: 'experience';
+    } & ExperienceValue) | ({
+        kind: 'project';
+    } & ProjectValue) | ({
+        kind: 'claim';
+    } & ClaimValue) | ({
+        kind: 'target_roles';
+    } & TargetRolesValue) | ({
+        kind: 'compensation';
+    } & CompensationValue) | ({
+        kind: 'location';
+    } & LocationPreferenceValue) | ({
+        kind: 'work_arrangement';
+    } & WorkArrangementProfileValue) | ({
+        kind: 'industries';
+    } & IndustryPreferencesValue) | ({
+        kind: 'priority';
+    } & PriorityValue) | ({
+        kind: 'dealbreaker';
+    } & DealbreakerValue) | ({
+        kind: 'custom';
+    } & CustomValue) | null;
+};
+
+/**
+ * AgentTrustModeUpdate
+ */
+export type AgentTrustModeUpdate = {
+    /**
+     * Trust Mode
+     */
+    trust_mode: 'review' | 'direct';
+};
+
+/**
  * ApiErrorResponse
  */
 export type ApiErrorResponse = {
@@ -441,6 +527,70 @@ export type BrowserTabMetadata = {
 };
 
 /**
+ * CareerProfileChangeProposal
+ */
+export type CareerProfileChangeProposal = {
+    after: ProfileItemRecord | null;
+    /**
+     * Agent Display Name
+     */
+    agent_display_name: string;
+    /**
+     * Agent Id
+     */
+    agent_id: string;
+    /**
+     * Base Profile Revision
+     */
+    base_profile_revision: number;
+    before: ProfileItemRecord | null;
+    /**
+     * Created At
+     */
+    created_at: string;
+    /**
+     * Decided At
+     */
+    decided_at?: string | null;
+    /**
+     * Decided By Principal
+     */
+    decided_by_principal?: string | null;
+    /**
+     * Evidence Ids
+     */
+    evidence_ids: Array<string>;
+    /**
+     * Operation
+     */
+    operation: 'item.create' | 'item.update' | 'item.remove';
+    /**
+     * Proposal Id
+     */
+    proposal_id: string;
+    /**
+     * Proposal Sha256
+     */
+    proposal_sha256: string;
+    /**
+     * Reason
+     */
+    reason: string;
+    /**
+     * Review Reason
+     */
+    review_reason: string;
+    /**
+     * Status
+     */
+    status: 'pending' | 'accepted' | 'rejected';
+    /**
+     * Target Id
+     */
+    target_id: string;
+};
+
+/**
  * CareerProfileCompleteCurrent
  */
 export type CareerProfileCompleteCurrent = {
@@ -481,6 +631,16 @@ export type CareerProfileErasureResult = {
  */
 export type CareerProfileProjection = {
     work_arrangement: WorkArrangementRecord | null;
+};
+
+/**
+ * CareerProfileProposalList
+ */
+export type CareerProfileProposalList = {
+    /**
+     * Proposals
+     */
+    proposals: Array<CareerProfileChangeProposal>;
 };
 
 /**
@@ -594,6 +754,54 @@ export type CompensationValue = {
      * Target
      */
     target?: number | null;
+};
+
+/**
+ * ConnectedAgent
+ */
+export type ConnectedAgent = {
+    /**
+     * Active
+     */
+    active: boolean;
+    /**
+     * Agent Id
+     */
+    agent_id: string;
+    /**
+     * Connected At
+     */
+    connected_at: string;
+    /**
+     * Disconnected At
+     */
+    disconnected_at?: string | null;
+    /**
+     * Display Name
+     */
+    display_name: string;
+    /**
+     * Principal
+     */
+    principal: string;
+    /**
+     * Trust Mode
+     */
+    trust_mode: 'review' | 'direct';
+    /**
+     * Updated At
+     */
+    updated_at: string;
+};
+
+/**
+ * ConnectedAgentList
+ */
+export type ConnectedAgentList = {
+    /**
+     * Agents
+     */
+    agents: Array<ConnectedAgent>;
 };
 
 /**
@@ -2256,6 +2464,94 @@ export type PriorityValue = {
 };
 
 /**
+ * ProfileHistory
+ */
+export type ProfileHistory = {
+    /**
+     * Profile Revision
+     */
+    profile_revision: number;
+    /**
+     * Revisions
+     */
+    revisions: Array<ProfileHistoryRevision>;
+};
+
+/**
+ * ProfileHistoryRevision
+ */
+export type ProfileHistoryRevision = {
+    /**
+     * Actor Kind
+     */
+    actor_kind: 'direct_user' | 'authenticated_user_instruction' | 'deterministic_source_mapping' | 'autonomous_agent' | 'user_proposal_decision';
+    /**
+     * Actor Principal
+     */
+    actor_principal: string;
+    /**
+     * Affected Fields
+     */
+    affected_fields: Array<string>;
+    /**
+     * After
+     */
+    after: {
+        [key: string]: unknown;
+    } | null;
+    /**
+     * Base Profile Revision
+     */
+    base_profile_revision: number;
+    /**
+     * Before
+     */
+    before: {
+        [key: string]: unknown;
+    } | null;
+    /**
+     * Created At
+     */
+    created_at: string;
+    /**
+     * Evidence Id
+     */
+    evidence_id: string | null;
+    /**
+     * Item Id
+     */
+    item_id: string | null;
+    /**
+     * Operation
+     */
+    operation: string;
+    /**
+     * Profile Revision
+     */
+    profile_revision: number;
+    /**
+     * Proposal Id
+     */
+    proposal_id: string | null;
+    /**
+     * Reason
+     */
+    reason: string | null;
+    /**
+     * Revision Id
+     */
+    revision_id: string;
+    /**
+     * Undo Of Revision Id
+     */
+    undo_of_revision_id: string | null;
+    /**
+     * Undoable
+     */
+    undoable: boolean;
+};
+
+/**
  * ProfileIntentGrant
  */
 export type ProfileIntentGrant = {
@@ -2475,6 +2771,20 @@ export type ProfileProposalDecision = {
 };
 
 /**
+ * ProfileUndoRequest
+ */
+export type ProfileUndoRequest = {
+    /**
+     * Expected Profile Revision
+     */
+    expected_profile_revision: number;
+    /**
+     * Idempotency Key
+     */
+    idempotency_key: string;
+};
+
+/**
  * ProjectValue
  */
 export type ProjectValue = {
@@ -2498,6 +2808,36 @@ export type ProjectValue = {
      * Url
      */
     url?: string | null;
+};
+
+/**
+ * ProposalDecisionRequest
+ */
+export type ProposalDecisionRequest = {
+    /**
+     * Decision
+     */
+    decision: 'accept' | 'reject';
+    /**
+     * Expected Profile Revision
+     */
+    expected_profile_revision: number;
+    /**
+     * Idempotency Key
+     */
+    idempotency_key: string;
+    /**
+     * Proposal Sha256
+     */
+    proposal_sha256: string;
+};
+
+/**
+ * ProposalDecisionResult
+ */
+export type ProposalDecisionResult = {
+    profile: CareerProfileCompleteCurrent;
+    proposal: CareerProfileChangeProposal;
 };
 
 /**
@@ -3439,6 +3779,20 @@ export type BrowserCommandV1BrowserCommandsPostResponse = BrowserCommandV1Browse
 
 export type CareerProfileCompleteGetV1CareerProfileGetData = {
     body?: never;
+    headers?: {
+        /**
+         * X-Jobos-Mcp-Token
+         */
+        'X-JobOS-MCP-Token'?: string | null;
+        /**
+         * X-Jobos-Agent-Id
+         */
+        'X-JobOS-Agent-Id'?: string | null;
+        /**
+         * X-Jobos-Agent-Token
+         */
+        'X-JobOS-Agent-Token'?: string | null;
+    };
     path?: never;
     query?: never;
     url: '/v1/career-profile';
@@ -3458,6 +3812,10 @@ export type CareerProfileCompleteGetV1CareerProfileGetErrors = {
      */
     404: ApiErrorResponse;
     /**
+     * Request validation failed
+     */
+    422: ApiErrorResponse;
+    /**
      * Internal server error
      */
     500: ApiErrorResponse;
@@ -3473,6 +3831,170 @@ export type CareerProfileCompleteGetV1CareerProfileGetResponses = {
 };
 
 export type CareerProfileCompleteGetV1CareerProfileGetResponse = CareerProfileCompleteGetV1CareerProfileGetResponses[keyof CareerProfileCompleteGetV1CareerProfileGetResponses];
+
+export type CareerProfileAgentEditV1CareerProfileAgentEditsPostData = {
+    body: AgentProfileEditRequest;
+    headers?: {
+        /**
+         * X-Jobos-Mcp-Token
+         */
+        'X-JobOS-MCP-Token'?: string | null;
+        /**
+         * X-Jobos-Agent-Id
+         */
+        'X-JobOS-Agent-Id'?: string | null;
+        /**
+         * X-Jobos-Agent-Token
+         */
+        'X-JobOS-Agent-Token'?: string | null;
+    };
+    path?: never;
+    query?: never;
+    url: '/v1/career-profile/agent-edits';
+};
+
+export type CareerProfileAgentEditV1CareerProfileAgentEditsPostErrors = {
+    /**
+     * Device authentication required
+     */
+    401: ApiErrorResponse;
+    /**
+     * Request validation failed
+     */
+    422: ApiErrorResponse;
+    /**
+     * Internal server error
+     */
+    500: ApiErrorResponse;
+};
+
+export type CareerProfileAgentEditV1CareerProfileAgentEditsPostError = CareerProfileAgentEditV1CareerProfileAgentEditsPostErrors[keyof CareerProfileAgentEditV1CareerProfileAgentEditsPostErrors];
+
+export type CareerProfileAgentEditV1CareerProfileAgentEditsPostResponses = {
+    /**
+     * Successful Response
+     */
+    200: AgentEditResult;
+};
+
+export type CareerProfileAgentEditV1CareerProfileAgentEditsPostResponse = CareerProfileAgentEditV1CareerProfileAgentEditsPostResponses[keyof CareerProfileAgentEditV1CareerProfileAgentEditsPostResponses];
+
+export type CareerProfileAgentsListV1CareerProfileAgentsGetData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/v1/career-profile/agents';
+};
+
+export type CareerProfileAgentsListV1CareerProfileAgentsGetErrors = {
+    /**
+     * Device authentication required
+     */
+    401: ApiErrorResponse;
+    /**
+     * Internal server error
+     */
+    500: ApiErrorResponse;
+};
+
+export type CareerProfileAgentsListV1CareerProfileAgentsGetError = CareerProfileAgentsListV1CareerProfileAgentsGetErrors[keyof CareerProfileAgentsListV1CareerProfileAgentsGetErrors];
+
+export type CareerProfileAgentsListV1CareerProfileAgentsGetResponses = {
+    /**
+     * Successful Response
+     */
+    200: ConnectedAgentList;
+};
+
+export type CareerProfileAgentsListV1CareerProfileAgentsGetResponse = CareerProfileAgentsListV1CareerProfileAgentsGetResponses[keyof CareerProfileAgentsListV1CareerProfileAgentsGetResponses];
+
+export type CareerProfileAgentDisconnectV1CareerProfileAgentsAgentIdDeleteData = {
+    body?: never;
+    headers?: {
+        /**
+         * X-Jobos-Mcp-Token
+         */
+        'X-JobOS-MCP-Token'?: string | null;
+    };
+    path: {
+        /**
+         * Agent Id
+         */
+        agent_id: string;
+    };
+    query?: never;
+    url: '/v1/career-profile/agents/{agent_id}';
+};
+
+export type CareerProfileAgentDisconnectV1CareerProfileAgentsAgentIdDeleteErrors = {
+    /**
+     * Device authentication required
+     */
+    401: ApiErrorResponse;
+    /**
+     * Request validation failed
+     */
+    422: ApiErrorResponse;
+    /**
+     * Internal server error
+     */
+    500: ApiErrorResponse;
+};
+
+export type CareerProfileAgentDisconnectV1CareerProfileAgentsAgentIdDeleteError = CareerProfileAgentDisconnectV1CareerProfileAgentsAgentIdDeleteErrors[keyof CareerProfileAgentDisconnectV1CareerProfileAgentsAgentIdDeleteErrors];
+
+export type CareerProfileAgentDisconnectV1CareerProfileAgentsAgentIdDeleteResponses = {
+    /**
+     * Successful Response
+     */
+    200: ConnectedAgent;
+};
+
+export type CareerProfileAgentDisconnectV1CareerProfileAgentsAgentIdDeleteResponse = CareerProfileAgentDisconnectV1CareerProfileAgentsAgentIdDeleteResponses[keyof CareerProfileAgentDisconnectV1CareerProfileAgentsAgentIdDeleteResponses];
+
+export type CareerProfileAgentUpdateV1CareerProfileAgentsAgentIdPatchData = {
+    body: AgentTrustModeUpdate;
+    headers?: {
+        /**
+         * X-Jobos-Mcp-Token
+         */
+        'X-JobOS-MCP-Token'?: string | null;
+    };
+    path: {
+        /**
+         * Agent Id
+         */
+        agent_id: string;
+    };
+    query?: never;
+    url: '/v1/career-profile/agents/{agent_id}';
+};
+
+export type CareerProfileAgentUpdateV1CareerProfileAgentsAgentIdPatchErrors = {
+    /**
+     * Device authentication required
+     */
+    401: ApiErrorResponse;
+    /**
+     * Request validation failed
+     */
+    422: ApiErrorResponse;
+    /**
+     * Internal server error
+     */
+    500: ApiErrorResponse;
+};
+
+export type CareerProfileAgentUpdateV1CareerProfileAgentsAgentIdPatchError = CareerProfileAgentUpdateV1CareerProfileAgentsAgentIdPatchErrors[keyof CareerProfileAgentUpdateV1CareerProfileAgentsAgentIdPatchErrors];
+
+export type CareerProfileAgentUpdateV1CareerProfileAgentsAgentIdPatchResponses = {
+    /**
+     * Successful Response
+     */
+    200: ConnectedAgent;
+};
+
+export type CareerProfileAgentUpdateV1CareerProfileAgentsAgentIdPatchResponse = CareerProfileAgentUpdateV1CareerProfileAgentsAgentIdPatchResponses[keyof CareerProfileAgentUpdateV1CareerProfileAgentsAgentIdPatchResponses];
 
 export type CareerProfileEvidenceImportV1CareerProfileEvidencePostData = {
     body: EvidenceImportRequest;
@@ -3682,6 +4204,79 @@ export type CareerProfileEvidenceEraseV1CareerProfileEvidenceEvidenceIdErasePost
 };
 
 export type CareerProfileEvidenceEraseV1CareerProfileEvidenceEvidenceIdErasePostResponse = CareerProfileEvidenceEraseV1CareerProfileEvidenceEvidenceIdErasePostResponses[keyof CareerProfileEvidenceEraseV1CareerProfileEvidenceEvidenceIdErasePostResponses];
+
+export type CareerProfileHistoryV1CareerProfileHistoryGetData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/v1/career-profile/history';
+};
+
+export type CareerProfileHistoryV1CareerProfileHistoryGetErrors = {
+    /**
+     * Device authentication required
+     */
+    401: ApiErrorResponse;
+    /**
+     * Internal server error
+     */
+    500: ApiErrorResponse;
+};
+
+export type CareerProfileHistoryV1CareerProfileHistoryGetError = CareerProfileHistoryV1CareerProfileHistoryGetErrors[keyof CareerProfileHistoryV1CareerProfileHistoryGetErrors];
+
+export type CareerProfileHistoryV1CareerProfileHistoryGetResponses = {
+    /**
+     * Successful Response
+     */
+    200: ProfileHistory;
+};
+
+export type CareerProfileHistoryV1CareerProfileHistoryGetResponse = CareerProfileHistoryV1CareerProfileHistoryGetResponses[keyof CareerProfileHistoryV1CareerProfileHistoryGetResponses];
+
+export type CareerProfileHistoryUndoV1CareerProfileHistoryRevisionIdUndoPostData = {
+    body: ProfileUndoRequest;
+    headers?: {
+        /**
+         * X-Jobos-Mcp-Token
+         */
+        'X-JobOS-MCP-Token'?: string | null;
+    };
+    path: {
+        /**
+         * Revision Id
+         */
+        revision_id: string;
+    };
+    query?: never;
+    url: '/v1/career-profile/history/{revision_id}/undo';
+};
+
+export type CareerProfileHistoryUndoV1CareerProfileHistoryRevisionIdUndoPostErrors = {
+    /**
+     * Device authentication required
+     */
+    401: ApiErrorResponse;
+    /**
+     * Request validation failed
+     */
+    422: ApiErrorResponse;
+    /**
+     * Internal server error
+     */
+    500: ApiErrorResponse;
+};
+
+export type CareerProfileHistoryUndoV1CareerProfileHistoryRevisionIdUndoPostError = CareerProfileHistoryUndoV1CareerProfileHistoryRevisionIdUndoPostErrors[keyof CareerProfileHistoryUndoV1CareerProfileHistoryRevisionIdUndoPostErrors];
+
+export type CareerProfileHistoryUndoV1CareerProfileHistoryRevisionIdUndoPostResponses = {
+    /**
+     * Successful Response
+     */
+    200: CareerProfileCompleteCurrent;
+};
+
+export type CareerProfileHistoryUndoV1CareerProfileHistoryRevisionIdUndoPostResponse = CareerProfileHistoryUndoV1CareerProfileHistoryRevisionIdUndoPostResponses[keyof CareerProfileHistoryUndoV1CareerProfileHistoryRevisionIdUndoPostResponses];
 
 export type CareerProfileIntentGrantCreateV1CareerProfileIntentGrantsPostData = {
     body: ProfileIntentGrantRequest;
@@ -3962,6 +4557,88 @@ export type CareerProfileProposalDecideV1CareerProfileItemsItemIdDecisionPostRes
 };
 
 export type CareerProfileProposalDecideV1CareerProfileItemsItemIdDecisionPostResponse = CareerProfileProposalDecideV1CareerProfileItemsItemIdDecisionPostResponses[keyof CareerProfileProposalDecideV1CareerProfileItemsItemIdDecisionPostResponses];
+
+export type CareerProfileProposalsListV1CareerProfileProposalsGetData = {
+    body?: never;
+    path?: never;
+    query?: {
+        /**
+         * Status
+         */
+        status?: 'pending' | 'accepted' | 'rejected' | null;
+    };
+    url: '/v1/career-profile/proposals';
+};
+
+export type CareerProfileProposalsListV1CareerProfileProposalsGetErrors = {
+    /**
+     * Device authentication required
+     */
+    401: ApiErrorResponse;
+    /**
+     * Request validation failed
+     */
+    422: ApiErrorResponse;
+    /**
+     * Internal server error
+     */
+    500: ApiErrorResponse;
+};
+
+export type CareerProfileProposalsListV1CareerProfileProposalsGetError = CareerProfileProposalsListV1CareerProfileProposalsGetErrors[keyof CareerProfileProposalsListV1CareerProfileProposalsGetErrors];
+
+export type CareerProfileProposalsListV1CareerProfileProposalsGetResponses = {
+    /**
+     * Successful Response
+     */
+    200: CareerProfileProposalList;
+};
+
+export type CareerProfileProposalsListV1CareerProfileProposalsGetResponse = CareerProfileProposalsListV1CareerProfileProposalsGetResponses[keyof CareerProfileProposalsListV1CareerProfileProposalsGetResponses];
+
+export type CareerProfileChangeProposalDecideV1CareerProfileProposalsProposalIdDecisionPostData = {
+    body: ProposalDecisionRequest;
+    headers?: {
+        /**
+         * X-Jobos-Mcp-Token
+         */
+        'X-JobOS-MCP-Token'?: string | null;
+    };
+    path: {
+        /**
+         * Proposal Id
+         */
+        proposal_id: string;
+    };
+    query?: never;
+    url: '/v1/career-profile/proposals/{proposal_id}/decision';
+};
+
+export type CareerProfileChangeProposalDecideV1CareerProfileProposalsProposalIdDecisionPostErrors = {
+    /**
+     * Device authentication required
+     */
+    401: ApiErrorResponse;
+    /**
+     * Request validation failed
+     */
+    422: ApiErrorResponse;
+    /**
+     * Internal server error
+     */
+    500: ApiErrorResponse;
+};
+
+export type CareerProfileChangeProposalDecideV1CareerProfileProposalsProposalIdDecisionPostError = CareerProfileChangeProposalDecideV1CareerProfileProposalsProposalIdDecisionPostErrors[keyof CareerProfileChangeProposalDecideV1CareerProfileProposalsProposalIdDecisionPostErrors];
+
+export type CareerProfileChangeProposalDecideV1CareerProfileProposalsProposalIdDecisionPostResponses = {
+    /**
+     * Successful Response
+     */
+    200: ProposalDecisionResult;
+};
+
+export type CareerProfileChangeProposalDecideV1CareerProfileProposalsProposalIdDecisionPostResponse = CareerProfileChangeProposalDecideV1CareerProfileProposalsProposalIdDecisionPostResponses[keyof CareerProfileChangeProposalDecideV1CareerProfileProposalsProposalIdDecisionPostResponses];
 
 export type CareerProfileResetV1CareerProfileResetPostData = {
     body: CareerProfileResetRequest;

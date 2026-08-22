@@ -22,11 +22,18 @@ def settings_from_environment() -> Settings:
     mcp_token = os.environ.get("JOBOS_MCP_TOKEN", "")
     if not token and not mcp_token:
         configured_path = Path(os.environ.get("JOBOS_CONFIG_PATH", config_path(default_data_dir())))
-        return settings_from_config(configured_path).model_copy(
-            update={
-                "career_profile_enabled": os.environ.get("JOBOS_CAREER_PROFILE_ENABLED") == "1"
-            }
-        )
+        configured = settings_from_config(configured_path)
+        updates: dict[str, object] = {
+            "career_profile_enabled": os.environ.get("JOBOS_CAREER_PROFILE_ENABLED") == "1"
+        }
+        for environment_name, field_name in (
+            ("JOBOS_CAREER_PROFILE_AGENT_ID", "career_profile_agent_id"),
+            ("JOBOS_CAREER_PROFILE_AGENT_DISPLAY_NAME", "career_profile_agent_display_name"),
+            ("JOBOS_CAREER_PROFILE_AGENT_TOKEN", "career_profile_agent_token"),
+        ):
+            if value := os.environ.get(environment_name):
+                updates[field_name] = value
+        return configured.model_copy(update=updates)
     if not token or not mcp_token:
         raise LocalConfigError(
             "JOBOS_DEVICE_TOKEN and JOBOS_MCP_TOKEN must be configured together."
@@ -66,6 +73,13 @@ def settings_from_environment() -> Settings:
         hermes_job_hunter_cwd=Path(hermes_cwd) if hermes_cwd else None,
         hermes_request_timeout=float(os.environ.get("JOBOS_HERMES_REQUEST_TIMEOUT", "5")),
         career_profile_enabled=os.environ.get("JOBOS_CAREER_PROFILE_ENABLED") == "1",
+        career_profile_agent_id=os.environ.get(
+            "JOBOS_CAREER_PROFILE_AGENT_ID", "trusted-local-mcp"
+        ),
+        career_profile_agent_display_name=os.environ.get(
+            "JOBOS_CAREER_PROFILE_AGENT_DISPLAY_NAME", "JobOS Agent"
+        ),
+        career_profile_agent_token=os.environ.get("JOBOS_CAREER_PROFILE_AGENT_TOKEN"),
     )
 
 

@@ -78,6 +78,96 @@ export type WorkArrangementMutationResult =
   | { status: 'saved'; current: WorkArrangementCurrent }
   | { status: 'conflict'; current: WorkArrangementCurrent }
 
+export type CareerProfileTrustMode = 'review' | 'direct'
+export type CareerProfileActorKind =
+  | 'direct_user'
+  | 'authenticated_user_instruction'
+  | 'deterministic_source_mapping'
+  | 'autonomous_agent'
+  | 'user_proposal_decision'
+
+export interface ConnectedCareerProfileAgent {
+  active: boolean
+  agentId: string
+  connectedAt: string
+  disconnectedAt: string | null
+  displayName: string
+  principal: string
+  trustMode: CareerProfileTrustMode
+  updatedAt: string
+}
+
+export interface CareerProfileItemSnapshot {
+  actorPrincipal: string
+  area: 'my_career' | 'what_im_looking_for' | 'my_evidence'
+  createdAt: string
+  evidenceIds: string[]
+  itemId: string
+  itemRevision: number
+  provenance: Record<string, unknown>
+  reviewStatus: 'accepted' | 'proposed' | 'conflicting'
+  updatedAt: string
+  value: Record<string, unknown>
+}
+
+export interface CareerProfileChangeProposal {
+  after: CareerProfileItemSnapshot | null
+  agentDisplayName: string
+  agentId: string
+  baseProfileRevision: number
+  before: CareerProfileItemSnapshot | null
+  createdAt: string
+  evidenceIds: string[]
+  operation: 'item.create' | 'item.update' | 'item.remove'
+  proposalId: string
+  proposalSha256: string
+  reason: string
+  reviewReason: string
+  status: 'pending' | 'accepted' | 'rejected'
+  targetId: string
+}
+
+export interface CareerProfileProposalDecisionRequest {
+  decision: 'accept' | 'reject'
+  expectedProfileRevision: number
+  idempotencyKey: string
+  proposalSha256: string
+}
+
+export interface CareerProfileProposalDecisionResult {
+  profileRevision: number
+  proposal: CareerProfileChangeProposal
+}
+
+export interface CareerProfileChangeRevision {
+  actorKind: CareerProfileActorKind
+  actorPrincipal: string
+  affectedFields: string[]
+  after: Record<string, unknown> | null
+  baseProfileRevision: number
+  before: Record<string, unknown> | null
+  createdAt: string
+  evidenceId: string | null
+  itemId: string | null
+  operation: string
+  profileRevision: number
+  proposalId: string | null
+  reason: string | null
+  revisionId: string
+  undoOfRevisionId: string | null
+  undoable: boolean
+}
+
+export interface CareerProfileChangeHistory {
+  profileRevision: number
+  revisions: CareerProfileChangeRevision[]
+}
+
+export interface CareerProfileUndoRequest {
+  expectedProfileRevision: number
+  idempotencyKey: string
+}
+
 export interface CareerProfileBridge {
   availability: () => Promise<{ enabled: boolean }>
   validateCachedWorkArrangement: (candidate: unknown) => Promise<WorkArrangementCurrent | null>
@@ -85,6 +175,22 @@ export interface CareerProfileBridge {
   saveWorkArrangement: (request: WorkArrangementMutationRequest) => Promise<WorkArrangementMutationResult>
   getWorkArrangementHistory: () => Promise<WorkArrangementHistory>
   restoreWorkArrangement: (request: WorkArrangementRestoreRequest) => Promise<WorkArrangementMutationResult>
+  listConnectedAgents: () => Promise<ConnectedCareerProfileAgent[]>
+  updateConnectedAgentTrustMode: (
+    agentId: string,
+    trustMode: CareerProfileTrustMode
+  ) => Promise<ConnectedCareerProfileAgent>
+  disconnectConnectedAgent: (agentId: string) => Promise<ConnectedCareerProfileAgent>
+  listCareerProfileProposals: () => Promise<CareerProfileChangeProposal[]>
+  decideCareerProfileProposal: (
+    proposalId: string,
+    request: CareerProfileProposalDecisionRequest
+  ) => Promise<CareerProfileProposalDecisionResult>
+  getCareerProfileChangeHistory: () => Promise<CareerProfileChangeHistory>
+  undoCareerProfileChange: (
+    revisionId: string,
+    request: CareerProfileUndoRequest
+  ) => Promise<{ profileRevision: number }>
 }
 
 export type JobSortMode = 'manual' | 'recent' | 'alphabetical' | 'status'
