@@ -1182,6 +1182,16 @@ MIGRATIONS = (
             """,
         ),
     ),
+    Migration(
+        version=26,
+        statements=(
+            """
+            ALTER TABLE career_profiles
+            ADD COLUMN authority_epoch INTEGER NOT NULL DEFAULT 0
+                CHECK (authority_epoch >= 0)
+            """,
+        ),
+    ),
 )
 SCHEMA_VERSION = MIGRATIONS[-1].version
 

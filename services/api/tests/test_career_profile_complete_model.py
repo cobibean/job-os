@@ -123,7 +123,12 @@ def test_complete_contract_represents_all_three_areas_and_canonical_item_kinds(t
         assert model in referenced
 
     current = schema["components"]["schemas"]["CareerProfileCompleteCurrent"]
-    assert set(current["properties"]) == {"profile_revision", "items", "source_evidence"}
+    assert set(current["properties"]) == {
+        "profile_revision",
+        "authority_epoch",
+        "items",
+        "source_evidence",
+    }
 
 
 def test_import_contract_rejects_header_injection_and_unbounded_nested_text():
@@ -592,6 +597,7 @@ def test_agent_sensitive_edit_requires_one_time_exact_payload_user_grant(tmp_pat
         exact_command = command | {"expected_profile_revision": 1}
         grant_command = {
             "expected_profile_revision": 1,
+            "expected_authority_epoch": 0,
             "idempotency_key": "exact-agent-intent-grant-0001",
             "operation": "item.create",
             "target_id": None,
@@ -889,6 +895,20 @@ def test_confirmed_evidence_erasure_removes_managed_bytes_metadata_and_source_hi
     evidence = imported.source_evidence[0]
     accepted_item = imported.items[0]
     vault_file = tmp_path / "evidence-vault" / EvidenceVault.storage_name(evidence.evidence_id)
+    store.create_intent_grant(
+        principal="device:primary-device",
+        command=ProfileIntentGrantRequest(
+            expected_profile_revision=1,
+            expected_authority_epoch=0,
+            idempotency_key="erase-target-intent-grant-0001",
+            operation="evidence.remove",
+            target_id=evidence.evidence_id,
+            payload=ProfileItemRemoval(
+                expected_profile_revision=1,
+                idempotency_key="remove-target-evidence-0001",
+            ).model_dump(mode="json"),
+        ),
+    )
 
     with pytest.raises(CareerProfileRevisionConflict):
         store.erase_evidence(
@@ -960,6 +980,47 @@ def test_confirmed_evidence_erasure_removes_managed_bytes_metadata_and_source_hi
         )
 
 
+def test_profile_reset_epoch_prevents_pre_reset_grant_request_replay(tmp_path: Path):
+    store = initialized_store(tmp_path)
+    mutation = ProfileItemMutation.model_validate(
+        {
+            "expected_profile_revision": 0,
+            "idempotency_key": "pre-reset-authority-mutation-0001",
+            "value": {"kind": "skill", "name": "(FAKE) pre-reset authority"},
+        }
+    )
+    grant_request = ProfileIntentGrantRequest(
+        expected_profile_revision=0,
+        expected_authority_epoch=0,
+        idempotency_key="pre-reset-authority-grant-0001",
+        operation="item.create",
+        payload=mutation.model_dump(mode="json"),
+    )
+    original_grant = store.create_intent_grant(
+        principal="device:primary-device", command=grant_request
+    )
+
+    store.reset_profile(
+        principal="device:primary-device",
+        command=CareerProfileResetRequest(
+            expected_profile_revision=0,
+            idempotency_key="reset-empty-profile-epoch-0001",
+            confirmation="RESET_CAREER_PROFILE_PERMANENTLY",
+        ),
+    )
+
+    assert store.current().authority_epoch == 1
+    with pytest.raises(CareerProfileValueError, match="authority epoch has changed"):
+        store.create_intent_grant(principal="device:primary-device", command=grant_request)
+    with pytest.raises(CareerProfileValueError, match="Intent grant is missing"):
+        store.upsert_item(
+            principal="agent:trusted-local-mcp",
+            command=mutation,
+            mutation_source="authenticated_user_instruction",
+            intent_grant_id=original_grant.grant_id,
+        )
+
+
 def test_full_profile_reset_erases_profile_proposals_snapshots_history_and_all_vault_files(
     tmp_path: Path,
 ):
@@ -1000,6 +1061,7 @@ def test_full_profile_reset_erases_profile_proposals_snapshots_history_and_all_v
         principal="device:primary-device",
         command=ProfileIntentGrantRequest(
             expected_profile_revision=2,
+            expected_authority_epoch=0,
             idempotency_key="stale-reset-intent-grant-0001",
             operation="item.create",
             payload=stale_agent_command.model_dump(mode="json"),
@@ -1019,6 +1081,7 @@ def test_full_profile_reset_erases_profile_proposals_snapshots_history_and_all_v
     assert list((tmp_path / "evidence-vault").glob("*.bin")) == []
     assert store.current().model_dump(mode="json") == {
         "profile_revision": 0,
+        "authority_epoch": 1,
         "items": [],
         "source_evidence": [],
     }
@@ -1192,7 +1255,7 @@ def test_schema_migration_adds_complete_model_tables_without_activating_profile(
     database = tmp_path / "jobos.db"
     health = JobOsStateStore(database).initialize(owner_device_id="primary-device")
 
-    assert health.schema_version == SCHEMA_VERSION == 25
+    assert health.schema_version == SCHEMA_VERSION == 26
     with sqlite3.connect(database) as connection:
         tables = {
             row[0]
@@ -1296,6 +1359,7 @@ def test_complete_routes_are_authenticated_dormant_by_default_and_read_back_muta
         assert reset.json() == {"operation": "career_profile_reset", "completed": True}
         assert client.get("/v1/career-profile", headers=auth()).json() == {
             "profile_revision": 0,
+            "authority_epoch": 1,
             "items": [],
             "source_evidence": [],
         }

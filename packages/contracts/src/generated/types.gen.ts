@@ -445,6 +445,10 @@ export type BrowserTabMetadata = {
  */
 export type CareerProfileCompleteCurrent = {
     /**
+     * Authority Epoch
+     */
+    authority_epoch: number;
+    /**
      * Items
      */
     items: Array<ProfileItemRecord>;
@@ -2281,6 +2285,10 @@ export type ProfileIntentGrant = {
  * ProfileIntentGrantRequest
  */
 export type ProfileIntentGrantRequest = {
+    /**
+     * Expected Authority Epoch
+     */
+    expected_authority_epoch: number;
     /**
      * Expected Profile Revision
      */

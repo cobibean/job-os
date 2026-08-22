@@ -412,6 +412,7 @@ class SourceEvidenceRecord(StrictModel):
 
 class CareerProfileCompleteCurrent(StrictModel):
     profile_revision: int = Field(ge=0)
+    authority_epoch: int = Field(ge=0)
     items: list[ProfileItemRecord]
     source_evidence: list[SourceEvidenceRecord]
 
@@ -437,6 +438,7 @@ class ProfileProposalDecision(StrictModel):
 
 class ProfileIntentGrantRequest(StrictModel):
     expected_profile_revision: int = Field(ge=0)
+    expected_authority_epoch: int = Field(ge=0)
     idempotency_key: IdempotencyKey
     operation: Literal[
         "item.create",
@@ -800,6 +802,15 @@ class CareerProfileCompleteStore:
                 result = ProfileIntentGrant.model_validate_json(str(replay[1]))
                 connection.rollback()
                 return result
+            profile_state = connection.execute(
+                "SELECT authority_epoch FROM career_profiles WHERE profile_id = ?",
+                (PROFILE_ID,),
+            ).fetchone()
+            if profile_state is None:
+                raise RuntimeError("Career Profile storage is not initialized")
+            if int(profile_state[0]) != command.expected_authority_epoch:
+                connection.rollback()
+                raise CareerProfileValueError("Career Profile authority epoch has changed")
             self._check_head(connection, command.expected_profile_revision)
             grant_id = _opaque_id("cpg_")
             created_at = _now()
@@ -1573,6 +1584,9 @@ class CareerProfileCompleteStore:
                     (row[0], row[1]),
                 )
         connection.execute(
+            "DELETE FROM career_profile_intent_grants WHERE target_id = ?", (evidence_id,)
+        )
+        connection.execute(
             "DELETE FROM career_profile_evidence WHERE evidence_id = ?", (evidence_id,)
         )
 
@@ -1618,8 +1632,8 @@ class CareerProfileCompleteStore:
         ):
             connection.execute(f"DELETE FROM {table}")
         connection.execute(
-            "UPDATE career_profiles SET head_revision = 0, updated_at = CURRENT_TIMESTAMP "
-            "WHERE profile_id = ?",
+            "UPDATE career_profiles SET head_revision = 0, authority_epoch = authority_epoch + 1, "
+            "updated_at = CURRENT_TIMESTAMP WHERE profile_id = ?",
             (PROFILE_ID,),
         )
 
@@ -1921,7 +1935,14 @@ class CareerProfileCompleteStore:
     def _current_in_connection(
         self, connection: sqlite3.Connection
     ) -> CareerProfileCompleteCurrent:
-        head = self._head(connection)
+        profile_state = connection.execute(
+            "SELECT head_revision, authority_epoch FROM career_profiles WHERE profile_id = ?",
+            (PROFILE_ID,),
+        ).fetchone()
+        if profile_state is None:
+            raise RuntimeError("Career Profile storage is not initialized")
+        head = int(profile_state[0])
+        authority_epoch = int(profile_state[1])
         rows = connection.execute(
             "SELECT item_id, value_json, provenance_json, review_status, evidence_ids_json, "
             "item_revision, actor_principal, created_at, updated_at FROM career_profile_items "
@@ -1958,6 +1979,7 @@ class CareerProfileCompleteStore:
         ).fetchall()
         return CareerProfileCompleteCurrent(
             profile_revision=head,
+            authority_epoch=authority_epoch,
             items=items,
             source_evidence=[self._evidence_from_row(row) for row in evidence_rows],
         )

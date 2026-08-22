@@ -847,6 +847,11 @@
       "CareerProfileCompleteCurrent": {
         "additionalProperties": false,
         "properties": {
+          "authority_epoch": {
+            "minimum": 0.0,
+            "title": "Authority Epoch",
+            "type": "integer"
+          },
           "items": {
             "items": {
               "$ref": "#/components/schemas/ProfileItemRecord"
@@ -869,6 +874,7 @@
         },
         "required": [
           "profile_revision",
+          "authority_epoch",
           "items",
           "source_evidence"
         ],
@@ -4433,6 +4439,11 @@
       "ProfileIntentGrantRequest": {
         "additionalProperties": false,
         "properties": {
+          "expected_authority_epoch": {
+            "minimum": 0.0,
+            "title": "Expected Authority Epoch",
+            "type": "integer"
+          },
           "expected_profile_revision": {
             "minimum": 0.0,
             "title": "Expected Profile Revision",
@@ -4477,6 +4488,7 @@
         },
         "required": [
           "expected_profile_revision",
+          "expected_authority_epoch",
           "idempotency_key",
           "operation",
           "payload"
