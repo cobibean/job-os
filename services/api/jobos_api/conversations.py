@@ -10,6 +10,7 @@ from typing import Literal, Protocol
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from .agent_gateway import AgentContext, AgentGateway
+from .career_profile_context import CareerProfileContextStore
 from .conversation_store import ConversationStore
 from .redaction import safe_error_summary, sanitize_user_text
 from .state_store import ConversationBusy, JobOsStateStore
@@ -96,6 +97,8 @@ class ConversationService:
         gateway: AgentGateway,
         conversation_id: str | None = None,
         career_profile_principal: str | None = None,
+        career_profile_context: CareerProfileContextStore | None = None,
+        career_profile_agent_id: str | None = None,
     ) -> None:
         if isinstance(store, JobOsStateStore):
             conversation_id = conversation_id or store.first_active_conversation_id()
@@ -104,6 +107,8 @@ class ConversationService:
         self.store = store
         self.gateway = gateway
         self.career_profile_principal = career_profile_principal
+        self.career_profile_context = career_profile_context
+        self.career_profile_agent_id = career_profile_agent_id
         self._event_task: asyncio.Task[None] | None = None
         self._connection_task: asyncio.Task[None] | None = None
         self._recovery_turn_id: str | None = None
@@ -270,6 +275,8 @@ class ConversationService:
             idempotency_key=command.idempotency_key,
             actor_id=actor_id,
             career_profile_principal=self.career_profile_principal,
+            career_profile_context=self.career_profile_context,
+            career_profile_agent_id=self.career_profile_agent_id,
         )
         turn = self.store.turn_record(str(created["turn_id"]))
         if turn and turn["status"] == "running" and created["created"] is True:
@@ -301,6 +308,8 @@ class ConversationService:
             idempotency_key=command.idempotency_key,
             actor_id=actor_id,
             career_profile_principal=self.career_profile_principal,
+            career_profile_context=self.career_profile_context,
+            career_profile_agent_id=self.career_profile_agent_id,
         )
         turn = self.store.turn_record(str(created["turn_id"]))
         if turn and created["created"] is True:
@@ -383,7 +392,10 @@ class ConversationService:
             context = turn["context"]
             assert isinstance(context, dict)
             career_profile = None
-            if self.career_profile_principal is not None:
+            if (
+                self.career_profile_context is None
+                and self.career_profile_principal is not None
+            ):
                 snapshot = self.store.bound_career_profile_snapshot(
                     turn_id, principal=self.career_profile_principal
                 )
@@ -399,6 +411,16 @@ class ConversationService:
                         )
                     },
                 }
+            career_profile_context = None
+            if self.career_profile_context is not None:
+                if self.career_profile_agent_id is None:
+                    raise RuntimeError("Career Profile context agent is not configured")
+                context_snapshot = self.store.bound_career_profile_context_snapshot(
+                    turn_id,
+                    context_store=self.career_profile_context,
+                    agent_id=self.career_profile_agent_id,
+                )
+                career_profile_context = context_snapshot.model_dump(mode="json")
             requested_session_id = (
                 None if context.get(FRESH_AGENT_SESSION_CONTEXT_KEY) is True else prior_stored_id
             )
@@ -426,7 +448,13 @@ class ConversationService:
             return
         try:
             async with self._submission_lock:
-                if not self.store.prepare_turn_submission(turn_id, prior_stored_id, stored_id):
+                if not self.store.prepare_turn_submission(
+                    turn_id,
+                    prior_stored_id,
+                    stored_id,
+                    career_profile_context=self.career_profile_context,
+                    career_profile_agent_id=self.career_profile_agent_id,
+                ):
                     return
                 selected_job = context.get("selected_job")
                 await self.gateway.submit_turn(
@@ -442,6 +470,7 @@ class ConversationService:
                             else None
                         ),
                         career_profile=career_profile,
+                        career_profile_context=career_profile_context,
                     ),
                 )
         except Exception as error:
@@ -502,6 +531,8 @@ class ConversationService:
                         detail={**event.detail, "activity_id": event.activity_id},
                         source_event_id=event.source_event_id,
                         career_profile_principal=self.career_profile_principal,
+                        career_profile_context=self.career_profile_context,
+                        career_profile_agent_id=self.career_profile_agent_id,
                     )
                 continue
             is_terminal = bool(

@@ -3,6 +3,18 @@
   "policy": "Every tracked binary asset must be checksum-pinned and publication-approved; every binary test fixture must be synthetic.",
   "assets": [
     {
+      "path": "apps/desktop/build/jobos-career-profile-archive-write",
+      "sha256": "3f990d2d7a5f579ae86efafd5d6306a8f1095da2c13280fd1b29458a6f51fc10",
+      "classification": "project-asset",
+      "publication": "keep",
+      "source": "Deterministically compiled from the tracked JobOS Swift helper source",
+      "purpose": "Packaged descriptor-relative Career Profile archive writer",
+      "provenance": {
+        "trackedSource": "apps/desktop/native/JobOSCareerProfileArchiveWrite.swift",
+        "method": "Built by apps/desktop/scripts/build-career-profile-archive-write.mjs."
+      }
+    },
+    {
       "path": "apps/desktop/build/icon.icns",
       "sha256": "328bc6fba639806631d537800f079b61017cb4d17167f6d3655586a5202bf23b",
       "classification": "project-asset",
@@ -252,6 +264,114 @@
       "provenance": {
         "trackedSource": "docs/acceptance/career-profile-first-slice/capture.mjs",
         "method": "Captured after using Undo in the packaged renderer, visually inspected, metadata-stripped, and checksum-pinned."
+      }
+    },
+    {
+      "path": "docs/acceptance/career-profile-product-experience/01-wide-my-career-1440x1024.png",
+      "sha256": "8012b9426f94b888724528e6c9578e709268647a0521bae0bdc687613075a78f",
+      "classification": "project-asset",
+      "publication": "keep",
+      "source": "Packaged JobOS capture using a disposable visibly FAKE staging profile",
+      "purpose": "Issue #56 My Career product acceptance",
+      "provenance": {
+        "trackedSource": "docs/acceptance/career-profile-product-experience/capture.mjs",
+        "method": "Captured from the packaged renderer, visually inspected, metadata-stripped, and checksum-pinned."
+      }
+    },
+    {
+      "path": "docs/acceptance/career-profile-product-experience/02-wide-looking-for-1440x1024.png",
+      "sha256": "dfa7dc78e1b27395e08c39db96653adfbc6dd31a1dba0fcfb23cf85f2d676ff5",
+      "classification": "project-asset",
+      "publication": "keep",
+      "source": "Packaged JobOS capture using a disposable visibly FAKE staging profile",
+      "purpose": "Issue #56 What I\u2019m Looking For product acceptance",
+      "provenance": {
+        "trackedSource": "docs/acceptance/career-profile-product-experience/capture.mjs",
+        "method": "Captured from the packaged renderer, visually inspected, metadata-stripped, and checksum-pinned."
+      }
+    },
+    {
+      "path": "docs/acceptance/career-profile-product-experience/03-wide-evidence-imported-1440x1024.png",
+      "sha256": "4d535dce137d62ff1bf7d6c65e07227de91313531b63768555ca9c1433e4e577",
+      "classification": "project-asset",
+      "publication": "keep",
+      "source": "Packaged JobOS capture using a disposable visibly FAKE staging profile",
+      "purpose": "Issue #56 Evidence import acceptance",
+      "provenance": {
+        "trackedSource": "docs/acceptance/career-profile-product-experience/capture.mjs",
+        "method": "Captured from the packaged renderer, visually inspected, metadata-stripped, and checksum-pinned."
+      }
+    },
+    {
+      "path": "docs/acceptance/career-profile-product-experience/04-wide-agent-access-1440x1024.png",
+      "sha256": "b39a6696273f7dc67fd5caabbf94f92fbe628053decc45eba18bf2b108f67615",
+      "classification": "project-asset",
+      "publication": "keep",
+      "source": "Packaged JobOS capture using a disposable visibly FAKE staging profile",
+      "purpose": "Issue #56 exact agent-scope preview acceptance",
+      "provenance": {
+        "trackedSource": "docs/acceptance/career-profile-product-experience/capture.mjs",
+        "method": "Captured from the packaged renderer, visually inspected, metadata-stripped, and checksum-pinned."
+      }
+    },
+    {
+      "path": "docs/acceptance/career-profile-product-experience/05-wide-export-choices-1440x1024.png",
+      "sha256": "361aecf59427b48b8cbee529013f0c405f42d2cbf2f32e678d4d893e01732074",
+      "classification": "project-asset",
+      "publication": "keep",
+      "source": "Packaged JobOS capture using a disposable visibly FAKE staging profile",
+      "purpose": "Issue #56 explicit export-scope acceptance",
+      "provenance": {
+        "trackedSource": "docs/acceptance/career-profile-product-experience/capture.mjs",
+        "method": "Captured from the packaged renderer, visually inspected, metadata-stripped, and checksum-pinned."
+      }
+    },
+    {
+      "path": "docs/acceptance/career-profile-product-experience/06-wide-restore-warning-1440x1024.png",
+      "sha256": "b4bae79d6a99d954bfc34b9d9ce67f02f43ad99d49c6aa729151482a62455d2b",
+      "classification": "project-asset",
+      "publication": "keep",
+      "source": "Packaged JobOS capture using a disposable visibly FAKE staging profile",
+      "purpose": "Issue #56 restore warning acceptance",
+      "provenance": {
+        "trackedSource": "docs/acceptance/career-profile-product-experience/capture.mjs",
+        "method": "Captured from the packaged renderer, visually inspected, metadata-stripped, and checksum-pinned."
+      }
+    },
+    {
+      "path": "docs/acceptance/career-profile-product-experience/07-narrow-detail-980x640.png",
+      "sha256": "55bae3de5b449f1807d9c4a51439074b953dc9c1a57af00cc38d4da4656e8d46",
+      "classification": "project-asset",
+      "publication": "keep",
+      "source": "Packaged JobOS capture using a disposable visibly FAKE staging profile",
+      "purpose": "Issue #56 narrow detail-surface acceptance",
+      "provenance": {
+        "trackedSource": "docs/acceptance/career-profile-product-experience/capture.mjs",
+        "method": "Captured from the packaged renderer, visually inspected, metadata-stripped, and checksum-pinned."
+      }
+    },
+    {
+      "path": "docs/acceptance/career-profile-product-experience/08-wide-after-restart-1440x1024.png",
+      "sha256": "06da31011728d8366f531e06e6999fea3a1e6488aa25dc25d913dfe34502459d",
+      "classification": "project-asset",
+      "publication": "keep",
+      "source": "Packaged JobOS capture using a disposable visibly FAKE staging profile",
+      "purpose": "Issue #56 restart-persistence acceptance",
+      "provenance": {
+        "trackedSource": "docs/acceptance/career-profile-product-experience/capture.mjs",
+        "method": "Captured after restarting the packaged app and API, visually inspected, metadata-stripped, and checksum-pinned."
+      }
+    },
+    {
+      "path": "docs/acceptance/career-profile-product-experience/09-narrow-restored-baseline-980x640.png",
+      "sha256": "403d8e44b70fbd9996fe968d243f4328ad48548ba06097b09fc557d648edf1ab",
+      "classification": "project-asset",
+      "publication": "keep",
+      "source": "Packaged JobOS capture using a disposable visibly FAKE staging profile",
+      "purpose": "Issue #56 restored unavailable-Evidence acceptance",
+      "provenance": {
+        "trackedSource": "docs/acceptance/career-profile-product-experience/capture.mjs",
+        "method": "Captured after restoring a profile-only baseline and restarting the packaged app, visually inspected, metadata-stripped, and checksum-pinned."
       }
     }
   ]

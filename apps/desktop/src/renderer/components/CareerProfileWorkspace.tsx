@@ -1,12 +1,15 @@
 import { BriefcaseBusiness, Check, Clock3, MapPin, RotateCcw, Save, Sparkles } from 'lucide-react'
-import { useEffect, useRef, useState, type KeyboardEvent } from 'react'
+import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from 'react'
 import { createPortal } from 'react-dom'
 
-import { CAREER_PROFILE_ADDITIONAL_CONTEXT_LIMIT, careerProfileAdditionalContextLength, type CareerProfileBridge, type CareerProfileItemSnapshot, type WorkArrangementMode, type WorkArrangementStrength, type WorkArrangementValue } from '../../shared/contracts'
+import { CAREER_PROFILE_ADDITIONAL_CONTEXT_LIMIT, careerProfileAdditionalContextLength, type CareerProfileArea, type CareerProfileBridge, type CareerProfileItemSnapshot, type WorkArrangementMode, type WorkArrangementStrength, type WorkArrangementValue } from '../../shared/contracts'
 import { useCareerProfile } from '../hooks/useCareerProfile'
 import { useCareerProfileCollaboration } from '../hooks/useCareerProfileCollaboration'
+import { useCareerProfileProduct } from '../hooks/useCareerProfileProduct'
+import { CareerProfileProductExperience } from './CareerProfileProductExperience'
 
 interface CareerProfileWorkspaceProps {
+  active?: boolean
   bridge?: CareerProfileBridge
   hasActiveTurn: boolean
   online?: boolean
@@ -156,9 +159,15 @@ function ProposalSnapshot({ snapshot, emptyLabel }: {
   )
 }
 
-export function CareerProfileWorkspace({ bridge = window.jobos.careerProfile, hasActiveTurn, online = true }: CareerProfileWorkspaceProps) {
+export function CareerProfileWorkspace({ active = true, bridge = window.jobos.careerProfile, hasActiveTurn, online = true }: CareerProfileWorkspaceProps) {
   const profile = useCareerProfile(bridge)
-  const collaboration = useCareerProfileCollaboration(bridge, online, profile.load)
+  const product = useCareerProfileProduct(bridge)
+  const refreshProfile = useCallback(async () => {
+    const [, completeProfileRefreshed] = await Promise.all([profile.load(false), product.load(false)])
+    return completeProfileRefreshed
+  }, [product.load, profile.load])
+  const collaboration = useCareerProfileCollaboration(bridge, online, refreshProfile)
+  const [activeArea, setActiveArea] = useState<CareerProfileArea>('what_im_looking_for')
   const [validation, setValidation] = useState('')
   const historyDrawer = useRef<HTMLElement>(null)
   const historyTrigger = useRef<HTMLButtonElement>(null)
@@ -180,6 +189,10 @@ export function CareerProfileWorkspace({ bridge = window.jobos.careerProfile, ha
       window.requestAnimationFrame(() => historyTrigger.current?.focus())
     }
   }, [profile.historyOpen])
+
+  useEffect(() => {
+    if (!active || activeArea !== 'what_im_looking_for') profile.setHistoryOpen(false)
+  }, [active, activeArea, profile.setHistoryOpen])
 
   const update = <Key extends keyof WorkArrangementValue>(key: Key, value: WorkArrangementValue[Key]) => {
     setValidation('')
@@ -250,6 +263,28 @@ export function CareerProfileWorkspace({ bridge = window.jobos.careerProfile, ha
 
   const currentValue = profile.current?.record?.value
   const empty = !currentValue
+  const productItems = product.current?.items ?? []
+  const myCareerCount = productItems.filter(item => item.area === 'my_career').length
+  const lookingCount = productItems.filter(item => item.area === 'what_im_looking_for').length + (currentValue ? 1 : 0)
+  const evidenceCount = product.current?.sourceEvidence.length ?? 0
+  const sectionCopy: Record<CareerProfileArea, { breadcrumb: string; description: string; title: string }> = {
+    my_career: {
+      breadcrumb: 'My Career',
+      description: 'Keep the experience, skills, education, projects, and positioning you want JobOS to remember.',
+      title: 'My Career'
+    },
+    what_im_looking_for: {
+      breadcrumb: 'What I’m Looking For',
+      description: 'Tell JobOS what you want next and how firmly it should apply each choice.',
+      title: 'Work arrangement'
+    },
+    my_evidence: {
+      breadcrumb: 'My Evidence',
+      description: 'Keep the source files that support your story, with clear provenance and independent import recovery.',
+      title: 'My Evidence'
+    }
+  }
+  const visibleSection = sectionCopy[activeArea]
 
   return (
     <main className="career-profile-workspace">
@@ -260,20 +295,28 @@ export function CareerProfileWorkspace({ bridge = window.jobos.careerProfile, ha
           <p>The information JobOS uses to understand your career and preferences.</p>
         </div>
         <nav className="career-profile-nav">
-          <button className="career-nav-item" disabled type="button"><BriefcaseBusiness aria-hidden="true" size={17} /><span><strong>My Career</strong><small>Coming later</small></span></button>
-          <button aria-current="page" className="career-nav-item active" type="button"><MapPin aria-hidden="true" size={17} /><span><strong>What I’m Looking For</strong><small>1 preference</small></span></button>
-          <button className="career-nav-item" disabled type="button"><Sparkles aria-hidden="true" size={17} /><span><strong>My Evidence</strong><small>Coming later</small></span></button>
+          <button aria-current={activeArea === 'my_career' ? 'page' : undefined} className={`career-nav-item ${activeArea === 'my_career' ? 'active' : ''}`} onClick={() => setActiveArea('my_career')} type="button"><BriefcaseBusiness aria-hidden="true" size={17} /><span><strong>My Career</strong><small>{myCareerCount} detail{myCareerCount === 1 ? '' : 's'}</small></span></button>
+          <button aria-current={activeArea === 'what_im_looking_for' ? 'page' : undefined} className={`career-nav-item ${activeArea === 'what_im_looking_for' ? 'active' : ''}`} onClick={() => setActiveArea('what_im_looking_for')} type="button"><MapPin aria-hidden="true" size={17} /><span><strong>What I’m Looking For</strong><small>{lookingCount} preference{lookingCount === 1 ? '' : 's'}</small></span></button>
+          <button aria-current={activeArea === 'my_evidence' ? 'page' : undefined} className={`career-nav-item ${activeArea === 'my_evidence' ? 'active' : ''}`} onClick={() => setActiveArea('my_evidence')} type="button"><Sparkles aria-hidden="true" size={17} /><span><strong>My Evidence</strong><small>{evidenceCount} source{evidenceCount === 1 ? '' : 's'}</small></span></button>
         </nav>
         <div className="career-staging-note"><span>(FAKE) staging profile</span><p>This preview does not replace your live career context.</p></div>
       </aside>
 
       <section className="career-profile-main">
         <span className="career-mobile-staging">(FAKE) staging profile</span>
+        <label className="career-mobile-nav">
+          <span>Profile section</span>
+          <select aria-label="Career Profile section" onChange={event => setActiveArea(event.target.value as CareerProfileArea)} value={activeArea}>
+            <option value="my_career">My Career</option>
+            <option value="what_im_looking_for">What I’m Looking For</option>
+            <option value="my_evidence">My Evidence</option>
+          </select>
+        </label>
         <header className="career-detail-header">
           <div>
-            <span className="career-breadcrumb">What I’m Looking For</span>
-            <h2>Work arrangement</h2>
-            <p>Tell JobOS where you want to work and how firmly it should apply that choice.</p>
+            <span className="career-breadcrumb">{visibleSection.breadcrumb}</span>
+            <h2>{visibleSection.title}</h2>
+            <p>{visibleSection.description}</p>
           </div>
           {profile.current?.record ? <span className="career-revision-badge">Revision {profile.current.profileRevision}</span> : null}
         </header>
@@ -340,15 +383,26 @@ export function CareerProfileWorkspace({ bridge = window.jobos.careerProfile, ha
           <p className={`career-collaboration-message ${collaboration.status}`} role={collaboration.status === 'error' ? 'alert' : 'status'}>{collaboration.message}</p>
         ) : null}
 
-        {empty ? (
-          <section className="career-empty-card">
-            <MapPin aria-hidden="true" size={24} />
-            <h3>Tell JobOS where you want to work</h3>
-            <p>Start with a flexible preference, then make it stronger if location should filter opportunities.</p>
-          </section>
-        ) : null}
+        <CareerProfileProductExperience
+          active={active}
+          activeArea={activeArea}
+          bridge={bridge}
+          hasActiveTurn={hasActiveTurn}
+          onBaselineRestored={refreshProfile}
+          online={online}
+          product={product}
+        />
 
-        <div className="career-detail-grid">
+        <div hidden={activeArea !== 'what_im_looking_for'}>
+          {empty ? (
+            <section className="career-empty-card">
+              <MapPin aria-hidden="true" size={24} />
+              <h3>Tell JobOS where you want to work</h3>
+              <p>Start with a flexible preference, then make it stronger if location should filter opportunities.</p>
+            </section>
+          ) : null}
+
+          <div className="career-detail-grid">
           <form className="career-form-card" onSubmit={event => { event.preventDefault(); submit() }}>
             <div className="career-card-heading"><div><span className="career-kicker">Preference</span><h3>Your work arrangement</h3></div>{currentValue ? <span className="career-status"><Check aria-hidden="true" size={13} /> User stated</span> : null}</div>
 
@@ -403,9 +457,10 @@ export function CareerProfileWorkspace({ bridge = window.jobos.careerProfile, ha
             <p>{example(profile.draft)}</p>
             <div className="career-impact-list"><span>Used in</span><ul><li>Job research</li><li>Browse ranking</li><li>Agent recommendations</li></ul></div>
           </aside>
+          </div>
         </div>
 
-        {profile.historyOpen ? createPortal(
+        {active && activeArea === 'what_im_looking_for' && profile.historyOpen ? createPortal(
           <div className="career-history-modal-layer">
             <div aria-hidden="true" className="career-history-backdrop" onClick={closeHistory} />
             <aside aria-label="Work arrangement history" aria-modal="true" className="career-history-drawer" onKeyDown={handleHistoryKeys} ref={historyDrawer} role="dialog">

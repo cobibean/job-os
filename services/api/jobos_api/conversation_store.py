@@ -14,6 +14,11 @@ from .career_profile import (
     create_snapshot_in_transaction,
     get_snapshot_in_connection,
 )
+from .career_profile_context import (
+    CareerProfileContextSelectionError,
+    CareerProfileContextSnapshot,
+    CareerProfileContextStore,
+)
 from .redaction import redact_detail, sanitize_summary, sanitize_user_text
 from .sqlite_connection import connect_sqlite
 from .state_store import (
@@ -169,6 +174,8 @@ class ConversationStore:
         actor_id: str,
         source_turn_id: str | None = None,
         career_profile_principal: str | None = None,
+        career_profile_context: CareerProfileContextStore | None = None,
+        career_profile_agent_id: str | None = None,
     ) -> dict[str, str | bool | None]:
         safe_text = sanitize_user_text(text)
         command = (
@@ -203,7 +210,12 @@ class ConversationStore:
                 source = connection.execute(
                     """
                     SELECT career_profile_snapshot_id, career_profile_revision,
-                           career_profile_content_hash
+                           career_profile_content_hash,
+                           career_profile_context_snapshot_id,
+                           career_profile_context_agent_id,
+                           career_profile_context_revision,
+                           career_profile_context_authority_epoch,
+                           career_profile_context_content_hash
                     FROM conversation_turns
                     WHERE turn_id = ? AND conversation_id = ?
                     """,
@@ -235,7 +247,7 @@ class ConversationStore:
                         request=CareerProfileSnapshotRequest(),
                     )
                 else:
-                    snapshot_id, revision, content_hash = source
+                    snapshot_id, revision, content_hash = source[:3]
                     if snapshot_id is None or revision is None or content_hash is None:
                         connection.rollback()
                         raise RuntimeError("Source turn has no valid Career Profile binding")
@@ -250,6 +262,68 @@ class ConversationStore:
                     ):
                         connection.rollback()
                         raise RuntimeError("Source turn Career Profile binding is invalid")
+            bound_context_snapshot: CareerProfileContextSnapshot | None = None
+            if career_profile_context is not None:
+                if career_profile_agent_id is None:
+                    connection.rollback()
+                    raise RuntimeError("Career Profile context agent is not configured")
+                if source is None:
+                    bound_context_snapshot = career_profile_context.create_snapshot_in_transaction(
+                        connection,
+                        agent_id=career_profile_agent_id,
+                    )
+                else:
+                    career_profile_context.require_active_agent_in_connection(
+                        connection, career_profile_agent_id
+                    )
+                    (
+                        context_snapshot_id,
+                        context_agent_id,
+                        context_revision,
+                        context_authority_epoch,
+                        context_content_hash,
+                    ) = source[3:]
+                    if any(
+                        value is None
+                        for value in (
+                            context_snapshot_id,
+                            context_agent_id,
+                            context_revision,
+                            context_authority_epoch,
+                            context_content_hash,
+                        )
+                    ):
+                        connection.rollback()
+                        raise RuntimeError(
+                            "Source turn has no valid Career Profile context binding"
+                        )
+                    if not secrets.compare_digest(
+                        str(context_agent_id), career_profile_agent_id
+                    ):
+                        connection.rollback()
+                        raise RuntimeError(
+                            "Source turn Career Profile context belongs to another agent"
+                        )
+                    bound_context_snapshot = (
+                        career_profile_context.get_snapshot_in_connection(
+                            connection,
+                            str(context_snapshot_id),
+                            agent_id=career_profile_agent_id,
+                        )
+                    )
+                    if (
+                        bound_context_snapshot.profile_revision != int(context_revision)
+                        or bound_context_snapshot.authority_epoch
+                        != int(context_authority_epoch)
+                        or not secrets.compare_digest(
+                            bound_context_snapshot.content_hash,
+                            str(context_content_hash),
+                        )
+                    ):
+                        connection.rollback()
+                        raise RuntimeError(
+                            "Source turn Career Profile context binding is invalid"
+                        )
             safe_context = redact_detail(context)
             safe_context.pop("redacted", None)
             public_context = dict(safe_context)
@@ -259,8 +333,13 @@ class ConversationStore:
                 INSERT INTO conversation_turns(
                     turn_id, conversation_id, message_id, source_turn_id, text,
                     context_json, status, career_profile_snapshot_id,
-                    career_profile_revision, career_profile_content_hash
-                ) VALUES (?, ?, ?, ?, ?, ?, 'running', ?, ?, ?)
+                    career_profile_revision, career_profile_content_hash,
+                    career_profile_context_snapshot_id,
+                    career_profile_context_agent_id,
+                    career_profile_context_revision,
+                    career_profile_context_authority_epoch,
+                    career_profile_context_content_hash
+                ) VALUES (?, ?, ?, ?, ?, ?, 'running', ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     turn_id,
@@ -272,6 +351,19 @@ class ConversationStore:
                     bound_snapshot.snapshot_id if bound_snapshot else None,
                     bound_snapshot.profile_revision if bound_snapshot else None,
                     bound_snapshot.content_hash if bound_snapshot else None,
+                    bound_context_snapshot.snapshot_id if bound_context_snapshot else None,
+                    bound_context_snapshot.agent_id if bound_context_snapshot else None,
+                    (
+                        bound_context_snapshot.profile_revision
+                        if bound_context_snapshot
+                        else None
+                    ),
+                    (
+                        bound_context_snapshot.authority_epoch
+                        if bound_context_snapshot
+                        else None
+                    ),
+                    bound_context_snapshot.content_hash if bound_context_snapshot else None,
                 ),
             )
             connection.execute(
@@ -340,6 +432,43 @@ class ConversationStore:
             raise RuntimeError("Turn Career Profile binding is invalid")
         return snapshot
 
+    def bound_career_profile_context_snapshot(
+        self,
+        turn_id: str,
+        *,
+        context_store: CareerProfileContextStore,
+        agent_id: str,
+    ) -> CareerProfileContextSnapshot:
+        with connect_sqlite(f"file:{self._path}?mode=ro", uri=True) as connection:
+            row = connection.execute(
+                """
+                SELECT career_profile_context_snapshot_id,
+                       career_profile_context_agent_id,
+                       career_profile_context_revision,
+                       career_profile_context_authority_epoch,
+                       career_profile_context_content_hash
+                FROM conversation_turns
+                WHERE turn_id = ? AND conversation_id = ?
+                """,
+                (turn_id, self.conversation_id),
+            ).fetchone()
+            if row is None or any(value is None for value in row):
+                raise RuntimeError("Turn has no valid Career Profile context binding")
+            if not secrets.compare_digest(str(row[1]), agent_id):
+                raise RuntimeError("Turn Career Profile context belongs to another agent")
+            snapshot = context_store.get_snapshot_in_connection(
+                connection,
+                str(row[0]),
+                agent_id=agent_id,
+            )
+        if (
+            snapshot.profile_revision != int(row[2])
+            or snapshot.authority_epoch != int(row[3])
+            or not secrets.compare_digest(snapshot.content_hash, str(row[4]))
+        ):
+            raise RuntimeError("Turn Career Profile context binding is invalid")
+        return snapshot
+
     def record_agent_continuation(
         self,
         *,
@@ -350,6 +479,8 @@ class ConversationStore:
         detail: dict[str, object],
         source_event_id: str | None = None,
         career_profile_principal: str | None = None,
+        career_profile_context: CareerProfileContextStore | None = None,
+        career_profile_agent_id: str | None = None,
     ) -> bool:
         """Atomically append one terminal assistant-only continuation."""
         if not re.fullmatch(r"turn_[A-Za-z0-9_-]{8,200}", turn_id):
@@ -379,7 +510,12 @@ class ConversationStore:
                 connection.execute(
                     """
                     SELECT turn.career_profile_snapshot_id, turn.career_profile_revision,
-                           turn.career_profile_content_hash
+                           turn.career_profile_content_hash,
+                           turn.career_profile_context_snapshot_id,
+                           turn.career_profile_context_agent_id,
+                           turn.career_profile_context_revision,
+                           turn.career_profile_context_authority_epoch,
+                           turn.career_profile_context_content_hash
                     FROM conversation_continuation_bindings AS continuation
                     JOIN conversation_turns AS turn
                       ON turn.turn_id = continuation.source_turn_id
@@ -393,14 +529,50 @@ class ConversationStore:
                 else None
             )
             if career_profile_principal is not None:
-                if binding is None or any(value is None for value in binding):
+                legacy_binding = binding[:3] if binding is not None else None
+                if legacy_binding is None or any(value is None for value in legacy_binding):
                     connection.rollback()
                     return False
                 snapshot = get_snapshot_in_connection(
-                    connection, str(binding[0]), principal=career_profile_principal
+                    connection, str(legacy_binding[0]), principal=career_profile_principal
                 )
-                if snapshot.profile_revision != int(binding[1]) or not secrets.compare_digest(
-                    snapshot.content_hash, str(binding[2])
+                if snapshot.profile_revision != int(legacy_binding[1]) or not secrets.compare_digest(
+                    snapshot.content_hash, str(legacy_binding[2])
+                ):
+                    connection.rollback()
+                    return False
+            if career_profile_context is not None:
+                if career_profile_agent_id is None or binding is None:
+                    connection.rollback()
+                    return False
+                try:
+                    career_profile_context.require_active_agent_in_connection(
+                        connection, career_profile_agent_id
+                    )
+                except CareerProfileContextSelectionError:
+                    connection.rollback()
+                    return False
+                context_binding = binding[3:]
+                if any(value is None for value in context_binding):
+                    connection.rollback()
+                    return False
+                if not secrets.compare_digest(
+                    str(context_binding[1]), career_profile_agent_id
+                ):
+                    connection.rollback()
+                    return False
+                context_snapshot = career_profile_context.get_snapshot_in_connection(
+                    connection,
+                    str(context_binding[0]),
+                    agent_id=career_profile_agent_id,
+                )
+                if (
+                    context_snapshot.profile_revision != int(context_binding[2])
+                    or context_snapshot.authority_epoch != int(context_binding[3])
+                    or not secrets.compare_digest(
+                        context_snapshot.content_hash,
+                        str(context_binding[4]),
+                    )
                 ):
                     connection.rollback()
                     return False
@@ -409,8 +581,13 @@ class ConversationStore:
                 INSERT INTO conversation_turns(
                     turn_id, conversation_id, message_id, source_turn_id, text,
                     context_json, status, career_profile_snapshot_id,
-                    career_profile_revision, career_profile_content_hash
-                ) VALUES (?, ?, ?, NULL, '', ?, ?, ?, ?, ?)
+                    career_profile_revision, career_profile_content_hash,
+                    career_profile_context_snapshot_id,
+                    career_profile_context_agent_id,
+                    career_profile_context_revision,
+                    career_profile_context_authority_epoch,
+                    career_profile_context_content_hash
+                ) VALUES (?, ?, ?, NULL, '', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     turn_id,
@@ -421,6 +598,11 @@ class ConversationStore:
                     binding[0] if binding else None,
                     binding[1] if binding else None,
                     binding[2] if binding else None,
+                    binding[3] if binding else None,
+                    binding[4] if binding else None,
+                    binding[5] if binding else None,
+                    binding[6] if binding else None,
+                    binding[7] if binding else None,
                 ),
             )
             connection.execute(
@@ -566,7 +748,15 @@ class ConversationStore:
         result["context"] = json.loads(str(result.pop("context_json")))
         return result
 
-    def prepare_turn_submission(self, turn_id: str, expected: str | None, stored: str) -> bool:
+    def prepare_turn_submission(
+        self,
+        turn_id: str,
+        expected: str | None,
+        stored: str,
+        *,
+        career_profile_context: CareerProfileContextStore | None = None,
+        career_profile_agent_id: str | None = None,
+    ) -> bool:
         with connect_sqlite(self._path) as connection:
             connection.execute("BEGIN IMMEDIATE")
             active = connection.execute(
@@ -580,6 +770,17 @@ class ConversationStore:
             if not active or not current or current[0] not in (expected, stored):
                 connection.rollback()
                 return False
+            if career_profile_context is not None:
+                if career_profile_agent_id is None:
+                    connection.rollback()
+                    return False
+                try:
+                    career_profile_context.require_active_agent_in_connection(
+                        connection, career_profile_agent_id
+                    )
+                except CareerProfileContextSelectionError:
+                    connection.rollback()
+                    raise
             if current[0] == expected:
                 connection.execute(
                     "UPDATE conversations SET stored_session_id = ?, updated_at = CURRENT_TIMESTAMP WHERE conversation_id = ?",

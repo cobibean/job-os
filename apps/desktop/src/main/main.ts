@@ -14,6 +14,7 @@ import { createApiLifecycle } from './apiLifecycle.js'
 import { BROWSER_PARTITION, BrowserManager, remoteBrowserViewOptions } from './browser.js'
 import { canonicalListingUrl, safeApplicationUrl, validatedBrowserJobExtraction } from './browserJobExtraction.js'
 import { createMainCareerProfileClient } from './careerProfile.js'
+import { careerProfileAcceptanceDialogPaths } from './careerProfileAcceptanceDialogs.js'
 import { registerBrowserRestoreHandler } from './browserIpc.js'
 import { startDesktopCapabilityClient } from './capabilityClient.js'
 import { initializeDesktopRuntime } from './desktopRuntime.js'
@@ -244,7 +245,27 @@ function registerConnectivityInterface(): void {
 
 function registerCareerProfileInterface(): void {
   const config = jobsConfig()
-  const careerProfile = config ? createMainCareerProfileClient(config) : null
+  const acceptanceDialogs = careerProfileAcceptanceDialogPaths()
+  const careerProfile = config ? createMainCareerProfileClient(config, {
+    chooseArchivePath: async () => {
+      if (acceptanceDialogs) return acceptanceDialogs.chooseArchivePath()
+      const selection = await dialog.showOpenDialog({
+        title: 'Restore a Career Profile baseline',
+        properties: ['openFile'],
+        filters: [{ name: 'JobOS Career Profile archive', extensions: ['zip'] }]
+      })
+      return selection.canceled ? null : selection.filePaths[0] ?? null
+    },
+    chooseExportPath: async filename => {
+      if (acceptanceDialogs) return acceptanceDialogs.chooseExportPath()
+      const selection = await dialog.showSaveDialog({
+        title: 'Export Career Profile',
+        defaultPath: filename,
+        filters: [{ name: 'JobOS Career Profile archive', extensions: ['zip'] }]
+      })
+      return selection.canceled ? null : selection.filePath ?? null
+    }
+  }) : null
   const trusted = (event: IpcMainInvokeEvent) => {
     assertTrustedRenderer(event)
     if (!careerProfile) throw new Error('Device credential unavailable')
@@ -279,6 +300,40 @@ function registerCareerProfileInterface(): void {
   ipcMain.handle('jobos:career-profile:history:get', event => trusted(event).getCareerProfileChangeHistory())
   ipcMain.handle('jobos:career-profile:history:undo', (event, revisionId, request) => (
     trusted(event).undoCareerProfileChange(revisionId, request)
+  ))
+  ipcMain.handle('jobos:career-profile:get', event => trusted(event).getCareerProfile())
+  ipcMain.handle('jobos:career-profile:items:create', (event, request) => (
+    trusted(event).createCareerProfileItem(request)
+  ))
+  ipcMain.handle('jobos:career-profile:items:update', (event, itemId, request) => (
+    trusted(event).updateCareerProfileItem(itemId, request)
+  ))
+  ipcMain.handle('jobos:career-profile:items:remove', (event, itemId, request) => (
+    trusted(event).removeCareerProfileItem(itemId, request)
+  ))
+  ipcMain.handle('jobos:career-profile:evidence:import', (event, request) => (
+    trusted(event).importCareerProfileEvidence(request)
+  ))
+  ipcMain.handle('jobos:career-profile:evidence:remove', (event, evidenceId, request) => (
+    trusted(event).removeCareerProfileEvidence(evidenceId, request)
+  ))
+  ipcMain.handle('jobos:career-profile:context:get', (event, agentId) => (
+    trusted(event).getCareerProfileContext(agentId)
+  ))
+  ipcMain.handle('jobos:career-profile:context:update', (event, agentId, request) => (
+    trusted(event).updateCareerProfileContext(agentId, request)
+  ))
+  ipcMain.handle('jobos:career-profile:context:preview', (event, agentId) => (
+    trusted(event).previewCareerProfileContext(agentId)
+  ))
+  ipcMain.handle('jobos:career-profile:export', (event, request) => (
+    trusted(event).exportCareerProfile(request)
+  ))
+  ipcMain.handle('jobos:career-profile:restore:choose', event => (
+    trusted(event).chooseCareerProfileArchive()
+  ))
+  ipcMain.handle('jobos:career-profile:restore', (event, request) => (
+    trusted(event).restoreCareerProfile(request)
   ))
 }
 

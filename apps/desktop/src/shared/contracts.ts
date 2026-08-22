@@ -168,6 +168,124 @@ export interface CareerProfileUndoRequest {
   idempotencyKey: string
 }
 
+export type CareerProfileArea = 'my_career' | 'what_im_looking_for' | 'my_evidence'
+export type CareerProfileContextMode = 'none' | 'selected' | 'broader'
+export type CareerProfileEvidenceKind = 'resume' | 'portfolio' | 'supporting_document' | 'citation'
+export type CareerProfileEvidenceMode = 'profile_only' | 'selected' | 'all'
+
+export interface CareerProfileEvidence {
+  active: boolean
+  byteCount: number
+  capturedAt: string | null
+  evidenceId: string
+  importedAt: string
+  mediaType: string
+  originalFilename: string
+  provenance: {
+    method: 'user_import' | 'agent_import' | 'migration_import'
+    sourceKind: CareerProfileEvidenceKind
+    sourceLabel: string
+  }
+  sha256: string
+}
+
+export interface CareerProfileCurrent {
+  authorityEpoch: number
+  items: CareerProfileItemSnapshot[]
+  profileRevision: number
+  sourceEvidence: CareerProfileEvidence[]
+}
+
+export interface CareerProfileItemMutationRequest {
+  evidenceIds: string[]
+  expectedProfileRevision: number
+  idempotencyKey: string
+  value: Record<string, unknown> & { kind: string }
+}
+
+export interface CareerProfileRemovalRequest {
+  expectedProfileRevision: number
+  idempotencyKey: string
+}
+
+export interface CareerProfileEvidenceImportRequest {
+  capturedAt: string | null
+  contentBase64: string
+  expectedProfileRevision: number
+  idempotencyKey: string
+  mediaType: string
+  originalFilename: string
+  sourceKind: CareerProfileEvidenceKind
+  sourceLabel: string
+}
+
+export type CareerProfileMutationResult =
+  | { status: 'saved'; current: CareerProfileCurrent }
+  | { status: 'conflict'; current: CareerProfileCurrent }
+
+export interface CareerProfileContextScope {
+  agentId: string
+  mode: CareerProfileContextMode
+  selectedAreas: CareerProfileArea[]
+  selectedItemIds: string[]
+  updatedAt: string
+}
+
+export interface CareerProfileContextUpdateRequest {
+  expectedAuthorityEpoch: number
+  expectedProfileRevision: number
+  idempotencyKey: string
+  mode: CareerProfileContextMode
+  selectedAreas: CareerProfileArea[]
+  selectedItemIds: string[]
+}
+
+export interface CareerProfileContextPreview {
+  authorityEpoch: number
+  contentHash: string
+  createdAt: string
+  profileRevision: number
+  profile: CareerProfileCurrent
+}
+
+export interface CareerProfileExportRequest {
+  evidenceMode: CareerProfileEvidenceMode
+  expectedProfileRevision: number
+  selectedEvidenceIds: string[]
+}
+
+export type CareerProfileExportResult =
+  | { status: 'cancelled' }
+  | {
+      status: 'saved'
+      byteCount: number
+      filename: string
+      includedEvidenceIds: string[]
+      omittedEvidenceIds: string[]
+      sha256: string
+    }
+
+export interface CareerProfileArchiveSelection {
+  archiveToken: string
+  byteCount: number
+  filename: string
+}
+
+export interface CareerProfileRestoreRequest {
+  archiveToken: string
+  confirmation: 'RESTORE_CAREER_PROFILE_BASELINE'
+  expectedProfileRevision: number
+  idempotencyKey: string
+}
+
+export interface CareerProfileRestoreResult {
+  archiveSha256: string
+  baselineCreated: true
+  profile: CareerProfileCurrent
+  restoredEvidenceIds: string[]
+  unavailableEvidenceIds: string[]
+}
+
 export interface CareerProfileBridge {
   availability: () => Promise<{ enabled: boolean }>
   validateCachedWorkArrangement: (candidate: unknown) => Promise<WorkArrangementCurrent | null>
@@ -191,6 +309,32 @@ export interface CareerProfileBridge {
     revisionId: string,
     request: CareerProfileUndoRequest
   ) => Promise<{ profileRevision: number }>
+  getCareerProfile: () => Promise<CareerProfileCurrent>
+  createCareerProfileItem: (request: CareerProfileItemMutationRequest) => Promise<CareerProfileMutationResult>
+  updateCareerProfileItem: (
+    itemId: string,
+    request: CareerProfileItemMutationRequest
+  ) => Promise<CareerProfileMutationResult>
+  removeCareerProfileItem: (
+    itemId: string,
+    request: CareerProfileRemovalRequest
+  ) => Promise<CareerProfileMutationResult>
+  importCareerProfileEvidence: (
+    request: CareerProfileEvidenceImportRequest
+  ) => Promise<CareerProfileMutationResult>
+  removeCareerProfileEvidence: (
+    evidenceId: string,
+    request: CareerProfileRemovalRequest
+  ) => Promise<CareerProfileMutationResult>
+  getCareerProfileContext: (agentId: string) => Promise<CareerProfileContextScope>
+  updateCareerProfileContext: (
+    agentId: string,
+    request: CareerProfileContextUpdateRequest
+  ) => Promise<CareerProfileContextScope>
+  previewCareerProfileContext: (agentId: string) => Promise<CareerProfileContextPreview>
+  exportCareerProfile: (request: CareerProfileExportRequest) => Promise<CareerProfileExportResult>
+  chooseCareerProfileArchive: () => Promise<CareerProfileArchiveSelection | null>
+  restoreCareerProfile: (request: CareerProfileRestoreRequest) => Promise<CareerProfileRestoreResult>
 }
 
 export type JobSortMode = 'manual' | 'recent' | 'alphabetical' | 'status'

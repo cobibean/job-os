@@ -15,12 +15,21 @@ from jobos_api.career_profile import (
     WorkArrangementValue,
     principal_for_device,
 )
+from jobos_api.career_profile_collaboration import CareerProfileCollaborationStore
+from jobos_api.career_profile_complete import CareerProfileCompleteStore, ProfileItemMutation
+from jobos_api.career_profile_context import (
+    CareerProfileContextScopeUpdate,
+    CareerProfileContextSelectionError,
+    CareerProfileContextStore,
+)
 from jobos_api.conversations import (
     ConversationService,
     RetryTurnRequest,
     SendMessageRequest,
 )
 from jobos_api.state_store import JobOsStateStore
+
+AGENT_ID = "job-hunter"
 
 
 class CapturingGateway:
@@ -73,6 +82,83 @@ def configured_service(tmp_path):
         career_profile_principal=principal,
     )
     return database, profile, service, gateway, principal
+
+
+def configured_complete_context_service(tmp_path):
+    database = tmp_path / "jobos-context.db"
+    state = JobOsStateStore(database)
+    state.initialize(owner_device_id="device-a")
+    profile = CareerProfileStore(database)
+    profile.initialize()
+    complete = CareerProfileCompleteStore(database, tmp_path / "evidence")
+    complete.initialize()
+    collaboration = CareerProfileCollaborationStore(database, complete)
+    collaboration.initialize(
+        agent_id=AGENT_ID,
+        display_name="Job Hunter",
+        token="synthetic-turn-binding-token",
+    )
+    context_store = CareerProfileContextStore(database, complete)
+    context_store.initialize()
+    principal = principal_for_device("device-a")
+    set_arrangement(
+        profile,
+        principal,
+        revision=0,
+        mode="remote",
+        key="complete-context-legacy-remote-0001",
+    )
+    current = complete.current()
+    current = complete.upsert_item(
+        principal=principal,
+        command=ProfileItemMutation.model_validate(
+            {
+                "expected_profile_revision": current.profile_revision,
+                "idempotency_key": "context-seed-skill-0001",
+                "value": {
+                    "kind": "skill",
+                    "name": "(FAKE) TypeScript",
+                    "level": "advanced",
+                },
+            }
+        ),
+    )
+    item_id = current.items[0].item_id
+    current = complete.upsert_item(
+        principal=principal,
+        command=ProfileItemMutation.model_validate(
+            {
+                "expected_profile_revision": current.profile_revision,
+                "idempotency_key": "context-seed-unselected-project-0001",
+                "value": {
+                    "kind": "project",
+                    "name": "(FAKE) Unselected portfolio project",
+                },
+            }
+        ),
+    )
+    context_store.update_scope(
+        principal=principal,
+        agent_id=AGENT_ID,
+        command=CareerProfileContextScopeUpdate(
+            expected_profile_revision=current.profile_revision,
+            expected_authority_epoch=current.authority_epoch,
+            idempotency_key="context-select-skill-0001",
+            mode="selected",
+            selected_item_ids=[item_id],
+        ),
+    )
+    gateway = CapturingGateway()
+    conversation_id = state.first_active_conversation_id("device-a")
+    service = ConversationService(
+        state.conversation_store(conversation_id),
+        gateway,
+        conversation_id,
+        career_profile_principal=principal,
+        career_profile_context=context_store,
+        career_profile_agent_id=AGENT_ID,
+    )
+    return database, complete, context_store, service, gateway, principal, item_id
 
 
 def set_arrangement(profile, principal, *, revision, mode, key):
@@ -513,5 +599,493 @@ def test_api_restart_recovery_tracer_keeps_frozen_snapshot_and_bounds_projection
             restarted.store.update_turn_status(fresh.turn_id, "completed")
         finally:
             await restarted.close()
+
+    asyncio.run(scenario())
+
+
+def test_complete_context_retry_reuses_frozen_snapshot_and_fresh_turn_gets_latest(tmp_path):
+    async def scenario():
+        (
+            database,
+            complete,
+            context_store,
+            service,
+            gateway,
+            principal,
+            item_id,
+        ) = configured_complete_context_service(tmp_path)
+        original = await service.send(
+            SendMessageRequest(text="Use my selected skill", idempotency_key="context-send-0001"),
+            actor_id="device-a",
+            context={},
+        )
+        original_submission = gateway.submissions[-1][1]
+        assert original_submission.career_profile is None
+        frozen = original_submission.career_profile_context
+        assert frozen is not None
+        frozen_scope = frozen["scope"]
+        frozen_projection = frozen["projection"]
+        assert isinstance(frozen_scope, dict)
+        assert isinstance(frozen_projection, dict)
+        assert frozen_scope["mode"] == "selected"
+        assert frozen_scope["selected_item_ids"] == [item_id]
+        frozen_items = frozen_projection["items"]
+        assert isinstance(frozen_items, list)
+        assert [item["item_id"] for item in frozen_items] == [item_id]
+        assert frozen_projection["source_evidence"] == []
+
+        service.store.update_turn_status(original.turn_id, "failed")
+        profile = complete.current()
+        context_store.update_scope(
+            principal=principal,
+            agent_id=AGENT_ID,
+            command=CareerProfileContextScopeUpdate(
+                expected_profile_revision=profile.profile_revision,
+                expected_authority_epoch=profile.authority_epoch,
+                idempotency_key="context-none-after-source-0001",
+                mode="none",
+            ),
+        )
+
+        restarted_gateway = CapturingGateway()
+        restarted = ConversationService(
+            service.store,
+            restarted_gateway,
+            service.conversation_id,
+            career_profile_principal=principal,
+            career_profile_context=context_store,
+            career_profile_agent_id=AGENT_ID,
+        )
+        retry = await restarted.retry(
+            original.turn_id,
+            RetryTurnRequest(idempotency_key="context-retry-0001"),
+            actor_id="device-a",
+        )
+        assert retry is not None
+        retry_submission = restarted_gateway.submissions[-1][1]
+        assert retry_submission.career_profile is None
+        assert retry_submission.career_profile_context == frozen
+
+        restarted.store.update_turn_status(retry.turn_id, "completed")
+        await restarted.send(
+            SendMessageRequest(text="Use current context", idempotency_key="context-send-0002"),
+            actor_id="device-a",
+            context={},
+        )
+        latest_submission = restarted_gateway.submissions[-1][1]
+        assert latest_submission.career_profile is None
+        latest = latest_submission.career_profile_context
+        assert latest is not None
+        latest_scope = latest["scope"]
+        latest_projection = latest["projection"]
+        assert isinstance(latest_scope, dict)
+        assert isinstance(latest_projection, dict)
+        assert latest_scope["mode"] == "none"
+        assert latest_projection["items"] == []
+        assert latest_projection["source_evidence"] == []
+        assert latest["snapshot_id"] != frozen["snapshot_id"]
+
+        with sqlite3.connect(database) as connection:
+            assert connection.execute(
+                "SELECT COUNT(*) FROM career_profile_context_snapshots"
+            ).fetchone()[0] == 2
+
+    asyncio.run(scenario())
+
+
+def test_complete_context_active_turn_recovery_after_service_restart_preserves_selected_scope(
+    tmp_path,
+):
+    async def scenario():
+        (
+            _database,
+            complete,
+            context_store,
+            service,
+            gateway,
+            principal,
+            item_id,
+        ) = configured_complete_context_service(tmp_path)
+        original = await service.send(
+            SendMessageRequest(
+                text="Recover work with only my selected skill",
+                idempotency_key="context-recovery-source-0001",
+            ),
+            actor_id="device-a",
+            context={},
+        )
+        frozen = gateway.submissions[-1][1].career_profile_context
+        assert frozen is not None
+        assert frozen["scope"]["mode"] == "selected"
+        assert frozen["scope"]["selected_item_ids"] == [item_id]
+        assert [item["item_id"] for item in frozen["projection"]["items"]] == [item_id]
+
+        profile = complete.current()
+        context_store.update_scope(
+            principal=principal,
+            agent_id=AGENT_ID,
+            command=CareerProfileContextScopeUpdate(
+                expected_profile_revision=profile.profile_revision,
+                expected_authority_epoch=profile.authority_epoch,
+                idempotency_key="context-none-before-recovery-0001",
+                mode="none",
+            ),
+        )
+
+        class RecoveryGateway(CapturingGateway):
+            def __init__(self) -> None:
+                super().__init__()
+                self.recovered: list[tuple[str, str]] = []
+
+            async def recover_active_turn(self, stored_session_id, turn_id):
+                self.recovered.append((stored_session_id, turn_id))
+
+        recovered_gateway = RecoveryGateway()
+        restarted = ConversationService(
+            service.store,
+            recovered_gateway,
+            service.conversation_id,
+            career_profile_principal=principal,
+            career_profile_context=context_store,
+            career_profile_agent_id=AGENT_ID,
+        )
+        await restarted.start()
+        try:
+            assert recovered_gateway.recovered == [("stored-session", original.turn_id)]
+            recovered = restarted.store.bound_career_profile_context_snapshot(
+                original.turn_id,
+                context_store=context_store,
+                agent_id=AGENT_ID,
+            )
+            assert recovered.model_dump(mode="json") == frozen
+
+            retry = await restarted.retry(
+                original.turn_id,
+                RetryTurnRequest(idempotency_key="context-recovery-retry-0001"),
+                actor_id="device-a",
+            )
+            assert retry is not None
+            assert recovered_gateway.submissions[-1][1].career_profile_context == frozen
+        finally:
+            await restarted.close()
+
+    asyncio.run(scenario())
+
+
+def test_complete_context_unauthorized_item_expansion_is_rejected_before_dispatch(tmp_path):
+    async def scenario():
+        (
+            database,
+            complete,
+            context_store,
+            service,
+            gateway,
+            principal,
+            selected_item_id,
+        ) = configured_complete_context_service(tmp_path)
+        created = service.store.create_turn(
+            text="Use only the explicitly selected skill",
+            context={},
+            idempotency_key="unauthorized-context-expansion-turn",
+            actor_id="device-a",
+            career_profile_principal=principal,
+            career_profile_context=context_store,
+            career_profile_agent_id=AGENT_ID,
+        )
+        bound = service.store.bound_career_profile_context_snapshot(
+            str(created["turn_id"]),
+            context_store=context_store,
+            agent_id=AGENT_ID,
+        )
+        bound_payload = bound.model_dump(mode="json")
+        assert bound_payload["scope"]["selected_item_ids"] == [selected_item_id]
+        unselected_project = next(
+            item
+            for item in complete.current().items
+            if item.item_id != selected_item_id and item.value.kind == "project"
+        )
+        expanded_projection = dict(bound_payload["projection"])
+        expanded_projection["items"] = [
+            *expanded_projection["items"],
+            unselected_project.model_dump(mode="json"),
+        ]
+        with sqlite3.connect(database) as connection:
+            connection.execute(
+                """
+                UPDATE career_profile_context_snapshots SET projection_json = ?
+                WHERE snapshot_id = (
+                    SELECT career_profile_context_snapshot_id
+                    FROM conversation_turns WHERE turn_id = ?
+                )
+                """,
+                (json.dumps(expanded_projection), created["turn_id"]),
+            )
+
+        with pytest.raises(CareerProfileContextSelectionError, match="integrity"):
+            service.store.bound_career_profile_context_snapshot(
+                str(created["turn_id"]),
+                context_store=context_store,
+                agent_id=AGENT_ID,
+            )
+        turn = service.store.turn_record(str(created["turn_id"]))
+        assert turn is not None
+        await service._dispatch(turn)
+        assert gateway.submissions == []
+        settled = service.store.turn_record(str(created["turn_id"]))
+        assert settled is not None
+        assert settled["status"] == "failed"
+
+    asyncio.run(scenario())
+
+
+def test_tampered_complete_context_binding_fails_closed_before_dispatch(tmp_path):
+    async def scenario():
+        (
+            database,
+            complete,
+            context_store,
+            service,
+            gateway,
+            principal,
+            _item_id,
+        ) = configured_complete_context_service(tmp_path)
+        created = service.store.create_turn(
+            text="Do not dispatch tampered complete context",
+            context={},
+            idempotency_key="tampered-complete-context-turn",
+            actor_id="device-a",
+            career_profile_principal=principal,
+            career_profile_context=context_store,
+            career_profile_agent_id=AGENT_ID,
+        )
+        profile = complete.current()
+        with sqlite3.connect(database) as connection:
+            connection.execute(
+                """
+                UPDATE career_profile_context_snapshots SET projection_json = ?
+                WHERE snapshot_id = (
+                    SELECT career_profile_context_snapshot_id
+                    FROM conversation_turns WHERE turn_id = ?
+                )
+                """,
+                (
+                    json.dumps(
+                        {
+                            "profile_revision": profile.profile_revision,
+                            "authority_epoch": profile.authority_epoch,
+                            "items": [],
+                            "source_evidence": [],
+                        }
+                    ),
+                    created["turn_id"],
+                ),
+            )
+
+        with pytest.raises(CareerProfileContextSelectionError, match="integrity"):
+            service.store.bound_career_profile_context_snapshot(
+                str(created["turn_id"]),
+                context_store=context_store,
+                agent_id=AGENT_ID,
+            )
+        turn = service.store.turn_record(str(created["turn_id"]))
+        assert turn is not None
+        await service._dispatch(turn)
+        assert gateway.submissions == []
+        settled = service.store.turn_record(str(created["turn_id"]))
+        assert settled is not None
+        assert settled["status"] == "failed"
+
+    asyncio.run(scenario())
+
+
+def test_complete_context_background_continuation_keeps_source_binding(tmp_path):
+    (
+        database,
+        complete,
+        context_store,
+        service,
+        _gateway,
+        principal,
+        _item_id,
+    ) = configured_complete_context_service(tmp_path)
+    source = service.store.create_turn(
+        text="Spawn complete-context background work",
+        context={},
+        idempotency_key="complete-context-continuation-source",
+        actor_id="device-a",
+        career_profile_principal=principal,
+        career_profile_context=context_store,
+        career_profile_agent_id=AGENT_ID,
+    )
+    service.store.append_conversation_event(
+        turn_id=str(source["turn_id"]),
+        event_type="activity",
+        state="working",
+        summary="Delegated complete-context work",
+        detail={"activity_id": "complete-context-delegate-activity"},
+        source_event_id="complete-context-delegate-source",
+        continuation_ids=("complete-context-continuation-0001",),
+    )
+    service.store.update_turn_status(str(source["turn_id"]), "completed")
+
+    profile = complete.current()
+    context_store.update_scope(
+        principal=principal,
+        agent_id=AGENT_ID,
+        command=CareerProfileContextScopeUpdate(
+            expected_profile_revision=profile.profile_revision,
+            expected_authority_epoch=profile.authority_epoch,
+            idempotency_key="complete-context-none-before-continuation",
+            mode="none",
+        ),
+    )
+    assert service.store.record_agent_continuation(
+        turn_id="turn_complete_context_continuation_0001",
+        status="completed",
+        event_type="assistant_message",
+        summary="Complete-context background work finished",
+        detail={
+            "agent_continuation": True,
+            "continuation_id": "complete-context-continuation-0001",
+        },
+        career_profile_principal=principal,
+        career_profile_context=context_store,
+        career_profile_agent_id=AGENT_ID,
+    )
+
+    binding_columns = """
+        career_profile_snapshot_id, career_profile_revision,
+        career_profile_content_hash, career_profile_context_snapshot_id,
+        career_profile_context_agent_id, career_profile_context_revision,
+        career_profile_context_authority_epoch, career_profile_context_content_hash
+    """
+    with sqlite3.connect(database) as connection:
+        source_binding = connection.execute(
+            f"SELECT {binding_columns} FROM conversation_turns WHERE turn_id = ?",
+            (source["turn_id"],),
+        ).fetchone()
+        continuation_binding = connection.execute(
+            f"SELECT {binding_columns} FROM conversation_turns WHERE turn_id = ?",
+            ("turn_complete_context_continuation_0001",),
+        ).fetchone()
+    assert continuation_binding == source_binding
+    assert continuation_binding is not None
+    assert all(value is not None for value in continuation_binding)
+
+
+def test_disconnected_agent_cannot_retry_a_frozen_complete_context_turn(tmp_path):
+    async def scenario():
+        (
+            database,
+            complete,
+            _context_store,
+            service,
+            gateway,
+            _principal,
+            _item_id,
+        ) = configured_complete_context_service(tmp_path)
+        original = await service.send(
+            SendMessageRequest(
+                text="Use this context once",
+                idempotency_key="disconnect-retry-source-0001",
+            ),
+            actor_id="device-a",
+            context={},
+        )
+        service.store.update_turn_status(original.turn_id, "failed")
+        CareerProfileCollaborationStore(database, complete).disconnect(agent_id=AGENT_ID)
+
+        with pytest.raises(CareerProfileContextSelectionError, match="not found"):
+            await service.retry(
+                original.turn_id,
+                RetryTurnRequest(idempotency_key="disconnect-retry-attempt-0001"),
+                actor_id="device-a",
+            )
+        assert len(gateway.submissions) == 1
+
+    asyncio.run(scenario())
+
+
+def test_disconnected_agent_cannot_record_a_frozen_context_continuation(tmp_path):
+    (
+        database,
+        complete,
+        context_store,
+        service,
+        _gateway,
+        principal,
+        _item_id,
+    ) = configured_complete_context_service(tmp_path)
+    source = service.store.create_turn(
+        text="Spawn work before disconnect",
+        context={},
+        idempotency_key="disconnect-continuation-source-0001",
+        actor_id="device-a",
+        career_profile_principal=principal,
+        career_profile_context=context_store,
+        career_profile_agent_id=AGENT_ID,
+    )
+    service.store.append_conversation_event(
+        turn_id=str(source["turn_id"]),
+        event_type="activity",
+        state="working",
+        summary="Delegated work before disconnect",
+        detail={"activity_id": "disconnect-continuation-activity"},
+        source_event_id="disconnect-continuation-source-event",
+        continuation_ids=("disconnect-continuation-binding",),
+    )
+    service.store.update_turn_status(str(source["turn_id"]), "completed")
+    CareerProfileCollaborationStore(database, complete).disconnect(agent_id=AGENT_ID)
+
+    assert not service.store.record_agent_continuation(
+        turn_id="turn_disconnect_continuation_result",
+        status="completed",
+        event_type="assistant_message",
+        summary="Disconnected background result",
+        detail={
+            "agent_continuation": True,
+            "continuation_id": "disconnect-continuation-binding",
+        },
+        career_profile_principal=principal,
+        career_profile_context=context_store,
+        career_profile_agent_id=AGENT_ID,
+    )
+    with sqlite3.connect(database) as connection:
+        assert connection.execute(
+            "SELECT 1 FROM conversation_turns WHERE turn_id = ?",
+            ("turn_disconnect_continuation_result",),
+        ).fetchone() is None
+
+
+def test_disconnect_between_turn_creation_and_submission_fails_closed(tmp_path):
+    async def scenario():
+        (
+            database,
+            complete,
+            context_store,
+            service,
+            gateway,
+            principal,
+            _item_id,
+        ) = configured_complete_context_service(tmp_path)
+        created = service.store.create_turn(
+            text="Do not submit after disconnect",
+            context={},
+            idempotency_key="disconnect-before-submit-0001",
+            actor_id="device-a",
+            career_profile_principal=principal,
+            career_profile_context=context_store,
+            career_profile_agent_id=AGENT_ID,
+        )
+        CareerProfileCollaborationStore(database, complete).disconnect(agent_id=AGENT_ID)
+
+        turn = service.store.turn_record(str(created["turn_id"]))
+        assert turn is not None
+        await service._dispatch(turn)
+
+        assert gateway.submissions == []
+        settled = service.store.turn_record(str(created["turn_id"]))
+        assert settled is not None
+        assert settled["status"] == "failed"
 
     asyncio.run(scenario())

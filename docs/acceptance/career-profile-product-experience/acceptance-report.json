@@ -1,0 +1,135 @@
+{
+  "status": "passed",
+  "packageSha256": "9ffc8fb85d652d602fd36e838a4c904c8063a3fa02068d9d2ec77d0c04468b31",
+  "head": "43c82a10c962107304328cee725af8a780d1588c",
+  "canonicalProductSource": {
+    "algorithm": "sha256(canonical-json(utf8-bytewise-sorted index entries {path,mode,size,sha256}))",
+    "exclusions": [
+      "docs/acceptance/career-profile-product-experience/acceptance-report.json",
+      "docs/acceptance/career-profile-product-experience/*.png",
+      "tests/public-release/synthetic-fixtures.json assets whose path matches those generated acceptance PNGs"
+    ],
+    "entryCount": 556,
+    "sha256": "cc73f942232dc5f7b541a364e5819c538104ab6ff64c092510ed20d4dadeb336"
+  },
+  "acceptanceOutputs": {
+    "algorithm": "sha256(canonical-json(utf8-bytewise-sorted generated screenshot entries {path,size,sha256}))",
+    "entries": [
+      {
+        "path": "docs/acceptance/career-profile-product-experience/01-wide-my-career-1440x1024.png",
+        "size": 171342,
+        "sha256": "8012b9426f94b888724528e6c9578e709268647a0521bae0bdc687613075a78f"
+      },
+      {
+        "path": "docs/acceptance/career-profile-product-experience/02-wide-looking-for-1440x1024.png",
+        "size": 260677,
+        "sha256": "dfa7dc78e1b27395e08c39db96653adfbc6dd31a1dba0fcfb23cf85f2d676ff5"
+      },
+      {
+        "path": "docs/acceptance/career-profile-product-experience/03-wide-evidence-imported-1440x1024.png",
+        "size": 206321,
+        "sha256": "4d535dce137d62ff1bf7d6c65e07227de91313531b63768555ca9c1433e4e577"
+      },
+      {
+        "path": "docs/acceptance/career-profile-product-experience/04-wide-agent-access-1440x1024.png",
+        "size": 184810,
+        "sha256": "b39a6696273f7dc67fd5caabbf94f92fbe628053decc45eba18bf2b108f67615"
+      },
+      {
+        "path": "docs/acceptance/career-profile-product-experience/05-wide-export-choices-1440x1024.png",
+        "size": 134325,
+        "sha256": "361aecf59427b48b8cbee529013f0c405f42d2cbf2f32e678d4d893e01732074"
+      },
+      {
+        "path": "docs/acceptance/career-profile-product-experience/06-wide-restore-warning-1440x1024.png",
+        "size": 132492,
+        "sha256": "b4bae79d6a99d954bfc34b9d9ce67f02f43ad99d49c6aa729151482a62455d2b"
+      },
+      {
+        "path": "docs/acceptance/career-profile-product-experience/07-narrow-detail-980x640.png",
+        "size": 47070,
+        "sha256": "55bae3de5b449f1807d9c4a51439074b953dc9c1a57af00cc38d4da4656e8d46"
+      },
+      {
+        "path": "docs/acceptance/career-profile-product-experience/08-wide-after-restart-1440x1024.png",
+        "size": 193377,
+        "sha256": "06da31011728d8366f531e06e6999fea3a1e6488aa25dc25d913dfe34502459d"
+      },
+      {
+        "path": "docs/acceptance/career-profile-product-experience/09-narrow-restored-baseline-980x640.png",
+        "size": 101703,
+        "sha256": "403d8e44b70fbd9996fe968d243f4328ad48548ba06097b09fc557d648edf1ab"
+      }
+    ],
+    "sha256": "74b3a17d1b6a5b83a7c698e8bb7979b2b4541020682edad5b35519b83d1a8341",
+    "syntheticFixtureChecksumsVerified": true
+  },
+  "exercisedAppManifestSha256": "71e15ecb1e901dd251affa8de5ac18c211449f5a263151371630edc60b5bdd75",
+  "zippedAppManifestSha256": "71e15ecb1e901dd251affa8de5ac18c211449f5a263151371630edc60b5bdd75",
+  "zipContainsEquivalentAppBundle": true,
+  "architecture": "arm64",
+  "apiPortLoopbackOnly": true,
+  "disposableCredentialProvider": "file",
+  "fakeOnly": true,
+  "screenshots": [
+    "01-wide-my-career-1440x1024.png",
+    "02-wide-looking-for-1440x1024.png",
+    "03-wide-evidence-imported-1440x1024.png",
+    "04-wide-agent-access-1440x1024.png",
+    "05-wide-export-choices-1440x1024.png",
+    "06-wide-restore-warning-1440x1024.png",
+    "07-narrow-detail-980x640.png",
+    "08-wide-after-restart-1440x1024.png",
+    "09-narrow-restored-baseline-980x640.png"
+  ],
+  "accessibilityNodeCount": 336,
+  "packagedNativeArchiveFlow": true,
+  "axNodeCount": 336,
+  "packagedUiDragDrop": true,
+  "failedImportRetryRecovery": true,
+  "zeroEvidenceContext": true,
+  "zeroEvidenceExport": true,
+  "nativeArchiveSelection": true,
+  "rendererPreloadMainRestore": true,
+  "restoredRevision": 7,
+  "evidenceId": "cpe_Dtu_8eENzVyM2p4FHd2WruP4",
+  "exportMembers": {
+    "zeroEvidence": [
+      "manifest.json"
+    ],
+    "profileOnly": [
+      "manifest.json"
+    ],
+    "selected": [
+      "manifest.json",
+      "evidence/cpe_Dtu_8eENzVyM2p4FHd2WruP4.bin"
+    ],
+    "all": [
+      "manifest.json",
+      "evidence/cpe_Dtu_8eENzVyM2p4FHd2WruP4.bin"
+    ]
+  },
+  "protocolFocusedTestFile": "services/api/tests/test_career_profile_turn_binding.py",
+  "protocolTests": {
+    "actualTurnBoundBeforeDispatch": {
+      "testId": "services/api/tests/test_career_profile_turn_binding.py::test_new_turn_binds_latest_snapshot_and_retry_keeps_original",
+      "result": "passed"
+    },
+    "scopeRetentionOverRetry": {
+      "testId": "services/api/tests/test_career_profile_turn_binding.py::test_complete_context_retry_reuses_frozen_snapshot_and_fresh_turn_gets_latest",
+      "result": "passed"
+    },
+    "scopeRetentionOverRecovery": {
+      "testId": "services/api/tests/test_career_profile_turn_binding.py::test_complete_context_active_turn_recovery_after_service_restart_preserves_selected_scope",
+      "result": "passed"
+    },
+    "scopeRetentionOverContinuation": {
+      "testId": "services/api/tests/test_career_profile_turn_binding.py::test_complete_context_background_continuation_keeps_source_binding",
+      "result": "passed"
+    },
+    "unauthorizedExpansionRejected": {
+      "testId": "services/api/tests/test_career_profile_turn_binding.py::test_complete_context_unauthorized_item_expansion_is_rejected_before_dispatch",
+      "result": "passed"
+    }
+  }
+}

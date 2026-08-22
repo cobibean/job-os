@@ -1253,8 +1253,99 @@ MIGRATIONS = (
     ),
     Migration(
         version=28,
+        statements=("ALTER TABLE career_profile_complete_revisions ADD COLUMN actor_kind TEXT",),
+    ),
+    Migration(
+        version=29,
         statements=(
-            "ALTER TABLE career_profile_complete_revisions ADD COLUMN actor_kind TEXT",
+            """
+            CREATE TABLE career_profile_context_grants (
+                agent_id TEXT PRIMARY KEY,
+                mode TEXT NOT NULL DEFAULT 'none' CHECK (
+                    mode IN ('none', 'selected', 'broader')
+                ),
+                selected_item_ids_json TEXT NOT NULL DEFAULT '[]'
+                    CHECK (json_valid(selected_item_ids_json)),
+                selected_areas_json TEXT NOT NULL DEFAULT '[]'
+                    CHECK (json_valid(selected_areas_json)),
+                updated_at TEXT NOT NULL,
+                FOREIGN KEY(agent_id) REFERENCES career_profile_connected_agents(agent_id)
+            )
+            """,
+            """
+            CREATE TABLE career_profile_context_snapshots (
+                snapshot_id TEXT PRIMARY KEY,
+                agent_id TEXT NOT NULL,
+                profile_revision INTEGER NOT NULL CHECK (profile_revision >= 0),
+                authority_epoch INTEGER NOT NULL CHECK (authority_epoch >= 0),
+                scope_json TEXT NOT NULL CHECK (json_valid(scope_json)),
+                content_hash TEXT NOT NULL CHECK (length(content_hash) = 64),
+                projection_json TEXT NOT NULL CHECK (json_valid(projection_json)),
+                created_at TEXT NOT NULL,
+                FOREIGN KEY(agent_id) REFERENCES career_profile_connected_agents(agent_id)
+            )
+            """,
+            """CREATE INDEX career_profile_context_snapshots_agent
+               ON career_profile_context_snapshots(agent_id, created_at DESC)""",
+            """
+            CREATE TABLE career_profile_context_idempotency (
+                actor_principal TEXT NOT NULL,
+                idempotency_key TEXT NOT NULL,
+                request_hash TEXT NOT NULL CHECK (length(request_hash) = 64),
+                result_json TEXT NOT NULL CHECK (json_valid(result_json)),
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY(actor_principal, idempotency_key)
+            )
+            """,
+            """
+            CREATE TABLE career_profile_restore_receipts (
+                actor_principal TEXT NOT NULL,
+                idempotency_key TEXT NOT NULL,
+                request_hash TEXT NOT NULL CHECK (length(request_hash) = 64),
+                result_json TEXT CHECK (
+                    result_json IS NULL OR json_valid(result_json)
+                ),
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY(actor_principal, idempotency_key)
+            )
+            """,
+            """
+            CREATE TABLE career_profile_restore_journal (
+                operation_id TEXT PRIMARY KEY,
+                actor_principal TEXT NOT NULL,
+                idempotency_key TEXT NOT NULL,
+                request_hash TEXT NOT NULL CHECK (length(request_hash) = 64),
+                phase TEXT NOT NULL CHECK (phase IN ('swap_pending', 'db_committed')),
+                had_live_vault INTEGER NOT NULL CHECK (had_live_vault IN (0, 1)),
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(actor_principal, idempotency_key)
+            )
+            """,
+        ),
+    ),
+    Migration(
+        version=30,
+        statements=(
+            "ALTER TABLE conversation_turns ADD COLUMN career_profile_context_snapshot_id TEXT",
+            "ALTER TABLE conversation_turns ADD COLUMN career_profile_context_agent_id TEXT",
+            """ALTER TABLE conversation_turns
+               ADD COLUMN career_profile_context_revision INTEGER
+               CHECK (
+                   career_profile_context_revision IS NULL
+                   OR career_profile_context_revision >= 0
+               )""",
+            """ALTER TABLE conversation_turns
+               ADD COLUMN career_profile_context_authority_epoch INTEGER
+               CHECK (
+                   career_profile_context_authority_epoch IS NULL
+                   OR career_profile_context_authority_epoch >= 0
+               )""",
+            """ALTER TABLE conversation_turns
+               ADD COLUMN career_profile_context_content_hash TEXT
+               CHECK (
+                   career_profile_context_content_hash IS NULL
+                   OR length(career_profile_context_content_hash) = 64
+               )""",
         ),
     ),
 )
@@ -2857,16 +2948,13 @@ class JobOsStateStore:
             }
         artifact_rows = [dict(row) for row in rows]
         for row in artifact_rows:
-            row["is_logically_approved"] = (
-                approved_manifest.get(
-                    (
-                        str(row["document_key"]),
-                        str(row["source_revision"]),
-                        str(row["artifact_id"]),
-                    )
+            row["is_logically_approved"] = approved_manifest.get(
+                (
+                    str(row["document_key"]),
+                    str(row["source_revision"]),
+                    str(row["artifact_id"]),
                 )
-                == row.get("sha256")
-            )
+            ) == row.get("sha256")
         return (
             artifact_rows,
             state["current_artifact_id"] if state else None,
@@ -3024,7 +3112,8 @@ class JobOsStateStore:
                 artifact is None
                 or artifact["job_id"] != job_id
                 or artifact["document_key"] not in {"resume", "cover_letter"}
-                or artifact["media_type"] not in {
+                or artifact["media_type"]
+                not in {
                     "application/pdf",
                     "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                 }

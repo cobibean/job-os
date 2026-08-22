@@ -347,8 +347,12 @@ def test_status_retry_preserves_original_transition_after_settlement_failure(tmp
 
 
 def auth_headers():
+    return {"Authorization": "Bearer test-device-token"}
+
+
+def mcp_auth_headers():
     return {
-        "Authorization": "Bearer test-device-token",
+        "Authorization": "Bearer test-mcp-trusted-token",
         "X-JobOS-MCP-Token": "test-mcp-trusted-token",
     }
 
@@ -460,7 +464,7 @@ def test_agent_job_create_stays_in_audit_without_injecting_ownerless_chat_activi
     with make_client(tmp_path, facade) as client:
         response = client.post(
             "/v1/jobs",
-            headers=auth_headers(),
+            headers=mcp_auth_headers(),
             json=browser_job_payload(origin="mcp", idempotency_key="agent-save-1"),
         )
         conversation = client.get("/v1/conversations/current", headers=auth_headers())
@@ -474,7 +478,7 @@ def test_agent_read_stays_in_audit_without_injecting_ownerless_chat_activity(tmp
     with make_client(tmp_path) as client:
         response = client.get(
             "/v1/jobs",
-            headers=auth_headers(),
+            headers=mcp_auth_headers(),
             params={"origin": "mcp", "idempotency_key": "agent-read-audit-1"},
         )
         conversation = client.get("/v1/conversations/current", headers=auth_headers())
@@ -503,10 +507,10 @@ def test_agent_updates_full_description_with_idempotent_recorded_mutation(tmp_pa
 
     with make_client(tmp_path, facade) as client:
         first = client.put(
-            "/v1/jobs/job-0/description", headers=auth_headers(), json=payload
+            "/v1/jobs/job-0/description", headers=mcp_auth_headers(), json=payload
         )
         replay = client.put(
-            "/v1/jobs/job-0/description", headers=auth_headers(), json=payload
+            "/v1/jobs/job-0/description", headers=mcp_auth_headers(), json=payload
         )
         inspected = client.get("/v1/jobs/job-0", headers=auth_headers())
         events = client.get("/v1/events?after=0", headers=auth_headers())
@@ -554,11 +558,11 @@ def test_description_update_requires_trusted_mcp_credential_and_valid_job(tmp_pa
             json=payload,
         )
         missing = client.put(
-            "/v1/jobs/missing/description", headers=auth_headers(), json=payload
+            "/v1/jobs/missing/description", headers=mcp_auth_headers(), json=payload
         )
         invalid = client.put(
             "/v1/jobs/job-0/description",
-            headers=auth_headers(),
+            headers=mcp_auth_headers(),
             json={**payload, "description_text": "   "},
         )
 
@@ -728,7 +732,7 @@ def test_user_and_mcp_status_changes_share_one_command_and_event_path(tmp_path):
         visible_to_mcp = client.get("/v1/jobs/job-0", headers=auth_headers())
         mcp_change = client.put(
             "/v1/jobs/job-0/status",
-            headers=auth_headers(),
+            headers=mcp_auth_headers(),
             json={"target_status": "shortlisted", "origin": "mcp"},
         )
         events = client.get("/v1/events?after=0", headers=auth_headers())
@@ -783,7 +787,7 @@ def test_selection_is_durable_and_uses_the_same_conversation_path_for_user_and_m
         )
         mcp_selection = client.put(
             f"/v1/conversations/{conversation_id}/workspace/job",
-            headers=auth_headers(),
+            headers=mcp_auth_headers(),
             json={"job_id": "job-0", "origin": "mcp"},
         )
         restored = client.get(
@@ -813,11 +817,11 @@ def test_mcp_job_and_artifact_calls_fail_closed_when_the_conversation_owns_anoth
         )
         mismatched_read = client.get(
             f"/v1/jobs/job-1/artifacts?conversation_id={conversation_id}",
-            headers=auth_headers(),
+            headers=mcp_auth_headers(),
         )
         mismatched_mutation = client.put(
             f"/v1/jobs/job-1/status?conversation_id={conversation_id}",
-            headers=auth_headers(),
+            headers=mcp_auth_headers(),
             json={
                 "target_status": "reviewed",
                 "origin": "mcp",
@@ -826,7 +830,7 @@ def test_mcp_job_and_artifact_calls_fail_closed_when_the_conversation_owns_anoth
         )
         owned_read = client.get(
             f"/v1/jobs/job-0/artifacts?conversation_id={conversation_id}",
-            headers=auth_headers(),
+            headers=mcp_auth_headers(),
         )
 
     assert selected.status_code == 200
@@ -883,16 +887,16 @@ def test_trusted_local_mcp_scopes_publication_to_a_remote_device_conversation(
         )
         published = client.post(
             f"/v1/jobs/job-0/artifacts/publish?conversation_id={conversation_id}",
-            headers=auth_headers(),
+            headers=mcp_auth_headers(),
             json=payload,
         )
         listed = client.get(
             f"/v1/jobs/job-0/artifacts?conversation_id={conversation_id}",
-            headers=auth_headers(),
+            headers=mcp_auth_headers(),
         )
         missing = client.get(
             "/v1/jobs/job-0/artifacts?conversation_id=conv_missing",
-            headers=auth_headers(),
+            headers=mcp_auth_headers(),
         )
         remote_mcp_attempt = client.get(
             f"/v1/jobs/job-0/artifacts?conversation_id={conversation_id}",
@@ -942,7 +946,7 @@ def test_event_stream_emits_ordered_resumable_status_events(tmp_path):
     with make_client(tmp_path, facade) as client:
         changed = client.put(
             "/v1/jobs/job-0/status",
-            headers=auth_headers(),
+            headers=mcp_auth_headers(),
             json={"target_status": "reviewed", "origin": "mcp"},
         )
         streamed = client.get(
@@ -1034,6 +1038,50 @@ def test_workspace_snapshot_round_trip_and_revision_conflict(tmp_path):
     assert restored.json()["browse_status_group"] == "Considering"
     assert restored.json()["browse_sort_mode"] == "recent"
     assert restored.json()["browse_rail_width"] == 300
+
+
+def test_scoped_mcp_workspace_uses_conversation_owner_state(tmp_path):
+    with make_client(tmp_path) as client:
+        conversation = client.post("/v1/conversations", headers=auth_headers()).json()
+        conversation_id = conversation["conversation_id"]
+        selected = client.put(
+            f"/v1/conversations/{conversation_id}/workspace/job",
+            headers=mcp_auth_headers(),
+            json={
+                "job_id": "job-0",
+                "origin": "mcp",
+                "idempotency_key": "scoped-workspace-select",
+            },
+        )
+        assert selected.status_code == 200
+
+        params = {
+            "origin": "mcp",
+            "conversation_id": conversation_id,
+            "idempotency_key": "scoped-workspace-read",
+        }
+        inspected = client.get("/v1/workspace", headers=mcp_auth_headers(), params=params)
+        assert inspected.status_code == 200
+        assert inspected.json()["selected_job_id"] == "job-0"
+
+        snapshot = inspected.json()
+        for response_only in ("repaired_presets", "repaired_browser", "browser_repair_reasons"):
+            snapshot.pop(response_only, None)
+        snapshot.update(
+            browse_query="scoped owner workspace",
+            origin="mcp",
+            idempotency_key="scoped-workspace-write",
+        )
+        updated = client.put(
+            "/v1/workspace",
+            headers=mcp_auth_headers(),
+            params={"conversation_id": conversation_id},
+            json=snapshot,
+        )
+        assert updated.status_code == 200
+
+        owner_workspace = client.get("/v1/workspace", headers=auth_headers())
+        assert owner_workspace.json()["browse_query"] == "scoped owner workspace"
 
 
 def test_workspace_snapshot_idempotent_retry_returns_original_revision(tmp_path):
@@ -1438,7 +1486,7 @@ def test_layout_save_cannot_overwrite_a_newer_user_or_mcp_selection(tmp_path):
         stale_layout.update({"origin": "user", "idempotency_key": "workspace-selection-race-1"})
         client.put(
             f"/v1/conversations/{conversation_id}/workspace/job",
-            headers=auth_headers(),
+            headers=mcp_auth_headers(),
             json={"job_id": "job-1", "origin": "mcp"},
         )
         stale_layout["selected_preset"] = "research"
@@ -1554,7 +1602,7 @@ def test_trusted_mcp_can_publish_paired_pdf_and_docx_into_one_logical_revision(
     with make_client(tmp_path, facade) as client:
         pdf = client.post(
             "/v1/jobs/job-0/artifacts/publish",
-            headers=auth_headers(),
+            headers=mcp_auth_headers(),
             json=payload(
                 "cover-letter.pdf",
                 build_minimal_pdf("(FAKE) letter"),
@@ -1566,12 +1614,12 @@ def test_trusted_mcp_can_publish_paired_pdf_and_docx_into_one_logical_revision(
         )
         docx = client.post(
             "/v1/jobs/job-0/artifacts/publish",
-            headers=auth_headers(),
+            headers=mcp_auth_headers(),
             json=docx_payload,
         )
         replay = client.post(
             "/v1/jobs/job-0/artifacts/publish",
-            headers=auth_headers(),
+            headers=mcp_auth_headers(),
             json=docx_payload,
         )
         untrusted = client.post(
@@ -2044,7 +2092,7 @@ def test_failed_render_stays_in_audit_without_injecting_chat_activity(tmp_path):
     with make_client(tmp_path, FailedRenderFacade()) as client:
         response = client.post(
             "/v1/jobs/job-0/artifacts/render",
-            headers=auth_headers(),
+            headers=mcp_auth_headers(),
             json={
                 "source_id": "job-0-tailored",
                 "output_format": "pdf",
@@ -2111,7 +2159,7 @@ def test_gateway_artifact_storage_races_are_stable_503(tmp_path, route, damage):
         }
 
     with make_client(tmp_path, facade) as client:
-        response = client.post(endpoint, headers=auth_headers(), json=payload)
+        response = client.post(endpoint, headers=mcp_auth_headers(), json=payload)
         listed = client.get("/v1/jobs/job-0/artifacts", headers=auth_headers())
 
     assert (response.status_code, response.json()["detail"]) == (
@@ -2157,7 +2205,7 @@ def test_gateway_artifact_trust_validation_remains_422(tmp_path, route):
         }
 
     with make_client(tmp_path, InvalidMetadataFacade()) as client:
-        response = client.post(endpoint, headers=auth_headers(), json=payload)
+        response = client.post(endpoint, headers=mcp_auth_headers(), json=payload)
 
     assert response.status_code == 422
 
@@ -2593,13 +2641,14 @@ def test_mutation_replay_does_not_recreate_agent_chat_activity(
 
     with make_client(tmp_path, facade) as client:
         request = getattr(client, method)
-        first = request(endpoint, headers=auth_headers(), json=payload)
+        request_headers = mcp_auth_headers() if payload.get("origin") == "mcp" else auth_headers()
+        first = request(endpoint, headers=request_headers, json=payload)
         with sqlite3.connect(tmp_path / "jobos.db") as connection:
             connection.execute(
                 "DELETE FROM conversation_events WHERE source_event_id = ?",
                 (source_event_id,),
             )
-        replay = request(endpoint, headers=auth_headers(), json=payload)
+        replay = request(endpoint, headers=request_headers, json=payload)
 
     assert first.status_code == 200
     assert replay.status_code == 200
@@ -2618,14 +2667,14 @@ def test_workspace_save_replay_does_not_recreate_agent_chat_activity(tmp_path):
         for key in ("repaired_presets", "repaired_browser", "browser_repair_reasons"):
             body.pop(key)
         body.update({"origin": "mcp", "idempotency_key": "repair-workspace"})
-        first = client.put("/v1/workspace", headers=auth_headers(), json=body)
+        first = client.put("/v1/workspace", headers=mcp_auth_headers(), json=body)
         source_event_id = "workspace:primary-device:repair-workspace"
         with sqlite3.connect(tmp_path / "jobos.db") as connection:
             connection.execute(
                 "DELETE FROM conversation_events WHERE source_event_id = ?",
                 (source_event_id,),
             )
-        replay = client.put("/v1/workspace", headers=auth_headers(), json=body)
+        replay = client.put("/v1/workspace", headers=mcp_auth_headers(), json=body)
 
     assert replay.json() == first.json()
     with sqlite3.connect(tmp_path / "jobos.db") as connection:
@@ -2723,7 +2772,7 @@ def test_editable_document_routes_cover_crud_conflict_snapshots_operations_and_s
         )
         outline = client.get(
             "/v1/jobs/job-0/editable-document-outlines/references",
-            headers=auth_headers(),
+            headers=mcp_auth_headers(),
             params={"origin": "mcp", "idempotency_key": "draft-read-1"},
         )
         assert listing.status_code == outline.status_code == 200
@@ -2760,7 +2809,7 @@ def test_editable_document_routes_cover_crud_conflict_snapshots_operations_and_s
 
         snapshot = client.post(
             f"/v1/editable-documents/{document_id}/snapshots",
-            headers=auth_headers(),
+            headers=mcp_auth_headers(),
             json={
                 "base_revision": 2,
                 "reason": "manual",
@@ -2775,7 +2824,7 @@ def test_editable_document_routes_cover_crud_conflict_snapshots_operations_and_s
         target = saved.json()["content"]["content"][1]["content"][0]
         applied = client.post(
             f"/v1/editable-documents/{document_id}/operations",
-            headers=auth_headers(),
+            headers=mcp_auth_headers(),
             json={
                 "base_revision": 2,
                 "origin": "mcp",

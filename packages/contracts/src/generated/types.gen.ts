@@ -613,6 +613,90 @@ export type CareerProfileCompleteCurrent = {
 };
 
 /**
+ * CareerProfileContextPreview
+ */
+export type CareerProfileContextPreview = {
+    /**
+     * Agent Id
+     */
+    agent_id: string;
+    /**
+     * Authority Epoch
+     */
+    authority_epoch: number;
+    /**
+     * Content Hash
+     */
+    content_hash: string;
+    /**
+     * Created At
+     */
+    created_at: string;
+    /**
+     * Profile Revision
+     */
+    profile_revision: number;
+    projection: CareerProfileCompleteCurrent;
+    scope: CareerProfileContextScope;
+};
+
+/**
+ * CareerProfileContextScope
+ */
+export type CareerProfileContextScope = {
+    /**
+     * Agent Id
+     */
+    agent_id: string;
+    /**
+     * Mode
+     */
+    mode: 'none' | 'selected' | 'broader';
+    /**
+     * Selected Areas
+     */
+    selected_areas: Array<'my_career' | 'what_im_looking_for' | 'my_evidence'>;
+    /**
+     * Selected Item Ids
+     */
+    selected_item_ids: Array<string>;
+    /**
+     * Updated At
+     */
+    updated_at: string;
+};
+
+/**
+ * CareerProfileContextScopeUpdate
+ */
+export type CareerProfileContextScopeUpdate = {
+    /**
+     * Expected Authority Epoch
+     */
+    expected_authority_epoch: number;
+    /**
+     * Expected Profile Revision
+     */
+    expected_profile_revision: number;
+    /**
+     * Idempotency Key
+     */
+    idempotency_key: string;
+    /**
+     * Mode
+     */
+    mode: 'none' | 'selected' | 'broader';
+    /**
+     * Selected Areas
+     */
+    selected_areas?: Array<'my_career' | 'what_im_looking_for' | 'my_evidence'>;
+    /**
+     * Selected Item Ids
+     */
+    selected_item_ids?: Array<string>;
+};
+
+/**
  * CareerProfileErasureResult
  */
 export type CareerProfileErasureResult = {
@@ -624,6 +708,54 @@ export type CareerProfileErasureResult = {
      * Operation
      */
     operation: 'evidence_erased' | 'career_profile_reset';
+};
+
+/**
+ * CareerProfileExportRequest
+ */
+export type CareerProfileExportRequest = {
+    /**
+     * Evidence Mode
+     */
+    evidence_mode: 'profile_only' | 'selected' | 'all';
+    /**
+     * Expected Profile Revision
+     */
+    expected_profile_revision: number;
+    /**
+     * Selected Evidence Ids
+     */
+    selected_evidence_ids?: Array<string>;
+};
+
+/**
+ * CareerProfileExportResult
+ */
+export type CareerProfileExportResult = {
+    /**
+     * Byte Count
+     */
+    byte_count: number;
+    /**
+     * Content Base64
+     */
+    content_base64: string;
+    /**
+     * Filename
+     */
+    filename: string;
+    /**
+     * Included Evidence Ids
+     */
+    included_evidence_ids: Array<string>;
+    /**
+     * Omitted Evidence Ids
+     */
+    omitted_evidence_ids: Array<string>;
+    /**
+     * Sha256
+     */
+    sha256: string;
 };
 
 /**
@@ -659,6 +791,51 @@ export type CareerProfileResetRequest = {
      * Idempotency Key
      */
     idempotency_key: string;
+};
+
+/**
+ * CareerProfileRestoreRequest
+ */
+export type CareerProfileRestoreRequest = {
+    /**
+     * Archive Base64
+     */
+    archive_base64: string;
+    /**
+     * Confirmation
+     */
+    confirmation: 'RESTORE_CAREER_PROFILE_BASELINE';
+    /**
+     * Expected Profile Revision
+     */
+    expected_profile_revision: number;
+    /**
+     * Idempotency Key
+     */
+    idempotency_key: string;
+};
+
+/**
+ * CareerProfileRestoreResult
+ */
+export type CareerProfileRestoreResult = {
+    /**
+     * Archive Sha256
+     */
+    archive_sha256: string;
+    /**
+     * Baseline Created
+     */
+    baseline_created?: true;
+    profile: CareerProfileCompleteCurrent;
+    /**
+     * Restored Evidence Ids
+     */
+    restored_evidence_ids: Array<string>;
+    /**
+     * Unavailable Evidence Ids
+     */
+    unavailable_evidence_ids: Array<string>;
 };
 
 /**
@@ -3591,6 +3768,12 @@ export type WorkspaceSnapshotResponse = {
 
 export type ReportActivityV1ActivityPostData = {
     body: ActivityReportRequest;
+    headers?: {
+        /**
+         * X-Jobos-Mcp-Token
+         */
+        'X-JobOS-MCP-Token'?: string | null;
+    };
     path?: never;
     query?: never;
     url: '/v1/activity';
@@ -3628,6 +3811,12 @@ export type ReportActivityV1ActivityPostResponse = ReportActivityV1ActivityPostR
 
 export type ArtifactContentV1ArtifactsArtifactIdContentGetData = {
     body?: never;
+    headers?: {
+        /**
+         * X-Jobos-Mcp-Token
+         */
+        'X-JobOS-MCP-Token'?: string | null;
+    };
     path: {
         /**
          * Artifact Id
@@ -3680,6 +3869,12 @@ export type ArtifactContentV1ArtifactsArtifactIdContentGetResponses = {
 
 export type ArtifactDownloadV1ArtifactsArtifactIdDownloadGetData = {
     body?: never;
+    headers?: {
+        /**
+         * X-Jobos-Mcp-Token
+         */
+        'X-JobOS-MCP-Token'?: string | null;
+    };
     path: {
         /**
          * Artifact Id
@@ -3881,6 +4076,12 @@ export type CareerProfileAgentEditV1CareerProfileAgentEditsPostResponse = Career
 
 export type CareerProfileAgentsListV1CareerProfileAgentsGetData = {
     body?: never;
+    headers?: {
+        /**
+         * X-Jobos-Mcp-Token
+         */
+        'X-JobOS-MCP-Token'?: string | null;
+    };
     path?: never;
     query?: never;
     url: '/v1/career-profile/agents';
@@ -3891,6 +4092,10 @@ export type CareerProfileAgentsListV1CareerProfileAgentsGetErrors = {
      * Device authentication required
      */
     401: ApiErrorResponse;
+    /**
+     * Request validation failed
+     */
+    422: ApiErrorResponse;
     /**
      * Internal server error
      */
@@ -3996,6 +4201,158 @@ export type CareerProfileAgentUpdateV1CareerProfileAgentsAgentIdPatchResponses =
 
 export type CareerProfileAgentUpdateV1CareerProfileAgentsAgentIdPatchResponse = CareerProfileAgentUpdateV1CareerProfileAgentsAgentIdPatchResponses[keyof CareerProfileAgentUpdateV1CareerProfileAgentsAgentIdPatchResponses];
 
+export type CareerProfileContextGetV1CareerProfileAgentsAgentIdContextGetData = {
+    body?: never;
+    headers?: {
+        /**
+         * X-Jobos-Mcp-Token
+         */
+        'X-JobOS-MCP-Token'?: string | null;
+    };
+    path: {
+        /**
+         * Agent Id
+         */
+        agent_id: string;
+    };
+    query?: never;
+    url: '/v1/career-profile/agents/{agent_id}/context';
+};
+
+export type CareerProfileContextGetV1CareerProfileAgentsAgentIdContextGetErrors = {
+    /**
+     * Device authentication required
+     */
+    401: ApiErrorResponse;
+    /**
+     * Operation is not permitted
+     */
+    403: ApiErrorResponse;
+    /**
+     * Resource not found
+     */
+    404: ApiErrorResponse;
+    /**
+     * Request validation failed
+     */
+    422: ApiErrorResponse;
+    /**
+     * Internal server error
+     */
+    500: ApiErrorResponse;
+};
+
+export type CareerProfileContextGetV1CareerProfileAgentsAgentIdContextGetError = CareerProfileContextGetV1CareerProfileAgentsAgentIdContextGetErrors[keyof CareerProfileContextGetV1CareerProfileAgentsAgentIdContextGetErrors];
+
+export type CareerProfileContextGetV1CareerProfileAgentsAgentIdContextGetResponses = {
+    /**
+     * Successful Response
+     */
+    200: CareerProfileContextScope;
+};
+
+export type CareerProfileContextGetV1CareerProfileAgentsAgentIdContextGetResponse = CareerProfileContextGetV1CareerProfileAgentsAgentIdContextGetResponses[keyof CareerProfileContextGetV1CareerProfileAgentsAgentIdContextGetResponses];
+
+export type CareerProfileContextUpdateV1CareerProfileAgentsAgentIdContextPutData = {
+    body: CareerProfileContextScopeUpdate;
+    headers?: {
+        /**
+         * X-Jobos-Mcp-Token
+         */
+        'X-JobOS-MCP-Token'?: string | null;
+    };
+    path: {
+        /**
+         * Agent Id
+         */
+        agent_id: string;
+    };
+    query?: never;
+    url: '/v1/career-profile/agents/{agent_id}/context';
+};
+
+export type CareerProfileContextUpdateV1CareerProfileAgentsAgentIdContextPutErrors = {
+    /**
+     * Device authentication required
+     */
+    401: ApiErrorResponse;
+    /**
+     * Operation is not permitted
+     */
+    403: ApiErrorResponse;
+    /**
+     * Resource state conflict
+     */
+    409: ApiErrorResponse;
+    /**
+     * Request validation failed
+     */
+    422: ApiErrorResponse;
+    /**
+     * Internal server error
+     */
+    500: ApiErrorResponse;
+};
+
+export type CareerProfileContextUpdateV1CareerProfileAgentsAgentIdContextPutError = CareerProfileContextUpdateV1CareerProfileAgentsAgentIdContextPutErrors[keyof CareerProfileContextUpdateV1CareerProfileAgentsAgentIdContextPutErrors];
+
+export type CareerProfileContextUpdateV1CareerProfileAgentsAgentIdContextPutResponses = {
+    /**
+     * Successful Response
+     */
+    200: CareerProfileContextScope;
+};
+
+export type CareerProfileContextUpdateV1CareerProfileAgentsAgentIdContextPutResponse = CareerProfileContextUpdateV1CareerProfileAgentsAgentIdContextPutResponses[keyof CareerProfileContextUpdateV1CareerProfileAgentsAgentIdContextPutResponses];
+
+export type CareerProfileContextPreviewV1CareerProfileAgentsAgentIdContextPreviewPostData = {
+    body?: never;
+    headers?: {
+        /**
+         * X-Jobos-Mcp-Token
+         */
+        'X-JobOS-MCP-Token'?: string | null;
+    };
+    path: {
+        /**
+         * Agent Id
+         */
+        agent_id: string;
+    };
+    query?: never;
+    url: '/v1/career-profile/agents/{agent_id}/context/preview';
+};
+
+export type CareerProfileContextPreviewV1CareerProfileAgentsAgentIdContextPreviewPostErrors = {
+    /**
+     * Device authentication required
+     */
+    401: ApiErrorResponse;
+    /**
+     * Operation is not permitted
+     */
+    403: ApiErrorResponse;
+    /**
+     * Request validation failed
+     */
+    422: ApiErrorResponse;
+    /**
+     * Internal server error
+     */
+    500: ApiErrorResponse;
+};
+
+export type CareerProfileContextPreviewV1CareerProfileAgentsAgentIdContextPreviewPostError = CareerProfileContextPreviewV1CareerProfileAgentsAgentIdContextPreviewPostErrors[keyof CareerProfileContextPreviewV1CareerProfileAgentsAgentIdContextPreviewPostErrors];
+
+export type CareerProfileContextPreviewV1CareerProfileAgentsAgentIdContextPreviewPostResponses = {
+    /**
+     * Successful Response
+     */
+    200: CareerProfileContextPreview;
+};
+
+export type CareerProfileContextPreviewV1CareerProfileAgentsAgentIdContextPreviewPostResponse = CareerProfileContextPreviewV1CareerProfileAgentsAgentIdContextPreviewPostResponses[keyof CareerProfileContextPreviewV1CareerProfileAgentsAgentIdContextPreviewPostResponses];
+
 export type CareerProfileEvidenceImportV1CareerProfileEvidencePostData = {
     body: EvidenceImportRequest;
     headers?: {
@@ -4003,6 +4360,14 @@ export type CareerProfileEvidenceImportV1CareerProfileEvidencePostData = {
          * X-Jobos-Mcp-Token
          */
         'X-JobOS-MCP-Token'?: string | null;
+        /**
+         * X-Jobos-Agent-Id
+         */
+        'X-JobOS-Agent-Id'?: string | null;
+        /**
+         * X-Jobos-Agent-Token
+         */
+        'X-JobOS-Agent-Token'?: string | null;
     };
     path?: never;
     query?: never;
@@ -4058,6 +4423,14 @@ export type CareerProfileEvidenceRemoveV1CareerProfileEvidenceEvidenceIdDeleteDa
          * X-Jobos-Intent-Grant
          */
         'X-JobOS-Intent-Grant'?: string | null;
+        /**
+         * X-Jobos-Agent-Id
+         */
+        'X-JobOS-Agent-Id'?: string | null;
+        /**
+         * X-Jobos-Agent-Token
+         */
+        'X-JobOS-Agent-Token'?: string | null;
     };
     path: {
         /**
@@ -4109,6 +4482,12 @@ export type CareerProfileEvidenceRemoveV1CareerProfileEvidenceEvidenceIdDeleteRe
 
 export type CareerProfileEvidenceContentV1CareerProfileEvidenceEvidenceIdContentGetData = {
     body?: never;
+    headers?: {
+        /**
+         * X-Jobos-Mcp-Token
+         */
+        'X-JobOS-MCP-Token'?: string | null;
+    };
     path: {
         /**
          * Evidence Id
@@ -4157,6 +4536,12 @@ export type CareerProfileEvidenceContentV1CareerProfileEvidenceEvidenceIdContent
 
 export type CareerProfileEvidenceEraseV1CareerProfileEvidenceEvidenceIdErasePostData = {
     body: EvidenceErasureRequest;
+    headers?: {
+        /**
+         * X-Jobos-Mcp-Token
+         */
+        'X-JobOS-MCP-Token'?: string | null;
+    };
     path: {
         /**
          * Evidence Id
@@ -4205,8 +4590,61 @@ export type CareerProfileEvidenceEraseV1CareerProfileEvidenceEvidenceIdErasePost
 
 export type CareerProfileEvidenceEraseV1CareerProfileEvidenceEvidenceIdErasePostResponse = CareerProfileEvidenceEraseV1CareerProfileEvidenceEvidenceIdErasePostResponses[keyof CareerProfileEvidenceEraseV1CareerProfileEvidenceEvidenceIdErasePostResponses];
 
+export type CareerProfileExportV1CareerProfileExportPostData = {
+    body: CareerProfileExportRequest;
+    headers?: {
+        /**
+         * X-Jobos-Mcp-Token
+         */
+        'X-JobOS-MCP-Token'?: string | null;
+    };
+    path?: never;
+    query?: never;
+    url: '/v1/career-profile/export';
+};
+
+export type CareerProfileExportV1CareerProfileExportPostErrors = {
+    /**
+     * Device authentication required
+     */
+    401: ApiErrorResponse;
+    /**
+     * Operation is not permitted
+     */
+    403: ApiErrorResponse;
+    /**
+     * Resource state conflict
+     */
+    409: ApiErrorResponse;
+    /**
+     * Request validation failed
+     */
+    422: ApiErrorResponse;
+    /**
+     * Internal server error
+     */
+    500: ApiErrorResponse;
+};
+
+export type CareerProfileExportV1CareerProfileExportPostError = CareerProfileExportV1CareerProfileExportPostErrors[keyof CareerProfileExportV1CareerProfileExportPostErrors];
+
+export type CareerProfileExportV1CareerProfileExportPostResponses = {
+    /**
+     * Successful Response
+     */
+    200: CareerProfileExportResult;
+};
+
+export type CareerProfileExportV1CareerProfileExportPostResponse = CareerProfileExportV1CareerProfileExportPostResponses[keyof CareerProfileExportV1CareerProfileExportPostResponses];
+
 export type CareerProfileHistoryV1CareerProfileHistoryGetData = {
     body?: never;
+    headers?: {
+        /**
+         * X-Jobos-Mcp-Token
+         */
+        'X-JobOS-MCP-Token'?: string | null;
+    };
     path?: never;
     query?: never;
     url: '/v1/career-profile/history';
@@ -4217,6 +4655,10 @@ export type CareerProfileHistoryV1CareerProfileHistoryGetErrors = {
      * Device authentication required
      */
     401: ApiErrorResponse;
+    /**
+     * Request validation failed
+     */
+    422: ApiErrorResponse;
     /**
      * Internal server error
      */
@@ -4280,6 +4722,12 @@ export type CareerProfileHistoryUndoV1CareerProfileHistoryRevisionIdUndoPostResp
 
 export type CareerProfileIntentGrantCreateV1CareerProfileIntentGrantsPostData = {
     body: ProfileIntentGrantRequest;
+    headers?: {
+        /**
+         * X-Jobos-Mcp-Token
+         */
+        'X-JobOS-MCP-Token'?: string | null;
+    };
     path?: never;
     query?: never;
     url: '/v1/career-profile/intent-grants';
@@ -4334,6 +4782,14 @@ export type CareerProfileItemCreateV1CareerProfileItemsPostData = {
          * X-Jobos-Intent-Grant
          */
         'X-JobOS-Intent-Grant'?: string | null;
+        /**
+         * X-Jobos-Agent-Id
+         */
+        'X-JobOS-Agent-Id'?: string | null;
+        /**
+         * X-Jobos-Agent-Token
+         */
+        'X-JobOS-Agent-Token'?: string | null;
     };
     path?: never;
     query?: never;
@@ -4389,6 +4845,14 @@ export type CareerProfileItemRemoveV1CareerProfileItemsItemIdDeleteData = {
          * X-Jobos-Intent-Grant
          */
         'X-JobOS-Intent-Grant'?: string | null;
+        /**
+         * X-Jobos-Agent-Id
+         */
+        'X-JobOS-Agent-Id'?: string | null;
+        /**
+         * X-Jobos-Agent-Token
+         */
+        'X-JobOS-Agent-Token'?: string | null;
     };
     path: {
         /**
@@ -4449,6 +4913,14 @@ export type CareerProfileItemUpdateV1CareerProfileItemsItemIdPutData = {
          * X-Jobos-Intent-Grant
          */
         'X-JobOS-Intent-Grant'?: string | null;
+        /**
+         * X-Jobos-Agent-Id
+         */
+        'X-JobOS-Agent-Id'?: string | null;
+        /**
+         * X-Jobos-Agent-Token
+         */
+        'X-JobOS-Agent-Token'?: string | null;
     };
     path: {
         /**
@@ -4509,6 +4981,14 @@ export type CareerProfileProposalDecideV1CareerProfileItemsItemIdDecisionPostDat
          * X-Jobos-Intent-Grant
          */
         'X-JobOS-Intent-Grant'?: string | null;
+        /**
+         * X-Jobos-Agent-Id
+         */
+        'X-JobOS-Agent-Id'?: string | null;
+        /**
+         * X-Jobos-Agent-Token
+         */
+        'X-JobOS-Agent-Token'?: string | null;
     };
     path: {
         /**
@@ -4560,6 +5040,12 @@ export type CareerProfileProposalDecideV1CareerProfileItemsItemIdDecisionPostRes
 
 export type CareerProfileProposalsListV1CareerProfileProposalsGetData = {
     body?: never;
+    headers?: {
+        /**
+         * X-Jobos-Mcp-Token
+         */
+        'X-JobOS-MCP-Token'?: string | null;
+    };
     path?: never;
     query?: {
         /**
@@ -4642,6 +5128,12 @@ export type CareerProfileChangeProposalDecideV1CareerProfileProposalsProposalIdD
 
 export type CareerProfileResetV1CareerProfileResetPostData = {
     body: CareerProfileResetRequest;
+    headers?: {
+        /**
+         * X-Jobos-Mcp-Token
+         */
+        'X-JobOS-MCP-Token'?: string | null;
+    };
     path?: never;
     query?: never;
     url: '/v1/career-profile/reset';
@@ -4685,8 +5177,61 @@ export type CareerProfileResetV1CareerProfileResetPostResponses = {
 
 export type CareerProfileResetV1CareerProfileResetPostResponse = CareerProfileResetV1CareerProfileResetPostResponses[keyof CareerProfileResetV1CareerProfileResetPostResponses];
 
+export type CareerProfileRestoreV1CareerProfileRestorePostData = {
+    body: CareerProfileRestoreRequest;
+    headers?: {
+        /**
+         * X-Jobos-Mcp-Token
+         */
+        'X-JobOS-MCP-Token'?: string | null;
+    };
+    path?: never;
+    query?: never;
+    url: '/v1/career-profile/restore';
+};
+
+export type CareerProfileRestoreV1CareerProfileRestorePostErrors = {
+    /**
+     * Device authentication required
+     */
+    401: ApiErrorResponse;
+    /**
+     * Operation is not permitted
+     */
+    403: ApiErrorResponse;
+    /**
+     * Resource state conflict
+     */
+    409: ApiErrorResponse;
+    /**
+     * Request validation failed
+     */
+    422: ApiErrorResponse;
+    /**
+     * Internal server error
+     */
+    500: ApiErrorResponse;
+};
+
+export type CareerProfileRestoreV1CareerProfileRestorePostError = CareerProfileRestoreV1CareerProfileRestorePostErrors[keyof CareerProfileRestoreV1CareerProfileRestorePostErrors];
+
+export type CareerProfileRestoreV1CareerProfileRestorePostResponses = {
+    /**
+     * Successful Response
+     */
+    200: CareerProfileRestoreResult;
+};
+
+export type CareerProfileRestoreV1CareerProfileRestorePostResponse = CareerProfileRestoreV1CareerProfileRestorePostResponses[keyof CareerProfileRestoreV1CareerProfileRestorePostResponses];
+
 export type CareerProfileSnapshotCreateV1CareerProfileSnapshotsPostData = {
     body: CareerProfileSnapshotRequest;
+    headers?: {
+        /**
+         * X-Jobos-Mcp-Token
+         */
+        'X-JobOS-MCP-Token'?: string | null;
+    };
     path?: never;
     query?: never;
     url: '/v1/career-profile/snapshots';
@@ -4724,6 +5269,12 @@ export type CareerProfileSnapshotCreateV1CareerProfileSnapshotsPostResponse = Ca
 
 export type CareerProfileSnapshotGetV1CareerProfileSnapshotsSnapshotIdGetData = {
     body?: never;
+    headers?: {
+        /**
+         * X-Jobos-Mcp-Token
+         */
+        'X-JobOS-MCP-Token'?: string | null;
+    };
     path: {
         /**
          * Snapshot Id
@@ -4770,6 +5321,12 @@ export type CareerProfileSnapshotGetV1CareerProfileSnapshotsSnapshotIdGetRespons
 
 export type CareerProfileWorkArrangementGetV1CareerProfileWorkArrangementGetData = {
     body?: never;
+    headers?: {
+        /**
+         * X-Jobos-Mcp-Token
+         */
+        'X-JobOS-MCP-Token'?: string | null;
+    };
     path?: never;
     query?: never;
     url: '/v1/career-profile/work-arrangement';
@@ -4784,6 +5341,10 @@ export type CareerProfileWorkArrangementGetV1CareerProfileWorkArrangementGetErro
      * Operation is not permitted
      */
     403: ApiErrorResponse;
+    /**
+     * Request validation failed
+     */
+    422: ApiErrorResponse;
     /**
      * Internal server error
      */
@@ -4803,6 +5364,12 @@ export type CareerProfileWorkArrangementGetV1CareerProfileWorkArrangementGetResp
 
 export type CareerProfileWorkArrangementPutV1CareerProfileWorkArrangementPutData = {
     body: WorkArrangementMutation;
+    headers?: {
+        /**
+         * X-Jobos-Mcp-Token
+         */
+        'X-JobOS-MCP-Token'?: string | null;
+    };
     path?: never;
     query?: never;
     url: '/v1/career-profile/work-arrangement';
@@ -4844,6 +5411,12 @@ export type CareerProfileWorkArrangementPutV1CareerProfileWorkArrangementPutResp
 
 export type CareerProfileWorkArrangementHistoryV1CareerProfileWorkArrangementHistoryGetData = {
     body?: never;
+    headers?: {
+        /**
+         * X-Jobos-Mcp-Token
+         */
+        'X-JobOS-MCP-Token'?: string | null;
+    };
     path?: never;
     query?: never;
     url: '/v1/career-profile/work-arrangement/history';
@@ -4858,6 +5431,10 @@ export type CareerProfileWorkArrangementHistoryV1CareerProfileWorkArrangementHis
      * Operation is not permitted
      */
     403: ApiErrorResponse;
+    /**
+     * Request validation failed
+     */
+    422: ApiErrorResponse;
     /**
      * Internal server error
      */
@@ -4877,6 +5454,12 @@ export type CareerProfileWorkArrangementHistoryV1CareerProfileWorkArrangementHis
 
 export type CareerProfileWorkArrangementRestoreV1CareerProfileWorkArrangementRestorePostData = {
     body: WorkArrangementRestore;
+    headers?: {
+        /**
+         * X-Jobos-Mcp-Token
+         */
+        'X-JobOS-MCP-Token'?: string | null;
+    };
     path?: never;
     query?: never;
     url: '/v1/career-profile/work-arrangement/restore';
@@ -4922,6 +5505,12 @@ export type CareerProfileWorkArrangementRestoreV1CareerProfileWorkArrangementRes
 
 export type ConversationsListV1ConversationsGetData = {
     body?: never;
+    headers?: {
+        /**
+         * X-Jobos-Mcp-Token
+         */
+        'X-JobOS-MCP-Token'?: string | null;
+    };
     path?: never;
     query?: never;
     url: '/v1/conversations';
@@ -4932,6 +5521,10 @@ export type ConversationsListV1ConversationsGetErrors = {
      * Device authentication required
      */
     401: ApiErrorResponse;
+    /**
+     * Request validation failed
+     */
+    422: ApiErrorResponse;
     /**
      * Internal server error
      */
@@ -4954,6 +5547,12 @@ export type ConversationCreateV1ConversationsPostData = {
      * Command
      */
     body?: CreateConversationRequest | null;
+    headers?: {
+        /**
+         * X-Jobos-Mcp-Token
+         */
+        'X-JobOS-MCP-Token'?: string | null;
+    };
     path?: never;
     query?: never;
     url: '/v1/conversations';
@@ -4991,6 +5590,12 @@ export type ConversationCreateV1ConversationsPostResponse = ConversationCreateV1
 
 export type ConversationCurrentV1ConversationsCurrentGetData = {
     body?: never;
+    headers?: {
+        /**
+         * X-Jobos-Mcp-Token
+         */
+        'X-JobOS-MCP-Token'?: string | null;
+    };
     path?: never;
     query?: never;
     url: '/v1/conversations/current';
@@ -5001,6 +5606,10 @@ export type ConversationCurrentV1ConversationsCurrentGetErrors = {
      * Device authentication required
      */
     401: ApiErrorResponse;
+    /**
+     * Request validation failed
+     */
+    422: ApiErrorResponse;
     /**
      * Internal server error
      */
@@ -5020,6 +5629,12 @@ export type ConversationCurrentV1ConversationsCurrentGetResponse = ConversationC
 
 export type ConversationStreamV1ConversationsEventsStreamGetData = {
     body?: never;
+    headers?: {
+        /**
+         * X-Jobos-Mcp-Token
+         */
+        'X-JobOS-MCP-Token'?: string | null;
+    };
     path?: never;
     query?: {
         /**
@@ -5062,6 +5677,12 @@ export type ConversationStreamV1ConversationsEventsStreamGetResponse = Conversat
 
 export type ConversationArchiveV1ConversationsConversationIdDeleteData = {
     body?: never;
+    headers?: {
+        /**
+         * X-Jobos-Mcp-Token
+         */
+        'X-JobOS-MCP-Token'?: string | null;
+    };
     path: {
         /**
          * Conversation Id
@@ -5108,6 +5729,12 @@ export type ConversationArchiveV1ConversationsConversationIdDeleteResponse = Con
 
 export type ConversationGetV1ConversationsConversationIdGetData = {
     body?: never;
+    headers?: {
+        /**
+         * X-Jobos-Mcp-Token
+         */
+        'X-JobOS-MCP-Token'?: string | null;
+    };
     path: {
         /**
          * Conversation Id
@@ -5150,6 +5777,12 @@ export type ConversationGetV1ConversationsConversationIdGetResponse = Conversati
 
 export type ConversationSendV1ConversationsConversationIdMessagesPostData = {
     body: SendMessageRequest;
+    headers?: {
+        /**
+         * X-Jobos-Mcp-Token
+         */
+        'X-JobOS-MCP-Token'?: string | null;
+    };
     path: {
         /**
          * Conversation Id
@@ -5192,6 +5825,12 @@ export type ConversationSendV1ConversationsConversationIdMessagesPostResponse = 
 
 export type ConversationCancelV1ConversationsConversationIdTurnsTurnIdCancelPostData = {
     body?: never;
+    headers?: {
+        /**
+         * X-Jobos-Mcp-Token
+         */
+        'X-JobOS-MCP-Token'?: string | null;
+    };
     path: {
         /**
          * Conversation Id
@@ -5238,6 +5877,12 @@ export type ConversationCancelV1ConversationsConversationIdTurnsTurnIdCancelPost
 
 export type ConversationRetryV1ConversationsConversationIdTurnsTurnIdRetryPostData = {
     body: RetryTurnRequest;
+    headers?: {
+        /**
+         * X-Jobos-Mcp-Token
+         */
+        'X-JobOS-MCP-Token'?: string | null;
+    };
     path: {
         /**
          * Conversation Id
@@ -5288,6 +5933,12 @@ export type ConversationRetryV1ConversationsConversationIdTurnsTurnIdRetryPostRe
 
 export type ConversationSaveDocumentViewV1ConversationsConversationIdWorkspaceDocumentPutData = {
     body: ConversationDocumentViewRequest;
+    headers?: {
+        /**
+         * X-Jobos-Mcp-Token
+         */
+        'X-JobOS-MCP-Token'?: string | null;
+    };
     path: {
         /**
          * Conversation Id
@@ -5326,6 +5977,12 @@ export type ConversationSaveDocumentViewV1ConversationsConversationIdWorkspaceDo
 
 export type ConversationSelectJobV1ConversationsConversationIdWorkspaceJobPutData = {
     body: JobSelectionRequest;
+    headers?: {
+        /**
+         * X-Jobos-Mcp-Token
+         */
+        'X-JobOS-MCP-Token'?: string | null;
+    };
     path: {
         /**
          * Conversation Id
@@ -5364,6 +6021,12 @@ export type ConversationSelectJobV1ConversationsConversationIdWorkspaceJobPutRes
 
 export type DesktopCapabilityPresenceV1DesktopCapabilitiesGetData = {
     body?: never;
+    headers?: {
+        /**
+         * X-Jobos-Mcp-Token
+         */
+        'X-JobOS-MCP-Token'?: string | null;
+    };
     path?: never;
     query?: never;
     url: '/v1/desktop/capabilities';
@@ -5374,6 +6037,10 @@ export type DesktopCapabilityPresenceV1DesktopCapabilitiesGetErrors = {
      * Device authentication required
      */
     401: ApiErrorResponse;
+    /**
+     * Request validation failed
+     */
+    422: ApiErrorResponse;
     /**
      * Internal server error
      */
@@ -5393,6 +6060,12 @@ export type DesktopCapabilityPresenceV1DesktopCapabilitiesGetResponse = DesktopC
 
 export type DeviceSessionV1DeviceSessionGetData = {
     body?: never;
+    headers?: {
+        /**
+         * X-Jobos-Mcp-Token
+         */
+        'X-JobOS-MCP-Token'?: string | null;
+    };
     path?: never;
     query?: never;
     url: '/v1/device-session';
@@ -5403,6 +6076,10 @@ export type DeviceSessionV1DeviceSessionGetErrors = {
      * Device authentication required
      */
     401: ApiErrorResponse;
+    /**
+     * Request validation failed
+     */
+    422: ApiErrorResponse;
     /**
      * Internal server error
      */
@@ -5422,6 +6099,12 @@ export type DeviceSessionV1DeviceSessionGetResponse = DeviceSessionV1DeviceSessi
 
 export type DocumentFileGetV1DocumentFilesDocumentIdGetData = {
     body?: never;
+    headers?: {
+        /**
+         * X-Jobos-Mcp-Token
+         */
+        'X-JobOS-MCP-Token'?: string | null;
+    };
     path: {
         /**
          * Document Id
@@ -5464,6 +6147,12 @@ export type DocumentFileGetV1DocumentFilesDocumentIdGetResponse = DocumentFileGe
 
 export type EditableDocumentGetV1EditableDocumentsDocumentIdGetData = {
     body?: never;
+    headers?: {
+        /**
+         * X-Jobos-Mcp-Token
+         */
+        'X-JobOS-MCP-Token'?: string | null;
+    };
     path: {
         /**
          * Document Id
@@ -5506,6 +6195,12 @@ export type EditableDocumentGetV1EditableDocumentsDocumentIdGetResponse = Editab
 
 export type EditableDocumentSaveV1EditableDocumentsDocumentIdPutData = {
     body: SaveEditableDocumentRequest;
+    headers?: {
+        /**
+         * X-Jobos-Mcp-Token
+         */
+        'X-JobOS-MCP-Token'?: string | null;
+    };
     path: {
         /**
          * Document Id
@@ -5552,6 +6247,12 @@ export type EditableDocumentSaveV1EditableDocumentsDocumentIdPutResponse = Edita
 
 export type EditableDocumentImportV1EditableDocumentsDocumentIdImportPostData = {
     body: ReplaceFromDocxRequest;
+    headers?: {
+        /**
+         * X-Jobos-Mcp-Token
+         */
+        'X-JobOS-MCP-Token'?: string | null;
+    };
     path: {
         /**
          * Document Id
@@ -5658,6 +6359,12 @@ export type EditableOperationsV1EditableDocumentsDocumentIdOperationsPostRespons
 
 export type EditableDocumentPublishV1EditableDocumentsDocumentIdPublishPostData = {
     body: PublishEditableDocumentRequest;
+    headers?: {
+        /**
+         * X-Jobos-Mcp-Token
+         */
+        'X-JobOS-MCP-Token'?: string | null;
+    };
     path: {
         /**
          * Document Id
@@ -5708,6 +6415,12 @@ export type EditableDocumentPublishV1EditableDocumentsDocumentIdPublishPostRespo
 
 export type EditableSnapshotListV1EditableDocumentsDocumentIdSnapshotsGetData = {
     body?: never;
+    headers?: {
+        /**
+         * X-Jobos-Mcp-Token
+         */
+        'X-JobOS-MCP-Token'?: string | null;
+    };
     path: {
         /**
          * Document Id
@@ -5806,6 +6519,12 @@ export type EditableSnapshotCreateV1EditableDocumentsDocumentIdSnapshotsPostResp
 
 export type EditableSnapshotRestoreV1EditableDocumentsDocumentIdSnapshotsSnapshotIdRestorePostData = {
     body: RestoreSnapshotRequest;
+    headers?: {
+        /**
+         * X-Jobos-Mcp-Token
+         */
+        'X-JobOS-MCP-Token'?: string | null;
+    };
     path: {
         /**
          * Document Id
@@ -5856,6 +6575,12 @@ export type EditableSnapshotRestoreV1EditableDocumentsDocumentIdSnapshotsSnapsho
 
 export type EventsListV1EventsGetData = {
     body?: never;
+    headers?: {
+        /**
+         * X-Jobos-Mcp-Token
+         */
+        'X-JobOS-MCP-Token'?: string | null;
+    };
     path?: never;
     query?: {
         /**
@@ -5894,6 +6619,12 @@ export type EventsListV1EventsGetResponse = EventsListV1EventsGetResponses[keyof
 
 export type EventsStreamV1EventsStreamGetData = {
     body?: never;
+    headers?: {
+        /**
+         * X-Jobos-Mcp-Token
+         */
+        'X-JobOS-MCP-Token'?: string | null;
+    };
     path?: never;
     query?: {
         /**
@@ -5963,6 +6694,12 @@ export type HealthV1HealthGetResponse = HealthV1HealthGetResponses[keyof HealthV
 
 export type JobsListV1JobsGetData = {
     body?: never;
+    headers?: {
+        /**
+         * X-Jobos-Mcp-Token
+         */
+        'X-JobOS-MCP-Token'?: string | null;
+    };
     path?: never;
     query?: {
         /**
@@ -6123,6 +6860,12 @@ export type JobsReorderV1JobsOrderPutResponse = JobsReorderV1JobsOrderPutRespons
 
 export type JobInspectV1JobsJobIdGetData = {
     body?: never;
+    headers?: {
+        /**
+         * X-Jobos-Mcp-Token
+         */
+        'X-JobOS-MCP-Token'?: string | null;
+    };
     path: {
         /**
          * Job Id
@@ -6178,6 +6921,12 @@ export type JobInspectV1JobsJobIdGetResponse = JobInspectV1JobsJobIdGetResponses
 
 export type JobArtifactsV1JobsJobIdArtifactsGetData = {
     body?: never;
+    headers?: {
+        /**
+         * X-Jobos-Mcp-Token
+         */
+        'X-JobOS-MCP-Token'?: string | null;
+    };
     path: {
         /**
          * Job Id
@@ -6296,6 +7045,12 @@ export type RefreshJobArtifactsV1JobsJobIdArtifactsRefreshPostData = {
      * Command
      */
     body?: ArtifactRefreshRequest | null;
+    headers?: {
+        /**
+         * X-Jobos-Mcp-Token
+         */
+        'X-JobOS-MCP-Token'?: string | null;
+    };
     path: {
         /**
          * Job Id
@@ -6346,6 +7101,12 @@ export type RefreshJobArtifactsV1JobsJobIdArtifactsRefreshPostResponse = Refresh
 
 export type RegisterJobArtifactV1JobsJobIdArtifactsRegisterPostData = {
     body: ArtifactRegistrationRequest;
+    headers?: {
+        /**
+         * X-Jobos-Mcp-Token
+         */
+        'X-JobOS-MCP-Token'?: string | null;
+    };
     path: {
         /**
          * Job Id
@@ -6396,6 +7157,12 @@ export type RegisterJobArtifactV1JobsJobIdArtifactsRegisterPostResponse = Regist
 
 export type RenderJobArtifactV1JobsJobIdArtifactsRenderPostData = {
     body: ResumeRenderRequest;
+    headers?: {
+        /**
+         * X-Jobos-Mcp-Token
+         */
+        'X-JobOS-MCP-Token'?: string | null;
+    };
     path: {
         /**
          * Job Id
@@ -6449,6 +7216,12 @@ export type ApproveJobArtifactV1JobsJobIdArtifactsArtifactIdApprovePostData = {
      * Command
      */
     body?: ArtifactApprovalRequest | null;
+    headers?: {
+        /**
+         * X-Jobos-Mcp-Token
+         */
+        'X-JobOS-MCP-Token'?: string | null;
+    };
     path: {
         /**
          * Job Id
@@ -6623,6 +7396,12 @@ export type JobUpdateDescriptionV1JobsJobIdDescriptionPutResponse = JobUpdateDes
 
 export type DocumentFilesListV1JobsJobIdDocumentFilesGetData = {
     body?: never;
+    headers?: {
+        /**
+         * X-Jobos-Mcp-Token
+         */
+        'X-JobOS-MCP-Token'?: string | null;
+    };
     path: {
         /**
          * Job Id
@@ -6738,6 +7517,12 @@ export type EditableDocumentOutlineV1JobsJobIdEditableDocumentOutlinesDocumentKe
 
 export type EditableDocumentsListV1JobsJobIdEditableDocumentsGetData = {
     body?: never;
+    headers?: {
+        /**
+         * X-Jobos-Mcp-Token
+         */
+        'X-JobOS-MCP-Token'?: string | null;
+    };
     path: {
         /**
          * Job Id
@@ -6793,6 +7578,12 @@ export type EditableDocumentCreateV1JobsJobIdEditableDocumentsPostData = {
     } & CreateRegisteredImportRequest) | ({
         mode: 'import_external_docx';
     } & CreateExternalImportRequest);
+    headers?: {
+        /**
+         * X-Jobos-Mcp-Token
+         */
+        'X-JobOS-MCP-Token'?: string | null;
+    };
     path: {
         /**
          * Job Id
@@ -6843,6 +7634,12 @@ export type EditableDocumentCreateV1JobsJobIdEditableDocumentsPostResponse = Edi
 
 export type EditableDocumentForJobV1JobsJobIdEditableDocumentsDocumentKeyGetData = {
     body?: never;
+    headers?: {
+        /**
+         * X-Jobos-Mcp-Token
+         */
+        'X-JobOS-MCP-Token'?: string | null;
+    };
     path: {
         /**
          * Job Id
@@ -6893,6 +7690,12 @@ export type EditableDocumentForJobV1JobsJobIdEditableDocumentsDocumentKeyGetResp
 
 export type JobHistoryV1JobsJobIdHistoryGetData = {
     body?: never;
+    headers?: {
+        /**
+         * X-Jobos-Mcp-Token
+         */
+        'X-JobOS-MCP-Token'?: string | null;
+    };
     path: {
         /**
          * Job Id
@@ -7024,6 +7827,12 @@ export type VersionV1VersionGetResponse = VersionV1VersionGetResponses[keyof Ver
 
 export type WorkspaceGetV1WorkspaceGetData = {
     body?: never;
+    headers?: {
+        /**
+         * X-Jobos-Mcp-Token
+         */
+        'X-JobOS-MCP-Token'?: string | null;
+    };
     path?: never;
     query?: {
         /**
@@ -7077,7 +7886,12 @@ export type WorkspacePutV1WorkspacePutData = {
         'X-JobOS-MCP-Token'?: string | null;
     };
     path?: never;
-    query?: never;
+    query?: {
+        /**
+         * Conversation Id
+         */
+        conversation_id?: string | null;
+    };
     url: '/v1/workspace';
 };
 
@@ -7117,6 +7931,12 @@ export type WorkspacePutV1WorkspacePutResponse = WorkspacePutV1WorkspacePutRespo
 
 export type WorkspaceJobsV1WorkspaceJobsGetData = {
     body?: never;
+    headers?: {
+        /**
+         * X-Jobos-Mcp-Token
+         */
+        'X-JobOS-MCP-Token'?: string | null;
+    };
     path?: never;
     query?: {
         /**
@@ -7155,6 +7975,12 @@ export type WorkspaceJobsV1WorkspaceJobsGetResponse = WorkspaceJobsV1WorkspaceJo
 
 export type WorkspaceSelectJobDeprecatedV1WorkspaceJobsSelectionPutData = {
     body: JobSelectionRequest;
+    headers?: {
+        /**
+         * X-Jobos-Mcp-Token
+         */
+        'X-JobOS-MCP-Token'?: string | null;
+    };
     path?: never;
     query?: never;
     url: '/v1/workspace/jobs/selection';

@@ -58,6 +58,15 @@ def auth() -> dict[str, str]:
     return {"Authorization": f"Bearer {DEVICE_TOKEN}"}
 
 
+def agent_auth() -> dict[str, str]:
+    return {
+        "Authorization": f"Bearer {MCP_TOKEN}",
+        "X-JobOS-MCP-Token": MCP_TOKEN,
+        "X-JobOS-Agent-Id": "trusted-local-mcp",
+        "X-JobOS-Agent-Token": MCP_TOKEN,
+    }
+
+
 def initialized_store(tmp_path: Path) -> CareerProfileCompleteStore:
     database = tmp_path / "state/jobos.db"
     JobOsStateStore(database).initialize(owner_device_id="primary-device")
@@ -584,7 +593,7 @@ def test_agent_sensitive_edit_requires_one_time_exact_payload_user_grant(tmp_pat
         "idempotency_key": "agent-user-authorized-identity-0001",
         "value": {"kind": "identity", "professional_name": "(FAKE) Alex Morgan"},
     }
-    agent_headers = auth() | {"X-JobOS-MCP-Token": MCP_TOKEN}
+    agent_headers = agent_auth()
     with TestClient(app) as client:
         autonomous = client.post(
             "/v1/career-profile/items",
@@ -824,9 +833,15 @@ def test_manual_values_and_evidence_removal_create_revisions_without_erasing_his
     assert all(item.item_id != claim_id for item in removed_item.items)
     assert removed_evidence.profile_revision == 4
     assert removed_evidence.source_evidence[0].active is False
-    assert store.read_evidence(evidence.evidence_id) == SYNTHETIC_BYTES
+    with pytest.raises(CareerProfileEvidenceNotFound):
+        store.read_evidence(evidence.evidence_id)
 
     with sqlite3.connect(tmp_path / "state/jobos.db") as connection:
+        storage_pointer = connection.execute(
+            "SELECT storage_name, content_sha256 FROM career_profile_evidence "
+            "WHERE evidence_id = ?",
+            (evidence.evidence_id,),
+        ).fetchone()
         operations = connection.execute(
             "SELECT operation FROM career_profile_complete_revisions ORDER BY profile_revision"
         ).fetchall()
@@ -842,6 +857,8 @@ def test_manual_values_and_evidence_removal_create_revisions_without_erasing_his
             "SELECT before_json FROM career_profile_complete_revisions "
             "WHERE operation = 'evidence.remove'"
         ).fetchone()[0]
+    assert storage_pointer is not None
+    assert store.vault.read(str(storage_pointer[0]), str(storage_pointer[1])) == SYNTHETIC_BYTES
     assert operations == [
         ("evidence.import",),
         ("item.upsert",),
@@ -1255,7 +1272,7 @@ def test_schema_migration_adds_complete_model_tables_without_activating_profile(
     database = tmp_path / "jobos.db"
     health = JobOsStateStore(database).initialize(owner_device_id="primary-device")
 
-    assert health.schema_version == SCHEMA_VERSION == 28
+    assert health.schema_version == SCHEMA_VERSION == 30
     with sqlite3.connect(database) as connection:
         tables = {
             row[0]

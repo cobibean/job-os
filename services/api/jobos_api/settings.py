@@ -4,6 +4,8 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+MCP_RUNTIME_DEVICE_ID = "jobos-mcp-runtime"
+
 
 class DeviceCredential(BaseModel):
     model_config = ConfigDict(frozen=True, hide_input_in_errors=True)
@@ -73,7 +75,11 @@ class Settings(BaseModel):
 
     @model_validator(mode="after")
     def validate_unique_device_credentials(self) -> "Settings":
-        device_ids = [self.device_id, *(item.device_id for item in self.device_credentials)]
+        device_ids = [
+            self.device_id,
+            MCP_RUNTIME_DEVICE_ID,
+            *(item.device_id for item in self.device_credentials),
+        ]
         tokens = [
             self.device_token,
             self.mcp_token,
@@ -89,6 +95,7 @@ class Settings(BaseModel):
     def device_credential_registry(self) -> dict[str, str]:
         return {
             self.device_id: self.device_token,
+            MCP_RUNTIME_DEVICE_ID: self.mcp_token,
             **{item.device_id: item.token for item in self.device_credentials},
         }
 

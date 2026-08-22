@@ -423,11 +423,6 @@ def create_server(
             idempotency_key=idempotency_key,
         )
 
-    @server.tool(name="career_profile_get", structured_output=True)
-    async def career_profile_get() -> dict[str, Any]:
-        """Read the user's canonical Career Profile and current revision."""
-        return await client.get_career_profile()
-
     @server.tool(name="career_profile_edit", structured_output=True)
     async def career_profile_edit(
         expected_profile_revision: int,

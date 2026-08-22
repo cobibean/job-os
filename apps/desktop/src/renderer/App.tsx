@@ -353,11 +353,14 @@ function WorkbenchApp() {
       />
       )}
       </div>
-      {careerProfileOpen ? (
-        <CareerProfileWorkspace
-          hasActiveTurn={Boolean(agentSessions.activeSession?.summary.activeTurn)}
-          online={connectivity.state === 'connected'}
-        />
+      {careerProfileEnabled ? (
+        <div className="career-profile-layer" hidden={!careerProfileOpen}>
+          <CareerProfileWorkspace
+            active={careerProfileOpen}
+            hasActiveTurn={Boolean(agentSessions.activeSession?.summary.activeTurn)}
+            online={connectivity.state === 'connected'}
+          />
+        </div>
       ) : null}
       {browseVisible ? (
         <BrowseWorkspace

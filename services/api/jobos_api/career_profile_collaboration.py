@@ -528,7 +528,13 @@ class CareerProfileCollaborationStore:
                     ),
                     undoable=(
                         int(row[1]) == profile.profile_revision
-                        and str(row[4]) in {"item.upsert", "item.remove"}
+                        and (
+                            (
+                                str(row[4]) in {"item.upsert", "item.remove"}
+                                and row[5] is not None
+                            )
+                            or (str(row[4]) == "evidence.remove" and row[6] is not None)
+                        )
                     ),
                     created_at=str(row[14]),
                 )
@@ -577,7 +583,8 @@ class CareerProfileCollaborationStore:
                     connection, command.expected_profile_revision
                 )
                 row = connection.execute(
-                    "SELECT profile_revision, operation, item_id, before_json, after_json "
+                    "SELECT profile_revision, operation, item_id, evidence_id, "
+                    "before_json, after_json "
                     "FROM career_profile_complete_revisions WHERE revision_id = ?",
                     (revision_id,),
                 ).fetchone()
@@ -589,40 +596,90 @@ class CareerProfileCollaborationStore:
                     )
                 operation = str(row[1])
                 item_id = str(row[2]) if row[2] is not None else None
-                if operation not in {"item.upsert", "item.remove"} or item_id is None:
+                evidence_id = str(row[3]) if row[3] is not None else None
+                if not (
+                    (operation in {"item.upsert", "item.remove"} and item_id is not None)
+                    or (operation == "evidence.remove" and evidence_id is not None)
+                ):
                     raise CareerProfileCollaborationConflict(
                         "This Career Profile change cannot be undone"
                     )
-                before = json.loads(str(row[3])) if row[3] is not None else None
-                current = self._active_item_in_connection(connection, item_id)
-                stored_item = connection.execute(
-                    "SELECT item_revision FROM career_profile_items WHERE item_id = ?",
-                    (item_id,),
-                ).fetchone()
-                if stored_item is None:
-                    raise CareerProfileCollaborationConflict(
-                        "The Career Profile item changed and cannot be undone"
+                before = json.loads(str(row[4])) if row[4] is not None else None
+                removed_after = json.loads(str(row[5])) if row[5] is not None else None
+                if operation == "evidence.remove":
+                    assert evidence_id is not None
+                    evidence_row = connection.execute(
+                        "SELECT original_filename, media_type, content_sha256, byte_count, "
+                        "captured_at, imported_at, provenance_json, storage_name, active "
+                        "FROM career_profile_evidence WHERE evidence_id = ?",
+                        (evidence_id,),
+                    ).fetchone()
+                    if evidence_row is None or bool(evidence_row[8]):
+                        raise CareerProfileCollaborationConflict(
+                            "The Evidence source changed and cannot be restored"
+                        )
+                    complete.vault.read(str(evidence_row[7]), str(evidence_row[2]))
+                    inactive_evidence = complete._evidence_from_row(  # noqa: SLF001
+                        (
+                            evidence_id,
+                            *evidence_row[:7],
+                            evidence_row[8],
+                        )
                     )
-                if before is None:
                     connection.execute(
-                        "UPDATE career_profile_items SET active = 0, "
-                        "item_revision = item_revision + 1, "
-                        "actor_principal = ?, updated_at = ? WHERE item_id = ? AND active = 1",
-                        (principal, _now(), item_id),
+                        "UPDATE career_profile_evidence SET active = 1 WHERE evidence_id = ?",
+                        (evidence_id,),
                     )
-                    after = None
-                    undo_operation = "item.remove"
+                    active_evidence = inactive_evidence.model_copy(update={"active": True})
+                    linked_items = (
+                        removed_after.get("linked_items", [])
+                        if isinstance(removed_after, dict)
+                        else []
+                    )
+                    revision_before = {
+                        "source_evidence": inactive_evidence.model_dump(mode="json"),
+                        "linked_items": linked_items,
+                    }
+                    revision_after = {
+                        "source_evidence": active_evidence.model_dump(mode="json"),
+                        "linked_items": linked_items,
+                    }
+                    undo_operation = "evidence.import"
+                    affected = ["source_evidence"]
                 else:
-                    restored = ProfileItemRecord.model_validate(before).model_copy(
-                        update={
-                            "item_revision": int(stored_item[0]) + 1,
-                            "actor_principal": principal,
-                            "updated_at": _now(),
-                        }
-                    )
-                    self._write_item(connection, restored)
-                    after = restored.model_dump(mode="json")
-                    undo_operation = "item.upsert"
+                    assert item_id is not None
+                    current = self._active_item_in_connection(connection, item_id)
+                    stored_item = connection.execute(
+                        "SELECT item_revision FROM career_profile_items WHERE item_id = ?",
+                        (item_id,),
+                    ).fetchone()
+                    if stored_item is None:
+                        raise CareerProfileCollaborationConflict(
+                            "The Career Profile item changed and cannot be undone"
+                        )
+                    if before is None:
+                        connection.execute(
+                            "UPDATE career_profile_items SET active = 0, "
+                            "item_revision = item_revision + 1, "
+                            "actor_principal = ?, updated_at = ? "
+                            "WHERE item_id = ? AND active = 1",
+                            (principal, _now(), item_id),
+                        )
+                        revision_after = None
+                        undo_operation = "item.remove"
+                    else:
+                        restored = ProfileItemRecord.model_validate(before).model_copy(
+                            update={
+                                "item_revision": int(stored_item[0]) + 1,
+                                "actor_principal": principal,
+                                "updated_at": _now(),
+                            }
+                        )
+                        self._write_item(connection, restored)
+                        revision_after = restored.model_dump(mode="json")
+                        undo_operation = "item.upsert"
+                    revision_before = current.model_dump(mode="json") if current else None
+                    affected = [f"items.{item_id}"]
                 complete._record_revision(  # noqa: SLF001
                     connection,
                     revision=head + 1,
@@ -631,11 +688,15 @@ class CareerProfileCollaborationStore:
                     actor_kind="direct_user",
                     operation=undo_operation,
                     item_id=item_id,
-                    evidence_id=None,
-                    before=current.model_dump(mode="json") if current else None,
-                    after=after,
-                    affected=[f"items.{item_id}"],
-                    reason="Undid the previous Career Profile change",
+                    evidence_id=evidence_id,
+                    before=revision_before,
+                    after=revision_after,
+                    affected=affected,
+                    reason=(
+                        "Restored the previously removed Evidence source"
+                        if evidence_id is not None
+                        else "Undid the previous Career Profile change"
+                    ),
                     undo_of_revision_id=revision_id,
                 )
                 profile = complete._current_in_connection(connection)  # noqa: SLF001

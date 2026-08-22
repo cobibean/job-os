@@ -4,6 +4,7 @@ from typing import Literal
 from pydantic import Field
 
 from .agent_gateway import AgentGatewayFactory
+from .career_profile_context import CareerProfileContextStore
 from .conversations import (
     ConnectionResponse,
     ConversationJobContext,
@@ -37,10 +38,14 @@ class ConversationManager:
         gateway_factory: AgentGatewayFactory,
         *,
         career_profile_principal: str | None = None,
+        career_profile_context: CareerProfileContextStore | None = None,
+        career_profile_agent_id: str | None = None,
     ) -> None:
         self.store = store
         self.gateway_factory = gateway_factory
         self.career_profile_principal = career_profile_principal
+        self.career_profile_context = career_profile_context
+        self.career_profile_agent_id = career_profile_agent_id
         self._services: dict[str, ConversationService] = {}
         self._lifecycle_lock = asyncio.Lock()
 
@@ -85,6 +90,8 @@ class ConversationManager:
             self.gateway_factory.create(conversation_id),
             conversation_id,
             career_profile_principal=self.career_profile_principal,
+            career_profile_context=self.career_profile_context,
+            career_profile_agent_id=self.career_profile_agent_id,
         )
 
     def list(self, *, owner_device_id: str) -> ConversationListResponse:

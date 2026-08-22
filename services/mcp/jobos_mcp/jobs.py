@@ -127,6 +127,7 @@ class JobOsMcpClient:
     ) -> None:
         if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,99}", agent_id):
             raise ValueError("Invalid Career Profile agent ID")
+        _ = device_token  # Kept for construction compatibility; MCP uses a distinct principal.
         self._conversation_scope: ContextVar[str | None] = ContextVar(
             "jobos_mcp_conversation_id", default=None
         )
@@ -137,7 +138,7 @@ class JobOsMcpClient:
         self._client = httpx.AsyncClient(
             base_url=base_url,
             headers={
-                "Authorization": f"Bearer {device_token}",
+                "Authorization": f"Bearer {mcp_token}",
                 "X-JobOS-MCP-Token": mcp_token,
             },
             transport=transport,
@@ -173,14 +174,6 @@ class JobOsMcpClient:
             "GET",
             f"/v1/jobs/{self._segment(job_id, 'job ID')}",
             params={"origin": "mcp", "idempotency_key": self._key(idempotency_key)},
-        )
-
-    async def get_career_profile(self) -> dict[str, Any]:
-        """Read the canonical Career Profile and its current revision."""
-        return await self._request(
-            "GET",
-            "/v1/career-profile",
-            headers=self._career_profile_agent_headers,
         )
 
     async def edit_career_profile(

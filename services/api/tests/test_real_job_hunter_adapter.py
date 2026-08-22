@@ -48,8 +48,9 @@ def test_real_job_hunter_adapter_reports_ready_while_jobos_owns_publication(tmp_
         artifact_roots=(workspace / "resume",),
         hermes_job_hunter_cwd=workspace,
     )
-    headers = {
-        "Authorization": "Bearer real-adapter-device-token",
+    owner_headers = {"Authorization": "Bearer real-adapter-device-token"}
+    mcp_headers = {
+        "Authorization": "Bearer real-adapter-trusted-token",
         "X-JobOS-MCP-Token": "real-adapter-trusted-token",
     }
     source = b"# Synthetic resume source\n"
@@ -69,17 +70,17 @@ def test_real_job_hunter_adapter_reports_ready_while_jobos_owns_publication(tmp_
         health = client.get("/v1/health")
         published = client.post(
             f"/v1/jobs/{job_id}/artifacts/publish",
-            headers=headers,
+            headers=mcp_headers,
             json=payload,
         )
         listed = client.get(
             f"/v1/jobs/{job_id}/artifacts",
-            headers={"Authorization": headers["Authorization"]},
+            headers=owner_headers,
         )
         artifact_id = listed.json()["artifacts"][0]["artifact_id"]
         downloaded = client.get(
             f"/v1/artifacts/{artifact_id}/download",
-            headers={"Authorization": headers["Authorization"]},
+            headers=owner_headers,
         )
 
     assert health.status_code == 200

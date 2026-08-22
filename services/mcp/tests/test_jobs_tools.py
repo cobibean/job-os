@@ -264,7 +264,8 @@ async def test_job_tools_use_only_the_authenticated_jobos_http_contract():
         ("PUT", "/v1/jobs/job-1/description"),
     ]
     assert all(
-        request.headers["authorization"] == "Bearer test-device-token" for request in requests
+        request.headers["authorization"] == "Bearer test-mcp-trusted-token"
+        for request in requests
     )
     assert json.loads(requests[2].content) == {
         "company_name": "Northstar Labs",
@@ -642,7 +643,6 @@ async def test_mcp_server_exposes_public_v1_parity_tools_while_retaining_job_too
         "job_reorder",
         "job_update_status",
         "job_update_description",
-        "career_profile_get",
         "career_profile_edit",
         "workspace_inspect",
         "workspace_update",

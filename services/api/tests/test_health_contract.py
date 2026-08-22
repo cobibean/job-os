@@ -54,7 +54,7 @@ def test_health_reports_truthful_public_capability_states(tmp_path):
         "status": "ready",
         "service": "jobos-api",
         "version": "0.1.0",
-        "state_schema": 28,
+        "state_schema": 30,
         "transport": "local-loopback",
         "agent": "not-configured",
         "artifact_storage": "available",
@@ -190,6 +190,8 @@ def test_version_and_openapi_describe_the_shared_workspace_contract(tmp_path):
         "/v1/career-profile/intent-grants",
         "/v1/career-profile/agents",
         "/v1/career-profile/agents/{agent_id}",
+        "/v1/career-profile/agents/{agent_id}/context",
+        "/v1/career-profile/agents/{agent_id}/context/preview",
         "/v1/career-profile/agent-edits",
         "/v1/career-profile/proposals",
         "/v1/career-profile/proposals/{proposal_id}/decision",
@@ -200,6 +202,8 @@ def test_version_and_openapi_describe_the_shared_workspace_contract(tmp_path):
         "/v1/career-profile/evidence/{evidence_id}/content",
         "/v1/career-profile/evidence/{evidence_id}/erase",
         "/v1/career-profile/reset",
+        "/v1/career-profile/export",
+        "/v1/career-profile/restore",
         "/v1/career-profile/work-arrangement",
         "/v1/career-profile/work-arrangement/history",
         "/v1/career-profile/work-arrangement/restore",
@@ -296,6 +300,7 @@ def test_version_and_openapi_describe_the_shared_workspace_contract(tmp_path):
     assert set(paths["/v1/device-session"]["get"]["responses"]) == {
         "200",
         "401",
+        "422",
         "500",
     }
     assert set(paths["/v1/artifacts/{artifact_id}/content"]["get"]["responses"]) == {
@@ -320,7 +325,7 @@ def test_version_and_openapi_describe_the_shared_workspace_contract(tmp_path):
                 assert response["content"]["application/json"]["schema"] == {
                     "$ref": "#/components/schemas/ApiErrorResponse"
                 }
-    assert documented_errors < 375
+    assert documented_errors < 400
     assert set(schemas["JobListItem"]["required"]) == {
         "job_id",
         "company",

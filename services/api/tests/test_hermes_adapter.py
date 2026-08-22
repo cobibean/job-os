@@ -268,8 +268,15 @@ def test_prompt_context_is_bounded_parseable_untrusted_reference_data():
         "\n</jobos_untrusted_context>", 1
     )[0]
     context = json.loads(serialized)
-    assert set(context) == {"selected_job_id", "selected_job", "workspace", "career_profile"}
+    assert set(context) == {
+        "selected_job_id",
+        "selected_job",
+        "workspace",
+        "career_profile",
+        "career_profile_context",
+    }
     assert context["career_profile"] is None
+    assert context["career_profile_context"] is None
     assert set(context["selected_job"]) == {"job_id", "company", "title"}
     assert set(context["workspace"]) == {
         "selected_preset",
@@ -345,6 +352,49 @@ def test_prompt_context_exposes_only_bounded_career_profile_projection():
     assert "record-private" not in prompt
     assert "/private/sensitive" not in prompt
     assert "device:private" not in prompt
+
+
+def test_prompt_context_accepts_only_exact_typed_complete_profile_snapshot():
+    snapshot = {
+        "snapshot_id": "cpcs_abcdefghijklmnop",
+        "agent_id": "job-hunter",
+        "profile_revision": 3,
+        "authority_epoch": 0,
+        "scope": {
+            "agent_id": "job-hunter",
+            "mode": "none",
+            "selected_item_ids": [],
+            "selected_areas": [],
+            "updated_at": "2026-08-22T00:00:00+00:00",
+        },
+        "content_hash": "b" * 64,
+        "projection": {
+            "profile_revision": 3,
+            "authority_epoch": 0,
+            "items": [],
+            "source_evidence": [],
+        },
+        "created_at": "2026-08-22T00:00:01+00:00",
+    }
+    prompt = _prompt_with_context(
+        "Use only the granted context",
+        {"career_profile_context": snapshot},
+        "conv_complete_profile_prompt",
+    )
+    serialized = prompt.split("<jobos_untrusted_context>\n", 1)[1].split(
+        "\n</jobos_untrusted_context>", 1
+    )[0]
+    assert json.loads(serialized)["career_profile_context"] == snapshot
+
+    prompt_with_extra = _prompt_with_context(
+        "Reject an expanded context shape",
+        {"career_profile_context": {**snapshot, "unexpected": "omit me"}},
+        "conv_complete_profile_prompt_extra",
+    )
+    serialized_with_extra = prompt_with_extra.split(
+        "<jobos_untrusted_context>\n", 1
+    )[1].split("\n</jobos_untrusted_context>", 1)[0]
+    assert json.loads(serialized_with_extra)["career_profile_context"] is None
 
 
 def test_prompt_rejects_unbounded_conversation_correlation():
