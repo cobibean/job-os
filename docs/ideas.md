@@ -12,6 +12,10 @@ Current-system reconnaissance and a future architecture proposal live in [`archi
 
 Make JobOS agent-agnostic so a user can connect an existing Hermes agent, connect an account from another supported provider such as Codex, or subscribe to have JobOS create and manage a new Hermes agent for them. The managed path should include an onboarding flow for shaping the agent and could serve as the primary paid layer around an otherwise open-source application.
 
+## Connect Other Agents: Codex via ChatGPT OAuth
+
+Build one narrow, real “Connect agent” path: let a JobOS user connect Codex through the supported ChatGPT OAuth flow and use that agent in JobOS. Defer generic provider support, a managed-agent subscription, and the full onboarding flow; the first proof is a fresh Codex agent using only the user-authorized Career Profile context to write a resume, so JobOS can compare portable profile context with a history-rich Hermes agent.
+
 ## Career Profile and User-Approved Review
 
 Turn accepted user-authored or user-approved Career Profile information into a visible, user-owned foundation for evaluating opportunities and producing truthful job-search work. User-stated information is valid matching context with provenance `user stated`; supporting Evidence is optional provenance, not permission to use the information. Deliver the direction in three parts:
