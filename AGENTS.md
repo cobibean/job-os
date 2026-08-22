@@ -10,6 +10,14 @@ JobOS is a source-first, local-first desktop workbench. Public defaults must run
 - Use only synthetic fixtures that are listed in `tests/public-release/synthetic-fixtures.json`.
 - Preserve stable, capability-based errors when optional integrations are unavailable.
 
+## Local checkout and worktrees
+
+- Treat `/Users/jacobilangemm/DEV/dependencies/job-os` as the canonical local checkout. Keep it on a clean `main` branch that tracks `origin/main`.
+- Before starting repository work, fetch `origin` and fast-forward local `main` with `git merge --ff-only origin/main`. Do not treat a stale local `main` as the starting point.
+- Small solo changes may be made directly in the canonical checkout when no concurrent work or review isolation requires a separate branch directory.
+- Create a worktree only for genuinely concurrent or isolated work. Start it from the synchronized local `main`, not as a workaround for a stale canonical checkout.
+- After a worktree branch is merged, verify the remote result, preserve any unrelated changes, and remove the clean worktree. Do not leave `main` checked out in a task-named worktree.
+
 ## Code quality
 
 - Prefer small components, focused interfaces, direct data flow, and readable names.
