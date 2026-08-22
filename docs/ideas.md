@@ -33,3 +33,9 @@ The intended relationship is: the Career Profile provides accepted user-authored
 ## Multi-Agent Job Search
 
 Add an in-app job-search flow where users enter preferences such as role, salary, location, and industry, launch a multi-agent search, review the combined results, and choose which opportunities to add to their JobOS job database.
+
+## Media Uploads for Agent Context
+
+Let users attach images, PDFs, and DOCX files in JobOS chat. Reuse the app's existing document parsing and rendering capabilities to bridge that media into the active agent session in a form each supported provider can receive, including Hermes, Codex, Claude, and other compatible agents. Each agent turn should make clear which uploaded media and JobOS tools are available for that work.
+
+Use the same foundation to build first-run context: an “Upload your resume” onboarding step and later upload screens for cover letters, supporting documents, and other labeled files. Users can add a short description; the agent infers what it can and uses that guidance to propose where the file belongs in the user-owned Career Profile or JobOS knowledge base.
