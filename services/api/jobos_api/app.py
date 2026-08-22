@@ -2213,6 +2213,32 @@ def create_app(
             },
         }
 
+    def workspace_owner_device_id(
+        conversation_id: str,
+        identity: DeviceIdentity,
+        *,
+        origin: str | None,
+        mcp_token: str | None,
+    ) -> str:
+        """Resolve a scoped MCP request back to the conversation owner."""
+        require_trusted_mcp(identity, origin, mcp_token)
+        if origin != "mcp":
+            conversation_service(conversation_id, identity)
+            return identity.device_id
+
+        conversation_manager.get(conversation_id)
+        owner = next(
+            (
+                value
+                for value in state_store.list_active_conversations()
+                if value["conversation_id"] == conversation_id
+            ),
+            None,
+        )
+        if owner is None:
+            raise ConversationNotFound("Conversation not found")
+        return str(owner["owner_device_id"])
+
     @app.put("/v1/conversations/{conversation_id}/workspace/job", tags=["workspace"])
     def conversation_select_job(
         conversation_id: ConversationId,
@@ -2220,23 +2246,12 @@ def create_app(
         identity: Annotated[DeviceIdentity, Depends(authenticated_device)],
         mcp_token: Annotated[str | None, Header(alias="X-JobOS-MCP-Token")] = None,
     ) -> ConversationJobContextMutation:
-        require_trusted_mcp(identity, command.origin, mcp_token)
-        owner_device_id = identity.device_id
-        if command.origin == "mcp":
-            conversation_manager.get(conversation_id)
-            owner = next(
-                (
-                    value
-                    for value in state_store.list_active_conversations()
-                    if value["conversation_id"] == conversation_id
-                ),
-                None,
-            )
-            if owner is None:
-                raise ConversationNotFound("Conversation not found")
-            owner_device_id = str(owner["owner_device_id"])
-        else:
-            conversation_service(conversation_id, identity)
+        owner_device_id = workspace_owner_device_id(
+            conversation_id,
+            identity,
+            origin=command.origin,
+            mcp_token=mcp_token,
+        )
         ensure_job(command.job_id)
         context = state_store.select_conversation_job(
             conversation_id, owner_device_id, command.job_id
@@ -2554,15 +2569,23 @@ def create_app(
     @app.get("/v1/workspace", tags=["workspace"])
     def workspace_get(
         identity: Annotated[DeviceIdentity, Depends(authenticated_device)],
+        mcp_token: Annotated[str | None, Header(alias="X-JobOS-MCP-Token")] = None,
         origin: Literal["mcp"] | None = None,
         idempotency_key: str | None = None,
         conversation_id: str | None = None,
     ) -> WorkspaceSnapshotResponse:
-        record = state_store.workspace_snapshot(identity.device_id)
+        owner_device_id = identity.device_id
+        if conversation_id is not None:
+            owner_device_id = workspace_owner_device_id(
+                conversation_id,
+                identity,
+                origin=origin,
+                mcp_token=mcp_token,
+            )
+        record = state_store.workspace_snapshot(owner_device_id)
         snapshot = dict(record.snapshot)
         if conversation_id is not None:
-            conversation_service(conversation_id, identity)
-            context = state_store.conversation_job_context(conversation_id, identity.device_id)
+            context = state_store.conversation_job_context(conversation_id, owner_device_id)
             snapshot.update(
                 selected_job_id=context["selected_job_id"],
                 active_artifact_id=context["active_artifact_id"],
@@ -2598,13 +2621,22 @@ def create_app(
         command: WorkspaceSnapshotCommand,
         identity: Annotated[DeviceIdentity, Depends(authenticated_device)],
         mcp_token: Annotated[str | None, Header(alias="X-JobOS-MCP-Token")] = None,
+        conversation_id: str | None = None,
     ) -> WorkspaceSnapshotResponse:
         require_trusted_mcp(identity, command.origin, mcp_token)
+        owner_device_id = identity.device_id
+        if conversation_id is not None:
+            owner_device_id = workspace_owner_device_id(
+                conversation_id,
+                identity,
+                origin=command.origin,
+                mcp_token=mcp_token,
+            )
         # Selected job and document view are conversation-owned. Compatibility
         # fields in this global snapshot are stripped by the state store.
         try:
             record = state_store.save_workspace_snapshot(
-                identity.device_id,
+                owner_device_id,
                 expected_revision=command.revision,
                 snapshot=command.model_dump(exclude={"revision", "origin", "idempotency_key"}),
                 idempotency_key=command.idempotency_key,
@@ -3781,8 +3813,7 @@ def create_app(
             raise HTTPException(
                 status_code=403,
                 detail=(
-                    "Agents may endorse a document, but only the authenticated user "
-                    "can approve it"
+                    "Agents may endorse a document, but only the authenticated user can approve it"
                 ),
             )
         ensure_job(job_id)

@@ -1040,6 +1040,50 @@ def test_workspace_snapshot_round_trip_and_revision_conflict(tmp_path):
     assert restored.json()["browse_rail_width"] == 300
 
 
+def test_scoped_mcp_workspace_uses_conversation_owner_state(tmp_path):
+    with make_client(tmp_path) as client:
+        conversation = client.post("/v1/conversations", headers=auth_headers()).json()
+        conversation_id = conversation["conversation_id"]
+        selected = client.put(
+            f"/v1/conversations/{conversation_id}/workspace/job",
+            headers=mcp_auth_headers(),
+            json={
+                "job_id": "job-0",
+                "origin": "mcp",
+                "idempotency_key": "scoped-workspace-select",
+            },
+        )
+        assert selected.status_code == 200
+
+        params = {
+            "origin": "mcp",
+            "conversation_id": conversation_id,
+            "idempotency_key": "scoped-workspace-read",
+        }
+        inspected = client.get("/v1/workspace", headers=mcp_auth_headers(), params=params)
+        assert inspected.status_code == 200
+        assert inspected.json()["selected_job_id"] == "job-0"
+
+        snapshot = inspected.json()
+        for response_only in ("repaired_presets", "repaired_browser", "browser_repair_reasons"):
+            snapshot.pop(response_only, None)
+        snapshot.update(
+            browse_query="scoped owner workspace",
+            origin="mcp",
+            idempotency_key="scoped-workspace-write",
+        )
+        updated = client.put(
+            "/v1/workspace",
+            headers=mcp_auth_headers(),
+            params={"conversation_id": conversation_id},
+            json=snapshot,
+        )
+        assert updated.status_code == 200
+
+        owner_workspace = client.get("/v1/workspace", headers=auth_headers())
+        assert owner_workspace.json()["browse_query"] == "scoped owner workspace"
+
+
 def test_workspace_snapshot_idempotent_retry_returns_original_revision(tmp_path):
     facade = FakeJobHunterFacade()
 
