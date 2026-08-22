@@ -1430,6 +1430,7 @@ def create_app(
         except (
             CareerProfileRevisionConflict,
             CareerProfileIdempotencyConflict,
+            CareerProfileErasureInProgress,
             CareerProfileItemNotFound,
             CareerProfileValueError,
         ) as error:
