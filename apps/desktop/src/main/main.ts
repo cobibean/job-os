@@ -265,6 +265,21 @@ function registerCareerProfileInterface(): void {
   ipcMain.handle('jobos:career-profile:work-arrangement:restore', (event, request) => (
     trusted(event).restoreWorkArrangement(request)
   ))
+  ipcMain.handle('jobos:career-profile:agents:list', event => trusted(event).listConnectedAgents())
+  ipcMain.handle('jobos:career-profile:agents:trust-mode', (event, agentId, trustMode) => (
+    trusted(event).updateConnectedAgentTrustMode(agentId, trustMode)
+  ))
+  ipcMain.handle('jobos:career-profile:agents:disconnect', (event, agentId) => (
+    trusted(event).disconnectConnectedAgent(agentId)
+  ))
+  ipcMain.handle('jobos:career-profile:proposals:list', event => trusted(event).listCareerProfileProposals())
+  ipcMain.handle('jobos:career-profile:proposals:decide', (event, proposalId, request) => (
+    trusted(event).decideCareerProfileProposal(proposalId, request)
+  ))
+  ipcMain.handle('jobos:career-profile:history:get', event => trusted(event).getCareerProfileChangeHistory())
+  ipcMain.handle('jobos:career-profile:history:undo', (event, revisionId, request) => (
+    trusted(event).undoCareerProfileChange(revisionId, request)
+  ))
 }
 
 function registerAgentInterface(): void {

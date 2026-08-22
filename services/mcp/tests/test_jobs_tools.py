@@ -642,6 +642,8 @@ async def test_mcp_server_exposes_public_v1_parity_tools_while_retaining_job_too
         "job_reorder",
         "job_update_status",
         "job_update_description",
+        "career_profile_get",
+        "career_profile_edit",
         "workspace_inspect",
         "workspace_update",
         "document_list",

@@ -55,6 +55,193 @@
         "title": "ActivityReportResponse",
         "type": "object"
       },
+      "AgentEditResult": {
+        "additionalProperties": false,
+        "properties": {
+          "outcome": {
+            "enum": [
+              "applied",
+              "proposal"
+            ],
+            "title": "Outcome",
+            "type": "string"
+          },
+          "profile": {
+            "$ref": "#/components/schemas/CareerProfileCompleteCurrent"
+          },
+          "proposal": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CareerProfileChangeProposal"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "outcome",
+          "profile"
+        ],
+        "title": "AgentEditResult",
+        "type": "object"
+      },
+      "AgentProfileEditRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "evidence_ids": {
+            "items": {
+              "pattern": "^cpe_[A-Za-z0-9_-]{16,64}$",
+              "type": "string"
+            },
+            "maxItems": 100,
+            "title": "Evidence Ids",
+            "type": "array"
+          },
+          "expected_profile_revision": {
+            "minimum": 0.0,
+            "title": "Expected Profile Revision",
+            "type": "integer"
+          },
+          "idempotency_key": {
+            "maxLength": 200,
+            "minLength": 8,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+            "title": "Idempotency Key",
+            "type": "string"
+          },
+          "operation": {
+            "enum": [
+              "item.create",
+              "item.update",
+              "item.remove"
+            ],
+            "title": "Operation",
+            "type": "string"
+          },
+          "reason": {
+            "maxLength": 1000,
+            "minLength": 1,
+            "title": "Reason",
+            "type": "string"
+          },
+          "target_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Id"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "discriminator": {
+                  "mapping": {
+                    "claim": "#/components/schemas/ClaimValue",
+                    "compensation": "#/components/schemas/CompensationValue",
+                    "custom": "#/components/schemas/CustomValue",
+                    "dealbreaker": "#/components/schemas/DealbreakerValue",
+                    "education": "#/components/schemas/EducationValue",
+                    "experience": "#/components/schemas/ExperienceValue",
+                    "identity": "#/components/schemas/IdentityValue",
+                    "industries": "#/components/schemas/IndustryPreferencesValue",
+                    "location": "#/components/schemas/LocationPreferenceValue",
+                    "positioning": "#/components/schemas/PositioningValue",
+                    "priority": "#/components/schemas/PriorityValue",
+                    "project": "#/components/schemas/ProjectValue",
+                    "skill": "#/components/schemas/SkillValue",
+                    "target_roles": "#/components/schemas/TargetRolesValue",
+                    "work_arrangement": "#/components/schemas/WorkArrangementProfileValue"
+                  },
+                  "propertyName": "kind"
+                },
+                "oneOf": [
+                  {
+                    "$ref": "#/components/schemas/IdentityValue"
+                  },
+                  {
+                    "$ref": "#/components/schemas/EducationValue"
+                  },
+                  {
+                    "$ref": "#/components/schemas/SkillValue"
+                  },
+                  {
+                    "$ref": "#/components/schemas/PositioningValue"
+                  },
+                  {
+                    "$ref": "#/components/schemas/ExperienceValue"
+                  },
+                  {
+                    "$ref": "#/components/schemas/ProjectValue"
+                  },
+                  {
+                    "$ref": "#/components/schemas/ClaimValue"
+                  },
+                  {
+                    "$ref": "#/components/schemas/TargetRolesValue"
+                  },
+                  {
+                    "$ref": "#/components/schemas/CompensationValue"
+                  },
+                  {
+                    "$ref": "#/components/schemas/LocationPreferenceValue"
+                  },
+                  {
+                    "$ref": "#/components/schemas/WorkArrangementProfileValue"
+                  },
+                  {
+                    "$ref": "#/components/schemas/IndustryPreferencesValue"
+                  },
+                  {
+                    "$ref": "#/components/schemas/PriorityValue"
+                  },
+                  {
+                    "$ref": "#/components/schemas/DealbreakerValue"
+                  },
+                  {
+                    "$ref": "#/components/schemas/CustomValue"
+                  }
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value"
+          }
+        },
+        "required": [
+          "expected_profile_revision",
+          "idempotency_key",
+          "operation",
+          "reason"
+        ],
+        "title": "AgentProfileEditRequest",
+        "type": "object"
+      },
+      "AgentTrustModeUpdate": {
+        "additionalProperties": false,
+        "properties": {
+          "trust_mode": {
+            "enum": [
+              "review",
+              "direct"
+            ],
+            "title": "Trust Mode",
+            "type": "string"
+          }
+        },
+        "required": [
+          "trust_mode"
+        ],
+        "title": "AgentTrustModeUpdate",
+        "type": "object"
+      },
       "ApiErrorResponse": {
         "additionalProperties": false,
         "properties": {
@@ -844,6 +1031,141 @@
         "title": "BrowserTabMetadata",
         "type": "object"
       },
+      "CareerProfileChangeProposal": {
+        "additionalProperties": false,
+        "properties": {
+          "after": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ProfileItemRecord"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "agent_display_name": {
+            "title": "Agent Display Name",
+            "type": "string"
+          },
+          "agent_id": {
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$",
+            "title": "Agent Id",
+            "type": "string"
+          },
+          "base_profile_revision": {
+            "minimum": 0.0,
+            "title": "Base Profile Revision",
+            "type": "integer"
+          },
+          "before": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ProfileItemRecord"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "created_at": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Created At",
+            "type": "string"
+          },
+          "decided_at": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Decided At"
+          },
+          "decided_by_principal": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Decided By Principal"
+          },
+          "evidence_ids": {
+            "items": {
+              "pattern": "^cpe_[A-Za-z0-9_-]{16,64}$",
+              "type": "string"
+            },
+            "title": "Evidence Ids",
+            "type": "array"
+          },
+          "operation": {
+            "enum": [
+              "item.create",
+              "item.update",
+              "item.remove"
+            ],
+            "title": "Operation",
+            "type": "string"
+          },
+          "proposal_id": {
+            "pattern": "^cpp_[A-Za-z0-9_-]{16,64}$",
+            "title": "Proposal Id",
+            "type": "string"
+          },
+          "proposal_sha256": {
+            "pattern": "^[a-f0-9]{64}$",
+            "title": "Proposal Sha256",
+            "type": "string"
+          },
+          "reason": {
+            "title": "Reason",
+            "type": "string"
+          },
+          "review_reason": {
+            "title": "Review Reason",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "pending",
+              "accepted",
+              "rejected"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "target_id": {
+            "title": "Target Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "proposal_id",
+          "agent_id",
+          "agent_display_name",
+          "reason",
+          "review_reason",
+          "base_profile_revision",
+          "operation",
+          "target_id",
+          "before",
+          "after",
+          "evidence_ids",
+          "proposal_sha256",
+          "status",
+          "created_at"
+        ],
+        "title": "CareerProfileChangeProposal",
+        "type": "object"
+      },
       "CareerProfileCompleteCurrent": {
         "additionalProperties": false,
         "properties": {
@@ -923,6 +1245,23 @@
           "work_arrangement"
         ],
         "title": "CareerProfileProjection",
+        "type": "object"
+      },
+      "CareerProfileProposalList": {
+        "additionalProperties": false,
+        "properties": {
+          "proposals": {
+            "items": {
+              "$ref": "#/components/schemas/CareerProfileChangeProposal"
+            },
+            "title": "Proposals",
+            "type": "array"
+          }
+        },
+        "required": [
+          "proposals"
+        ],
+        "title": "CareerProfileProposalList",
         "type": "object"
       },
       "CareerProfileResetRequest": {
@@ -1152,6 +1491,91 @@
           "kind"
         ],
         "title": "CompensationValue",
+        "type": "object"
+      },
+      "ConnectedAgent": {
+        "additionalProperties": false,
+        "properties": {
+          "active": {
+            "title": "Active",
+            "type": "boolean"
+          },
+          "agent_id": {
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$",
+            "title": "Agent Id",
+            "type": "string"
+          },
+          "connected_at": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Connected At",
+            "type": "string"
+          },
+          "disconnected_at": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Disconnected At"
+          },
+          "display_name": {
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Display Name",
+            "type": "string"
+          },
+          "principal": {
+            "title": "Principal",
+            "type": "string"
+          },
+          "trust_mode": {
+            "enum": [
+              "review",
+              "direct"
+            ],
+            "title": "Trust Mode",
+            "type": "string"
+          },
+          "updated_at": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "agent_id",
+          "display_name",
+          "principal",
+          "trust_mode",
+          "active",
+          "connected_at",
+          "updated_at"
+        ],
+        "title": "ConnectedAgent",
+        "type": "object"
+      },
+      "ConnectedAgentList": {
+        "additionalProperties": false,
+        "properties": {
+          "agents": {
+            "items": {
+              "$ref": "#/components/schemas/ConnectedAgent"
+            },
+            "title": "Agents",
+            "type": "array"
+          }
+        },
+        "required": [
+          "agents"
+        ],
+        "title": "ConnectedAgentList",
         "type": "object"
       },
       "ConnectionResponse": {
@@ -4391,6 +4815,184 @@
         "title": "PriorityValue",
         "type": "object"
       },
+      "ProfileHistory": {
+        "additionalProperties": false,
+        "properties": {
+          "profile_revision": {
+            "minimum": 0.0,
+            "title": "Profile Revision",
+            "type": "integer"
+          },
+          "revisions": {
+            "items": {
+              "$ref": "#/components/schemas/ProfileHistoryRevision"
+            },
+            "title": "Revisions",
+            "type": "array"
+          }
+        },
+        "required": [
+          "profile_revision",
+          "revisions"
+        ],
+        "title": "ProfileHistory",
+        "type": "object"
+      },
+      "ProfileHistoryRevision": {
+        "additionalProperties": false,
+        "properties": {
+          "actor_kind": {
+            "enum": [
+              "direct_user",
+              "authenticated_user_instruction",
+              "deterministic_source_mapping",
+              "autonomous_agent",
+              "user_proposal_decision"
+            ],
+            "title": "Actor Kind",
+            "type": "string"
+          },
+          "actor_principal": {
+            "title": "Actor Principal",
+            "type": "string"
+          },
+          "affected_fields": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Affected Fields",
+            "type": "array"
+          },
+          "after": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "After"
+          },
+          "base_profile_revision": {
+            "minimum": 0.0,
+            "title": "Base Profile Revision",
+            "type": "integer"
+          },
+          "before": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Before"
+          },
+          "created_at": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Created At",
+            "type": "string"
+          },
+          "evidence_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Evidence Id"
+          },
+          "item_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Item Id"
+          },
+          "operation": {
+            "title": "Operation",
+            "type": "string"
+          },
+          "profile_revision": {
+            "minimum": 1.0,
+            "title": "Profile Revision",
+            "type": "integer"
+          },
+          "proposal_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Proposal Id"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "revision_id": {
+            "pattern": "^cpv_[A-Za-z0-9_-]{16,64}$",
+            "title": "Revision Id",
+            "type": "string"
+          },
+          "undo_of_revision_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Undo Of Revision Id"
+          },
+          "undoable": {
+            "title": "Undoable",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "revision_id",
+          "profile_revision",
+          "base_profile_revision",
+          "actor_principal",
+          "actor_kind",
+          "operation",
+          "item_id",
+          "evidence_id",
+          "before",
+          "after",
+          "affected_fields",
+          "reason",
+          "proposal_id",
+          "undo_of_revision_id",
+          "undoable",
+          "created_at"
+        ],
+        "title": "ProfileHistoryRevision",
+        "type": "object"
+      },
       "ProfileIntentGrant": {
         "additionalProperties": false,
         "properties": {
@@ -4804,6 +5406,29 @@
         "title": "ProfileProposalDecision",
         "type": "object"
       },
+      "ProfileUndoRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "expected_profile_revision": {
+            "minimum": 1.0,
+            "title": "Expected Profile Revision",
+            "type": "integer"
+          },
+          "idempotency_key": {
+            "maxLength": 200,
+            "minLength": 8,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+            "title": "Idempotency Key",
+            "type": "string"
+          }
+        },
+        "required": [
+          "expected_profile_revision",
+          "idempotency_key"
+        ],
+        "title": "ProfileUndoRequest",
+        "type": "object"
+      },
       "ProjectValue": {
         "additionalProperties": false,
         "properties": {
@@ -4869,6 +5494,61 @@
           "kind"
         ],
         "title": "ProjectValue",
+        "type": "object"
+      },
+      "ProposalDecisionRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "decision": {
+            "enum": [
+              "accept",
+              "reject"
+            ],
+            "title": "Decision",
+            "type": "string"
+          },
+          "expected_profile_revision": {
+            "minimum": 0.0,
+            "title": "Expected Profile Revision",
+            "type": "integer"
+          },
+          "idempotency_key": {
+            "maxLength": 200,
+            "minLength": 8,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+            "title": "Idempotency Key",
+            "type": "string"
+          },
+          "proposal_sha256": {
+            "pattern": "^[a-f0-9]{64}$",
+            "title": "Proposal Sha256",
+            "type": "string"
+          }
+        },
+        "required": [
+          "expected_profile_revision",
+          "idempotency_key",
+          "proposal_sha256",
+          "decision"
+        ],
+        "title": "ProposalDecisionRequest",
+        "type": "object"
+      },
+      "ProposalDecisionResult": {
+        "additionalProperties": false,
+        "properties": {
+          "profile": {
+            "$ref": "#/components/schemas/CareerProfileCompleteCurrent"
+          },
+          "proposal": {
+            "$ref": "#/components/schemas/CareerProfileChangeProposal"
+          }
+        },
+        "required": [
+          "proposal",
+          "profile"
+        ],
+        "title": "ProposalDecisionResult",
         "type": "object"
       },
       "PublishEditableDocumentRequest": {
@@ -6785,6 +7465,56 @@
     "/v1/career-profile": {
       "get": {
         "operationId": "career_profile_complete_get_v1_career_profile_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-JobOS-MCP-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Jobos-Mcp-Token"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-JobOS-Agent-Id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Jobos-Agent-Id"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-JobOS-Agent-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Jobos-Agent-Token"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -6826,6 +7556,16 @@
             },
             "description": "Resource not found"
           },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Request validation failed"
+          },
           "500": {
             "content": {
               "application/json": {
@@ -6843,6 +7583,342 @@
           }
         ],
         "summary": "Career Profile Complete Get",
+        "tags": [
+          "career-profile"
+        ]
+      }
+    },
+    "/v1/career-profile/agent-edits": {
+      "post": {
+        "operationId": "career_profile_agent_edit_v1_career_profile_agent_edits_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-JobOS-MCP-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Jobos-Mcp-Token"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-JobOS-Agent-Id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Jobos-Agent-Id"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-JobOS-Agent-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Jobos-Agent-Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AgentProfileEditRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentEditResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Device authentication required"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Request validation failed"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Internal server error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Career Profile Agent Edit",
+        "tags": [
+          "career-profile"
+        ]
+      }
+    },
+    "/v1/career-profile/agents": {
+      "get": {
+        "operationId": "career_profile_agents_list_v1_career_profile_agents_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConnectedAgentList"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Device authentication required"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Internal server error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Career Profile Agents List",
+        "tags": [
+          "career-profile"
+        ]
+      }
+    },
+    "/v1/career-profile/agents/{agent_id}": {
+      "delete": {
+        "operationId": "career_profile_agent_disconnect_v1_career_profile_agents__agent_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "agent_id",
+            "required": true,
+            "schema": {
+              "title": "Agent Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-JobOS-MCP-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Jobos-Mcp-Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConnectedAgent"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Device authentication required"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Request validation failed"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Internal server error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Career Profile Agent Disconnect",
+        "tags": [
+          "career-profile"
+        ]
+      },
+      "patch": {
+        "operationId": "career_profile_agent_update_v1_career_profile_agents__agent_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "agent_id",
+            "required": true,
+            "schema": {
+              "title": "Agent Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-JobOS-MCP-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Jobos-Mcp-Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AgentTrustModeUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConnectedAgent"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Device authentication required"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Request validation failed"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Internal server error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Career Profile Agent Update",
         "tags": [
           "career-profile"
         ]
@@ -7301,6 +8377,145 @@
           }
         ],
         "summary": "Career Profile Evidence Erase",
+        "tags": [
+          "career-profile"
+        ]
+      }
+    },
+    "/v1/career-profile/history": {
+      "get": {
+        "operationId": "career_profile_history_v1_career_profile_history_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProfileHistory"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Device authentication required"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Internal server error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Career Profile History",
+        "tags": [
+          "career-profile"
+        ]
+      }
+    },
+    "/v1/career-profile/history/{revision_id}/undo": {
+      "post": {
+        "operationId": "career_profile_history_undo_v1_career_profile_history__revision_id__undo_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "revision_id",
+            "required": true,
+            "schema": {
+              "title": "Revision Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-JobOS-MCP-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Jobos-Mcp-Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProfileUndoRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CareerProfileCompleteCurrent"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Device authentication required"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Request validation failed"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Internal server error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Career Profile History Undo",
         "tags": [
           "career-profile"
         ]
@@ -7945,6 +9160,179 @@
           }
         ],
         "summary": "Career Profile Proposal Decide",
+        "tags": [
+          "career-profile"
+        ]
+      }
+    },
+    "/v1/career-profile/proposals": {
+      "get": {
+        "operationId": "career_profile_proposals_list_v1_career_profile_proposals_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "pending",
+                    "accepted",
+                    "rejected"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": "pending",
+              "title": "Status"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CareerProfileProposalList"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Device authentication required"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Request validation failed"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Internal server error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Career Profile Proposals List",
+        "tags": [
+          "career-profile"
+        ]
+      }
+    },
+    "/v1/career-profile/proposals/{proposal_id}/decision": {
+      "post": {
+        "operationId": "career_profile_change_proposal_decide_v1_career_profile_proposals__proposal_id__decision_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "proposal_id",
+            "required": true,
+            "schema": {
+              "title": "Proposal Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-JobOS-MCP-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Jobos-Mcp-Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProposalDecisionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProposalDecisionResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Device authentication required"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Request validation failed"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Internal server error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Career Profile Change Proposal Decide",
         "tags": [
           "career-profile"
         ]

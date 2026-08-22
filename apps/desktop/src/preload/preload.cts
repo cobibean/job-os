@@ -9,6 +9,9 @@ import type {
   BrowserJobExtraction,
   BrowserRestoreState,
   BrowserState,
+  CareerProfileProposalDecisionRequest,
+  CareerProfileTrustMode,
+  CareerProfileUndoRequest,
   JobEvent,
   JobOsRendererBridge,
   JobSortMode,
@@ -67,6 +70,21 @@ const bridge: JobOsRendererBridge = Object.freeze({
     getWorkArrangementHistory: () => ipcRenderer.invoke('jobos:career-profile:work-arrangement:history'),
     restoreWorkArrangement: (request: WorkArrangementRestoreRequest) => (
       ipcRenderer.invoke('jobos:career-profile:work-arrangement:restore', request)
+    ),
+    listConnectedAgents: () => ipcRenderer.invoke('jobos:career-profile:agents:list'),
+    updateConnectedAgentTrustMode: (agentId: string, trustMode: CareerProfileTrustMode) => (
+      ipcRenderer.invoke('jobos:career-profile:agents:trust-mode', agentId, trustMode)
+    ),
+    disconnectConnectedAgent: (agentId: string) => (
+      ipcRenderer.invoke('jobos:career-profile:agents:disconnect', agentId)
+    ),
+    listCareerProfileProposals: () => ipcRenderer.invoke('jobos:career-profile:proposals:list'),
+    decideCareerProfileProposal: (proposalId: string, request: CareerProfileProposalDecisionRequest) => (
+      ipcRenderer.invoke('jobos:career-profile:proposals:decide', proposalId, request)
+    ),
+    getCareerProfileChangeHistory: () => ipcRenderer.invoke('jobos:career-profile:history:get'),
+    undoCareerProfileChange: (revisionId: string, request: CareerProfileUndoRequest) => (
+      ipcRenderer.invoke('jobos:career-profile:history:undo', revisionId, request)
     )
   }),
   agent: Object.freeze({

@@ -73,6 +73,22 @@ from jobos_api.career_profile import (
     WorkArrangementRestore,
     principal_for_device,
 )
+from jobos_api.career_profile_collaboration import (
+    AgentEditResult,
+    AgentProfileEditRequest,
+    AgentTrustModeUpdate,
+    CareerProfileCollaborationConflict,
+    CareerProfileCollaborationStore,
+    CareerProfileProposalList,
+    ConnectedAgent,
+    ConnectedAgentAuthorizationError,
+    ConnectedAgentList,
+    ProfileHistory,
+    ProfileUndoRequest,
+    ProposalDecisionRequest,
+    ProposalDecisionResult,
+    ProposalStatus,
+)
 from jobos_api.career_profile_complete import (
     CareerProfileCompleteCurrent,
     CareerProfileCompleteStore,
@@ -463,6 +479,10 @@ def create_app(
         settings.state_db_path,
         settings.resolved_evidence_vault_root(),
     )
+    career_profile_collaboration = CareerProfileCollaborationStore(
+        settings.state_db_path,
+        complete_career_profile,
+    )
     artifact_gateway_configured = (
         artifact_gateway is not None or settings.artifact_provider == "gateway"
     )
@@ -595,6 +615,11 @@ def create_app(
         if settings.career_profile_enabled:
             career_profiles.initialize()
             complete_career_profile.initialize()
+            career_profile_collaboration.initialize(
+                agent_id=settings.career_profile_agent_id,
+                display_name=settings.career_profile_agent_display_name,
+                token=settings.resolved_career_profile_agent_token(),
+            )
         jobs.initialize()
         await conversation_manager.start()
         try:
@@ -838,6 +863,39 @@ def create_app(
                 status_code=403,
                 detail="MCP operations require the trusted local MCP credential",
             )
+
+    def require_direct_career_profile_user(
+        identity: DeviceIdentity,
+        mcp_token: str | None,
+    ) -> str:
+        require_career_profile_owner(identity)
+        if mcp_token is not None:
+            raise HTTPException(
+                status_code=403,
+                detail="This Career Profile decision belongs to the user",
+            )
+        return principal_for_device(identity.device_id)
+
+    def authenticated_career_profile_agent(
+        identity: DeviceIdentity,
+        mcp_token: str | None,
+        agent_id: str | None,
+        agent_token: str | None,
+    ) -> ConnectedAgent:
+        require_career_profile_owner(identity)
+        require_trusted_mcp(identity, "mcp", mcp_token)
+        if agent_id is None or agent_token is None:
+            raise HTTPException(
+                status_code=403,
+                detail="Connected-agent identity is required",
+            )
+        try:
+            return career_profile_collaboration.authenticate(
+                agent_id=agent_id,
+                token=agent_token,
+            )
+        except ConnectedAgentAuthorizationError as error:
+            raise HTTPException(status_code=403, detail=str(error)) from error
 
     @app.middleware("http")
     async def enforce_mcp_conversation_job_scope(
@@ -1278,9 +1336,166 @@ def create_app(
     )
     def career_profile_complete_get(
         identity: Annotated[DeviceIdentity, Depends(authenticated_device)],
+        mcp_token: Annotated[str | None, Header(alias="X-JobOS-MCP-Token")] = None,
+        agent_id: Annotated[str | None, Header(alias="X-JobOS-Agent-Id")] = None,
+        agent_token: Annotated[str | None, Header(alias="X-JobOS-Agent-Token")] = None,
     ) -> CareerProfileCompleteCurrent:
-        require_career_profile_owner(identity)
+        if mcp_token is None:
+            require_career_profile_owner(identity)
+        else:
+            authenticated_career_profile_agent(
+                identity,
+                mcp_token,
+                agent_id,
+                agent_token,
+            )
         return complete_career_profile.current()
+
+    @app.get(
+        "/v1/career-profile/agents",
+        tags=["career-profile"],
+    )
+    def career_profile_agents_list(
+        identity: Annotated[DeviceIdentity, Depends(authenticated_device)],
+    ) -> ConnectedAgentList:
+        require_career_profile_owner(identity)
+        return career_profile_collaboration.list_agents()
+
+    @app.patch(
+        "/v1/career-profile/agents/{agent_id}",
+        tags=["career-profile"],
+    )
+    def career_profile_agent_update(
+        agent_id: str,
+        command: AgentTrustModeUpdate,
+        identity: Annotated[DeviceIdentity, Depends(authenticated_device)],
+        mcp_token: Annotated[str | None, Header(alias="X-JobOS-MCP-Token")] = None,
+    ) -> ConnectedAgent:
+        require_direct_career_profile_user(identity, mcp_token)
+        try:
+            return career_profile_collaboration.update_trust_mode(
+                agent_id=agent_id,
+                trust_mode=command.trust_mode,
+            )
+        except ConnectedAgentAuthorizationError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+
+    @app.delete(
+        "/v1/career-profile/agents/{agent_id}",
+        tags=["career-profile"],
+    )
+    def career_profile_agent_disconnect(
+        agent_id: str,
+        identity: Annotated[DeviceIdentity, Depends(authenticated_device)],
+        mcp_token: Annotated[str | None, Header(alias="X-JobOS-MCP-Token")] = None,
+    ) -> ConnectedAgent:
+        require_direct_career_profile_user(identity, mcp_token)
+        try:
+            return career_profile_collaboration.disconnect(agent_id=agent_id)
+        except ConnectedAgentAuthorizationError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+
+    @app.post(
+        "/v1/career-profile/agent-edits",
+        tags=["career-profile"],
+    )
+    def career_profile_agent_edit(
+        command: AgentProfileEditRequest,
+        identity: Annotated[DeviceIdentity, Depends(authenticated_device)],
+        mcp_token: Annotated[str | None, Header(alias="X-JobOS-MCP-Token")] = None,
+        agent_id: Annotated[str | None, Header(alias="X-JobOS-Agent-Id")] = None,
+        agent_token: Annotated[str | None, Header(alias="X-JobOS-Agent-Token")] = None,
+    ) -> AgentEditResult:
+        agent = authenticated_career_profile_agent(
+            identity,
+            mcp_token,
+            agent_id,
+            agent_token,
+        )
+        try:
+            return career_profile_collaboration.submit_edit(agent=agent, command=command)
+        except (
+            CareerProfileRevisionConflict,
+            CareerProfileIdempotencyConflict,
+            CareerProfileErasureInProgress,
+            CareerProfileItemNotFound,
+            CareerProfileValueError,
+            CareerProfileCollaborationConflict,
+        ) as error:
+            raise complete_profile_conflict(error) from error
+
+    @app.get(
+        "/v1/career-profile/proposals",
+        tags=["career-profile"],
+    )
+    def career_profile_proposals_list(
+        identity: Annotated[DeviceIdentity, Depends(authenticated_device)],
+        status: ProposalStatus | None = "pending",
+    ) -> CareerProfileProposalList:
+        require_career_profile_owner(identity)
+        return career_profile_collaboration.list_proposals(status=status)
+
+    @app.post(
+        "/v1/career-profile/proposals/{proposal_id}/decision",
+        tags=["career-profile"],
+    )
+    def career_profile_change_proposal_decide(
+        proposal_id: str,
+        command: ProposalDecisionRequest,
+        identity: Annotated[DeviceIdentity, Depends(authenticated_device)],
+        mcp_token: Annotated[str | None, Header(alias="X-JobOS-MCP-Token")] = None,
+    ) -> ProposalDecisionResult:
+        principal = require_direct_career_profile_user(identity, mcp_token)
+        try:
+            return career_profile_collaboration.decide_proposal(
+                proposal_id=proposal_id,
+                principal=principal,
+                command=command,
+            )
+        except (
+            CareerProfileRevisionConflict,
+            CareerProfileIdempotencyConflict,
+            CareerProfileErasureInProgress,
+            CareerProfileValueError,
+            CareerProfileCollaborationConflict,
+        ) as error:
+            raise complete_profile_conflict(error) from error
+
+    @app.get(
+        "/v1/career-profile/history",
+        tags=["career-profile"],
+    )
+    def career_profile_history(
+        identity: Annotated[DeviceIdentity, Depends(authenticated_device)],
+    ) -> ProfileHistory:
+        require_career_profile_owner(identity)
+        return career_profile_collaboration.history()
+
+    @app.post(
+        "/v1/career-profile/history/{revision_id}/undo",
+        tags=["career-profile"],
+    )
+    def career_profile_history_undo(
+        revision_id: str,
+        command: ProfileUndoRequest,
+        identity: Annotated[DeviceIdentity, Depends(authenticated_device)],
+        mcp_token: Annotated[str | None, Header(alias="X-JobOS-MCP-Token")] = None,
+    ) -> CareerProfileCompleteCurrent:
+        principal = require_direct_career_profile_user(identity, mcp_token)
+        try:
+            return career_profile_collaboration.undo(
+                revision_id=revision_id,
+                principal=principal,
+                command=command,
+            )
+        except (
+            CareerProfileRevisionConflict,
+            CareerProfileIdempotencyConflict,
+            CareerProfileErasureInProgress,
+            CareerProfileValueError,
+            CareerProfileCollaborationConflict,
+        ) as error:
+            raise complete_profile_conflict(error) from error
 
     def complete_profile_conflict(error: Exception) -> HTTPException:
         if isinstance(error, CareerProfileEvidenceNotFound):

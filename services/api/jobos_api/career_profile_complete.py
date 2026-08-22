@@ -114,6 +114,19 @@ MutationSource = Literal[
     "deterministic_source_mapping",
     "agent_inference",
 ]
+HistoryActorKind = Literal[
+    "direct_user",
+    "authenticated_user_instruction",
+    "deterministic_source_mapping",
+    "autonomous_agent",
+    "user_proposal_decision",
+]
+
+
+def _history_actor_kind(mutation_source: MutationSource) -> HistoryActorKind:
+    if mutation_source == "agent_inference":
+        return "autonomous_agent"
+    return mutation_source
 
 PreferenceStrength = (
     Literal["requirement", "strong_preference", "preference", "dealbreaker"]
@@ -858,6 +871,8 @@ class CareerProfileCompleteStore:
             "direct_user", "agent_inference", "authenticated_user_instruction"
         ] = "direct_user",
         intent_grant_id: str | None = None,
+        allow_agent_direct: bool = False,
+        reason: str | None = None,
     ) -> CareerProfileCompleteCurrent:
         if item_id is not None and not re.fullmatch(r"cpi_[A-Za-z0-9_-]{16,64}", item_id):
             raise CareerProfileValueError(
@@ -886,6 +901,8 @@ class CareerProfileCompleteStore:
             intent_grant_id=intent_grant_id,
             operation="item.update" if item_id is not None else "item.create",
             grant_payload=command.model_dump(mode="json"),
+            allow_agent_direct=allow_agent_direct,
+            reason=reason,
         )
 
     def remove_item(
@@ -947,6 +964,7 @@ class CareerProfileCompleteStore:
                     revision=revision,
                     base_revision=head,
                     principal=principal,
+                    actor_kind=_history_actor_kind(mutation_source),
                     operation="item.remove",
                     item_id=item_id,
                     evidence_id=None,
@@ -1077,6 +1095,7 @@ class CareerProfileCompleteStore:
                     revision=revision,
                     base_revision=head,
                     principal=principal,
+                    actor_kind=_history_actor_kind(mutation_source),
                     operation="evidence.import",
                     item_id=None,
                     evidence_id=evidence_id,
@@ -1171,6 +1190,7 @@ class CareerProfileCompleteStore:
                     revision=revision,
                     base_revision=head,
                     principal=principal,
+                    actor_kind=_history_actor_kind(mutation_source),
                     operation="evidence.remove",
                     item_id=None,
                     evidence_id=evidence_id,
@@ -1294,6 +1314,7 @@ class CareerProfileCompleteStore:
                     revision=revision,
                     base_revision=head,
                     principal=principal,
+                    actor_kind="user_proposal_decision",
                     operation=revision_operation,
                     item_id=item_id,
                     evidence_id=None,
@@ -1619,6 +1640,8 @@ class CareerProfileCompleteStore:
         )
         for table in (
             "career_profile_intent_grants",
+            "career_profile_collaboration_idempotency",
+            "career_profile_change_proposals",
             "career_profile_complete_idempotency",
             "career_profile_complete_revisions",
             "career_profile_items",
@@ -1661,6 +1684,8 @@ class CareerProfileCompleteStore:
         intent_grant_id: str | None,
         operation: str,
         grant_payload: dict[str, object],
+        allow_agent_direct: bool,
+        reason: str | None,
     ) -> CareerProfileCompleteCurrent:
         with connect_sqlite(self.database) as connection:
             connection.execute("BEGIN IMMEDIATE")
@@ -1678,6 +1703,7 @@ class CareerProfileCompleteStore:
                     operation=operation,
                     target_id=item_id if require_existing else None,
                     payload=grant_payload,
+                    allow_agent_direct=allow_agent_direct,
                 )
                 previous_row = connection.execute(
                     "SELECT value_json, provenance_json, review_status, evidence_ids_json, "
@@ -1692,7 +1718,11 @@ class CareerProfileCompleteStore:
                 )
                 if require_existing and previous is None:
                     raise CareerProfileItemNotFound
-                if mutation_source == "agent_inference" and previous is not None:
+                if (
+                    mutation_source == "agent_inference"
+                    and previous is not None
+                    and not allow_agent_direct
+                ):
                     raise CareerProfileValueError(
                         "Autonomous agent updates must be submitted as a separate proposal"
                     )
@@ -1709,7 +1739,9 @@ class CareerProfileCompleteStore:
                 item_revision = previous.item_revision + 1 if previous else 1
                 timestamp = _now()
                 review_status: ReviewStatus = (
-                    "proposed" if mutation_source == "agent_inference" else "accepted"
+                    "proposed"
+                    if mutation_source == "agent_inference" and not allow_agent_direct
+                    else "accepted"
                 )
                 provenance = ItemProvenance(
                     method=(
@@ -1764,12 +1796,14 @@ class CareerProfileCompleteStore:
                     revision=revision,
                     base_revision=head,
                     principal=principal,
+                    actor_kind=_history_actor_kind(mutation_source),
                     operation="item.upsert",
                     item_id=item_id,
                     evidence_id=None,
                     before=previous.model_dump(mode="json") if previous else None,
                     after=current.model_dump(mode="json"),
                     affected=[f"items.{item_id}"],
+                    reason=reason,
                 )
                 result = self._finish(connection, principal, idempotency_key, request_hash)
                 connection.commit()
@@ -1790,13 +1824,14 @@ class CareerProfileCompleteStore:
         operation: str,
         target_id: str | None,
         payload: dict[str, object],
+        allow_agent_direct: bool = False,
     ) -> None:
         if mutation_source == "direct_user":
             if intent_grant_id is not None:
                 raise CareerProfileValueError("Direct user actions do not consume agent grants")
             return
         if mutation_source == "agent_inference":
-            if operation != "item.create":
+            if operation != "item.create" and not allow_agent_direct:
                 raise CareerProfileValueError(
                     "Autonomous agent destructive or replacement actions require exact user intent"
                 )
@@ -1889,29 +1924,39 @@ class CareerProfileCompleteStore:
         revision: int,
         base_revision: int,
         principal: str,
+        actor_kind: HistoryActorKind,
         operation: str,
         item_id: str | None,
         evidence_id: str | None,
         before: object | None,
         after: object | None,
         affected: list[str],
+        reason: str | None = None,
+        proposal_id: str | None = None,
+        undo_of_revision_id: str | None = None,
     ) -> None:
         revision_id = _opaque_id("cpv_")
         connection.execute(
             "INSERT INTO career_profile_complete_revisions(revision_id, profile_revision, "
-            "base_profile_revision, actor_principal, operation, item_id, evidence_id, before_json, "
-            "after_json, affected_fields_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "base_profile_revision, actor_principal, actor_kind, operation, item_id, "
+            "evidence_id, before_json, "
+            "after_json, affected_fields_json, reason, proposal_id, undo_of_revision_id) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 revision_id,
                 revision,
                 base_revision,
                 principal,
+                actor_kind,
                 operation,
                 item_id,
                 evidence_id,
                 _canonical_json(before) if before is not None else None,
                 _canonical_json(after) if after is not None else None,
                 _canonical_json(affected),
+                reason,
+                proposal_id,
+                undo_of_revision_id,
             ),
         )
         connection.execute(
