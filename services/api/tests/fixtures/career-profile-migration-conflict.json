@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "bundle_label": "(FAKE) conflicting Career Profile migration candidate",
+  "evidence": [
+    {"key": "source-a", "original_filename": "(FAKE)-source-a.txt", "media_type": "text/plain", "captured_at": null, "source_kind": "resume", "source_label": "(FAKE) source A", "content_base64": "KEZBS0UpIGNvbmZsaWN0aW5nIHNvdXJjZSBBCg=="},
+    {"key": "source-b", "original_filename": "(FAKE)-source-b.txt", "media_type": "text/plain", "captured_at": null, "source_kind": "resume", "source_label": "(FAKE) source B", "content_base64": "KEZBS0UpIGNvbmZsaWN0aW5nIHNvdXJjZSBCCg=="}
+  ],
+  "facts": [
+    {"key": "identity-a", "mapping": "canonical.identity", "value": {"kind": "identity", "professional_name": "(FAKE) Alex Morgan A"}, "evidence_keys": ["source-a"], "source_label": "(FAKE) deterministic source A"},
+    {"key": "identity-b", "mapping": "canonical.identity", "value": {"kind": "identity", "professional_name": "(FAKE) Alex Morgan B"}, "evidence_keys": ["source-b"], "source_label": "(FAKE) deterministic source B"}
+  ]
+}

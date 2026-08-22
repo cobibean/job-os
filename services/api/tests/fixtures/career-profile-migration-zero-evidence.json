@@ -1,0 +1,9 @@
+{
+  "schema_version": 1,
+  "bundle_label": "(FAKE) zero-Evidence Career Profile migration candidate",
+  "evidence": [],
+  "facts": [
+    {"key": "user-claim", "mapping": "canonical.claim", "value": {"kind": "claim", "statement": "(FAKE) Led a cross-functional launch"}, "evidence_keys": [], "source_label": "(FAKE) accepted user-authored content"},
+    {"key": "priority", "mapping": "search.priority", "value": {"kind": "priority", "label": "(FAKE) Sustainable pace"}, "evidence_keys": [], "source_label": "(FAKE) direct preference"}
+  ]
+}

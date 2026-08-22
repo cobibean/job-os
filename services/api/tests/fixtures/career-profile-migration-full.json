@@ -1,0 +1,68 @@
+{
+  "schema_version": 1,
+  "bundle_label": "(FAKE) full Career Profile migration candidate",
+  "evidence": [
+    {
+      "key": "resume-primary",
+      "original_filename": "(FAKE)-alex-morgan-resume.txt",
+      "media_type": "text/plain",
+      "captured_at": "2026-08",
+      "source_kind": "resume",
+      "source_label": "(FAKE) canonical resume",
+      "content_base64": "KEZBS0UpIEFsZXggTW9yZ2FuIHJlc3VtZSBzb3VyY2UgYnl0ZXMK"
+    },
+    {
+      "key": "portfolio-primary",
+      "original_filename": "(FAKE)-alex-morgan-portfolio.txt",
+      "media_type": "text/plain",
+      "captured_at": null,
+      "source_kind": "portfolio",
+      "source_label": "(FAKE) portfolio source",
+      "content_base64": "KEZBS0UpIEFsZXggTW9yZ2FuIHBvcnRmb2xpbyBzb3VyY2UgYnl0ZXMK"
+    }
+  ],
+  "facts": [
+    {
+      "key": "identity",
+      "mapping": "canonical.identity",
+      "value": {"kind": "identity", "professional_name": "(FAKE) Alex Morgan"},
+      "evidence_keys": ["resume-primary"],
+      "source_label": "(FAKE) candidate profile identity"
+    },
+    {
+      "key": "skill",
+      "mapping": "canonical.skill",
+      "value": {"kind": "skill", "name": "(FAKE) Product systems"},
+      "evidence_keys": ["resume-primary"],
+      "source_label": "(FAKE) skills ledger"
+    },
+    {
+      "key": "positioning",
+      "mapping": "canonical.positioning",
+      "value": {"kind": "positioning", "summary": "(FAKE) Product-minded systems builder"},
+      "evidence_keys": ["portfolio-primary"],
+      "source_label": "(FAKE) positioning narrative"
+    },
+    {
+      "key": "target-role",
+      "mapping": "search.target_roles",
+      "value": {"kind": "target_roles", "roles": ["(FAKE) Product Engineer"]},
+      "evidence_keys": [],
+      "source_label": "(FAKE) search preference"
+    },
+    {
+      "key": "work-arrangement",
+      "mapping": "search.work_arrangement",
+      "value": {"kind": "work_arrangement", "mode": "(FAKE) remote"},
+      "evidence_keys": [],
+      "source_label": "(FAKE) search preference"
+    },
+    {
+      "key": "claim",
+      "mapping": "source.extracted",
+      "value": {"kind": "claim", "statement": "(FAKE) Improved a workflow by 35%"},
+      "evidence_keys": ["resume-primary", "portfolio-primary"],
+      "source_label": "(FAKE) extracted accomplishment"
+    }
+  ]
+}

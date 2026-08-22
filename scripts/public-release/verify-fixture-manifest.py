@@ -72,13 +72,25 @@ def verify(root: Path, manifest_path: Path) -> list[str]:
         errors.append("manifest contains duplicate paths")
     declared = {path for path in paths if isinstance(path, str)}
     actual = controlled_assets(root, tracked)
-    if declared != actual:
-        for path in sorted(actual - declared):
-            errors.append(f"missing manifest entry: {path}")
-        for path in sorted(declared - actual):
+    tracked_set = set(tracked)
+    entry_by_path = {
+        entry["path"]: entry
+        for entry in entries
+        if isinstance(entry, dict) and isinstance(entry.get("path"), str)
+    }
+    for path in sorted(actual - declared):
+        errors.append(f"missing manifest entry: {path}")
+    for path in sorted(declared - actual):
+        entry = entry_by_path[path]
+        is_registered_text_fixture = (
+            path in tracked_set
+            and entry.get("classification") == "synthetic"
+            and path.startswith("services/api/tests/fixtures/")
+            and (root / path).is_file()
+        )
+        if not is_registered_text_fixture:
             errors.append(f"stale manifest entry: {path}")
 
-    tracked_set = set(tracked)
     for entry in entries:
         if not isinstance(entry, dict) or not isinstance(entry.get("path"), str):
             errors.append("every asset entry must be an object with a path")

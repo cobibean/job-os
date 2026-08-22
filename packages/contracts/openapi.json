@@ -1031,6 +1031,71 @@
         "title": "BrowserTabMetadata",
         "type": "object"
       },
+      "CareerProfileAuthorityActivationRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "confirmation": {
+            "const": "CUT OVER CAREER PROFILE AUTHORITY",
+            "title": "Confirmation",
+            "type": "string"
+          },
+          "expected_authority_epoch": {
+            "minimum": 0.0,
+            "title": "Expected Authority Epoch",
+            "type": "integer"
+          },
+          "expected_profile_revision": {
+            "minimum": 0.0,
+            "title": "Expected Profile Revision",
+            "type": "integer"
+          },
+          "idempotency_key": {
+            "maxLength": 200,
+            "minLength": 8,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+            "title": "Idempotency Key",
+            "type": "string"
+          }
+        },
+        "required": [
+          "expected_profile_revision",
+          "expected_authority_epoch",
+          "idempotency_key",
+          "confirmation"
+        ],
+        "title": "CareerProfileAuthorityActivationRequest",
+        "type": "object"
+      },
+      "CareerProfileAuthorityState": {
+        "additionalProperties": false,
+        "properties": {
+          "authority_epoch": {
+            "minimum": 0.0,
+            "title": "Authority Epoch",
+            "type": "integer"
+          },
+          "authority_state": {
+            "enum": [
+              "staging",
+              "cutover"
+            ],
+            "title": "Authority State",
+            "type": "string"
+          },
+          "profile_revision": {
+            "minimum": 0.0,
+            "title": "Profile Revision",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "authority_state",
+          "authority_epoch",
+          "profile_revision"
+        ],
+        "title": "CareerProfileAuthorityState",
+        "type": "object"
+      },
       "CareerProfileChangeProposal": {
         "additionalProperties": false,
         "properties": {
@@ -1173,6 +1238,15 @@
             "minimum": 0.0,
             "title": "Authority Epoch",
             "type": "integer"
+          },
+          "authority_state": {
+            "default": "staging",
+            "enum": [
+              "staging",
+              "cutover"
+            ],
+            "title": "Authority State",
+            "type": "string"
           },
           "items": {
             "items": {
@@ -3985,6 +4059,7 @@
               "agent_edit",
               "evidence_import",
               "evidence_erased",
+              "migration_import",
               "tracer_compatibility"
             ],
             "title": "Method",
@@ -8617,6 +8692,280 @@
           }
         ],
         "summary": "Career Profile Context Preview",
+        "tags": [
+          "career-profile"
+        ]
+      }
+    },
+    "/v1/career-profile/authority": {
+      "get": {
+        "operationId": "career_profile_authority_get_v1_career_profile_authority_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-JobOS-MCP-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Jobos-Mcp-Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CareerProfileAuthorityState"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Device authentication required"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Request validation failed"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Internal server error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Career Profile Authority Get",
+        "tags": [
+          "career-profile"
+        ]
+      }
+    },
+    "/v1/career-profile/authority/activate": {
+      "post": {
+        "operationId": "career_profile_authority_activate_v1_career_profile_authority_activate_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-JobOS-MCP-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Jobos-Mcp-Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CareerProfileAuthorityActivationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CareerProfileAuthorityState"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Device authentication required"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Resource state conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Request validation failed"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Internal server error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Career Profile Authority Activate",
+        "tags": [
+          "career-profile"
+        ]
+      }
+    },
+    "/v1/career-profile/consumer-projection": {
+      "get": {
+        "operationId": "career_profile_consumer_projection_v1_career_profile_consumer_projection_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-JobOS-MCP-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Jobos-Mcp-Token"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-JobOS-Agent-Id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Jobos-Agent-Id"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-JobOS-Agent-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Jobos-Agent-Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CareerProfileContextPreview"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Device authentication required"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Request validation failed"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Internal server error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Career Profile Consumer Projection",
         "tags": [
           "career-profile"
         ]

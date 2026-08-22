@@ -135,6 +135,7 @@ def test_complete_contract_represents_all_three_areas_and_canonical_item_kinds(t
     assert set(current["properties"]) == {
         "profile_revision",
         "authority_epoch",
+        "authority_state",
         "items",
         "source_evidence",
     }
@@ -1099,6 +1100,7 @@ def test_full_profile_reset_erases_profile_proposals_snapshots_history_and_all_v
     assert store.current().model_dump(mode="json") == {
         "profile_revision": 0,
         "authority_epoch": 1,
+        "authority_state": "staging",
         "items": [],
         "source_evidence": [],
     }
@@ -1272,7 +1274,7 @@ def test_schema_migration_adds_complete_model_tables_without_activating_profile(
     database = tmp_path / "jobos.db"
     health = JobOsStateStore(database).initialize(owner_device_id="primary-device")
 
-    assert health.schema_version == SCHEMA_VERSION == 30
+    assert health.schema_version == SCHEMA_VERSION == 31
     with sqlite3.connect(database) as connection:
         tables = {
             row[0]
@@ -1431,6 +1433,7 @@ def test_complete_routes_are_authenticated_dormant_by_default_and_read_back_muta
         assert client.get("/v1/career-profile", headers=auth()).json() == {
             "profile_revision": 0,
             "authority_epoch": 1,
+            "authority_state": "staging",
             "items": [],
             "source_evidence": [],
         }

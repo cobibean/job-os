@@ -371,6 +371,7 @@ def test_prompt_context_accepts_only_exact_typed_complete_profile_snapshot():
         "projection": {
             "profile_revision": 3,
             "authority_epoch": 0,
+            "authority_state": "staging",
             "items": [],
             "source_evidence": [],
         },

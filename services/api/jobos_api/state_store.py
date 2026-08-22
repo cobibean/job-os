@@ -1348,6 +1348,44 @@ MIGRATIONS = (
                )""",
         ),
     ),
+    Migration(
+        version=31,
+        statements=(
+            """
+            ALTER TABLE career_profiles
+            ADD COLUMN authority_state TEXT NOT NULL DEFAULT 'staging'
+                CHECK (authority_state IN ('staging', 'cutover'))
+            """,
+            """
+            CREATE TABLE career_profile_migration_journal (
+                bundle_sha256 TEXT PRIMARY KEY CHECK (length(bundle_sha256) = 64),
+                actor_principal TEXT NOT NULL CHECK (actor_principal = 'migration:career-profile'),
+                phase TEXT NOT NULL CHECK (phase IN ('prepared', 'vault_written', 'complete')),
+                request_json TEXT NOT NULL CHECK (json_valid(request_json)),
+                report_json TEXT CHECK (report_json IS NULL OR json_valid(report_json)),
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+            """,
+            """
+            CREATE TABLE career_profile_migration_receipts (
+                bundle_sha256 TEXT PRIMARY KEY CHECK (length(bundle_sha256) = 64),
+                report_json TEXT NOT NULL CHECK (json_valid(report_json)),
+                created_at TEXT NOT NULL
+            )
+            """,
+            """
+            CREATE TABLE career_profile_authority_idempotency (
+                actor_principal TEXT NOT NULL,
+                idempotency_key TEXT NOT NULL,
+                request_hash TEXT NOT NULL CHECK (length(request_hash) = 64),
+                result_json TEXT NOT NULL CHECK (json_valid(result_json)),
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY(actor_principal, idempotency_key)
+            )
+            """,
+        ),
+    ),
 )
 SCHEMA_VERSION = MIGRATIONS[-1].version
 

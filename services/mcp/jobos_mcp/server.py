@@ -449,6 +449,11 @@ def create_server(
             idempotency_key=idempotency_key,
         )
 
+    @server.tool(name="career_profile_get", structured_output=True)
+    async def career_profile_get() -> dict[str, Any]:
+        """Read the exact user-authorized post-cutover Career Profile projection."""
+        return await client.get_career_profile_projection()
+
     @server.tool(name="workspace_inspect", structured_output=True)
     async def workspace_inspect(
         conversation_id: ConversationId, idempotency_key: str | None = None
