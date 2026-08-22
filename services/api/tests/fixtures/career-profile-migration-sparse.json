@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "bundle_label": "(FAKE) sparse Career Profile migration candidate",
+  "evidence": [],
+  "facts": [
+    {"key": "unknown-education", "mapping": "canonical.education", "value": null, "evidence_keys": [], "source_label": "(FAKE) absent education"},
+    {"key": "partial-experience", "mapping": "canonical.experience", "value": {"kind": "experience", "role": "(FAKE) Builder"}, "evidence_keys": [], "source_label": "(FAKE) sparse experience"},
+    {"key": "unknown-compensation", "mapping": "search.compensation", "value": null, "evidence_keys": [], "source_label": "(FAKE) absent compensation"},
+    {"key": "unknown-location", "mapping": "search.location", "value": null, "evidence_keys": [], "source_label": "(FAKE) absent location"}
+  ]
+}

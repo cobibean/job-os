@@ -1,0 +1,70 @@
+{
+  "api_projection": {
+    "authority_state": "cutover",
+    "item_count": 1,
+    "mode": "selected"
+  },
+  "disposable_activation": {
+    "authority_epoch": 1,
+    "authority_state": "cutover",
+    "profile_revision": 1
+  },
+  "dormant_projection_status": 422,
+  "fixture": "services/api/tests/fixtures/career-profile-migration-full.json",
+  "legacy_writer_refusal": "career_profile_legacy_writer_fenced",
+  "mcp_projection": {
+    "agent_id": "job-hunter",
+    "authority_epoch": 1,
+    "content_hash": "1fcd1ab572eb523cb592fc971a080c4bbea2e721ccc84eecd981f61d2d8e3b61",
+    "created_at": "2026-08-22T16:11:01.521445+00:00",
+    "profile_revision": 1,
+    "projection": {
+      "authority_epoch": 1,
+      "authority_state": "cutover",
+      "items": [
+        {
+          "actor_principal": "migration:career-profile",
+          "area": "what_im_looking_for",
+          "created_at": "2026-08-22T16:11:01.401734+00:00",
+          "evidence_ids": [],
+          "item_id": "cpi_2393d7d26447c4621aa75eed0a4bc607",
+          "item_revision": 1,
+          "provenance": {
+            "imported_at": "2026-08-22T16:11:01.401734+00:00",
+            "method": "migration_import",
+            "mutation_source": "deterministic_source_mapping",
+            "source_label": "(FAKE) search preference"
+          },
+          "review_status": "accepted",
+          "updated_at": "2026-08-22T16:11:01.401734+00:00",
+          "value": {
+            "kind": "target_roles",
+            "roles": [
+              "(FAKE) Product Engineer"
+            ],
+            "strength": null
+          }
+        }
+      ],
+      "profile_revision": 1,
+      "source_evidence": []
+    },
+    "scope": {
+      "agent_id": "job-hunter",
+      "mode": "selected",
+      "selected_areas": [],
+      "selected_item_ids": [
+        "cpi_2393d7d26447c4621aa75eed0a4bc607"
+      ],
+      "updated_at": "2026-08-22T16:11:01.466992+00:00"
+    }
+  },
+  "migration_replay_equal": true,
+  "pre_activation_authority": "staging",
+  "restart_authority": {
+    "authority_epoch": 1,
+    "authority_state": "cutover",
+    "profile_revision": 1
+  },
+  "temporary_root": "[DISPOSABLE ROOT REDACTED]"
+}

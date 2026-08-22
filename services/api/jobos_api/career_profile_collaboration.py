@@ -350,7 +350,11 @@ class CareerProfileCollaborationStore:
             raise CareerProfileRevisionConflict(profile.profile_revision)
         before = self._target_item(profile, command)
         self._validate_evidence_links(profile, before, command.evidence_ids)
-        if command.value is not None and command.value.kind == "work_arrangement":
+        if (
+            command.value is not None
+            and command.value.kind == "work_arrangement"
+            and complete.authority().authority_state == "staging"
+        ):
             raise CareerProfileValueError(
                 "Work arrangement remains on the staging tracer endpoint until consumer cutover"
             )
@@ -444,7 +448,12 @@ class CareerProfileCollaborationStore:
                     complete._check_head(  # noqa: SLF001 - shared transaction boundary
                         connection, command.expected_profile_revision
                     )
-                    if proposal.base_profile_revision != head:
+                    migration_create = (
+                        proposal.agent_id == "career-profile-migration"
+                        and proposal.operation == "item.create"
+                        and proposal.before is None
+                    )
+                    if proposal.base_profile_revision != head and not migration_create:
                         raise CareerProfileCollaborationConflict(
                             "This proposal is stale and must be regenerated"
                         )
@@ -1023,9 +1032,10 @@ class CareerProfileCollaborationStore:
                 raise CareerProfileCollaborationConflict(
                     "The proposal target changed and must be regenerated"
                 )
-            self._write_item(connection, proposal.after)
+            accepted = proposal.after.model_copy(update={"review_status": "accepted"})
+            self._write_item(connection, accepted)
             before_json = None
-            after_json = proposal.after.model_dump(mode="json")
+            after_json = accepted.model_dump(mode="json")
             operation = "item.upsert"
         elif proposal.operation == "item.update":
             if (
@@ -1038,9 +1048,10 @@ class CareerProfileCollaborationStore:
                 raise CareerProfileCollaborationConflict(
                     "The proposed item changed and must be regenerated"
                 )
-            self._write_item(connection, proposal.after)
+            accepted = proposal.after.model_copy(update={"review_status": "accepted"})
+            self._write_item(connection, accepted)
             before_json = proposal.before.model_dump(mode="json")
-            after_json = proposal.after.model_dump(mode="json")
+            after_json = accepted.model_dump(mode="json")
             operation = "item.upsert"
         else:
             if (

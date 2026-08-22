@@ -12,7 +12,7 @@ from contextlib import suppress
 from datetime import UTC, date, datetime
 from hashlib import sha256
 from pathlib import Path
-from typing import Annotated, Literal, Self
+from typing import Annotated, Literal, Self, cast
 
 from pydantic import (
     AfterValidator,
@@ -387,6 +387,7 @@ class ItemProvenance(StrictModel):
         "agent_edit",
         "evidence_import",
         "evidence_erased",
+        "migration_import",
         "tracer_compatibility",
     ]
     source_label: str | None = Field(default=None, max_length=500)
@@ -428,8 +429,22 @@ class SourceEvidenceRecord(StrictModel):
 class CareerProfileCompleteCurrent(StrictModel):
     profile_revision: int = Field(ge=0)
     authority_epoch: int = Field(ge=0)
+    authority_state: Literal["staging", "cutover"] = "staging"
     items: list[ProfileItemRecord]
     source_evidence: list[SourceEvidenceRecord]
+
+
+class CareerProfileAuthorityActivationRequest(StrictModel):
+    expected_profile_revision: int = Field(ge=0)
+    expected_authority_epoch: int = Field(ge=0)
+    idempotency_key: IdempotencyKey
+    confirmation: Literal["CUT OVER CAREER PROFILE AUTHORITY"]
+
+
+class CareerProfileAuthorityState(StrictModel):
+    authority_state: Literal["staging", "cutover"]
+    authority_epoch: int = Field(ge=0)
+    profile_revision: int = Field(ge=0)
 
 
 class ProfileItemMutation(StrictModel):
@@ -560,6 +575,12 @@ class CareerProfileItemNotFound(RuntimeError):
 
 class CareerProfileValueError(RuntimeError):
     """A complete-model mutation is invalid for the current profile."""
+
+
+class CareerProfileLegacyWriterFenced(RuntimeError):
+    """A retired legacy writer attempted to mutate after authority cutover."""
+
+    code = "career_profile_legacy_writer_fenced"
 
 
 def _now() -> str:
@@ -696,6 +717,63 @@ class EvidenceVault:
             os.close(root_descriptor)
         return storage_name
 
+    def write_idempotent(self, evidence_id: str, content: bytes) -> str:
+        """Atomically install deterministic migration bytes without following links."""
+        storage_name = self.storage_name(evidence_id)
+        expected_hash = sha256(content).hexdigest()
+        root_descriptor = self._open_root()
+        flags = os.O_RDONLY
+        if hasattr(os, "O_NOFOLLOW"):
+            flags |= os.O_NOFOLLOW
+        try:
+            try:
+                metadata = os.stat(storage_name, dir_fd=root_descriptor, follow_symlinks=False)
+            except FileNotFoundError:
+                metadata = None
+            if metadata is not None:
+                if not stat.S_ISREG(metadata.st_mode):
+                    raise CareerProfileEvidencePathError("Evidence must be a regular file")
+                descriptor = os.open(storage_name, flags, dir_fd=root_descriptor)
+                with os.fdopen(descriptor, "rb") as source:
+                    existing = source.read(10 * 1024 * 1024 + 1)
+                if len(existing) > 10 * 1024 * 1024 or not secrets.compare_digest(
+                    sha256(existing).hexdigest(), expected_hash
+                ):
+                    raise CareerProfileEvidenceIntegrityError
+                return storage_name
+
+            staging_name = f".migration-{evidence_id}-{secrets.token_urlsafe(8)}.tmp"
+            write_flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+            if hasattr(os, "O_NOFOLLOW"):
+                write_flags |= os.O_NOFOLLOW
+            descriptor = os.open(staging_name, write_flags, 0o600, dir_fd=root_descriptor)
+            try:
+                with os.fdopen(descriptor, "wb") as output:
+                    descriptor = -1
+                    output.write(content)
+                    output.flush()
+                    os.fsync(output.fileno())
+                os.replace(
+                    staging_name,
+                    storage_name,
+                    src_dir_fd=root_descriptor,
+                    dst_dir_fd=root_descriptor,
+                )
+                os.chmod(storage_name, 0o600, dir_fd=root_descriptor, follow_symlinks=False)
+                os.fsync(root_descriptor)
+            finally:
+                if descriptor >= 0:
+                    os.close(descriptor)
+                with suppress(FileNotFoundError):
+                    os.unlink(staging_name, dir_fd=root_descriptor)
+            return storage_name
+        except OSError as error:
+            raise CareerProfileEvidencePathError(
+                "Evidence could not be atomically installed inside its managed vault"
+            ) from error
+        finally:
+            os.close(root_descriptor)
+
     def read(self, storage_name: str, expected_hash: str) -> bytes:
         self._validate_storage_name(storage_name)
         root_descriptor = self._open_root()
@@ -779,6 +857,115 @@ class CareerProfileCompleteStore:
     def current(self) -> CareerProfileCompleteCurrent:
         with connect_sqlite(f"file:{self.database}?mode=ro", uri=True) as connection:
             return self._current_in_connection(connection)
+
+    def authority(self) -> CareerProfileAuthorityState:
+        current = self.current()
+        return CareerProfileAuthorityState(
+            authority_state=current.authority_state,
+            authority_epoch=current.authority_epoch,
+            profile_revision=current.profile_revision,
+        )
+
+    def activate_authority(
+        self,
+        *,
+        principal: str,
+        command: CareerProfileAuthorityActivationRequest,
+    ) -> CareerProfileAuthorityState:
+        request_hash = _request_hash("authority.activate", command.model_dump(mode="json"))
+        with connect_sqlite(self.database) as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            try:
+                replay = connection.execute(
+                    "SELECT request_hash, result_json FROM career_profile_authority_idempotency "
+                    "WHERE actor_principal = ? AND idempotency_key = ?",
+                    (principal, command.idempotency_key),
+                ).fetchone()
+                if replay is not None:
+                    if not secrets.compare_digest(str(replay[0]), request_hash):
+                        raise CareerProfileIdempotencyConflict
+                    result = CareerProfileAuthorityState.model_validate_json(str(replay[1]))
+                    connection.rollback()
+                    return result
+                ensure_no_pending_profile_operation(connection)
+                ensure_no_active_conversation_turn(
+                    connection,
+                    conflict_type=CareerProfileValueError,
+                    message="Finish or stop active agent work before Career Profile cutover",
+                )
+                row = connection.execute(
+                    "SELECT head_revision, authority_epoch, authority_state "
+                    "FROM career_profiles WHERE profile_id = ?",
+                    (PROFILE_ID,),
+                ).fetchone()
+                if row is None:
+                    raise RuntimeError("Career Profile storage is not initialized")
+                if int(row[0]) != command.expected_profile_revision:
+                    raise CareerProfileRevisionConflict(int(row[0]))
+                if int(row[1]) != command.expected_authority_epoch:
+                    raise CareerProfileValueError("Career Profile authority epoch has changed")
+                if str(row[2]) != "staging":
+                    raise CareerProfileValueError("Career Profile authority is already cut over")
+                receipt = connection.execute(
+                    "SELECT report_json FROM career_profile_migration_receipts LIMIT 1"
+                ).fetchone()
+                if receipt is None:
+                    raise CareerProfileValueError(
+                        "Career Profile authority requires a completed migration candidate"
+                    )
+                report = json.loads(str(receipt[0]))
+                if report.get("profile_revision") != int(row[0]):
+                    raise CareerProfileValueError(
+                        "Career Profile changed after its migration candidate was completed"
+                    )
+                epoch = int(row[1]) + 1
+                connection.execute(
+                    "UPDATE career_profiles SET authority_state = 'cutover', authority_epoch = ?, "
+                    "updated_at = ? WHERE profile_id = ?",
+                    (epoch, _now(), PROFILE_ID),
+                )
+                result = CareerProfileAuthorityState(
+                    authority_state="cutover",
+                    authority_epoch=epoch,
+                    profile_revision=int(row[0]),
+                )
+                connection.execute(
+                    "INSERT INTO career_profile_authority_idempotency("
+                    "actor_principal, idempotency_key, request_hash, result_json) "
+                    "VALUES (?, ?, ?, ?)",
+                    (
+                        principal,
+                        command.idempotency_key,
+                        request_hash,
+                        _canonical_json(result.model_dump(mode="json")),
+                    ),
+                )
+                connection.execute(
+                    "INSERT INTO career_profile_audit_events("
+                    "actor_principal, action, profile_revision, affected_fields_json) "
+                    "VALUES (?, 'authority.cutover', ?, ?)",
+                    (
+                        principal,
+                        int(row[0]),
+                        _canonical_json(["authority_state", "authority_epoch"]),
+                    ),
+                )
+                connection.commit()
+                return result
+            except Exception:
+                connection.rollback()
+                raise
+
+    def require_consumer_projection(self) -> None:
+        if self.current().authority_state != "cutover":
+            raise CareerProfileValueError(
+                "Complete Career Profile consumer projections remain dormant "
+                "until authority cutover"
+            )
+
+    def assert_legacy_writer_allowed(self) -> None:
+        if self.current().authority_state == "cutover":
+            raise CareerProfileLegacyWriterFenced(CareerProfileLegacyWriterFenced.code)
 
     def create_intent_grant(
         self, *, principal: str, command: ProfileIntentGrantRequest
@@ -882,7 +1069,10 @@ class CareerProfileCompleteStore:
             raise CareerProfileValueError(
                 "Compatibility tracer items must use their dedicated staging endpoint"
             )
-        if command.value.kind == "work_arrangement":
+        if (
+            command.value.kind == "work_arrangement"
+            and self.authority().authority_state == "staging"
+        ):
             raise CareerProfileValueError(
                 "Work arrangement remains on the staging tracer endpoint until consumer cutover"
             )
@@ -1009,7 +1199,17 @@ class CareerProfileCompleteStore:
                     connection.rollback()
                     return replay
                 head = self._check_head(connection, command.expected_profile_revision)
-                if any(item.value.kind == "work_arrangement" for item in command.extractions):
+                authority_state = connection.execute(
+                    "SELECT authority_state FROM career_profiles WHERE profile_id = ?",
+                    (PROFILE_ID,),
+                ).fetchone()
+                if authority_state is None:
+                    raise RuntimeError("Career Profile storage is not initialized")
+                if str(authority_state[0]) == "cutover" and principal.startswith("legacy-writer:"):
+                    raise CareerProfileLegacyWriterFenced(CareerProfileLegacyWriterFenced.code)
+                if str(authority_state[0]) == "staging" and any(
+                    item.value.kind == "work_arrangement" for item in command.extractions
+                ):
                     raise CareerProfileValueError(
                         "Imported work arrangement stays proposed for the later migration candidate"
                     )
@@ -2090,13 +2290,15 @@ class CareerProfileCompleteStore:
         self, connection: sqlite3.Connection
     ) -> CareerProfileCompleteCurrent:
         profile_state = connection.execute(
-            "SELECT head_revision, authority_epoch FROM career_profiles WHERE profile_id = ?",
+            "SELECT head_revision, authority_epoch, authority_state "
+            "FROM career_profiles WHERE profile_id = ?",
             (PROFILE_ID,),
         ).fetchone()
         if profile_state is None:
             raise RuntimeError("Career Profile storage is not initialized")
         head = int(profile_state[0])
         authority_epoch = int(profile_state[1])
+        authority_state = cast(Literal["staging", "cutover"], str(profile_state[2]))
         rows = connection.execute(
             "SELECT item_id, value_json, provenance_json, review_status, evidence_ids_json, "
             "item_revision, actor_principal, created_at, updated_at FROM career_profile_items "
@@ -2134,6 +2336,7 @@ class CareerProfileCompleteStore:
         return CareerProfileCompleteCurrent(
             profile_revision=head,
             authority_epoch=authority_epoch,
+            authority_state=authority_state,
             items=items,
             source_evidence=[self._evidence_from_row(row) for row in evidence_rows],
         )

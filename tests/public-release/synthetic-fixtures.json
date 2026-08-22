@@ -373,6 +373,54 @@
         "trackedSource": "docs/acceptance/career-profile-product-experience/capture.mjs",
         "method": "Captured after restoring a profile-only baseline and restarting the packaged app, visually inspected, metadata-stripped, and checksum-pinned."
       }
+    },
+    {
+      "path": "services/api/tests/fixtures/career-profile-migration-conflict.json",
+      "sha256": "3dd7828225976043ee75b701832421d8c19f6cef6dd751068e41d497354d4020",
+      "classification": "synthetic",
+      "publication": "keep",
+      "source": "Hand-authored visibly (FAKE) migration input bundle",
+      "purpose": "Issue #57 conflicting deterministic assertion migration proof",
+      "provenance": {
+        "trackedSource": "docs/implementation/career-profile-migration-inventory.md",
+        "method": "Hand-authored from the public source-shape inventory with every user-like value visibly marked (FAKE)."
+      }
+    },
+    {
+      "path": "services/api/tests/fixtures/career-profile-migration-full.json",
+      "sha256": "4e51685bec27035da694e47d5dd60d92f7bd0023031a10f6815761249232a56c",
+      "classification": "synthetic",
+      "publication": "keep",
+      "source": "Hand-authored visibly (FAKE) migration input bundle",
+      "purpose": "Issue #57 complete three-area migration proof",
+      "provenance": {
+        "trackedSource": "docs/implementation/career-profile-migration-inventory.md",
+        "method": "Hand-authored from the public source-shape inventory with every user-like value visibly marked (FAKE)."
+      }
+    },
+    {
+      "path": "services/api/tests/fixtures/career-profile-migration-sparse.json",
+      "sha256": "bcd685da0521eb35878de584a3ca9a3f1e72dc99d2ee89b12b99bfef166fce0d",
+      "classification": "synthetic",
+      "publication": "keep",
+      "source": "Hand-authored visibly (FAKE) migration input bundle",
+      "purpose": "Issue #57 sparse and unknown-value migration proof",
+      "provenance": {
+        "trackedSource": "docs/implementation/career-profile-migration-inventory.md",
+        "method": "Hand-authored from the public source-shape inventory with every user-like value visibly marked (FAKE)."
+      }
+    },
+    {
+      "path": "services/api/tests/fixtures/career-profile-migration-zero-evidence.json",
+      "sha256": "fa4f9e533c7125565667809901ccbd25d7c4448501e35bbc7b7972e624016dae",
+      "classification": "synthetic",
+      "publication": "keep",
+      "source": "Hand-authored visibly (FAKE) migration input bundle",
+      "purpose": "Issue #57 accepted Evidence-free migration proof",
+      "provenance": {
+        "trackedSource": "docs/implementation/career-profile-migration-inventory.md",
+        "method": "Hand-authored from the public source-shape inventory with every user-like value visibly marked (FAKE)."
+      }
     }
   ]
 }

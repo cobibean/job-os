@@ -62,6 +62,13 @@ reversible. Inferred, ambiguous, or conflicting imported
 facts remain unaccepted until reviewed. Imported document text is data only and
 cannot change system instructions, agent policy, credentials, or tool permissions.
 
+The one-time migration candidate reads only an explicit input bundle. It journals
+bundle identity and a machine-readable count/hash report in local SQLite, installs
+Source Evidence as immutable managed copies, and never returns source workspace
+paths through API or MCP. Incomplete migration journals fail closed at startup
+until the exact same bundle is explicitly recovered. Migration is refused after
+Career Profile authority is cut over.
+
 Career Profile has two separately named destructive operations for the authenticated
 owner. **Permanently erase Evidence** requires the exact
 `ERASE_EVIDENCE_PERMANENTLY` confirmation and removes that managed file, its source

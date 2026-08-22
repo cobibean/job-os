@@ -72,13 +72,16 @@ publish, render, and refresh and reports an unconfigured capability when absent.
 This source behavior is not proof that packaged onboarding or clean-clone
 installed-app acceptance has passed.
 
-The dormant Career Profile candidate uses typed records for **My Career**, **What
+The Career Profile cutover candidate uses typed records for **My Career**, **What
 I'm Looking For**, and **My Evidence**. Accepted values, proposed or conflicting
 imports, provenance, Claims, qualifiers, and forbidden-use boundaries share the
 existing immutable global profile revision. Imported Source Evidence metadata
 lives in SQLite while original bytes live in a JobOS-owned hash-verified vault;
-API clients receive opaque Evidence IDs rather than local paths. The feature is
-off by default and does not migrate or replace any live profile authority.
+API clients receive opaque Evidence IDs rather than local paths. A journaled,
+idempotent migration command can build a fresh staging candidate from an explicit
+bundle. Complete consumer projections remain dormant until a separately persisted
+owner operation uses the exact cutover confirmation phrase. Candidate construction
+does not migrate or replace any live profile authority.
 
 Canonical-job mutations commit before the related workbench selection/audit
 event. If the second local write fails, retrying converges through canonical-URL

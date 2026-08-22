@@ -49,15 +49,17 @@ The JobOS API is the product boundary. The interface and MCP adapter translate a
 
 Approval policies may restrict consequential external actions. Automatic application submission is outside the default capability set.
 
-## Career Profile agency (dormant complete-product contract)
+## Career Profile agency and cutover candidate
 
 The future complete Career Profile treats Evidence as optional support, not permission or proof a user must supply. Accepted user-authored and user-approved information remains usable with zero Evidence. Missing Evidence is not a health deficit, task, filter, or generation gate; conflicts and changed sources may instead produce specific advisory review states.
 
-When complete-profile agent projection is later implemented, the user chooses no Career Profile context, selected items or areas, or a broader explicitly authorized projection. A turn keeps that exact scope through retry, recovery, and continuation, and unauthorized expansion fails closed.
+The user chooses no Career Profile context, selected items or areas, or a broader explicitly authorized projection. A turn keeps that exact scope through retry, recovery, and continuation, and unauthorized expansion fails closed. The authenticated API/MCP consumer projection remains dormant while authority is `staging` and becomes eligible only after the owner-only exact-confirmation cutover operation.
 
 Portable Career Profile export will require an explicit choice between profile only, profile plus selected Evidence, and profile plus all Evidence. JobOS never silently bundles Source Evidence. These semantics are repository-owned acceptance requirements and do not activate complete-profile projection, migration, or live authority.
 
-See the [Career Profile context and export semantic contract](../implementation/career-profile-context-and-export-contract.md) for the detailed dormant acceptance boundary.
+Issue #57 also supplies a journaled, idempotent synthetic migration candidate. Code-owned mappings accept only exact structured facts; inference, ambiguity, conflicts, and conflicting duplicate assertions remain review-only Proposals. Sparse and zero-Evidence profiles are valid candidates. No live authority changes as part of candidate construction.
+
+See the [Career Profile context and export semantic contract](../implementation/career-profile-context-and-export-contract.md) and [migration inventory](../implementation/career-profile-migration-inventory.md) for the detailed boundaries.
 
 See the [agent capability parity matrix](capability-parity.md) for the current UI, API, and MCP mapping.
 

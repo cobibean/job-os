@@ -143,7 +143,7 @@ def test_initialization_applies_every_migration_once(tmp_path):
     first = store.initialize()
     second = store.initialize()
 
-    assert first.schema_version == SCHEMA_VERSION == 30
+    assert first.schema_version == SCHEMA_VERSION == 31
     assert second.schema_version == SCHEMA_VERSION
     assert applied_versions(database) == [
         1,
@@ -176,6 +176,7 @@ def test_initialization_applies_every_migration_once(tmp_path):
         28,
         29,
         30,
+        31,
     ]
     assert metadata_columns(database) == {"key", "value", "updated_at"}
 
@@ -244,6 +245,7 @@ def test_initialization_upgrades_a_behind_database(tmp_path):
         28,
         29,
         30,
+        31,
     ]
     assert metadata_columns(database) == {"key", "value", "updated_at"}
 
@@ -744,6 +746,7 @@ def test_document_identity_migration_clears_legacy_docx_approval(tmp_path):
             29,
             30,
             31,
+            32,
         ],
         [2],
     ),

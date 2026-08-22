@@ -90,6 +90,8 @@ from jobos_api.career_profile_collaboration import (
     ProposalStatus,
 )
 from jobos_api.career_profile_complete import (
+    CareerProfileAuthorityActivationRequest,
+    CareerProfileAuthorityState,
     CareerProfileCompleteCurrent,
     CareerProfileCompleteStore,
     CareerProfileErasureInProgress,
@@ -98,6 +100,7 @@ from jobos_api.career_profile_complete import (
     CareerProfileEvidenceNotFound,
     CareerProfileEvidencePathError,
     CareerProfileItemNotFound,
+    CareerProfileLegacyWriterFenced,
     CareerProfileResetRequest,
     CareerProfileValueError,
     CompleteProfileItemId,
@@ -117,6 +120,7 @@ from jobos_api.career_profile_context import (
     CareerProfileContextSelectionError,
     CareerProfileContextStore,
 )
+from jobos_api.career_profile_migration import CareerProfileMigrationService
 from jobos_api.career_profile_portability import (
     CareerProfileExportRequest,
     CareerProfileExportResult,
@@ -356,6 +360,7 @@ _ENDPOINT_ERROR_ROUTES = {
     409: frozenset(
         {
             "approve_job_artifact",
+            "career_profile_authority_activate",
             "career_profile_context_snapshot_create",
             "career_profile_context_update",
             "career_profile_evidence_content",
@@ -518,6 +523,10 @@ def create_app(
         settings.state_db_path,
         settings.resolved_evidence_vault_root(),
     )
+    career_profile_migration = CareerProfileMigrationService(
+        settings.state_db_path,
+        settings.resolved_evidence_vault_root(),
+    )
     artifact_gateway_configured = (
         artifact_gateway is not None or settings.artifact_provider == "gateway"
     )
@@ -663,6 +672,7 @@ def create_app(
             )
             career_profile_context.initialize()
             career_profile_portability.recover_pending_restores()
+            career_profile_migration.initialize()
         jobs.initialize()
         await conversation_manager.start()
         try:
@@ -1400,6 +1410,57 @@ def create_app(
     ) -> CareerProfileCompleteCurrent:
         require_direct_career_profile_user(identity, mcp_token)
         return complete_career_profile.current()
+
+    @app.get("/v1/career-profile/authority", tags=["career-profile"])
+    def career_profile_authority_get(
+        identity: Annotated[DeviceIdentity, Depends(authenticated_device)],
+    ) -> CareerProfileAuthorityState:
+        require_career_profile_owner(identity)
+        return complete_career_profile.authority()
+
+    @app.post("/v1/career-profile/authority/activate", tags=["career-profile"])
+    @serialized_mutation_route
+    def career_profile_authority_activate(
+        command: CareerProfileAuthorityActivationRequest,
+        identity: Annotated[DeviceIdentity, Depends(authenticated_device)],
+        mcp_token: Annotated[str | None, Header(alias="X-JobOS-MCP-Token")] = None,
+    ) -> CareerProfileAuthorityState:
+        principal = require_direct_career_profile_user(identity, mcp_token)
+        try:
+            return complete_career_profile.activate_authority(
+                principal=principal,
+                command=command,
+            )
+        except (
+            CareerProfileRevisionConflict,
+            CareerProfileIdempotencyConflict,
+            CareerProfileErasureInProgress,
+            CareerProfileValueError,
+        ) as error:
+            raise complete_profile_conflict(error) from error
+
+    @app.get("/v1/career-profile/consumer-projection", tags=["career-profile"])
+    def career_profile_consumer_projection(
+        identity: Annotated[DeviceIdentity, Depends(authenticated_device)],
+        mcp_token: Annotated[str | None, Header(alias="X-JobOS-MCP-Token")] = None,
+        agent_id: Annotated[str | None, Header(alias="X-JobOS-Agent-Id")] = None,
+        agent_token: Annotated[str | None, Header(alias="X-JobOS-Agent-Token")] = None,
+    ) -> CareerProfileContextPreview:
+        agent = authenticated_career_profile_agent(
+            identity,
+            mcp_token,
+            agent_id,
+            agent_token,
+        )
+        try:
+            complete_career_profile.require_consumer_projection()
+            return career_profile_context.preview(agent_id=agent.agent_id)
+        except (
+            CareerProfileValueError,
+            CareerProfileContextSelectionError,
+            CareerProfileLegacyWriterFenced,
+        ) as error:
+            raise complete_profile_conflict(error) from error
 
     @app.get(
         "/v1/career-profile/agents",

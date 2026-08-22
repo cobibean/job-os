@@ -203,6 +203,14 @@ class JobOsMcpClient:
             },
         )
 
+    async def get_career_profile_projection(self) -> dict[str, Any]:
+        """Read only the exact authorized post-cutover projection."""
+        return await self._request(
+            "GET",
+            "/v1/career-profile/consumer-projection",
+            headers=self._career_profile_agent_headers,
+        )
+
     async def create_job(
         self,
         *,

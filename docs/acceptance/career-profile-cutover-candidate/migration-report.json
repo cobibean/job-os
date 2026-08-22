@@ -1,0 +1,40 @@
+{
+  "accepted_content_hashes": [
+    "3a5fba0aed73242e226f59c167ace0c0f2e444a2d9950f3acc1e41e651797d2b",
+    "43e88fa83d4f4306e4e7d722def2452255afc2357b0971bcd5a3d607a892d78f",
+    "c205bfb8a8ccc7cb82e63762f710487393452089b97b74194d66d8070ac53970",
+    "de1b7b207efc601bd3de5de2337a4d7fc94ab06cea5bb80408c08f93287ad30d"
+  ],
+  "authority_state": "staging",
+  "bundle_label": "(FAKE) full Career Profile migration candidate",
+  "bundle_sha256": "f199de1598084841e5c80f2801ecc46497a92bbc4f72a20ccad333fa9239ee60",
+  "completed": true,
+  "evidence_hashes": [
+    "00f54267e838bd9328ea83224f50220841f18548514e69175b427bc0a370d9dc",
+    "bebaa28d407fc6e745ac26b31d4ceb2e3b19f668f3f8adf1e023283ce9272493"
+  ],
+  "evidence_objects": 2,
+  "my_career": {
+    "accepted": 2,
+    "conflicting": 0,
+    "proposed": 2,
+    "skipped_unknown": 0
+  },
+  "my_evidence": {
+    "accepted": 2,
+    "conflicting": 0,
+    "proposed": 0,
+    "skipped_unknown": 0
+  },
+  "profile_revision": 1,
+  "proposed_content_hashes": [
+    "07c4de4ae2f747ce0467892b04826cfcb95b58d612416bb1bb4a102597e406ea",
+    "2eca90942d15b84d586ebf9114a9313fcd21851f99486016c262f9d8555fad4b"
+  ],
+  "what_im_looking_for": {
+    "accepted": 2,
+    "conflicting": 0,
+    "proposed": 0,
+    "skipped_unknown": 0
+  }
+}

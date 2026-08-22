@@ -111,7 +111,16 @@ def test_every_tracked_binary_asset_has_a_publication_manifest_entry():
 
     declared_paths = {entry["path"] for entry in entries}
     assert len(declared_paths) == len(entries)
-    assert declared_paths == tracked_controlled_binary_assets()
+    controlled_assets = tracked_controlled_binary_assets()
+    assert controlled_assets <= declared_paths
+    registered_text_fixtures = declared_paths - controlled_assets
+    tracked = set(tracked_files())
+    assert all(
+        path in tracked
+        and path.startswith("services/api/tests/fixtures/")
+        and (REPOSITORY_ROOT / path).is_file()
+        for path in registered_text_fixtures
+    )
     assert all(entry["classification"] in {"project-asset", "synthetic"} for entry in entries)
     assert all(entry["publication"] == "keep" for entry in entries)
     assert all(entry["purpose"].strip() for entry in entries)
@@ -120,7 +129,6 @@ def test_every_tracked_binary_asset_has_a_publication_manifest_entry():
     synthetic_entries = [entry for entry in entries if entry["classification"] == "synthetic"]
     assert synthetic_entries
     assert all("/fixtures/" in entry["path"].casefold() for entry in synthetic_entries)
-    tracked = set(tracked_files())
     for entry in synthetic_entries:
         provenance = entry["provenance"]
         assert provenance["trackedSource"] in tracked

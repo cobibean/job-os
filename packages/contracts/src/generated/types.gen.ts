@@ -527,6 +527,46 @@ export type BrowserTabMetadata = {
 };
 
 /**
+ * CareerProfileAuthorityActivationRequest
+ */
+export type CareerProfileAuthorityActivationRequest = {
+    /**
+     * Confirmation
+     */
+    confirmation: 'CUT OVER CAREER PROFILE AUTHORITY';
+    /**
+     * Expected Authority Epoch
+     */
+    expected_authority_epoch: number;
+    /**
+     * Expected Profile Revision
+     */
+    expected_profile_revision: number;
+    /**
+     * Idempotency Key
+     */
+    idempotency_key: string;
+};
+
+/**
+ * CareerProfileAuthorityState
+ */
+export type CareerProfileAuthorityState = {
+    /**
+     * Authority Epoch
+     */
+    authority_epoch: number;
+    /**
+     * Authority State
+     */
+    authority_state: 'staging' | 'cutover';
+    /**
+     * Profile Revision
+     */
+    profile_revision: number;
+};
+
+/**
  * CareerProfileChangeProposal
  */
 export type CareerProfileChangeProposal = {
@@ -598,6 +638,10 @@ export type CareerProfileCompleteCurrent = {
      * Authority Epoch
      */
     authority_epoch: number;
+    /**
+     * Authority State
+     */
+    authority_state?: 'staging' | 'cutover';
     /**
      * Items
      */
@@ -2075,7 +2119,7 @@ export type ItemProvenance = {
     /**
      * Method
      */
-    method: 'user_entered' | 'agent_generated' | 'agent_edit' | 'evidence_import' | 'evidence_erased' | 'tracer_compatibility';
+    method: 'user_entered' | 'agent_generated' | 'agent_edit' | 'evidence_import' | 'evidence_erased' | 'migration_import' | 'tracer_compatibility';
     /**
      * Mutation Source
      */
@@ -4352,6 +4396,135 @@ export type CareerProfileContextPreviewV1CareerProfileAgentsAgentIdContextPrevie
 };
 
 export type CareerProfileContextPreviewV1CareerProfileAgentsAgentIdContextPreviewPostResponse = CareerProfileContextPreviewV1CareerProfileAgentsAgentIdContextPreviewPostResponses[keyof CareerProfileContextPreviewV1CareerProfileAgentsAgentIdContextPreviewPostResponses];
+
+export type CareerProfileAuthorityGetV1CareerProfileAuthorityGetData = {
+    body?: never;
+    headers?: {
+        /**
+         * X-Jobos-Mcp-Token
+         */
+        'X-JobOS-MCP-Token'?: string | null;
+    };
+    path?: never;
+    query?: never;
+    url: '/v1/career-profile/authority';
+};
+
+export type CareerProfileAuthorityGetV1CareerProfileAuthorityGetErrors = {
+    /**
+     * Device authentication required
+     */
+    401: ApiErrorResponse;
+    /**
+     * Request validation failed
+     */
+    422: ApiErrorResponse;
+    /**
+     * Internal server error
+     */
+    500: ApiErrorResponse;
+};
+
+export type CareerProfileAuthorityGetV1CareerProfileAuthorityGetError = CareerProfileAuthorityGetV1CareerProfileAuthorityGetErrors[keyof CareerProfileAuthorityGetV1CareerProfileAuthorityGetErrors];
+
+export type CareerProfileAuthorityGetV1CareerProfileAuthorityGetResponses = {
+    /**
+     * Successful Response
+     */
+    200: CareerProfileAuthorityState;
+};
+
+export type CareerProfileAuthorityGetV1CareerProfileAuthorityGetResponse = CareerProfileAuthorityGetV1CareerProfileAuthorityGetResponses[keyof CareerProfileAuthorityGetV1CareerProfileAuthorityGetResponses];
+
+export type CareerProfileAuthorityActivateV1CareerProfileAuthorityActivatePostData = {
+    body: CareerProfileAuthorityActivationRequest;
+    headers?: {
+        /**
+         * X-Jobos-Mcp-Token
+         */
+        'X-JobOS-MCP-Token'?: string | null;
+    };
+    path?: never;
+    query?: never;
+    url: '/v1/career-profile/authority/activate';
+};
+
+export type CareerProfileAuthorityActivateV1CareerProfileAuthorityActivatePostErrors = {
+    /**
+     * Device authentication required
+     */
+    401: ApiErrorResponse;
+    /**
+     * Resource state conflict
+     */
+    409: ApiErrorResponse;
+    /**
+     * Request validation failed
+     */
+    422: ApiErrorResponse;
+    /**
+     * Internal server error
+     */
+    500: ApiErrorResponse;
+};
+
+export type CareerProfileAuthorityActivateV1CareerProfileAuthorityActivatePostError = CareerProfileAuthorityActivateV1CareerProfileAuthorityActivatePostErrors[keyof CareerProfileAuthorityActivateV1CareerProfileAuthorityActivatePostErrors];
+
+export type CareerProfileAuthorityActivateV1CareerProfileAuthorityActivatePostResponses = {
+    /**
+     * Successful Response
+     */
+    200: CareerProfileAuthorityState;
+};
+
+export type CareerProfileAuthorityActivateV1CareerProfileAuthorityActivatePostResponse = CareerProfileAuthorityActivateV1CareerProfileAuthorityActivatePostResponses[keyof CareerProfileAuthorityActivateV1CareerProfileAuthorityActivatePostResponses];
+
+export type CareerProfileConsumerProjectionV1CareerProfileConsumerProjectionGetData = {
+    body?: never;
+    headers?: {
+        /**
+         * X-Jobos-Mcp-Token
+         */
+        'X-JobOS-MCP-Token'?: string | null;
+        /**
+         * X-Jobos-Agent-Id
+         */
+        'X-JobOS-Agent-Id'?: string | null;
+        /**
+         * X-Jobos-Agent-Token
+         */
+        'X-JobOS-Agent-Token'?: string | null;
+    };
+    path?: never;
+    query?: never;
+    url: '/v1/career-profile/consumer-projection';
+};
+
+export type CareerProfileConsumerProjectionV1CareerProfileConsumerProjectionGetErrors = {
+    /**
+     * Device authentication required
+     */
+    401: ApiErrorResponse;
+    /**
+     * Request validation failed
+     */
+    422: ApiErrorResponse;
+    /**
+     * Internal server error
+     */
+    500: ApiErrorResponse;
+};
+
+export type CareerProfileConsumerProjectionV1CareerProfileConsumerProjectionGetError = CareerProfileConsumerProjectionV1CareerProfileConsumerProjectionGetErrors[keyof CareerProfileConsumerProjectionV1CareerProfileConsumerProjectionGetErrors];
+
+export type CareerProfileConsumerProjectionV1CareerProfileConsumerProjectionGetResponses = {
+    /**
+     * Successful Response
+     */
+    200: CareerProfileContextPreview;
+};
+
+export type CareerProfileConsumerProjectionV1CareerProfileConsumerProjectionGetResponse = CareerProfileConsumerProjectionV1CareerProfileConsumerProjectionGetResponses[keyof CareerProfileConsumerProjectionV1CareerProfileConsumerProjectionGetResponses];
 
 export type CareerProfileEvidenceImportV1CareerProfileEvidencePostData = {
     body: EvidenceImportRequest;

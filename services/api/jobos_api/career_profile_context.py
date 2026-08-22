@@ -21,9 +21,7 @@ from .sqlite_connection import connect_sqlite
 
 CareerProfileArea = Literal["my_career", "what_im_looking_for", "my_evidence"]
 ContextMode = Literal["none", "selected", "broader"]
-OpaqueContextSnapshotId = Annotated[
-    str, Field(pattern=r"^cpcs_[A-Za-z0-9_-]{16,64}$")
-]
+OpaqueContextSnapshotId = Annotated[str, Field(pattern=r"^cpcs_[A-Za-z0-9_-]{16,64}$")]
 
 
 class StrictModel(BaseModel):
@@ -180,8 +178,7 @@ class CareerProfileContextStore:
         agent_id: str,
     ) -> None:
         active = connection.execute(
-            "SELECT 1 FROM career_profile_connected_agents "
-            "WHERE agent_id = ? AND active = 1",
+            "SELECT 1 FROM career_profile_connected_agents WHERE agent_id = ? AND active = 1",
             (agent_id,),
         ).fetchone()
         if active is None:
@@ -410,9 +407,7 @@ class CareerProfileContextStore:
             created_at=created_at,
         )
 
-    def get_snapshot(
-        self, snapshot_id: str, *, agent_id: str
-    ) -> CareerProfileContextSnapshot:
+    def get_snapshot(self, snapshot_id: str, *, agent_id: str) -> CareerProfileContextSnapshot:
         with connect_sqlite(f"file:{self.database}?mode=ro", uri=True) as connection:
             return self.get_snapshot_in_connection(
                 connection,
@@ -487,6 +482,7 @@ class CareerProfileContextStore:
         return CareerProfileCompleteCurrent(
             profile_revision=current.profile_revision,
             authority_epoch=current.authority_epoch,
+            authority_state=current.authority_state,
             items=items,
             source_evidence=evidence,
         )
