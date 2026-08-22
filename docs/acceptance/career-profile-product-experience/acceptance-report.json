@@ -10,7 +10,7 @@
       "tests/public-release/synthetic-fixtures.json assets whose path matches those generated acceptance PNGs"
     ],
     "entryCount": 556,
-    "sha256": "9a61483f81d826806e808c9dd8eab4d24cdda79592baea3e8ccef82bd383f647"
+    "sha256": "cc73f942232dc5f7b541a364e5819c538104ab6ff64c092510ed20d4dadeb336"
   },
   "acceptanceOutputs": {
     "algorithm": "sha256(canonical-json(utf8-bytewise-sorted generated screenshot entries {path,size,sha256}))",

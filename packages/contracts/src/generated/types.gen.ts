@@ -7886,7 +7886,12 @@ export type WorkspacePutV1WorkspacePutData = {
         'X-JobOS-MCP-Token'?: string | null;
     };
     path?: never;
-    query?: never;
+    query?: {
+        /**
+         * Conversation Id
+         */
+        conversation_id?: string | null;
+    };
     url: '/v1/workspace';
 };
 

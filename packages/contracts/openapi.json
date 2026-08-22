@@ -16258,6 +16258,22 @@
         "operationId": "workspace_put_v1_workspace_put",
         "parameters": [
           {
+            "in": "query",
+            "name": "conversation_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Conversation Id"
+            }
+          },
+          {
             "in": "header",
             "name": "X-JobOS-MCP-Token",
             "required": false,
