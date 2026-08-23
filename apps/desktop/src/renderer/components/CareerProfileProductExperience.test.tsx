@@ -163,6 +163,7 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+  vi.useRealTimers()
   cleanup()
   window.localStorage.clear()
   vi.restoreAllMocks()
@@ -208,7 +209,7 @@ test('renders list-valued career details as human-readable words', async () => {
   expect(detail.textContent).not.toMatch(/applied_ai_builder|internal_ai_enablement/)
 })
 
-test('adds a typed career detail using accessible fields rather than JSON', async () => {
+test('adds a typed career detail and dismisses its success feedback', async () => {
   const nextSkill = { ...skill, itemId: 'cpi_fakeproductskill5678', value: { kind: 'skill', name: 'React', level: 'expert' } }
   const createCareerProfileItem = vi.fn().mockResolvedValue({
     status: 'saved',
@@ -233,6 +234,23 @@ test('adds a typed career detail using accessible fields rather than JSON', asyn
   })))
   expect(await screen.findByRole('button', { name: /React/i })).not.toBeNull()
   expect(screen.queryByText(/"kind"|JSON/i)).toBeNull()
+  expect(await screen.findByText('Career detail added.')).not.toBeNull()
+  await waitFor(() => expect(screen.queryByText('Career detail added.')).toBeNull(), { timeout: 6_000 })
+}, 7_000)
+
+test('keeps an actionable career-detail error visible', async () => {
+  const api = bridge({
+    createCareerProfileItem: vi.fn().mockRejectedValue(new Error('offline'))
+  })
+  render(<CareerProfileWorkspace bridge={api} hasActiveTurn={false} />)
+  await screen.findByRole('heading', { name: 'Work arrangement' })
+  fireEvent.click(screen.getByRole('button', { name: /My Career/i }))
+  fireEvent.click(await screen.findByRole('button', { name: 'Add career detail' }))
+  const editor = screen.getByRole('dialog', { name: 'Add career detail' })
+  fireEvent.change(within(editor).getByLabelText('Detail type'), { target: { value: 'skill' } })
+  fireEvent.change(within(editor).getByLabelText('Skill name'), { target: { value: 'React' } })
+  fireEvent.click(within(editor).getByRole('button', { name: 'Save detail' }))
+  expect((await within(editor).findByRole('alert')).textContent).toMatch(/draft is still here/i)
 })
 
 test('imports Evidence with live recovery and retries the full original mutation identity after an ambiguous failure', async () => {
