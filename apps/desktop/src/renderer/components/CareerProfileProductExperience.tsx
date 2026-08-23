@@ -280,6 +280,17 @@ const careerGroupLabels: Partial<Record<EditableItemKind, string>> = {
   custom: 'Other details'
 }
 
+const careerGroupDescriptions: Partial<Record<EditableItemKind, string>> = {
+  identity: 'The name and professional summary JobOS can use when representing you.',
+  education: 'Education and training JobOS can reference when they are relevant.',
+  skill: 'Capabilities JobOS can use to understand fit and keep drafts accurate.',
+  positioning: 'The headline and framing you want JobOS to use for your career story.',
+  experience: 'Roles and work history JobOS can reference as career context.',
+  project: 'Concrete examples of what you built, led, or contributed to.',
+  claim: 'Qualified statements JobOS can use only within the boundaries you saved.',
+  custom: 'Additional career context that does not fit another section.'
+}
+
 function normalizeCareerSearch(value: string): string {
   return value.toLocaleLowerCase().replaceAll(/[^a-z0-9]+/g, '')
 }
@@ -816,6 +827,7 @@ function ItemArea({ active, area, online, product }: {
   const careerGroups = useMemo(() => itemSpecs
     .filter(spec => spec.area === 'my_career')
     .map(spec => ({
+      description: careerGroupDescriptions[spec.kind] ?? '',
       kind: spec.kind,
       label: careerGroupLabels[spec.kind] ?? spec.label,
       items: filteredItems.filter(item => itemKind(item) === spec.kind)
@@ -867,6 +879,16 @@ function ItemArea({ active, area, online, product }: {
         </div>
         <button className="career-primary-button" disabled={!online || !product.current} onClick={() => openEditor(null)} type="button"><Plus aria-hidden="true" size={15} />Add {areaName}</button>
       </div>
+      {area === 'my_career' ? (
+        <aside aria-label="How JobOS uses My Career" className="career-product-usage-card" role="region">
+          <ShieldCheck aria-hidden="true" size={20} />
+          <div>
+            <span className="career-kicker">How JobOS uses this</span>
+            <strong>Accepted details become shared career context.</strong>
+            <p>They help JobOS when researching roles, comparing opportunities, and drafting documents. They inform the work—they are not a completeness score or automatic decision.</p>
+          </div>
+        </aside>
+      ) : null}
       {area === 'my_career' && items.length > 0 ? (
         <div className="career-product-search">
           <label>
@@ -905,7 +927,7 @@ function ItemArea({ active, area, online, product }: {
                   onClick={() => toggleGroup(group.kind)}
                   type="button"
                 >
-                  <span><strong>{group.label}</strong><small>{group.items.length}</small></span>
+                  <div><span><strong>{group.label}</strong><small>{group.items.length}</small></span><p>{group.description}</p></div>
                   <ChevronDown aria-hidden="true" size={18} />
                 </button>
                 {expanded ? <div className="career-product-card-grid" id={groupId}>{group.items.map(itemCard)}</div> : null}
