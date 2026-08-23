@@ -161,6 +161,15 @@ export function useCareerProfileProduct(bridge: CareerProfileBridge) {
   const cacheWriteSequence = useRef(0)
   const headCheckRunning = useRef(false)
 
+  useEffect(() => {
+    if (status !== 'saved' || !message) return undefined
+    const timeout = window.setTimeout(() => {
+      setMessage('')
+      setStatus(currentStatus => currentStatus === 'saved' ? 'ready' : currentStatus)
+    }, 5_000)
+    return () => { window.clearTimeout(timeout) }
+  }, [message, status])
+
   const persist = useCallback(async (profile: CareerProfileCurrent) => {
     const sequence = ++cacheWriteSequence.current
     try {

@@ -32,6 +32,12 @@ export function useCareerProfileCollaboration(
   const refreshSequence = useRef(0)
 
   useEffect(() => {
+    if (status !== 'idle' || !message) return undefined
+    const timeout = window.setTimeout(() => { setMessage('') }, 5_000)
+    return () => { window.clearTimeout(timeout) }
+  }, [message, status])
+
+  useEffect(() => {
     mounted.current = true
     return () => { mounted.current = false }
   }, [])
@@ -107,11 +113,11 @@ export function useCareerProfileCollaboration(
       return true
     } catch (error) {
       const stale = /revision|stale|changed|regenerat|payload/i.test(errorText(error))
+      await refresh()
       setStatus('error')
       setMessage(stale
         ? 'This proposal is out of date and cannot replace newer profile data. Ask the agent to regenerate it.'
         : 'JobOS could not save that decision. Nothing was changed—try again.')
-      await refresh()
       return false
     }
   }, [bridge, history, onProfileChanged, online, refresh, status])
@@ -135,11 +141,11 @@ export function useCareerProfileCollaboration(
       return true
     } catch (error) {
       const stale = /revision|stale|changed|regenerat/i.test(errorText(error))
+      await refresh()
       setStatus('error')
       setMessage(stale
         ? 'Your Career Profile changed after this edit. Reloaded the latest version instead of overwriting it.'
         : 'JobOS could not undo that agent change. Nothing was changed—try again.')
-      await refresh()
       return false
     }
   }, [bridge, history, onProfileChanged, online, refresh, status])

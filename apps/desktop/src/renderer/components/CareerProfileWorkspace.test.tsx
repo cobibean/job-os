@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, expect, test, vi } from 'vitest'
 
 import type { CareerProfileBridge } from '../../shared/contracts'
@@ -409,6 +409,7 @@ test('uses the latest loaded profile revision when accepting an exact zero-Evide
   expect(screen.getAllByText('Level')).toHaveLength(2)
   expect(screen.queryByText(/"level":/)).toBeNull()
 
+  const timeout = vi.spyOn(window, 'setTimeout')
   fireEvent.click(screen.getByRole('button', { name: 'Accept exact change' }))
   await waitFor(() => expect(decideCareerProfileProposal).toHaveBeenCalledWith(
     'cpp_fakeproposal123456',
@@ -418,6 +419,12 @@ test('uses the latest loaded profile revision when accepting an exact zero-Evide
       proposalSha256: 'a'.repeat(64)
     })
   ))
+  expect(await screen.findByText('Exact change accepted.')).not.toBeNull()
+  const dismiss = timeout.mock.calls.find(([, delay]) => delay === 5_000)?.[0]
+  expect(dismiss).toBeTypeOf('function')
+  if (typeof dismiss !== 'function') throw new Error('Expected a transient feedback timer')
+  act(() => { dismiss() })
+  expect(screen.queryByText('Exact change accepted.')).toBeNull()
 })
 
 test('surfaces a direct agent edit as a lightweight confirmation with prominent Undo', async () => {
