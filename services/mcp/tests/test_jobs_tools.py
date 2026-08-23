@@ -1,6 +1,7 @@
 import base64
 import json
 import os
+import re
 from pathlib import Path
 
 import httpx
@@ -716,6 +717,38 @@ async def test_mcp_server_exposes_public_v1_parity_tools_while_retaining_job_too
     assert snapshot_schema["properties"]["include_targets"]["default"] is True
     create_schema = tools_by_name["browser_tab_create"].inputSchema
     assert create_schema["properties"]["activate"]["default"] is True
+
+
+@pytest.mark.anyio
+async def test_mcp_server_exposes_capability_map_and_keeps_catalog_in_sync():
+    client = JobOsMcpClient(
+        base_url="http://jobos.test",
+        device_token="test-device-token",
+        mcp_token="test-mcp-trusted-token",
+        transport=httpx.MockTransport(lambda _: httpx.Response(200, json={})),
+    )
+    server = create_server(client)
+
+    tools = await server.list_tools()
+    resources = await server.list_resources()
+    contents = list(await server.read_resource("jobos://capability-map"))
+    await client.aclose()
+
+    assert "jobos://capability-map" in server.instructions
+    assert "supporting Evidence is optional" in server.instructions
+    assert [str(resource.uri) for resource in resources] == ["jobos://capability-map"]
+    assert len(contents) == 1
+    capability_map = contents[0].content
+    assert "## Workflow: build a Career Profile through conversation" in capability_map
+    assert "Evidence is optional" in capability_map
+
+    documented_tools = set(re.findall(r"^\| `([a-z0-9_]+)` \|", capability_map, re.MULTILINE))
+    assert documented_tools == {tool.name for tool in tools}
+
+    repository_map = (
+        Path(__file__).resolve().parents[3] / "docs/public/mcp-capability-map.md"
+    ).read_text(encoding="utf-8")
+    assert capability_map == repository_map
 
 
 @pytest.mark.anyio
