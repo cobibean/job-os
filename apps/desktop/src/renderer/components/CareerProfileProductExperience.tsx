@@ -291,9 +291,9 @@ function itemTitle(item: CareerProfileItemSnapshot): string {
     value.credential,
     value.label,
     value.statement,
-    Array.isArray(value.roles) ? value.roles.join(', ') : null,
-    Array.isArray(value.locations) ? value.locations.join(', ') : null,
-    Array.isArray(value.industries) ? value.industries.join(', ') : null
+    Array.isArray(value.roles) ? readableValue(value.roles) : null,
+    Array.isArray(value.locations) ? readableValue(value.locations) : null,
+    Array.isArray(value.industries) ? readableValue(value.industries) : null
   ]
   const title = candidates.find(candidate => typeof candidate === 'string' && candidate.trim())
   const kind = itemKind(item)
@@ -329,7 +329,7 @@ function readableLabel(value: string): string {
 }
 
 function readableValue(value: unknown): string {
-  if (Array.isArray(value)) return value.join(', ')
+  if (Array.isArray(value)) return value.map(item => readableValue(item)).join(', ')
   if (typeof value === 'boolean') return value ? 'Yes' : 'No'
   if (typeof value === 'number') return value.toLocaleString()
   if (value === null || value === undefined || value === '') return 'Not specified'
@@ -541,7 +541,7 @@ function importanceMeaning(value: string | undefined): string {
 
 function preferenceGuidance(kind: EditableItemKind, draft: Record<string, string>): PreferenceGuidance | null {
   if (kind === 'target_roles') {
-    const roles = draftLines(draft.roles)
+    const roles = draftLines(draft.roles).map(role => readableValue(role))
     const target = roles[0] ?? 'a role you add'
     return {
       affectedBehavior: 'Affects research, matching, and agent focus.',
@@ -562,7 +562,7 @@ function preferenceGuidance(kind: EditableItemKind, draft: Record<string, string
     }
   }
   if (kind === 'location') {
-    const locations = draftLines(draft.locations)
+    const locations = draftLines(draft.locations).map(location => readableValue(location))
     const place = locations[0] ?? 'a place you add'
     const relocation = draft.relocation === 'yes'
       ? 'You are open to relocating.'
@@ -578,7 +578,7 @@ function preferenceGuidance(kind: EditableItemKind, draft: Record<string, string
     }
   }
   if (kind === 'industries') {
-    const industries = draftLines(draft.industries)
+    const industries = draftLines(draft.industries).map(industry => readableValue(industry))
     const industry = industries[0] ?? 'an industry you add'
     return {
       affectedBehavior: 'Affects research, matching, and agent focus.',
