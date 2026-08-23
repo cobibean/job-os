@@ -21,6 +21,7 @@ from fastapi import (
     FastAPI,
     Header,
     HTTPException,
+    Query,
     Request,
     WebSocket,
     WebSocketDisconnect,
@@ -73,8 +74,21 @@ from jobos_api.career_profile import (
     WorkArrangementRestore,
     principal_for_device,
 )
+from jobos_api.career_profile_agent_tools import (
+    AgentEvidenceImportResult,
+    AgentEvidenceInspectResult,
+    AgentProfileSearchResult,
+    CareerProfileArea,
+    CareerProfileItemKind,
+    CareerProfileReviewStatus,
+    inspect_evidence_segment,
+    search_projection,
+)
 from jobos_api.career_profile_collaboration import (
     AgentEditResult,
+    AgentProfileBatchEditRequest,
+    AgentProfileBatchEditResult,
+    AgentProfileChanges,
     AgentProfileEditRequest,
     AgentTrustModeUpdate,
     CareerProfileCollaborationConflict,
@@ -288,6 +302,11 @@ _ENDPOINT_ERROR_ROUTES = {
             "career_profile_context_get",
             "career_profile_context_preview",
             "career_profile_context_update",
+            "career_profile_agent_changes",
+            "career_profile_agent_edit_batch",
+            "career_profile_agent_evidence_import",
+            "career_profile_agent_evidence_inspect",
+            "career_profile_agent_search",
             "career_profile_export",
             "career_profile_intent_grant_create",
             "career_profile_proposal_decide",
@@ -326,6 +345,11 @@ _ENDPOINT_ERROR_ROUTES = {
             "career_profile_complete_get",
             "career_profile_context_get",
             "career_profile_context_snapshot_get",
+            "career_profile_agent_changes",
+            "career_profile_agent_edit_batch",
+            "career_profile_agent_evidence_import",
+            "career_profile_agent_evidence_inspect",
+            "career_profile_agent_search",
             "career_profile_intent_grant_create",
             "career_profile_proposal_decide",
             "career_profile_evidence_content",
@@ -377,6 +401,11 @@ _ENDPOINT_ERROR_ROUTES = {
             "career_profile_authority_activate",
             "career_profile_context_snapshot_create",
             "career_profile_context_update",
+            "career_profile_agent_changes",
+            "career_profile_agent_edit_batch",
+            "career_profile_agent_evidence_import",
+            "career_profile_agent_evidence_inspect",
+            "career_profile_agent_search",
             "career_profile_evidence_content",
             "career_profile_evidence_import",
             "career_profile_evidence_erase",
@@ -1836,6 +1865,75 @@ def create_app(
         except ConnectedAgentAuthorizationError as error:
             raise HTTPException(status_code=404, detail=str(error)) from error
 
+    @app.get(
+        "/v1/career-profile/agent-search",
+        tags=["career-profile"],
+    )
+    def career_profile_agent_search(
+        identity: Annotated[DeviceIdentity, Depends(authenticated_device)],
+        query: Annotated[str, Query(min_length=1, max_length=500)],
+        kinds: Annotated[list[CareerProfileItemKind] | None, Query()] = None,
+        areas: Annotated[list[CareerProfileArea] | None, Query()] = None,
+        review_statuses: Annotated[list[CareerProfileReviewStatus] | None, Query()] = None,
+        has_evidence: bool | None = None,
+        limit: Annotated[int, Query(ge=1, le=100)] = 25,
+        mcp_token: Annotated[str | None, Header(alias="X-JobOS-MCP-Token")] = None,
+        agent_id: Annotated[str | None, Header(alias="X-JobOS-Agent-Id")] = None,
+        agent_token: Annotated[str | None, Header(alias="X-JobOS-Agent-Token")] = None,
+    ) -> AgentProfileSearchResult:
+        agent = authenticated_career_profile_agent(
+            identity, mcp_token, agent_id, agent_token
+        )
+        try:
+            complete_career_profile.require_consumer_projection()
+            preview = career_profile_context.preview(agent_id=agent.agent_id)
+            return search_projection(
+                preview.projection,
+                query=query,
+                kinds=kinds,
+                areas=areas,
+                review_statuses=review_statuses,
+                has_evidence=has_evidence,
+                limit=limit,
+            )
+        except (
+            CareerProfileValueError,
+            CareerProfileContextSelectionError,
+            CareerProfileLegacyWriterFenced,
+        ) as error:
+            raise complete_profile_conflict(error) from error
+
+    @app.get(
+        "/v1/career-profile/agent-changes",
+        tags=["career-profile"],
+    )
+    def career_profile_agent_changes(
+        identity: Annotated[DeviceIdentity, Depends(authenticated_device)],
+        status: Literal["pending", "accepted", "rejected", "all"] = "pending",
+        limit: Annotated[int, Query(ge=1, le=100)] = 25,
+        mcp_token: Annotated[str | None, Header(alias="X-JobOS-MCP-Token")] = None,
+        agent_id: Annotated[str | None, Header(alias="X-JobOS-Agent-Id")] = None,
+        agent_token: Annotated[str | None, Header(alias="X-JobOS-Agent-Token")] = None,
+    ) -> AgentProfileChanges:
+        agent = authenticated_career_profile_agent(
+            identity, mcp_token, agent_id, agent_token
+        )
+        try:
+            complete_career_profile.require_consumer_projection()
+            preview = career_profile_context.preview(agent_id=agent.agent_id)
+            return career_profile_collaboration.list_agent_changes(
+                agent=agent,
+                status=None if status == "all" else cast(ProposalStatus, status),
+                limit=limit,
+                authorized_projection=preview.projection,
+            )
+        except (
+            CareerProfileValueError,
+            CareerProfileContextSelectionError,
+            CareerProfileLegacyWriterFenced,
+        ) as error:
+            raise complete_profile_conflict(error) from error
+
     @app.post(
         "/v1/career-profile/agent-edits",
         tags=["career-profile"],
@@ -1855,6 +1953,41 @@ def create_app(
         )
         try:
             return career_profile_collaboration.submit_edit(agent=agent, command=command)
+        except (
+            CareerProfileRevisionConflict,
+            CareerProfileIdempotencyConflict,
+            CareerProfileErasureInProgress,
+            CareerProfileItemNotFound,
+            CareerProfileValueError,
+            CareerProfileCollaborationConflict,
+        ) as error:
+            raise complete_profile_conflict(error) from error
+
+    @app.post(
+        "/v1/career-profile/agent-edits/batch",
+        tags=["career-profile"],
+    )
+    def career_profile_agent_edit_batch(
+        command: AgentProfileBatchEditRequest,
+        identity: Annotated[DeviceIdentity, Depends(authenticated_device)],
+        mcp_token: Annotated[str | None, Header(alias="X-JobOS-MCP-Token")] = None,
+        agent_id: Annotated[str | None, Header(alias="X-JobOS-Agent-Id")] = None,
+        agent_token: Annotated[str | None, Header(alias="X-JobOS-Agent-Token")] = None,
+    ) -> AgentProfileBatchEditResult:
+        agent = authenticated_career_profile_agent(
+            identity, mcp_token, agent_id, agent_token
+        )
+        try:
+            complete_career_profile.require_consumer_projection()
+            preview = career_profile_context.preview(agent_id=agent.agent_id)
+            return career_profile_collaboration.submit_edit_batch(
+                agent=agent,
+                command=command,
+                authorized_projection=preview.projection,
+                authorized_scope=preview.scope,
+            )
+        except ConnectedAgentAuthorizationError as error:
+            raise HTTPException(status_code=403, detail=str(error)) from error
         except (
             CareerProfileRevisionConflict,
             CareerProfileIdempotencyConflict,
@@ -2133,6 +2266,110 @@ def create_app(
             CareerProfileErasureInProgress,
             CareerProfileItemNotFound,
             CareerProfileValueError,
+        ) as error:
+            raise complete_profile_conflict(error) from error
+
+    @app.get(
+        "/v1/career-profile/agent-evidence/{evidence_id}",
+        tags=["career-profile"],
+    )
+    def career_profile_agent_evidence_inspect(
+        evidence_id: OpaqueEvidenceId,
+        identity: Annotated[DeviceIdentity, Depends(authenticated_device)],
+        byte_start: Annotated[int, Query(ge=0)] = 0,
+        byte_length: Annotated[int, Query(ge=1, le=262_144)] = 65_536,
+        mcp_token: Annotated[str | None, Header(alias="X-JobOS-MCP-Token")] = None,
+        agent_id: Annotated[str | None, Header(alias="X-JobOS-Agent-Id")] = None,
+        agent_token: Annotated[str | None, Header(alias="X-JobOS-Agent-Token")] = None,
+    ) -> AgentEvidenceInspectResult:
+        agent = authenticated_career_profile_agent(
+            identity, mcp_token, agent_id, agent_token
+        )
+        try:
+            complete_career_profile.require_consumer_projection()
+            preview = career_profile_context.preview(agent_id=agent.agent_id)
+            evidence = next(
+                (
+                    source
+                    for source in preview.projection.source_evidence
+                    if source.evidence_id == evidence_id
+                ),
+                None,
+            )
+            if evidence is None:
+                raise HTTPException(
+                    status_code=403,
+                    detail="This Evidence source is outside the agent's authorized context",
+                )
+            content = complete_career_profile.read_evidence(evidence_id)
+            return inspect_evidence_segment(
+                evidence,
+                content,
+                byte_start=byte_start,
+                byte_length=byte_length,
+            )
+        except HTTPException:
+            raise
+        except (
+            CareerProfileValueError,
+            CareerProfileContextSelectionError,
+            CareerProfileLegacyWriterFenced,
+            CareerProfileEvidenceNotFound,
+            CareerProfileEvidenceIntegrityError,
+            CareerProfileEvidencePathError,
+        ) as error:
+            raise complete_profile_conflict(error) from error
+
+    @app.post(
+        "/v1/career-profile/agent-evidence",
+        tags=["career-profile"],
+        status_code=201,
+    )
+    def career_profile_agent_evidence_import(
+        command: EvidenceImportRequest,
+        identity: Annotated[DeviceIdentity, Depends(authenticated_device)],
+        mcp_token: Annotated[str | None, Header(alias="X-JobOS-MCP-Token")] = None,
+        agent_id: Annotated[str | None, Header(alias="X-JobOS-Agent-Id")] = None,
+        agent_token: Annotated[str | None, Header(alias="X-JobOS-Agent-Token")] = None,
+    ) -> AgentEvidenceImportResult:
+        agent = authenticated_career_profile_agent(
+            identity, mcp_token, agent_id, agent_token
+        )
+        try:
+            complete_career_profile.require_consumer_projection()
+            profile = complete_career_profile.import_evidence(
+                principal=agent.principal,
+                command=command,
+                mutation_source="agent_inference",
+            )
+            content_sha256 = hashlib.sha256(
+                base64.b64decode(command.content_base64, validate=True)
+            ).hexdigest()
+            matches = [
+                evidence
+                for evidence in profile.source_evidence
+                if evidence.active
+                and evidence.sha256 == content_sha256
+                and evidence.original_filename == command.original_filename
+                and evidence.media_type == command.media_type
+                and evidence.provenance.source_kind == command.provenance.source_kind
+                and evidence.provenance.source_label == command.provenance.source_label
+                and evidence.provenance.method == "agent_import"
+            ]
+            if not matches:
+                raise RuntimeError("Imported Career Profile Evidence was not returned")
+            evidence = max(matches, key=lambda item: (item.imported_at, item.evidence_id))
+            return AgentEvidenceImportResult(
+                profile_revision=profile.profile_revision,
+                evidence=evidence,
+            )
+        except (
+            CareerProfileRevisionConflict,
+            CareerProfileIdempotencyConflict,
+            CareerProfileErasureInProgress,
+            CareerProfileLegacyWriterFenced,
+            CareerProfileValueError,
+            CareerProfileEvidencePathError,
         ) as error:
             raise complete_profile_conflict(error) from error
 

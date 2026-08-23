@@ -69,6 +69,180 @@ export type AgentEditResult = {
 };
 
 /**
+ * AgentEvidenceImportResult
+ */
+export type AgentEvidenceImportResult = {
+    evidence: SourceEvidenceRecord;
+    /**
+     * Profile Revision
+     */
+    profile_revision: number;
+};
+
+/**
+ * AgentEvidenceInspectResult
+ */
+export type AgentEvidenceInspectResult = {
+    /**
+     * Byte Length
+     */
+    byte_length: number;
+    /**
+     * Byte Start
+     */
+    byte_start: number;
+    /**
+     * Content Base64
+     */
+    content_base64: string;
+    evidence: SourceEvidenceRecord;
+    /**
+     * Next Byte Start
+     */
+    next_byte_start?: number | null;
+    /**
+     * Text
+     */
+    text?: string | null;
+    /**
+     * Total Bytes
+     */
+    total_bytes: number;
+};
+
+/**
+ * AgentProfileBatchEditItem
+ */
+export type AgentProfileBatchEditItem = {
+    /**
+     * Evidence Ids
+     */
+    evidence_ids?: Array<string>;
+    /**
+     * Operation
+     */
+    operation: 'item.create' | 'item.update' | 'item.remove';
+    /**
+     * Reason
+     */
+    reason: string;
+    /**
+     * Target Id
+     */
+    target_id?: string | null;
+    /**
+     * Value
+     */
+    value?: ({
+        kind: 'identity';
+    } & IdentityValue) | ({
+        kind: 'education';
+    } & EducationValue) | ({
+        kind: 'skill';
+    } & SkillValue) | ({
+        kind: 'positioning';
+    } & PositioningValue) | ({
+        kind: 'experience';
+    } & ExperienceValue) | ({
+        kind: 'project';
+    } & ProjectValue) | ({
+        kind: 'claim';
+    } & ClaimValue) | ({
+        kind: 'target_roles';
+    } & TargetRolesValue) | ({
+        kind: 'compensation';
+    } & CompensationValue) | ({
+        kind: 'location';
+    } & LocationPreferenceValue) | ({
+        kind: 'work_arrangement';
+    } & WorkArrangementProfileValue) | ({
+        kind: 'industries';
+    } & IndustryPreferencesValue) | ({
+        kind: 'priority';
+    } & PriorityValue) | ({
+        kind: 'dealbreaker';
+    } & DealbreakerValue) | ({
+        kind: 'custom';
+    } & CustomValue) | null;
+};
+
+/**
+ * AgentProfileBatchEditOutcome
+ */
+export type AgentProfileBatchEditOutcome = {
+    /**
+     * Operation
+     */
+    operation: 'item.create' | 'item.update' | 'item.remove';
+    /**
+     * Outcome
+     */
+    outcome: 'applied' | 'proposal';
+    /**
+     * Profile Revision
+     */
+    profile_revision: number;
+    /**
+     * Proposal Id
+     */
+    proposal_id?: string | null;
+    /**
+     * Target Id
+     */
+    target_id: string;
+};
+
+/**
+ * AgentProfileBatchEditRequest
+ */
+export type AgentProfileBatchEditRequest = {
+    /**
+     * Edits
+     */
+    edits: Array<AgentProfileBatchEditItem>;
+    /**
+     * Expected Profile Revision
+     */
+    expected_profile_revision: number;
+    /**
+     * Idempotency Key
+     */
+    idempotency_key: string;
+};
+
+/**
+ * AgentProfileBatchEditResult
+ */
+export type AgentProfileBatchEditResult = {
+    /**
+     * Profile Revision
+     */
+    profile_revision: number;
+    /**
+     * Results
+     */
+    results: Array<AgentProfileBatchEditOutcome>;
+};
+
+/**
+ * AgentProfileChanges
+ */
+export type AgentProfileChanges = {
+    /**
+     * Applied Revisions
+     */
+    applied_revisions: Array<ProfileHistoryRevision>;
+    /**
+     * Profile Revision
+     */
+    profile_revision: number;
+    /**
+     * Proposals
+     */
+    proposals: Array<CareerProfileChangeProposal>;
+};
+
+/**
  * AgentProfileEditRequest
  */
 export type AgentProfileEditRequest = {
@@ -130,6 +304,32 @@ export type AgentProfileEditRequest = {
     } & DealbreakerValue) | ({
         kind: 'custom';
     } & CustomValue) | null;
+};
+
+/**
+ * AgentProfileSearchResult
+ */
+export type AgentProfileSearchResult = {
+    /**
+     * Items
+     */
+    items: Array<ProfileItemRecord>;
+    /**
+     * Profile Revision
+     */
+    profile_revision: number;
+    /**
+     * Source Evidence
+     */
+    source_evidence: Array<SourceEvidenceRecord>;
+    /**
+     * Total Evidence
+     */
+    total_evidence: number;
+    /**
+     * Total Items
+     */
+    total_items: number;
 };
 
 /**
@@ -4225,6 +4425,74 @@ export type CareerProfileCompleteGetV1CareerProfileGetResponses = {
 
 export type CareerProfileCompleteGetV1CareerProfileGetResponse = CareerProfileCompleteGetV1CareerProfileGetResponses[keyof CareerProfileCompleteGetV1CareerProfileGetResponses];
 
+export type CareerProfileAgentChangesV1CareerProfileAgentChangesGetData = {
+    body?: never;
+    headers?: {
+        /**
+         * X-Jobos-Mcp-Token
+         */
+        'X-JobOS-MCP-Token'?: string | null;
+        /**
+         * X-Jobos-Agent-Id
+         */
+        'X-JobOS-Agent-Id'?: string | null;
+        /**
+         * X-Jobos-Agent-Token
+         */
+        'X-JobOS-Agent-Token'?: string | null;
+    };
+    path?: never;
+    query?: {
+        /**
+         * Status
+         */
+        status?: 'pending' | 'accepted' | 'rejected' | 'all';
+        /**
+         * Limit
+         */
+        limit?: number;
+    };
+    url: '/v1/career-profile/agent-changes';
+};
+
+export type CareerProfileAgentChangesV1CareerProfileAgentChangesGetErrors = {
+    /**
+     * Device authentication required
+     */
+    401: ApiErrorResponse;
+    /**
+     * Operation is not permitted
+     */
+    403: ApiErrorResponse;
+    /**
+     * Resource not found
+     */
+    404: ApiErrorResponse;
+    /**
+     * Resource state conflict
+     */
+    409: ApiErrorResponse;
+    /**
+     * Request validation failed
+     */
+    422: ApiErrorResponse;
+    /**
+     * Internal server error
+     */
+    500: ApiErrorResponse;
+};
+
+export type CareerProfileAgentChangesV1CareerProfileAgentChangesGetError = CareerProfileAgentChangesV1CareerProfileAgentChangesGetErrors[keyof CareerProfileAgentChangesV1CareerProfileAgentChangesGetErrors];
+
+export type CareerProfileAgentChangesV1CareerProfileAgentChangesGetResponses = {
+    /**
+     * Successful Response
+     */
+    200: AgentProfileChanges;
+};
+
+export type CareerProfileAgentChangesV1CareerProfileAgentChangesGetResponse = CareerProfileAgentChangesV1CareerProfileAgentChangesGetResponses[keyof CareerProfileAgentChangesV1CareerProfileAgentChangesGetResponses];
+
 export type CareerProfileAgentEditV1CareerProfileAgentEditsPostData = {
     body: AgentProfileEditRequest;
     headers?: {
@@ -4271,6 +4539,281 @@ export type CareerProfileAgentEditV1CareerProfileAgentEditsPostResponses = {
 };
 
 export type CareerProfileAgentEditV1CareerProfileAgentEditsPostResponse = CareerProfileAgentEditV1CareerProfileAgentEditsPostResponses[keyof CareerProfileAgentEditV1CareerProfileAgentEditsPostResponses];
+
+export type CareerProfileAgentEditBatchV1CareerProfileAgentEditsBatchPostData = {
+    body: AgentProfileBatchEditRequest;
+    headers?: {
+        /**
+         * X-Jobos-Mcp-Token
+         */
+        'X-JobOS-MCP-Token'?: string | null;
+        /**
+         * X-Jobos-Agent-Id
+         */
+        'X-JobOS-Agent-Id'?: string | null;
+        /**
+         * X-Jobos-Agent-Token
+         */
+        'X-JobOS-Agent-Token'?: string | null;
+    };
+    path?: never;
+    query?: never;
+    url: '/v1/career-profile/agent-edits/batch';
+};
+
+export type CareerProfileAgentEditBatchV1CareerProfileAgentEditsBatchPostErrors = {
+    /**
+     * Device authentication required
+     */
+    401: ApiErrorResponse;
+    /**
+     * Operation is not permitted
+     */
+    403: ApiErrorResponse;
+    /**
+     * Resource not found
+     */
+    404: ApiErrorResponse;
+    /**
+     * Resource state conflict
+     */
+    409: ApiErrorResponse;
+    /**
+     * Request validation failed
+     */
+    422: ApiErrorResponse;
+    /**
+     * Internal server error
+     */
+    500: ApiErrorResponse;
+};
+
+export type CareerProfileAgentEditBatchV1CareerProfileAgentEditsBatchPostError = CareerProfileAgentEditBatchV1CareerProfileAgentEditsBatchPostErrors[keyof CareerProfileAgentEditBatchV1CareerProfileAgentEditsBatchPostErrors];
+
+export type CareerProfileAgentEditBatchV1CareerProfileAgentEditsBatchPostResponses = {
+    /**
+     * Successful Response
+     */
+    200: AgentProfileBatchEditResult;
+};
+
+export type CareerProfileAgentEditBatchV1CareerProfileAgentEditsBatchPostResponse = CareerProfileAgentEditBatchV1CareerProfileAgentEditsBatchPostResponses[keyof CareerProfileAgentEditBatchV1CareerProfileAgentEditsBatchPostResponses];
+
+export type CareerProfileAgentEvidenceImportV1CareerProfileAgentEvidencePostData = {
+    body: EvidenceImportRequest;
+    headers?: {
+        /**
+         * X-Jobos-Mcp-Token
+         */
+        'X-JobOS-MCP-Token'?: string | null;
+        /**
+         * X-Jobos-Agent-Id
+         */
+        'X-JobOS-Agent-Id'?: string | null;
+        /**
+         * X-Jobos-Agent-Token
+         */
+        'X-JobOS-Agent-Token'?: string | null;
+    };
+    path?: never;
+    query?: never;
+    url: '/v1/career-profile/agent-evidence';
+};
+
+export type CareerProfileAgentEvidenceImportV1CareerProfileAgentEvidencePostErrors = {
+    /**
+     * Device authentication required
+     */
+    401: ApiErrorResponse;
+    /**
+     * Operation is not permitted
+     */
+    403: ApiErrorResponse;
+    /**
+     * Resource not found
+     */
+    404: ApiErrorResponse;
+    /**
+     * Resource state conflict
+     */
+    409: ApiErrorResponse;
+    /**
+     * Request validation failed
+     */
+    422: ApiErrorResponse;
+    /**
+     * Internal server error
+     */
+    500: ApiErrorResponse;
+};
+
+export type CareerProfileAgentEvidenceImportV1CareerProfileAgentEvidencePostError = CareerProfileAgentEvidenceImportV1CareerProfileAgentEvidencePostErrors[keyof CareerProfileAgentEvidenceImportV1CareerProfileAgentEvidencePostErrors];
+
+export type CareerProfileAgentEvidenceImportV1CareerProfileAgentEvidencePostResponses = {
+    /**
+     * Successful Response
+     */
+    201: AgentEvidenceImportResult;
+};
+
+export type CareerProfileAgentEvidenceImportV1CareerProfileAgentEvidencePostResponse = CareerProfileAgentEvidenceImportV1CareerProfileAgentEvidencePostResponses[keyof CareerProfileAgentEvidenceImportV1CareerProfileAgentEvidencePostResponses];
+
+export type CareerProfileAgentEvidenceInspectV1CareerProfileAgentEvidenceEvidenceIdGetData = {
+    body?: never;
+    headers?: {
+        /**
+         * X-Jobos-Mcp-Token
+         */
+        'X-JobOS-MCP-Token'?: string | null;
+        /**
+         * X-Jobos-Agent-Id
+         */
+        'X-JobOS-Agent-Id'?: string | null;
+        /**
+         * X-Jobos-Agent-Token
+         */
+        'X-JobOS-Agent-Token'?: string | null;
+    };
+    path: {
+        /**
+         * Evidence Id
+         */
+        evidence_id: string;
+    };
+    query?: {
+        /**
+         * Byte Start
+         */
+        byte_start?: number;
+        /**
+         * Byte Length
+         */
+        byte_length?: number;
+    };
+    url: '/v1/career-profile/agent-evidence/{evidence_id}';
+};
+
+export type CareerProfileAgentEvidenceInspectV1CareerProfileAgentEvidenceEvidenceIdGetErrors = {
+    /**
+     * Device authentication required
+     */
+    401: ApiErrorResponse;
+    /**
+     * Operation is not permitted
+     */
+    403: ApiErrorResponse;
+    /**
+     * Resource not found
+     */
+    404: ApiErrorResponse;
+    /**
+     * Resource state conflict
+     */
+    409: ApiErrorResponse;
+    /**
+     * Request validation failed
+     */
+    422: ApiErrorResponse;
+    /**
+     * Internal server error
+     */
+    500: ApiErrorResponse;
+};
+
+export type CareerProfileAgentEvidenceInspectV1CareerProfileAgentEvidenceEvidenceIdGetError = CareerProfileAgentEvidenceInspectV1CareerProfileAgentEvidenceEvidenceIdGetErrors[keyof CareerProfileAgentEvidenceInspectV1CareerProfileAgentEvidenceEvidenceIdGetErrors];
+
+export type CareerProfileAgentEvidenceInspectV1CareerProfileAgentEvidenceEvidenceIdGetResponses = {
+    /**
+     * Successful Response
+     */
+    200: AgentEvidenceInspectResult;
+};
+
+export type CareerProfileAgentEvidenceInspectV1CareerProfileAgentEvidenceEvidenceIdGetResponse = CareerProfileAgentEvidenceInspectV1CareerProfileAgentEvidenceEvidenceIdGetResponses[keyof CareerProfileAgentEvidenceInspectV1CareerProfileAgentEvidenceEvidenceIdGetResponses];
+
+export type CareerProfileAgentSearchV1CareerProfileAgentSearchGetData = {
+    body?: never;
+    headers?: {
+        /**
+         * X-Jobos-Mcp-Token
+         */
+        'X-JobOS-MCP-Token'?: string | null;
+        /**
+         * X-Jobos-Agent-Id
+         */
+        'X-JobOS-Agent-Id'?: string | null;
+        /**
+         * X-Jobos-Agent-Token
+         */
+        'X-JobOS-Agent-Token'?: string | null;
+    };
+    path?: never;
+    query: {
+        /**
+         * Query
+         */
+        query: string;
+        /**
+         * Kinds
+         */
+        kinds?: Array<'identity' | 'education' | 'skill' | 'positioning' | 'experience' | 'project' | 'claim' | 'target_roles' | 'compensation' | 'location' | 'work_arrangement' | 'industries' | 'priority' | 'dealbreaker' | 'custom'> | null;
+        /**
+         * Areas
+         */
+        areas?: Array<'my_career' | 'what_im_looking_for' | 'my_evidence'> | null;
+        /**
+         * Review Statuses
+         */
+        review_statuses?: Array<'accepted' | 'proposed' | 'conflicting'> | null;
+        /**
+         * Has Evidence
+         */
+        has_evidence?: boolean | null;
+        /**
+         * Limit
+         */
+        limit?: number;
+    };
+    url: '/v1/career-profile/agent-search';
+};
+
+export type CareerProfileAgentSearchV1CareerProfileAgentSearchGetErrors = {
+    /**
+     * Device authentication required
+     */
+    401: ApiErrorResponse;
+    /**
+     * Operation is not permitted
+     */
+    403: ApiErrorResponse;
+    /**
+     * Resource not found
+     */
+    404: ApiErrorResponse;
+    /**
+     * Resource state conflict
+     */
+    409: ApiErrorResponse;
+    /**
+     * Request validation failed
+     */
+    422: ApiErrorResponse;
+    /**
+     * Internal server error
+     */
+    500: ApiErrorResponse;
+};
+
+export type CareerProfileAgentSearchV1CareerProfileAgentSearchGetError = CareerProfileAgentSearchV1CareerProfileAgentSearchGetErrors[keyof CareerProfileAgentSearchV1CareerProfileAgentSearchGetErrors];
+
+export type CareerProfileAgentSearchV1CareerProfileAgentSearchGetResponses = {
+    /**
+     * Successful Response
+     */
+    200: AgentProfileSearchResult;
+};
+
+export type CareerProfileAgentSearchV1CareerProfileAgentSearchGetResponse = CareerProfileAgentSearchV1CareerProfileAgentSearchGetResponses[keyof CareerProfileAgentSearchV1CareerProfileAgentSearchGetResponses];
 
 export type CareerProfileAgentsListV1CareerProfileAgentsGetData = {
     body?: never;

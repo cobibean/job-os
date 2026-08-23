@@ -152,6 +152,7 @@ def test_token_configured_source_defaults_use_application_data_not_cwd(tmp_path,
     monkeypatch.setenv("JOBOS_DEVICE_TOKEN", "source-default-device-token")
     monkeypatch.setenv("JOBOS_MCP_TOKEN", "source-default-mcp-token")
     monkeypatch.delenv("JOBOS_STATE_DB_PATH", raising=False)
+    monkeypatch.delenv("JOBOS_JOBS_DB_PATH", raising=False)
     monkeypatch.delenv("JOBOS_LOCAL_ARTIFACT_ROOT", raising=False)
 
     configured = settings_from_environment()

@@ -211,6 +211,107 @@ class JobOsMcpClient:
             headers=self._career_profile_agent_headers,
         )
 
+    async def search_career_profile(
+        self,
+        *,
+        query: str,
+        kinds: list[str] | None = None,
+        areas: list[str] | None = None,
+        review_statuses: list[str] | None = None,
+        has_evidence: bool | None = None,
+        limit: int = 25,
+    ) -> dict[str, Any]:
+        params: dict[str, Any] = {"query": query, "limit": limit}
+        if kinds:
+            params["kinds"] = kinds
+        if areas:
+            params["areas"] = areas
+        if review_statuses:
+            params["review_statuses"] = review_statuses
+        if has_evidence is not None:
+            params["has_evidence"] = has_evidence
+        return await self._request(
+            "GET",
+            "/v1/career-profile/agent-search",
+            headers=self._career_profile_agent_headers,
+            params=params,
+        )
+
+    async def edit_career_profile_batch(
+        self,
+        *,
+        expected_profile_revision: int,
+        edits: list[dict[str, Any]],
+        idempotency_key: str | None = None,
+    ) -> dict[str, Any]:
+        return await self._request(
+            "POST",
+            "/v1/career-profile/agent-edits/batch",
+            headers=self._career_profile_agent_headers,
+            json={
+                "expected_profile_revision": expected_profile_revision,
+                "idempotency_key": self._key(idempotency_key),
+                "edits": edits,
+            },
+        )
+
+    async def list_career_profile_changes(
+        self, *, status: str = "pending", limit: int = 25
+    ) -> dict[str, Any]:
+        return await self._request(
+            "GET",
+            "/v1/career-profile/agent-changes",
+            headers=self._career_profile_agent_headers,
+            params={"status": status, "limit": limit},
+        )
+
+    async def import_career_profile_evidence(
+        self,
+        *,
+        expected_profile_revision: int,
+        original_filename: str,
+        media_type: str,
+        source_kind: str,
+        source_label: str,
+        content_base64: str,
+        captured_at: str | None = None,
+        extractions: list[dict[str, Any]] | None = None,
+        idempotency_key: str | None = None,
+    ) -> dict[str, Any]:
+        return await self._request(
+            "POST",
+            "/v1/career-profile/agent-evidence",
+            headers=self._career_profile_agent_headers,
+            json={
+                "expected_profile_revision": expected_profile_revision,
+                "idempotency_key": self._key(idempotency_key),
+                "original_filename": original_filename,
+                "media_type": media_type,
+                "captured_at": captured_at,
+                "provenance": {
+                    "source_kind": source_kind,
+                    "source_label": source_label,
+                    "method": "agent_import",
+                },
+                "content_base64": content_base64,
+                "extractions": extractions or [],
+            },
+        )
+
+    async def inspect_career_profile_evidence(
+        self,
+        evidence_id: str,
+        *,
+        byte_start: int = 0,
+        byte_length: int = 65_536,
+    ) -> dict[str, Any]:
+        return await self._request(
+            "GET",
+            f"/v1/career-profile/agent-evidence/{self._segment(evidence_id, 'Evidence ID')}",
+            headers=self._career_profile_agent_headers,
+            params={"byte_start": byte_start, "byte_length": byte_length},
+        )
+
     async def create_job(
         self,
         *,

@@ -293,6 +293,11 @@ def test_version_and_openapi_describe_the_shared_workspace_contract(tmp_path):
         "/v1/career-profile/agents/{agent_id}/context",
         "/v1/career-profile/agents/{agent_id}/context/preview",
         "/v1/career-profile/agent-edits",
+        "/v1/career-profile/agent-edits/batch",
+        "/v1/career-profile/agent-search",
+        "/v1/career-profile/agent-changes",
+        "/v1/career-profile/agent-evidence",
+        "/v1/career-profile/agent-evidence/{evidence_id}",
         "/v1/career-profile/proposals",
         "/v1/career-profile/proposals/{proposal_id}/decision",
         "/v1/career-profile/history",
@@ -416,6 +421,16 @@ def test_version_and_openapi_describe_the_shared_workspace_contract(tmp_path):
         "500",
         "503",
     }
+    for path, method in (
+        ("/v1/career-profile/agent-search", "get"),
+        ("/v1/career-profile/agent-changes", "get"),
+        ("/v1/career-profile/agent-edits/batch", "post"),
+        ("/v1/career-profile/agent-evidence", "post"),
+        ("/v1/career-profile/agent-evidence/{evidence_id}", "get"),
+    ):
+        assert {"401", "403", "404", "409", "422", "500"} <= set(
+            paths[path][method]["responses"]
+        )
     documented_errors = 0
     for path_item in openapi.json()["paths"].values():
         for operation in path_item.values():
@@ -428,7 +443,7 @@ def test_version_and_openapi_describe_the_shared_workspace_contract(tmp_path):
                 assert response["content"]["application/json"]["schema"] == {
                     "$ref": "#/components/schemas/ApiErrorResponse"
                 }
-    assert documented_errors < 425
+    assert documented_errors < 470
     assert set(schemas["JobListItem"]["required"]) == {
         "job_id",
         "company",

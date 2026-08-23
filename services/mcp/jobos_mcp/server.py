@@ -454,6 +454,93 @@ def create_server(
         """Read the exact user-authorized post-cutover Career Profile projection."""
         return await client.get_career_profile_projection()
 
+    @server.tool(name="career_profile_search", structured_output=True)
+    async def career_profile_search(
+        query: str,
+        kinds: list[str] | None = None,
+        areas: list[str] | None = None,
+        review_statuses: list[str] | None = None,
+        has_evidence: bool | None = None,
+        limit: int = 25,
+    ) -> dict[str, Any]:
+        """Search only the Career Profile items and Evidence authorized for this agent."""
+        return await client.search_career_profile(
+            query=query,
+            kinds=kinds,
+            areas=areas,
+            review_statuses=review_statuses,
+            has_evidence=has_evidence,
+            limit=limit,
+        )
+
+    @server.tool(name="career_profile_edit_batch", structured_output=True)
+    async def career_profile_edit_batch(
+        expected_profile_revision: int,
+        edits: list[dict[str, Any]],
+        idempotency_key: str | None = None,
+    ) -> dict[str, Any]:
+        """Atomically apply or propose several related Career Profile edits.
+
+        Each edit uses the same item.create, item.update, or item.remove shape as
+        career_profile_edit. Evidence IDs remain optional. If any edit is invalid,
+        none of the batch is saved.
+        """
+        return await client.edit_career_profile_batch(
+            expected_profile_revision=expected_profile_revision,
+            edits=edits,
+            idempotency_key=idempotency_key,
+        )
+
+    @server.tool(name="career_profile_changes_list", structured_output=True)
+    async def career_profile_changes_list(
+        status: Literal["pending", "accepted", "rejected", "all"] = "pending",
+        limit: int = 25,
+    ) -> dict[str, Any]:
+        """List this agent's proposals and directly applied Career Profile revisions."""
+        return await client.list_career_profile_changes(status=status, limit=limit)
+
+    @server.tool(name="career_profile_evidence_import", structured_output=True)
+    async def career_profile_evidence_import(
+        expected_profile_revision: int,
+        original_filename: str,
+        media_type: str,
+        source_kind: Literal["resume", "portfolio", "supporting_document", "citation"],
+        source_label: str,
+        content_base64: str,
+        captured_at: str | None = None,
+        extractions: list[dict[str, Any]] | None = None,
+        idempotency_key: str | None = None,
+    ) -> dict[str, Any]:
+        """Optionally import immutable source Evidence into the JobOS-owned vault.
+
+        Evidence is never required to create or edit profile items. Any supplied
+        extractions remain subject to JobOS review and truthfulness rules.
+        """
+        return await client.import_career_profile_evidence(
+            expected_profile_revision=expected_profile_revision,
+            original_filename=original_filename,
+            media_type=media_type,
+            source_kind=source_kind,
+            source_label=source_label,
+            content_base64=content_base64,
+            captured_at=captured_at,
+            extractions=extractions,
+            idempotency_key=idempotency_key,
+        )
+
+    @server.tool(name="career_profile_evidence_inspect", structured_output=True)
+    async def career_profile_evidence_inspect(
+        evidence_id: str,
+        byte_start: int = 0,
+        byte_length: int = 65_536,
+    ) -> dict[str, Any]:
+        """Read a bounded segment of Evidence already authorized for this agent."""
+        return await client.inspect_career_profile_evidence(
+            evidence_id,
+            byte_start=byte_start,
+            byte_length=byte_length,
+        )
+
     @server.tool(name="workspace_inspect", structured_output=True)
     async def workspace_inspect(
         conversation_id: ConversationId, idempotency_key: str | None = None

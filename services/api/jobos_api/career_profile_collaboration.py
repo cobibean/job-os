@@ -29,6 +29,7 @@ from .career_profile_complete import (
     StrictModel,
     TimestampText,
 )
+from .career_profile_context import CareerProfileContextScope
 from .sqlite_connection import connect_sqlite
 
 AgentId = Annotated[str, Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$")]
@@ -97,6 +98,61 @@ class AgentProfileEditRequest(StrictModel):
         return self
 
 
+class AgentProfileBatchEditItem(StrictModel):
+    operation: AgentEditOperation
+    target_id: str | None = None
+    reason: str = Field(min_length=1, max_length=1000)
+    value: ProfileValue | None = None
+    evidence_ids: list[OpaqueEvidenceId] = Field(default_factory=list, max_length=100)
+
+    @model_validator(mode="after")
+    def operation_shape(self) -> Self:
+        if self.operation == "item.create":
+            if self.target_id is not None or self.value is None:
+                raise ValueError("item.create requires a value and cannot name an existing item")
+        elif self.operation == "item.update":
+            if (
+                self.target_id is None
+                or re.fullmatch(r"cpi_[A-Za-z0-9_-]{16,64}", self.target_id) is None
+                or self.value is None
+            ):
+                raise ValueError("item.update requires an exact Career Profile item and value")
+        elif (
+            self.target_id is None
+            or re.fullmatch(r"cpi_[A-Za-z0-9_-]{16,64}", self.target_id) is None
+            or self.value is not None
+            or self.evidence_ids
+        ):
+            raise ValueError("item.remove requires only an exact Career Profile item")
+        return self
+
+
+class AgentProfileBatchEditRequest(StrictModel):
+    expected_profile_revision: int = Field(ge=0)
+    idempotency_key: IdempotencyKey
+    edits: list[AgentProfileBatchEditItem] = Field(min_length=1, max_length=50)
+
+    @model_validator(mode="after")
+    def unique_targets(self) -> Self:
+        targets = [edit.target_id for edit in self.edits if edit.target_id is not None]
+        if len(targets) != len(set(targets)):
+            raise ValueError("A batch can mutate each existing Career Profile item only once")
+        return self
+
+
+class AgentProfileBatchEditOutcome(StrictModel):
+    outcome: Literal["applied", "proposal"]
+    operation: AgentEditOperation
+    target_id: str
+    profile_revision: int = Field(ge=0)
+    proposal_id: ProposalId | None = None
+
+
+class AgentProfileBatchEditResult(StrictModel):
+    results: list[AgentProfileBatchEditOutcome]
+    profile_revision: int = Field(ge=0)
+
+
 class CareerProfileChangeProposal(StrictModel):
     proposal_id: ProposalId
     agent_id: AgentId
@@ -160,6 +216,12 @@ class ProfileHistoryRevision(StrictModel):
 class ProfileHistory(StrictModel):
     profile_revision: int = Field(ge=0)
     revisions: list[ProfileHistoryRevision]
+
+
+class AgentProfileChanges(StrictModel):
+    profile_revision: int = Field(ge=0)
+    proposals: list[CareerProfileChangeProposal]
+    applied_revisions: list[ProfileHistoryRevision]
 
 
 class ProfileUndoRequest(StrictModel):
@@ -378,6 +440,246 @@ class CareerProfileCollaborationStore:
             request_hash=request_hash,
         )
 
+    def submit_edit_batch(
+        self,
+        *,
+        agent: ConnectedAgent,
+        command: AgentProfileBatchEditRequest,
+        authorized_projection: CareerProfileCompleteCurrent,
+        authorized_scope: CareerProfileContextScope,
+    ) -> AgentProfileBatchEditResult:
+        """Apply or propose a bounded edit set in one database transaction."""
+        complete = self._complete()
+        request_hash = _request_hash(
+            "agent-edit-batch",
+            {"agent_id": agent.agent_id, **command.model_dump(mode="json")},
+        )
+        replay = self._replay(
+            principal=agent.principal,
+            idempotency_key=command.idempotency_key,
+            request_hash=request_hash,
+            model=AgentProfileBatchEditResult,
+        )
+        if replay is not None:
+            return replay
+
+        with connect_sqlite(self.database) as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            try:
+                replay = self._replay_in_connection(
+                    connection,
+                    principal=agent.principal,
+                    idempotency_key=command.idempotency_key,
+                    request_hash=request_hash,
+                    model=AgentProfileBatchEditResult,
+                )
+                if replay is not None:
+                    connection.rollback()
+                    return replay
+
+                current_agent = self._get_agent_in_connection(connection, agent.agent_id)
+                if not current_agent.active:
+                    raise ConnectedAgentAuthorizationError(
+                        "Connected agent access is unavailable or has been revoked"
+                    )
+                profile = complete._current_in_connection(connection)  # noqa: SLF001
+                if profile.profile_revision != command.expected_profile_revision:
+                    raise CareerProfileRevisionConflict(profile.profile_revision)
+                if authorized_projection.profile_revision != profile.profile_revision:
+                    raise CareerProfileRevisionConflict(profile.profile_revision)
+                current_scope = self._context_scope_in_connection(
+                    connection, current_agent.agent_id
+                )
+                if current_scope != authorized_scope:
+                    raise ConnectedAgentAuthorizationError(
+                        "Career Profile context changed; retry this edit"
+                    )
+                authorized_item_ids = {item.item_id for item in authorized_projection.items}
+                authorized_evidence_ids = {
+                    source.evidence_id for source in authorized_projection.source_evidence
+                }
+
+                outcomes: list[AgentProfileBatchEditOutcome] = []
+                for edit in command.edits:
+                    if (
+                        edit.operation != "item.create"
+                        and edit.target_id not in authorized_item_ids
+                    ):
+                        raise ConnectedAgentAuthorizationError(
+                            "The requested Career Profile item is outside the "
+                            "agent's authorized context"
+                        )
+                    if not set(edit.evidence_ids).issubset(authorized_evidence_ids):
+                        raise ConnectedAgentAuthorizationError(
+                            "The requested Evidence source is outside the agent's "
+                            "authorized context"
+                        )
+                    before = self._target_item(profile, edit)
+                    self._validate_evidence_links(profile, before, edit.evidence_ids)
+                    if (
+                        edit.value is not None
+                        and edit.value.kind == "work_arrangement"
+                        and profile.authority_state == "staging"
+                    ):
+                        raise CareerProfileValueError(
+                            "Work arrangement remains on the staging tracer endpoint until "
+                            "consumer cutover"
+                        )
+                    review_reason = self._review_reason(
+                        current_agent.trust_mode, before, edit
+                    )
+                    target_id = edit.target_id or _opaque_id("cpi_")
+                    timestamp = _now()
+
+                    if review_reason is not None:
+                        after: ProfileItemRecord | None = None
+                        if edit.operation != "item.remove":
+                            assert edit.value is not None
+                            after = ProfileItemRecord(
+                                item_id=target_id,
+                                area=_area_for_kind(edit.value.kind),
+                                value=edit.value,
+                                review_status="accepted",
+                                evidence_ids=edit.evidence_ids,
+                                provenance=ItemProvenance(
+                                    method=(
+                                        "agent_generated"
+                                        if edit.operation == "item.create"
+                                        else "agent_edit"
+                                    ),
+                                    mutation_source="agent_inference",
+                                ),
+                                item_revision=before.item_revision + 1 if before else 1,
+                                actor_principal=current_agent.principal,
+                                created_at=before.created_at if before else timestamp,
+                                updated_at=timestamp,
+                            )
+                        proposal = CareerProfileChangeProposal(
+                            proposal_id=_opaque_id("cpp_"),
+                            agent_id=current_agent.agent_id,
+                            agent_display_name=current_agent.display_name,
+                            reason=edit.reason,
+                            review_reason=review_reason,
+                            base_profile_revision=profile.profile_revision,
+                            operation=edit.operation,
+                            target_id=target_id,
+                            before=before,
+                            after=after,
+                            evidence_ids=edit.evidence_ids,
+                            proposal_sha256="0" * 64,
+                            status="pending",
+                            created_at=timestamp,
+                        )
+                        proposal = proposal.model_copy(
+                            update={"proposal_sha256": _proposal_digest(proposal)}
+                        )
+                        connection.execute(
+                            "INSERT INTO career_profile_change_proposals("
+                            "proposal_id, agent_id, reason, review_reason, "
+                            "base_profile_revision, operation, target_id, before_json, "
+                            "after_json, evidence_ids_json, payload_sha256, status, created_at) "
+                            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)",
+                            (
+                                proposal.proposal_id,
+                                proposal.agent_id,
+                                proposal.reason,
+                                proposal.review_reason,
+                                proposal.base_profile_revision,
+                                proposal.operation,
+                                proposal.target_id,
+                                _canonical_json(proposal.before.model_dump(mode="json"))
+                                if proposal.before
+                                else None,
+                                _canonical_json(proposal.after.model_dump(mode="json"))
+                                if proposal.after
+                                else None,
+                                _canonical_json(proposal.evidence_ids),
+                                proposal.proposal_sha256,
+                                proposal.created_at,
+                            ),
+                        )
+                        outcomes.append(
+                            AgentProfileBatchEditOutcome(
+                                outcome="proposal",
+                                operation=edit.operation,
+                                target_id=target_id,
+                                profile_revision=profile.profile_revision,
+                                proposal_id=proposal.proposal_id,
+                            )
+                        )
+                        continue
+
+                    assert edit.value is not None
+                    current = self._active_item_in_connection(connection, target_id)
+                    if edit.operation == "item.create":
+                        if current is not None:
+                            raise CareerProfileCollaborationConflict(
+                                "The new item identifier is already in use"
+                            )
+                    elif current is None:
+                        raise CareerProfileItemNotFound
+                    updated = ProfileItemRecord(
+                        item_id=target_id,
+                        area=_area_for_kind(edit.value.kind),
+                        value=edit.value,
+                        review_status="accepted",
+                        evidence_ids=edit.evidence_ids,
+                        provenance=ItemProvenance(
+                            method=(
+                                "agent_generated"
+                                if edit.operation == "item.create"
+                                else "agent_edit"
+                            ),
+                            mutation_source="agent_inference",
+                        ),
+                        item_revision=current.item_revision + 1 if current else 1,
+                        actor_principal=current_agent.principal,
+                        created_at=current.created_at if current else timestamp,
+                        updated_at=timestamp,
+                    )
+                    self._write_item(connection, updated)
+                    head = profile.profile_revision
+                    complete._record_revision(  # noqa: SLF001
+                        connection,
+                        revision=head + 1,
+                        base_revision=head,
+                        principal=current_agent.principal,
+                        actor_kind="autonomous_agent",
+                        operation="item.upsert",
+                        item_id=target_id,
+                        evidence_id=None,
+                        before=current.model_dump(mode="json") if current else None,
+                        after=updated.model_dump(mode="json"),
+                        affected=[f"items.{target_id}"],
+                        reason=edit.reason,
+                    )
+                    profile = complete._current_in_connection(connection)  # noqa: SLF001
+                    outcomes.append(
+                        AgentProfileBatchEditOutcome(
+                            outcome="applied",
+                            operation=edit.operation,
+                            target_id=target_id,
+                            profile_revision=profile.profile_revision,
+                        )
+                    )
+
+                result = AgentProfileBatchEditResult(
+                    results=outcomes,
+                    profile_revision=profile.profile_revision,
+                )
+                self._record_result_in_connection(
+                    connection,
+                    principal=current_agent.principal,
+                    idempotency_key=command.idempotency_key,
+                    request_hash=request_hash,
+                    result=result,
+                )
+                connection.commit()
+                return result
+            except Exception:
+                connection.rollback()
+                raise
+
     def list_proposals(
         self, *, status: ProposalStatus | None = "pending"
     ) -> CareerProfileProposalList:
@@ -391,6 +693,50 @@ class CareerProfileCollaborationStore:
             rows = connection.execute(query, parameters).fetchall()
         return CareerProfileProposalList(
             proposals=[self._proposal_from_row(row) for row in rows]
+        )
+
+    def list_agent_changes(
+        self,
+        *,
+        agent: ConnectedAgent,
+        status: ProposalStatus | None,
+        limit: int,
+        authorized_projection: CareerProfileCompleteCurrent,
+    ) -> AgentProfileChanges:
+        query = self._proposal_select() + " WHERE proposal.agent_id = ?"
+        parameters: tuple[object, ...]
+        if status is None:
+            parameters = (agent.agent_id, limit)
+        else:
+            query += " AND proposal.status = ?"
+            parameters = (agent.agent_id, status, limit)
+        query += " ORDER BY proposal.created_at DESC, proposal.proposal_id DESC LIMIT ?"
+        with connect_sqlite(f"file:{self.database}?mode=ro", uri=True) as connection:
+            rows = connection.execute(query, parameters).fetchall()
+        history = self.history(limit=limit, actor_principal=agent.principal)
+        allowed_item_ids = {item.item_id for item in authorized_projection.items}
+        allowed_evidence_ids = {
+            evidence.evidence_id for evidence in authorized_projection.source_evidence
+        }
+        proposals = [self._proposal_from_row(row) for row in rows]
+        proposals = [
+            proposal
+            for proposal in proposals
+            if proposal.before is None or proposal.target_id in allowed_item_ids
+        ]
+        revisions = [
+            revision
+            for revision in history.revisions
+            if (revision.item_id is not None and revision.item_id in allowed_item_ids)
+            or (
+                revision.evidence_id is not None
+                and revision.evidence_id in allowed_evidence_ids
+            )
+        ]
+        return AgentProfileChanges(
+            profile_revision=history.profile_revision,
+            proposals=proposals,
+            applied_revisions=revisions,
         )
 
     def decide_proposal(
@@ -454,9 +800,13 @@ class CareerProfileCollaborationStore:
                         and proposal.before is None
                     )
                     if proposal.base_profile_revision != head and not migration_create:
-                        raise CareerProfileCollaborationConflict(
-                            "This proposal is stale and must be regenerated"
+                        current_target = self._active_item_in_connection(
+                            connection, proposal.target_id
                         )
+                        if current_target != proposal.before:
+                            raise CareerProfileCollaborationConflict(
+                                "This proposal is stale and must be regenerated"
+                            )
 
                 decided_at = _now()
                 connection.execute(
@@ -490,18 +840,26 @@ class CareerProfileCollaborationStore:
                 connection.rollback()
                 raise
 
-    def history(self, *, limit: int = 100) -> ProfileHistory:
+    def history(
+        self, *, limit: int = 100, actor_principal: str | None = None
+    ) -> ProfileHistory:
         complete = self._complete()
         profile = complete.current()
+        query = (
+            "SELECT revision_id, profile_revision, base_profile_revision, actor_principal, "
+            "operation, item_id, evidence_id, before_json, after_json, affected_fields_json, "
+            "reason, proposal_id, undo_of_revision_id, actor_kind, created_at "
+            "FROM career_profile_complete_revisions"
+        )
+        parameters: tuple[object, ...]
+        if actor_principal is None:
+            query += " ORDER BY profile_revision DESC LIMIT ?"
+            parameters = (limit,)
+        else:
+            query += " WHERE actor_principal = ? ORDER BY profile_revision DESC LIMIT ?"
+            parameters = (actor_principal, limit)
         with connect_sqlite(f"file:{self.database}?mode=ro", uri=True) as connection:
-            rows = connection.execute(
-                "SELECT revision_id, profile_revision, base_profile_revision, actor_principal, "
-                "operation, item_id, evidence_id, before_json, after_json, affected_fields_json, "
-                "reason, proposal_id, undo_of_revision_id, actor_kind, created_at "
-                "FROM career_profile_complete_revisions "
-                "ORDER BY profile_revision DESC LIMIT ?",
-                (limit,),
-            ).fetchall()
+            rows = connection.execute(query, parameters).fetchall()
         revisions: list[ProfileHistoryRevision] = []
         for row in rows:
             before = json.loads(str(row[7])) if row[7] is not None else None
@@ -967,7 +1325,7 @@ class CareerProfileCollaborationStore:
     @staticmethod
     def _target_item(
         profile: CareerProfileCompleteCurrent,
-        command: AgentProfileEditRequest,
+        command: AgentProfileEditRequest | AgentProfileBatchEditItem,
     ) -> ProfileItemRecord | None:
         if command.operation == "item.create":
             return None
@@ -996,7 +1354,7 @@ class CareerProfileCollaborationStore:
     def _review_reason(
         trust_mode: TrustMode,
         before: ProfileItemRecord | None,
-        command: AgentProfileEditRequest,
+        command: AgentProfileEditRequest | AgentProfileBatchEditItem,
     ) -> str | None:
         if command.operation == "item.remove":
             return "Removing Career Profile information always needs your approval."
@@ -1233,6 +1591,27 @@ class CareerProfileCollaborationStore:
         if row is None:
             raise ConnectedAgentAuthorizationError("Connected agent was not found")
         return self._agent_from_row(row)
+
+    @staticmethod
+    def _context_scope_in_connection(
+        connection: sqlite3.Connection, agent_id: str
+    ) -> CareerProfileContextScope:
+        row = connection.execute(
+            "SELECT agent_id, mode, selected_item_ids_json, selected_areas_json, updated_at "
+            "FROM career_profile_context_grants WHERE agent_id = ?",
+            (agent_id,),
+        ).fetchone()
+        if row is None:
+            raise ConnectedAgentAuthorizationError(
+                "Career Profile context grant was not initialized"
+            )
+        return CareerProfileContextScope(
+            agent_id=str(row[0]),
+            mode=str(row[1]),  # type: ignore[arg-type]
+            selected_item_ids=json.loads(str(row[2])),
+            selected_areas=json.loads(str(row[3])),
+            updated_at=str(row[4]),
+        )
 
     def _replay(
         self,
