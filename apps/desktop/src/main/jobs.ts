@@ -1,6 +1,7 @@
 import {
   conversationSelectJobV1ConversationsConversationIdWorkspaceJobPut,
   createJobOsApiClient,
+  jobOsAuthenticatedHeaders,
   jobCreateFromBrowserV1JobsPost,
   jobInspectV1JobsJobIdGet,
   jobRemoveDemoV1JobsJobIdDemoDelete,
@@ -38,6 +39,7 @@ import type {
 export interface JobsConfig {
   baseUrl: string
   deviceToken: string
+  installationProfileId?: string
 }
 
 interface ApiResult<T> {
@@ -84,7 +86,11 @@ function toJobDetail(job: ApiJobDetail): JobDetail {
 }
 
 export function createMainJobsClient(config: JobsConfig) {
-  const client = createJobOsApiClient(config.baseUrl, config.deviceToken)
+  const client = createJobOsApiClient(
+    config.baseUrl,
+    config.deviceToken,
+    config.installationProfileId
+  )
 
   return {
     async getState(): Promise<JobWorkspaceSnapshot> {
@@ -247,7 +253,10 @@ export function startJobEventStream(
         const url = new URL('/v1/events/stream', config.baseUrl)
         url.searchParams.set('after', String(cursor))
         const response = await fetch(url, {
-          headers: { Authorization: `Bearer ${config.deviceToken}` },
+          headers: {
+            ...jobOsAuthenticatedHeaders(config.deviceToken, config.installationProfileId),
+            Accept: 'text/event-stream'
+          },
           signal: controller.signal
         })
         if (!response.ok || !response.body) throw new Error('Job event stream unavailable')

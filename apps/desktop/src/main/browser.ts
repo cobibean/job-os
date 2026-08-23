@@ -36,14 +36,14 @@ import {
 export const BROWSER_PARTITION = 'persist:jobos-browser-v1'
 export const DEFAULT_BROWSER_URL = 'https://www.google.com/'
 
-export function remoteBrowserPreferences(): WebPreferences {
+export function remoteBrowserPreferences(partition = BROWSER_PARTITION): WebPreferences {
   return {
     allowRunningInsecureContent: false,
     contextIsolation: true,
     devTools: false,
     javascript: true,
     nodeIntegration: false,
-    partition: BROWSER_PARTITION,
+    partition,
     sandbox: true,
     webSecurity: true,
     webviewTag: false
@@ -51,9 +51,10 @@ export function remoteBrowserPreferences(): WebPreferences {
 }
 
 export function remoteBrowserViewOptions(
-  options?: WebContentsViewConstructorOptions
+  options?: WebContentsViewConstructorOptions,
+  partition = BROWSER_PARTITION
 ): WebContentsViewConstructorOptions {
-  const webPreferences = { ...options?.webPreferences, ...remoteBrowserPreferences() }
+  const webPreferences = { ...options?.webPreferences, ...remoteBrowserPreferences(partition) }
   return options?.webContents
     ? { webContents: options.webContents, webPreferences }
     : { webPreferences }
@@ -132,6 +133,7 @@ export class BrowserManager {
   #attachedTabId: string | null = null
   #bounds: BrowserBounds = { x: 0, y: 0, width: 0, height: 0, visible: false }
   #download: BrowserDownload | null = null
+  #downloadsAllowed = true
   #notice: string | null = null
   #synthesizedDefault = false
   #hasExplicitAction = false
@@ -165,6 +167,14 @@ export class BrowserManager {
       download: this.#download ? { ...this.#download } : null,
       notice: this.#notice
     }
+  }
+
+  setDownloadsAllowed(allowed: boolean): void {
+    this.#downloadsAllowed = allowed
+  }
+
+  getBounds(): BrowserBounds {
+    return { ...this.#bounds }
   }
 
   contextToken(tabId: string): { url: string, documentEpoch: number, loading: boolean } {
@@ -738,6 +748,12 @@ export class BrowserManager {
   }
 
   #handleDownload(item: DownloadItem, contents: WebContents): void {
+    if (!this.#downloadsAllowed) {
+      item.cancel()
+      this.#notice = 'JobOS blocked a new download while switching profiles.'
+      this.#emit()
+      return
+    }
     const id = randomUUID()
     const filename = item.getFilename() || 'download'
     const update = (state: BrowserDownload['state'], message?: string) => {

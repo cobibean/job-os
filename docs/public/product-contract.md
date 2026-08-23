@@ -15,6 +15,20 @@ The desktop workbench has four structural areas:
 
 Research emphasizes the browser, Review emphasizes the document, and Agent Focus emphasizes conversation. Primary panels remain resizable, collapsible, recoverable, keyboard operable, and persistent. Reset Layout restores presentation defaults; it never deletes jobs, tabs, documents, chat, or other user data.
 
+## JobOS Profiles
+
+The top bar always names the active **JobOS Profile**, which is distinct from the
+Career Profile feature inside it. A user may list, create, rename, and switch
+profiles. Create has one explicit **Create and switch** action. A new profile is a
+blank workspace: jobs, Career Profile data and Evidence, documents, chats,
+browser data, layout, theme, avatar, grants, and sessions do not carry over.
+
+Agent connection setup remains available across profiles, while agent access is
+profile-local and starts in review mode with no scopes. Switching saves safe
+workspace state, blocks on unsaved DOCX work, active/recovering agent turns, or a
+browser download, restarts JobOS, and opens only after exact target identity is
+confirmed. Failure rolls back without changing or deleting the prior workspace.
+
 ## Jobs and browser independence
 
 Exactly one job may be active at a time. Selection changes conversational and organizational context, not browser ownership. Selecting another job must not close tabs, replace pages, end authenticated sessions, discard forms, or create a new conversation.

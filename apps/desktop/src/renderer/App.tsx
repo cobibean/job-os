@@ -71,6 +71,10 @@ function WorkbenchApp() {
   const panelReorderGeneration = useRef(0)
   const navigatorSelectionQueue = useRef<Promise<unknown>>(Promise.resolve())
   const prepareClose = useRef<() => Promise<boolean>>(async () => true)
+  const prepareProfileSwitch = useRef<() => Promise<boolean>>(async () => true)
+  const expectedInstallationProfileId = useRef<string | null>(
+    window.jobos?.installationProfiles?.expectedProfileId ?? null
+  )
   const activePreset = layoutState.workspace.selectedPreset
   const activeTopLevelWorkspace = layoutState.workspace.activeTopLevelWorkspace ?? activePreset
   const activeLayout = layoutState.workspace.layouts[activePreset]
@@ -112,8 +116,22 @@ function WorkbenchApp() {
     return true
   }, [nativeBrowserVisible])
 
+  prepareProfileSwitch.current = async () => {
+    if (!await prepareClose.current()) return false
+    try {
+      await layoutState.flush()
+    } catch {
+      return false
+    }
+    return !Object.values(agentSessions.sessions).some(session => (
+      session.conversation.activeTurn !== null
+      || session.summary.recoveryState === 'recovering'
+      || session.operation !== null
+    ))
+  }
+
   useEffect(() => window.jobos?.lifecycle?.subscribePrepareClose(
-    () => prepareClose.current()
+    reason => reason === 'profile-switch' ? prepareProfileSwitch.current() : prepareClose.current()
   ), [])
 
   useEffect(() => setDocumentPreviewMode('pdf'), [jobState.selectedJobId])
@@ -261,6 +279,21 @@ function WorkbenchApp() {
     if (activeTopLevelWorkspace !== 'browse') await layoutState.selectTopLevelWorkspace('browse')
   }
 
+  const profileChangedElsewhere = Boolean(
+    expectedInstallationProfileId.current
+    && connectivity.installationProfileId
+    && expectedInstallationProfileId.current !== connectivity.installationProfileId
+  )
+  if (profileChangedElsewhere) {
+    return (
+      <main className="profile-changed-elsewhere">
+        <h1>JobOS switched to “{connectivity.installationProfileName ?? 'another profile'}” on another device.</h1>
+        <p>Restart JobOS to continue safely.</p>
+        <button onClick={() => { void window.jobos?.installationProfiles.restart() }} type="button">Restart JobOS</button>
+      </main>
+    )
+  }
+
   return (
     <div className="app-shell" data-layout={activePreset} data-workspace={activeTopLevelWorkspace}>
       <WorkspaceBar
@@ -270,6 +303,7 @@ function WorkbenchApp() {
         onReset={layoutState.reset}
         onToggleMode={theme.toggleMode}
         themeMode={theme.mode}
+        activeProfileName={connectivity.installationProfileName ?? 'Personal'}
       />
       <div className="workspace-content">
       <div className="workbench-layer" hidden={browseVisible || careerProfileOpen}>

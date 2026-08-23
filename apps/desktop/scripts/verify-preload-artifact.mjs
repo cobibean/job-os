@@ -28,6 +28,10 @@ const listeners = new Map()
 const removedListeners = []
 const exposures = []
 const ipcRenderer = {
+  sendSync(channel) {
+    assert.equal(channel, 'jobos:installation-profiles:expected-id')
+    return 'jprof_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+  },
   invoke(channel, ...args) {
     invokeCalls.push([channel, ...args])
     return Promise.resolve({})

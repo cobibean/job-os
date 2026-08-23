@@ -3,6 +3,7 @@ import { readFile, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 
 import type { Dialog } from 'electron'
+import { jobOsAuthenticatedHeaders } from '@jobos/contracts'
 import type {
   EditableDocument as GeneratedEditableDocument,
   EditableDocumentSnapshot as ApiSnapshot,
@@ -356,7 +357,7 @@ async function apiJson<T>(config: JobsConfig, route: string, init: RequestInit =
   const response = await fetch(new URL(route, config.baseUrl), {
     ...init,
     headers: {
-      Authorization: ['Bearer', config.deviceToken].join(' '),
+      ...jobOsAuthenticatedHeaders(config.deviceToken, config.installationProfileId),
       ...(init.body === undefined ? {} : { 'Content-Type': 'application/json' })
     },
     redirect: 'error'

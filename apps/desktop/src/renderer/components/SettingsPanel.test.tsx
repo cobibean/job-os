@@ -71,7 +71,7 @@ test('explains agent edit modes, changes trust as the user, and disconnects with
 
   fireEvent.click(screen.getByRole('button', { name: 'Disconnect Job Hunter' }))
   expect(screen.getByText(/Your Career Profile stays exactly as it is/i)).not.toBeNull()
-  fireEvent.click(screen.getByRole('button', { name: 'Confirm disconnect Job Hunter' }))
+  fireEvent.click(screen.getByRole('button', { name: 'Confirm remove access Job Hunter' }))
   await waitFor(() => expect(disconnectConnectedAgent).toHaveBeenCalledWith('job-hunter'))
   await waitFor(() => expect(screen.queryByText('Job Hunter')).toBeNull())
 })

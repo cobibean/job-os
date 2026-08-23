@@ -11,6 +11,11 @@ test('shows capability states without paths or secrets and confirms demo reset',
     diagnostics: {
       get: vi.fn().mockResolvedValue({
         mode: 'local-service', appVersion: '0.1.0',
+        installationProfile: {
+          id: 'jprof_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+          name: 'Personal',
+          switchStatus: 'idle'
+        },
         capabilities: {
           localService: 'available', agent: 'connecting', desktop: 'disconnected',
           renderer: 'unavailable', artifactStorage: 'available', artifactGateway: 'not-configured', transport: 'local-loopback'
@@ -23,6 +28,8 @@ test('shows capability states without paths or secrets and confirms demo reset',
   render(<DiagnosticsPanel />)
   expect(await screen.findByText('local-service')).not.toBeNull()
   expect(screen.getByText('Agent connecting')).not.toBeNull()
+  expect(screen.getByText('jprof_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa')).not.toBeNull()
+  expect(screen.getByText('Personal')).not.toBeNull()
   expect(screen.getByText('Desktop capability disconnected')).not.toBeNull()
   expect(screen.getByText('Renderer unavailable')).not.toBeNull()
   expect(screen.getByText('Artifact storage available')).not.toBeNull()

@@ -167,7 +167,7 @@ export function SettingsPanel({
                           disabled={busy}
                           onClick={() => setDisconnectAgentId(agent.agentId)}
                           type="button"
-                        >Disconnect</button>
+                        >Remove access from this profile</button>
                       </div>
 
                       <div aria-label={`${agent.displayName} edit mode`} className="settings-trust-options" role="radiogroup">
@@ -197,9 +197,9 @@ export function SettingsPanel({
 
                       {confirmingDisconnect ? (
                         <div className="settings-disconnect-confirmation">
-                          <p>Your Career Profile stays exactly as it is. This only stops {agent.displayName} from making future changes.</p>
+                          <p>Your Career Profile stays exactly as it is. This removes access only from this JobOS Profile; the installation-level agent connection remains available. External agents may retain information outside JobOS.</p>
                           <div>
-                            <button className="settings-agent-disconnect confirm" disabled={busy} onClick={() => { void disconnectAgent(agent) }} type="button" aria-label={`Confirm disconnect ${agent.displayName}`}>Disconnect</button>
+                            <button className="settings-agent-disconnect confirm" disabled={busy} onClick={() => { void disconnectAgent(agent) }} type="button" aria-label={`Confirm remove access ${agent.displayName}`}>Remove access from this profile</button>
                             <button className="settings-agent-cancel" disabled={busy} onClick={() => setDisconnectAgentId(null)} type="button">Cancel</button>
                           </div>
                         </div>

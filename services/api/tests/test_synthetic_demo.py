@@ -126,7 +126,9 @@ def test_demo_metadata_and_intentional_removal_use_public_api_contract(tmp_path,
         actor="user",
         label="Contains edited private content",
     )
-    app = create_app(settings_from_config(tmp_path / "config.json"))
+    settings = settings_from_config(tmp_path / "config.json")
+    headers["X-JobOS-Profile-Id"] = settings.installation_profile_id
+    app = create_app(settings)
     with TestClient(app) as client:
         listed = client.get("/v1/jobs", headers=headers)
         assert listed.status_code == 200
@@ -192,11 +194,15 @@ def test_removing_demo_preserves_a_different_workspace_selection(tmp_path, monke
     config = read_config(tmp_path / "config.json")
     device_token, _ = load_credentials(config, tmp_path)
 
-    with TestClient(create_app(settings_from_config(tmp_path / "config.json"))) as client:
+    settings = settings_from_config(tmp_path / "config.json")
+    with TestClient(create_app(settings)) as client:
         response = client.request(
             "DELETE",
             f"/v1/jobs/{DEMO_JOB_ID}/demo",
-            headers={"Authorization": f"Bearer {device_token}"},
+            headers={
+                "Authorization": f"Bearer {device_token}",
+                "X-JobOS-Profile-Id": settings.installation_profile_id,
+            },
             json={"origin": "user", "idempotency_key": "preserve-selection"},
         )
 

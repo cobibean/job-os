@@ -104,6 +104,18 @@ def _add_synthetic_demo_metadata(connection: sqlite3.Connection) -> None:
     )
 
 
+def _add_installation_profile_metadata(connection: sqlite3.Connection) -> None:
+    connection.execute(
+        """
+        CREATE TABLE job_repository_metadata (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL,
+            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )
+
+
 MIGRATIONS: tuple[Migration, ...] = (
     Migration(
         version=1,
@@ -116,6 +128,12 @@ MIGRATIONS: tuple[Migration, ...] = (
         name="add_synthetic_demo_metadata",
         checksum="sha256:654a5b33e07655f952ded412c46f8f92d3c4e0a45a8e0b82ed15c2caab3598c2",
         apply=_add_synthetic_demo_metadata,
+    ),
+    Migration(
+        version=3,
+        name="add_installation_profile_metadata",
+        checksum="sha256:8d7cf2580fa2520866994229eb6397cd2b543a55f73b33f4509831a39ba48fda",
+        apply=_add_installation_profile_metadata,
     ),
 )
 
@@ -235,6 +253,7 @@ def initialize_job_repository_database(
     *,
     migrations: Sequence[Migration] = MIGRATIONS,
     backup_directory: Path | None = None,
+    installation_profile_id: str | None = None,
 ) -> None:
     """Apply each pending migration once under thread and process locks."""
     _validate_catalog(migrations)
@@ -266,6 +285,31 @@ def initialize_job_repository_database(
                                 datetime.now(UTC).isoformat(),
                             ),
                         )
+                        connection.commit()
+                    except Exception:
+                        connection.rollback()
+                        raise
+                if installation_profile_id is not None:
+                    connection.execute("BEGIN IMMEDIATE")
+                    try:
+                        ownership = connection.execute(
+                            """
+                            SELECT value FROM job_repository_metadata
+                            WHERE key = 'installation_profile_id'
+                            """
+                        ).fetchone()
+                        if ownership is None:
+                            connection.execute(
+                                """
+                                INSERT INTO job_repository_metadata(key, value, updated_at)
+                                VALUES ('installation_profile_id', ?, CURRENT_TIMESTAMP)
+                                """,
+                                (installation_profile_id,),
+                            )
+                        elif str(ownership[0]) != installation_profile_id:
+                            raise MigrationHistoryError(
+                                "Canonical jobs database belongs to another JobOS Profile"
+                            )
                         connection.commit()
                     except Exception:
                         connection.rollback()

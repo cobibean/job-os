@@ -6,7 +6,8 @@ import {
   conversationRetryV1ConversationsConversationIdTurnsTurnIdRetryPost,
   conversationSendV1ConversationsConversationIdMessagesPost,
   conversationsListV1ConversationsGet,
-  createJobOsApiClient
+  createJobOsApiClient,
+  jobOsAuthenticatedHeaders
 } from '@jobos/contracts'
 import type { ConversationResponse, ConversationSummary, TurnMutationResponse } from '@jobos/contracts'
 
@@ -29,6 +30,7 @@ export interface AgentConfig {
   baseUrl: string
   deviceToken: string
   fetch?: typeof fetch
+  installationProfileId?: string
 }
 
 interface ApiResult<T> {
@@ -262,7 +264,11 @@ export class AgentConversationRegistry {
 }
 
 export function createScopedMainAgentClient(config: AgentConfig, registry?: AgentConversationRegistry) {
-  const client = createJobOsApiClient(config.baseUrl, config.deviceToken)
+  const client = createJobOsApiClient(
+    config.baseUrl,
+    config.deviceToken,
+    config.installationProfileId
+  )
   if (config.fetch) client.setConfig({ fetch: config.fetch })
   return {
     async list(): Promise<AgentSessionSummary[]> {
@@ -409,7 +415,13 @@ export function startAgentEventStream(target: AgentStreamTarget, config: AgentCo
         if (attempt > 0) sendConnection('reconnecting')
         const url = new URL('/v1/conversations/events/stream', config.baseUrl)
         url.searchParams.set('after', String(cursor))
-        const response = await fetcher(url, { headers: { Authorization: `Bearer ${config.deviceToken}`, Accept: 'text/event-stream' }, signal: controller.signal })
+        const response = await fetcher(url, {
+          headers: {
+            ...jobOsAuthenticatedHeaders(config.deviceToken, config.installationProfileId),
+            Accept: 'text/event-stream'
+          },
+          signal: controller.signal
+        })
         if (!response.ok || !response.body) throw new Error('Conversation stream unavailable')
         restoreConnections()
         attempt = 0

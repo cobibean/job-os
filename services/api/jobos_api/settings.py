@@ -1,3 +1,4 @@
+import hashlib
 import json
 from pathlib import Path
 from typing import Literal
@@ -72,6 +73,41 @@ class Settings(BaseModel):
         max_length=4096,
         repr=False,
     )
+    installation_profile_id: str = Field(pattern=r"^jprof_[a-f0-9]{32}$")
+    installation_profile_name: str = Field(min_length=1, max_length=64)
+    installation_registry_path: Path
+    profile_registry_revision: int = Field(default=1, ge=1)
+    profile_switch_driver: Literal["launchd", "desktop"] = "desktop"
+
+    @model_validator(mode="before")
+    @classmethod
+    def populate_legacy_profile_context(cls, value: object) -> object:
+        """Keep direct test/development construction compatible.
+
+        Real source and launchd startup always replace these derived compatibility
+        values with the installation registry's random identity.
+        """
+        if not isinstance(value, dict):
+            return value
+        values = dict(value)
+        state_value = values.get("state_db_path")
+        if state_value is not None:
+            state_path = Path(state_value)
+            # Direct construction predates installation profiles and commonly creates
+            # multiple state database fixtures beside one shared default jobs.db.
+            # Treat that directory as the compatibility installation boundary. Real
+            # source and launchd composition always provide the random registry ID.
+            installation_root = state_path.parent.absolute()
+            digest = hashlib.sha256(str(installation_root).encode()).hexdigest()[:32]
+            if not values.get("installation_profile_id"):
+                values["installation_profile_id"] = f"jprof_{digest}"
+            if not values.get("installation_profile_name"):
+                values["installation_profile_name"] = "Personal"
+            if not values.get("installation_registry_path"):
+                values["installation_registry_path"] = (
+                    state_path.parent / "installation-profiles.json"
+                )
+        return values
 
     @model_validator(mode="after")
     def validate_unique_device_credentials(self) -> "Settings":

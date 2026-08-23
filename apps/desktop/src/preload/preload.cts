@@ -34,6 +34,11 @@ import type {
   SaveEditableDocumentRequest
 } from '../shared/editableDocuments.js'
 
+const expectedProfileId = ipcRenderer.sendSync('jobos:installation-profiles:expected-id')
+const validExpectedProfileId = expectedProfileId && /^jprof_[a-f0-9]{32}$/.test(expectedProfileId)
+  ? expectedProfileId
+  : undefined
+
 const bridge: JobOsRendererBridge = Object.freeze({
   setup: Object.freeze({
     get: () => ipcRenderer.invoke('jobos:setup:get'),
@@ -48,9 +53,13 @@ const bridge: JobOsRendererBridge = Object.freeze({
     openLogs: () => ipcRenderer.invoke('jobos:diagnostics:open-logs')
   }),
   lifecycle: Object.freeze({
-    subscribePrepareClose: (handler: () => Promise<boolean>) => {
-      const wrapped = (_event: IpcRendererEvent, requestId: string) => {
-        void handler()
+    subscribePrepareClose: (handler: (reason: 'window-close' | 'profile-switch') => Promise<boolean>) => {
+      const wrapped = (
+        _event: IpcRendererEvent,
+        requestId: string,
+        reason: 'window-close' | 'profile-switch'
+      ) => {
+        void handler(reason)
           .then(safe => ipcRenderer.send('jobos:window:prepare-close-result', requestId, safe))
           .catch(() => ipcRenderer.send('jobos:window:prepare-close-result', requestId, false))
       }
@@ -63,6 +72,36 @@ const bridge: JobOsRendererBridge = Object.freeze({
   }),
   connectivity: Object.freeze({
     get: () => ipcRenderer.invoke('jobos:connectivity:get')
+  }),
+  installationProfiles: Object.freeze({
+    expectedProfileId: validExpectedProfileId,
+    list: () => ipcRenderer.invoke('jobos:installation-profiles:list'),
+    createAndSwitch: (displayName: string, idempotencyKey: string) => (
+      ipcRenderer.invoke('jobos:installation-profiles:create-and-switch', displayName, idempotencyKey)
+    ),
+    rename: (
+      profileId: string,
+      displayName: string,
+      expectedRegistryRevision: number,
+      idempotencyKey: string
+    ) => ipcRenderer.invoke(
+      'jobos:installation-profiles:rename',
+      profileId,
+      displayName,
+      expectedRegistryRevision,
+      idempotencyKey
+    ),
+    activate: (
+      profileId: string,
+      expectedRegistryRevision: number,
+      idempotencyKey: string
+    ) => ipcRenderer.invoke(
+      'jobos:installation-profiles:activate',
+      profileId,
+      expectedRegistryRevision,
+      idempotencyKey
+    ),
+    restart: () => ipcRenderer.invoke('jobos:installation-profiles:restart')
   }),
   careerProfile: Object.freeze({
     availability: () => ipcRenderer.invoke('jobos:career-profile:availability'),

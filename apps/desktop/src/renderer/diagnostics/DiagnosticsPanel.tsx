@@ -31,6 +31,11 @@ export function DiagnosticsPanel() {
         <dl>
           <div><dt>Mode</dt><dd>{snapshot.mode}</dd></div>
           <div><dt>JobOS</dt><dd>{snapshot.appVersion}</dd></div>
+          {snapshot.installationProfile ? <>
+            <div><dt>JobOS Profile</dt><dd>{snapshot.installationProfile.name}</dd></div>
+            <div><dt>Profile ID</dt><dd>{snapshot.installationProfile.id}</dd></div>
+            <div><dt>Profile switch</dt><dd>{snapshot.installationProfile.switchStatus}</dd></div>
+          </> : null}
           <div><dt>Local service</dt><dd>{capabilityLabel('Local service', snapshot.capabilities.localService)}</dd></div>
           <div><dt>Agent</dt><dd>{capabilityLabel('Agent', snapshot.capabilities.agent)}</dd></div>
           <div><dt>Desktop capability</dt><dd>{capabilityLabel('Desktop capability', snapshot.capabilities.desktop)}</dd></div>

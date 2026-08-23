@@ -1,6 +1,28 @@
 {
   "components": {
     "schemas": {
+      "ActivateJobOsProfileRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "expected_registry_revision": {
+            "minimum": 1.0,
+            "title": "Expected Registry Revision",
+            "type": "integer"
+          },
+          "idempotency_key": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Idempotency Key",
+            "type": "string"
+          }
+        },
+        "required": [
+          "expected_registry_revision",
+          "idempotency_key"
+        ],
+        "title": "ActivateJobOsProfileRequest",
+        "type": "object"
+      },
       "ActivityReportRequest": {
         "additionalProperties": false,
         "properties": {
@@ -2373,6 +2395,27 @@
         "title": "CreateExternalImportRequest",
         "type": "object"
       },
+      "CreateJobOsProfileRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "display_name": {
+            "title": "Display Name",
+            "type": "string"
+          },
+          "idempotency_key": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Idempotency Key",
+            "type": "string"
+          }
+        },
+        "required": [
+          "display_name",
+          "idempotency_key"
+        ],
+        "title": "CreateJobOsProfileRequest",
+        "type": "object"
+      },
       "CreateRegisteredImportRequest": {
         "additionalProperties": false,
         "properties": {
@@ -2637,6 +2680,22 @@
             "title": "Desktop",
             "type": "string"
           },
+          "installation_profile_id": {
+            "pattern": "^jprof_[a-f0-9]{32}$",
+            "title": "Installation Profile Id",
+            "type": "string"
+          },
+          "installation_profile_name": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Installation Profile Name",
+            "type": "string"
+          },
+          "profile_registry_revision": {
+            "minimum": 1.0,
+            "title": "Profile Registry Revision",
+            "type": "integer"
+          },
           "transport": {
             "enum": [
               "local-loopback",
@@ -2650,7 +2709,10 @@
           "authenticated",
           "transport",
           "desktop",
-          "api_version"
+          "api_version",
+          "installation_profile_id",
+          "installation_profile_name",
+          "profile_registry_revision"
         ],
         "title": "DeviceSessionResponse",
         "type": "object"
@@ -4652,6 +4714,160 @@
         "title": "JobMutationResponse",
         "type": "object"
       },
+      "JobOsProfileList": {
+        "additionalProperties": false,
+        "properties": {
+          "active_profile_id": {
+            "pattern": "^jprof_[a-f0-9]{32}$",
+            "title": "Active Profile Id",
+            "type": "string"
+          },
+          "anchored_profile_id": {
+            "pattern": "^jprof_[a-f0-9]{32}$",
+            "title": "Anchored Profile Id",
+            "type": "string"
+          },
+          "profiles": {
+            "items": {
+              "$ref": "#/components/schemas/JobOsProfileSummary"
+            },
+            "title": "Profiles",
+            "type": "array"
+          },
+          "registry_revision": {
+            "minimum": 1.0,
+            "title": "Registry Revision",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "registry_revision",
+          "active_profile_id",
+          "anchored_profile_id",
+          "profiles"
+        ],
+        "title": "JobOsProfileList",
+        "type": "object"
+      },
+      "JobOsProfileSummary": {
+        "additionalProperties": false,
+        "properties": {
+          "active": {
+            "title": "Active",
+            "type": "boolean"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "display_name": {
+            "title": "Display Name",
+            "type": "string"
+          },
+          "profile_id": {
+            "pattern": "^jprof_[a-f0-9]{32}$",
+            "title": "Profile Id",
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "profile_id",
+          "display_name",
+          "active",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "JobOsProfileSummary",
+        "type": "object"
+      },
+      "JobOsProfileSwitchAccepted": {
+        "additionalProperties": false,
+        "properties": {
+          "from_profile_id": {
+            "pattern": "^jprof_[a-f0-9]{32}$",
+            "title": "From Profile Id",
+            "type": "string"
+          },
+          "status": {
+            "const": "accepted",
+            "default": "accepted",
+            "title": "Status",
+            "type": "string"
+          },
+          "switch_id": {
+            "pattern": "^jpswitch_[a-f0-9]{32}$",
+            "title": "Switch Id",
+            "type": "string"
+          },
+          "to_profile_id": {
+            "pattern": "^jprof_[a-f0-9]{32}$",
+            "title": "To Profile Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "switch_id",
+          "from_profile_id",
+          "to_profile_id"
+        ],
+        "title": "JobOsProfileSwitchAccepted",
+        "type": "object"
+      },
+      "JobOsProfileSwitchStatus": {
+        "additionalProperties": false,
+        "properties": {
+          "active_profile_id": {
+            "pattern": "^jprof_[a-f0-9]{32}$",
+            "title": "Active Profile Id",
+            "type": "string"
+          },
+          "error_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Code"
+          },
+          "status": {
+            "enum": [
+              "pending",
+              "activating",
+              "succeeded",
+              "rolled_back"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "switch_id": {
+            "pattern": "^jpswitch_[a-f0-9]{32}$",
+            "title": "Switch Id",
+            "type": "string"
+          },
+          "target_profile_id": {
+            "pattern": "^jprof_[a-f0-9]{32}$",
+            "title": "Target Profile Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "switch_id",
+          "target_profile_id",
+          "status",
+          "active_profile_id"
+        ],
+        "title": "JobOsProfileSwitchStatus",
+        "type": "object"
+      },
       "JobSelectionRequest": {
         "additionalProperties": false,
         "properties": {
@@ -6011,6 +6227,33 @@
           "idempotency_key"
         ],
         "title": "PublishEditableDocumentRequest",
+        "type": "object"
+      },
+      "RenameJobOsProfileRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "display_name": {
+            "title": "Display Name",
+            "type": "string"
+          },
+          "expected_registry_revision": {
+            "minimum": 1.0,
+            "title": "Expected Registry Revision",
+            "type": "integer"
+          },
+          "idempotency_key": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Idempotency Key",
+            "type": "string"
+          }
+        },
+        "required": [
+          "display_name",
+          "expected_registry_revision",
+          "idempotency_key"
+        ],
+        "title": "RenameJobOsProfileRequest",
         "type": "object"
       },
       "ReplaceBlockText": {
@@ -14003,6 +14246,591 @@
           }
         },
         "summary": "Health",
+        "tags": [
+          "system"
+        ]
+      }
+    },
+    "/v1/installation-profiles": {
+      "get": {
+        "operationId": "installation_profile_list_v1_installation_profiles_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-JobOS-Agent-Id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Jobos-Agent-Id"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-JobOS-Agent-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Jobos-Agent-Token"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-JobOS-MCP-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Jobos-Mcp-Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobOsProfileList"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Device authentication required"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Request validation failed"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Internal server error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Installation Profile List",
+        "tags": [
+          "system"
+        ]
+      },
+      "post": {
+        "operationId": "installation_profile_create_v1_installation_profiles_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-JobOS-Agent-Id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Jobos-Agent-Id"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-JobOS-Agent-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Jobos-Agent-Token"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-JobOS-MCP-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Jobos-Mcp-Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateJobOsProfileRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobOsProfileList"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Device authentication required"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Request validation failed"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Internal server error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Installation Profile Create",
+        "tags": [
+          "system"
+        ]
+      }
+    },
+    "/v1/installation-profiles/switches/{switch_id}": {
+      "get": {
+        "operationId": "installation_profile_switch_status_v1_installation_profiles_switches__switch_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "switch_id",
+            "required": true,
+            "schema": {
+              "title": "Switch Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-JobOS-Agent-Id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Jobos-Agent-Id"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-JobOS-Agent-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Jobos-Agent-Token"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-JobOS-MCP-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Jobos-Mcp-Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobOsProfileSwitchStatus"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Device authentication required"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Request validation failed"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Internal server error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Installation Profile Switch Status",
+        "tags": [
+          "system"
+        ]
+      }
+    },
+    "/v1/installation-profiles/{profile_id}": {
+      "patch": {
+        "operationId": "installation_profile_rename_v1_installation_profiles__profile_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "profile_id",
+            "required": true,
+            "schema": {
+              "title": "Profile Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-JobOS-Agent-Id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Jobos-Agent-Id"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-JobOS-Agent-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Jobos-Agent-Token"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-JobOS-MCP-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Jobos-Mcp-Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RenameJobOsProfileRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobOsProfileList"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Device authentication required"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Request validation failed"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Internal server error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Installation Profile Rename",
+        "tags": [
+          "system"
+        ]
+      }
+    },
+    "/v1/installation-profiles/{profile_id}/activate": {
+      "post": {
+        "operationId": "installation_profile_activate_v1_installation_profiles__profile_id__activate_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "profile_id",
+            "required": true,
+            "schema": {
+              "title": "Profile Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-JobOS-Agent-Id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Jobos-Agent-Id"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-JobOS-Agent-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Jobos-Agent-Token"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-JobOS-MCP-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Jobos-Mcp-Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ActivateJobOsProfileRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobOsProfileSwitchAccepted"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Device authentication required"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Request validation failed"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Internal server error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Installation Profile Activate",
         "tags": [
           "system"
         ]

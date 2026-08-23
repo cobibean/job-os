@@ -39,6 +39,7 @@ export function useWorkspace(
   const revision = useRef(0)
   const latest = useRef(workspace)
   const queue = useRef(Promise.resolve())
+  const persistenceFailure = useRef<unknown>(null)
   const bridge = useRef(window.jobos?.workspace).current
   const hydrating = useRef(Boolean(bridge))
   const pendingHydrationUpdates = useRef<WorkspaceUpdate[]>([])
@@ -61,6 +62,7 @@ export function useWorkspace(
           activeArtifactZoom: 1
         })
         revision.current = saved.revision
+        persistenceFailure.current = null
         if (recoveringStartup.current) {
           recoveringStartup.current = false
           startupRecoveryUpdates.current = []
@@ -89,7 +91,8 @@ export function useWorkspace(
         }
       }
     })
-    queue.current = operation.catch(() => {
+    queue.current = operation.catch(error => {
+      persistenceFailure.current = error
       setAnnouncement('Layout save failed; changes remain visible')
     })
     return operation
@@ -242,7 +245,12 @@ export function useWorkspace(
     activeCenterSurface: 'browser'
   }), 'Job listing opened in browser'), [commit])
 
-  return { workspace, announcement, hydrated, selectPreset, selectTopLevelWorkspace, updateBrowseState, resize, collapse, move, reset, updateBrowserState, updateDocumentState, showDocument, showBrowser }
+  const flush = useCallback(async (): Promise<void> => {
+    await queue.current
+    if (persistenceFailure.current) throw new Error('Workspace changes could not be saved')
+  }, [])
+
+  return { workspace, announcement, hydrated, flush, selectPreset, selectTopLevelWorkspace, updateBrowseState, resize, collapse, move, reset, updateBrowserState, updateDocumentState, showDocument, showBrowser }
 }
 
 function panelLabel(panel: PanelId) {

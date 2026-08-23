@@ -93,6 +93,50 @@ test('the shell reports authenticated local connectivity without exposing creden
   expect(JSON.stringify(window.jobos)).not.toContain('test-device-token')
 })
 
+test('a profile change before the first probe replaces the workspace with restart recovery', async () => {
+  const profileA = 'jprof_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+  const profileB = 'jprof_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
+  const connectivity = vi.fn().mockResolvedValue({
+      state: 'connected',
+      checkedAt: '2026-08-23T12:01:00Z',
+      message: 'Connected',
+      installationProfileId: profileB,
+      installationProfileName: 'Fresh setup',
+      profileRegistryRevision: 2
+    })
+  const restart = vi.fn()
+  Object.defineProperty(window, 'jobos', { configurable: true, value: {
+    connectivity: { get: connectivity },
+    installationProfiles: {
+      expectedProfileId: profileA,
+      list: vi.fn().mockResolvedValue({
+        registryRevision: 1,
+        activeProfileId: profileA,
+        profiles: [{
+          profileId: profileA,
+          displayName: 'Personal',
+          active: true,
+          createdAt: '2026-08-23T12:00:00Z',
+          updatedAt: '2026-08-23T12:00:00Z'
+        }]
+      }),
+      activate: vi.fn(),
+      createAndSwitch: vi.fn(),
+      rename: vi.fn(),
+      restart
+    }
+  } })
+
+  render(<App />)
+  await waitFor(() => expect(connectivity).toHaveBeenCalledOnce())
+
+  expect(await screen.findByRole('heading', {
+    name: 'JobOS switched to “Fresh setup” on another device.'
+  })).not.toBeNull()
+  fireEvent.click(screen.getByRole('button', { name: 'Restart JobOS' }))
+  expect(restart).toHaveBeenCalledOnce()
+})
+
 test('reset preserves the selected layout preset', async () => {
   Object.defineProperty(window, 'jobos', {
     configurable: true,

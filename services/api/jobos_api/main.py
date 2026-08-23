@@ -80,6 +80,16 @@ def settings_from_environment() -> Settings:
             "JOBOS_CAREER_PROFILE_AGENT_DISPLAY_NAME", "JobOS Agent"
         ),
         career_profile_agent_token=os.environ.get("JOBOS_CAREER_PROFILE_AGENT_TOKEN"),
+        installation_profile_id=os.environ.get("JOBOS_INSTALLATION_PROFILE_ID"),
+        installation_profile_name=os.environ.get("JOBOS_INSTALLATION_PROFILE_NAME", "Personal"),
+        installation_registry_path=Path(
+            os.environ.get(
+                "JOBOS_INSTALLATION_REGISTRY_PATH",
+                application_data / "installation-profiles.json",
+            )
+        ),
+        profile_registry_revision=int(os.environ.get("JOBOS_PROFILE_REGISTRY_REVISION", "1")),
+        profile_switch_driver=os.environ.get("JOBOS_PROFILE_SWITCH_DRIVER", "desktop"),
     )
 
 
