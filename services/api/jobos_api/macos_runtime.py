@@ -54,6 +54,7 @@ _CONFIG_FIELDS = {
     "hermes_job_hunter_cwd",
     "device_id",
     "remote_device_ids",
+    "career_profile_owner_device_ids",
     "host",
     "port",
 }
@@ -124,6 +125,7 @@ class RuntimeServiceConfig:
     hermes_job_hunter_cwd: Path | None
     device_id: str
     remote_device_ids: tuple[str, ...]
+    career_profile_owner_device_ids: tuple[str, ...]
     host: str
     port: int
 
@@ -180,6 +182,17 @@ class RuntimeServiceConfig:
             or len(set(remote_device_ids)) != len(remote_device_ids)
         ):
             raise ValueError("remote device identifiers are invalid")
+        career_profile_owner_device_ids = value.get("career_profile_owner_device_ids", [])
+        if (
+            not isinstance(career_profile_owner_device_ids, list)
+            or any(
+                not isinstance(owner_id, str) or owner_id not in remote_device_ids
+                for owner_id in career_profile_owner_device_ids
+            )
+            or len(set(career_profile_owner_device_ids))
+            != len(career_profile_owner_device_ids)
+        ):
+            raise ValueError("Career Profile owner device identifiers are invalid")
         job_provider = value["job_provider"]
         artifact_provider = value["artifact_provider"]
         if job_provider not in {"sqlite", "job-hunter"}:
@@ -223,6 +236,7 @@ class RuntimeServiceConfig:
             ),
             device_id=device_id,
             remote_device_ids=tuple(remote_device_ids),
+            career_profile_owner_device_ids=tuple(career_profile_owner_device_ids),
             host="127.0.0.1",
             port=port,
         )
@@ -250,6 +264,9 @@ class RuntimeServiceConfig:
                 value[field] = str(value[field])
         value["artifact_roots"] = [str(path) for path in self.artifact_roots]
         value["remote_device_ids"] = list(self.remote_device_ids)
+        value["career_profile_owner_device_ids"] = list(
+            self.career_profile_owner_device_ids
+        )
         return value
 
 
@@ -320,6 +337,11 @@ def build_service_environment(
         )
     if source.get("JOBOS_CAREER_PROFILE_ENABLED") == "1":
         environment["JOBOS_CAREER_PROFILE_ENABLED"] = "1"
+        if config.career_profile_owner_device_ids:
+            environment["JOBOS_CAREER_PROFILE_OWNER_DEVICE_IDS_JSON"] = json.dumps(
+                config.career_profile_owner_device_ids,
+                separators=(",", ":"),
+            )
         environment["JOBOS_CAREER_PROFILE_AGENT_ID"] = source.get(
             "JOBOS_CAREER_PROFILE_AGENT_ID", "trusted-local-mcp"
         )

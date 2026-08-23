@@ -325,17 +325,23 @@ def test_service_environment_and_uvicorn_command_are_fixed_and_loopback_only(tmp
         "8766",
     ]
 
+    owner_mapping = runtime_mapping(tmp_path)
+    owner_mapping["remote_device_ids"] = ["macbook-device"]
+    owner_mapping["career_profile_owner_device_ids"] = ["macbook-device"]
     remote_environment = build_service_environment(
-        config,
+        RuntimeServiceConfig.from_mapping(owner_mapping),
         device_token="device-secret-value",
         mcp_token="mcp-secret-value",
         remote_device_tokens={"macbook-device": "macbook-secret-value"},
         hermes_dashboard_token=None,
-        base_environment={},
+        base_environment={"JOBOS_CAREER_PROFILE_ENABLED": "1"},
     )
     assert json.loads(remote_environment["JOBOS_DEVICE_CREDENTIALS_JSON"]) == {
         "macbook-device": "macbook-secret-value"
     }
+    assert json.loads(
+        remote_environment["JOBOS_CAREER_PROFILE_OWNER_DEVICE_IDS_JSON"]
+    ) == ["macbook-device"]
 
 
 def test_local_service_environment_has_no_private_provider_inputs(tmp_path):

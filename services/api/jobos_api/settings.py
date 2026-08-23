@@ -32,6 +32,18 @@ def parse_device_credentials(raw: str | None) -> tuple[DeviceCredential, ...]:
         raise ValueError("device credential registry is invalid") from None
 
 
+def parse_device_ids(raw: str | None) -> tuple[str, ...]:
+    if not raw:
+        return ()
+    try:
+        value = json.loads(raw)
+        if not isinstance(value, list) or any(not isinstance(item, str) for item in value):
+            raise ValueError
+        return tuple(value)
+    except (json.JSONDecodeError, ValueError):
+        raise ValueError("device identifier list is invalid") from None
+
+
 class Settings(BaseModel):
     """Runtime inputs for the API process.
 
@@ -58,6 +70,7 @@ class Settings(BaseModel):
     hermes_job_hunter_cwd: Path | None = None
     hermes_request_timeout: float = Field(default=5.0, gt=0, le=30)
     career_profile_enabled: bool = False
+    career_profile_owner_device_ids: tuple[str, ...] = ()
     career_profile_agent_id: str = Field(
         default="trusted-local-mcp",
         min_length=1,
@@ -126,6 +139,16 @@ class Settings(BaseModel):
             raise ValueError("device identifiers must be unique")
         if len(set(tokens)) != len(tokens):
             raise ValueError("device credentials must be unique")
+        remote_ids = {item.device_id for item in self.device_credentials}
+        if (
+            len(set(self.career_profile_owner_device_ids))
+            != len(self.career_profile_owner_device_ids)
+            or any(
+                device_id not in remote_ids
+                for device_id in self.career_profile_owner_device_ids
+            )
+        ):
+            raise ValueError("Career Profile owner devices must be authorized remote devices")
         return self
 
     def device_credential_registry(self) -> dict[str, str]:
