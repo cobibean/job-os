@@ -348,7 +348,7 @@ def public_profile_list(data: InstallationProfileRegistryData) -> JobOsProfileLi
 
 
 def _assert_safe_managed_root(installation_root: Path, profile_id: str) -> Path:
-    validate_profile_id(profile_id)
+    profile_id = validate_profile_id(profile_id)
     installation_root = installation_root.absolute()
     profiles_root = installation_root / "profiles"
     root = profiles_root / profile_id
@@ -364,6 +364,8 @@ def _assert_safe_managed_root(installation_root: Path, profile_id: str) -> Path:
     current = installation_root
     for part in ("profiles", profile_id):
         current /= part
+        # Profile IDs are fixed-format single segments and every ancestor is checked here.
+        # codeql[py/path-injection]
         if current.exists() and stat.S_ISLNK(current.lstat().st_mode):
             raise InstallationProfileStorageError("Managed JobOS Profile root is unavailable")
     return root
