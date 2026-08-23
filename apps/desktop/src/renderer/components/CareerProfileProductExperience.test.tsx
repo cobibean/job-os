@@ -186,6 +186,28 @@ test('navigates all three real areas and explains item provenance without scorin
   expect(screen.getByRole('button', { name: /Resume\.pdf/i })).not.toBeNull()
 })
 
+test('renders list-valued career details as human-readable words', async () => {
+  const targetRoles: CareerProfileItemSnapshot = {
+    ...skill,
+    area: 'what_im_looking_for',
+    itemId: 'cpi_fakeproductroles1234',
+    value: { kind: 'target_roles', roles: ['applied_ai_builder', 'internal_ai_enablement'] }
+  }
+  const api = bridge({
+    getCareerProfile: vi.fn().mockResolvedValue(savedProfile({ items: [skill, targetRoles] }))
+  })
+  render(<CareerProfileWorkspace bridge={api} hasActiveTurn={false} />)
+
+  await screen.findByRole('heading', { name: 'Work arrangement' })
+  expect(screen.getByRole('button', { name: /applied ai builder, internal ai enablement/i })).not.toBeNull()
+  expect(screen.queryByText(/applied_ai_builder|internal_ai_enablement/)).toBeNull()
+
+  fireEvent.click(screen.getByRole('button', { name: /applied ai builder, internal ai enablement/i }))
+  const detail = await screen.findByRole('dialog', { name: /applied ai builder, internal ai enablement details/i })
+  expect(within(detail).getAllByText('applied ai builder, internal ai enablement')).toHaveLength(2)
+  expect(detail.textContent).not.toMatch(/applied_ai_builder|internal_ai_enablement/)
+})
+
 test('adds a typed career detail using accessible fields rather than JSON', async () => {
   const nextSkill = { ...skill, itemId: 'cpi_fakeproductskill5678', value: { kind: 'skill', name: 'React', level: 'expert' } }
   const createCareerProfileItem = vi.fn().mockResolvedValue({
