@@ -293,6 +293,11 @@ def test_version_and_openapi_describe_the_shared_workspace_contract(tmp_path):
         "/v1/career-profile/agents/{agent_id}/context",
         "/v1/career-profile/agents/{agent_id}/context/preview",
         "/v1/career-profile/agent-edits",
+        "/v1/career-profile/agent-edits/batch",
+        "/v1/career-profile/agent-search",
+        "/v1/career-profile/agent-changes",
+        "/v1/career-profile/agent-evidence",
+        "/v1/career-profile/agent-evidence/{evidence_id}",
         "/v1/career-profile/proposals",
         "/v1/career-profile/proposals/{proposal_id}/decision",
         "/v1/career-profile/history",
@@ -428,7 +433,7 @@ def test_version_and_openapi_describe_the_shared_workspace_contract(tmp_path):
                 assert response["content"]["application/json"]["schema"] == {
                     "$ref": "#/components/schemas/ApiErrorResponse"
                 }
-    assert documented_errors < 425
+    assert documented_errors < 450
     assert set(schemas["JobListItem"]["required"]) == {
         "job_id",
         "company",

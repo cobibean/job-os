@@ -120,7 +120,7 @@ def test_connected_agent_defaults_to_review_and_only_user_changes_mode(tmp_path:
         assert changed.json()["trust_mode"] == "direct"
 
 
-def test_review_mode_proposal_is_exact_evidence_optional_and_stale_safe(tmp_path: Path):
+def test_review_mode_proposal_is_exact_evidence_optional_and_target_safe(tmp_path: Path):
     app = create_app(configured_settings(tmp_path / "jobos.db"))
 
     with TestClient(app) as client:
@@ -176,19 +176,23 @@ def test_review_mode_proposal_is_exact_evidence_optional_and_stale_safe(tmp_path
         )
         assert competing_edit.status_code == 201, competing_edit.text
 
-        stale_accept = client.post(
+        independent_accept = client.post(
             f"/v1/career-profile/proposals/{proposal['proposal_id']}/decision",
             headers=user_headers(),
             json={
                 "expected_profile_revision": 1,
-                "idempotency_key": "reject-stale-proposal-accept-0001",
+                "idempotency_key": "accept-independent-proposal-0001",
                 "proposal_sha256": proposal["proposal_sha256"],
                 "decision": "accept",
             },
         )
-        assert stale_accept.status_code == 409
+        assert independent_accept.status_code == 200, independent_accept.text
         current = client.get("/v1/career-profile", headers=user_headers()).json()
-        assert current["profile_revision"] == 1
+        assert current["profile_revision"] == 2
+        assert {item["value"]["kind"] for item in current["items"]} == {
+            "custom",
+            "skill",
+        }
 
 
 def test_review_mode_accepts_exact_zero_evidence_payload_atomically(tmp_path: Path):
