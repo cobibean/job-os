@@ -86,7 +86,8 @@ export function useCareerProfileCollaboration(
     decision: 'accept' | 'reject'
   ) => {
     if (!online || status === 'saving') return false
-    const signature = `proposal:${proposal.proposalId}:${decision}:${proposal.proposalSha256}:${proposal.baseProfileRevision}`
+    const expectedProfileRevision = history?.profileRevision ?? proposal.baseProfileRevision
+    const signature = `proposal:${proposal.proposalId}:${decision}:${proposal.proposalSha256}:${expectedProfileRevision}`
     const idempotencyKey = pendingKeys.current.get(signature) ?? requestId('career_proposal')
     pendingKeys.current.set(signature, idempotencyKey)
     setStatus('saving')
@@ -94,7 +95,7 @@ export function useCareerProfileCollaboration(
     try {
       await bridge.decideCareerProfileProposal(proposal.proposalId, {
         decision,
-        expectedProfileRevision: proposal.baseProfileRevision,
+        expectedProfileRevision,
         idempotencyKey,
         proposalSha256: proposal.proposalSha256
       })
@@ -113,7 +114,7 @@ export function useCareerProfileCollaboration(
       await refresh()
       return false
     }
-  }, [bridge, onProfileChanged, online, refresh, status])
+  }, [bridge, history, onProfileChanged, online, refresh, status])
 
   const undo = useCallback(async (revision: CareerProfileChangeRevision) => {
     if (!history || !online || status === 'saving') return false

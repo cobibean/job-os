@@ -353,7 +353,7 @@ test('keeps empty and failure states actionable', async () => {
   expect(await screen.findByText('Tell JobOS where you want to work')).not.toBeNull()
 })
 
-test('shows an exact zero-Evidence proposal and binds approval to its revision and payload', async () => {
+test('uses the latest loaded profile revision when accepting an exact zero-Evidence proposal', async () => {
   const proposal = {
     after: {
       actorPrincipal: 'agent:job-hunter',
@@ -369,7 +369,7 @@ test('shows an exact zero-Evidence proposal and binds approval to its revision a
     },
     agentDisplayName: 'Job Hunter',
     agentId: 'job-hunter',
-    baseProfileRevision: 2,
+    baseProfileRevision: 1,
     before: {
       actorPrincipal: 'primary-device',
       area: 'my_career' as const,
