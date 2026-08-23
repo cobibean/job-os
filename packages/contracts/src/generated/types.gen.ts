@@ -4461,6 +4461,18 @@ export type CareerProfileAgentChangesV1CareerProfileAgentChangesGetErrors = {
      */
     401: ApiErrorResponse;
     /**
+     * Operation is not permitted
+     */
+    403: ApiErrorResponse;
+    /**
+     * Resource not found
+     */
+    404: ApiErrorResponse;
+    /**
+     * Resource state conflict
+     */
+    409: ApiErrorResponse;
+    /**
      * Request validation failed
      */
     422: ApiErrorResponse;
@@ -4555,6 +4567,18 @@ export type CareerProfileAgentEditBatchV1CareerProfileAgentEditsBatchPostErrors 
      */
     401: ApiErrorResponse;
     /**
+     * Operation is not permitted
+     */
+    403: ApiErrorResponse;
+    /**
+     * Resource not found
+     */
+    404: ApiErrorResponse;
+    /**
+     * Resource state conflict
+     */
+    409: ApiErrorResponse;
+    /**
      * Request validation failed
      */
     422: ApiErrorResponse;
@@ -4601,6 +4625,18 @@ export type CareerProfileAgentEvidenceImportV1CareerProfileAgentEvidencePostErro
      * Device authentication required
      */
     401: ApiErrorResponse;
+    /**
+     * Operation is not permitted
+     */
+    403: ApiErrorResponse;
+    /**
+     * Resource not found
+     */
+    404: ApiErrorResponse;
+    /**
+     * Resource state conflict
+     */
+    409: ApiErrorResponse;
     /**
      * Request validation failed
      */
@@ -4662,6 +4698,18 @@ export type CareerProfileAgentEvidenceInspectV1CareerProfileAgentEvidenceEvidenc
      * Device authentication required
      */
     401: ApiErrorResponse;
+    /**
+     * Operation is not permitted
+     */
+    403: ApiErrorResponse;
+    /**
+     * Resource not found
+     */
+    404: ApiErrorResponse;
+    /**
+     * Resource state conflict
+     */
+    409: ApiErrorResponse;
     /**
      * Request validation failed
      */
@@ -4734,6 +4782,18 @@ export type CareerProfileAgentSearchV1CareerProfileAgentSearchGetErrors = {
      * Device authentication required
      */
     401: ApiErrorResponse;
+    /**
+     * Operation is not permitted
+     */
+    403: ApiErrorResponse;
+    /**
+     * Resource not found
+     */
+    404: ApiErrorResponse;
+    /**
+     * Resource state conflict
+     */
+    409: ApiErrorResponse;
     /**
      * Request validation failed
      */
