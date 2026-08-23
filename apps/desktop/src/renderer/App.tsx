@@ -65,18 +65,23 @@ function WorkbenchApp() {
   const [documentPreviewMode, setDocumentPreviewMode] = useState<'pdf' | 'docx'>('pdf')
   const [editingDocument, setEditingDocument] = useState<DocxOpenResult | null>(null)
   const [panelReorderActive, setPanelReorderActive] = useState(false)
+  const [profileOverlayActive, setProfileOverlayActive] = useState(false)
   const nextJobListingRequestId = useRef(0)
   const latestNavigatorSelection = useRef(0)
   const browseTransitionGeneration = useRef(0)
   const panelReorderGeneration = useRef(0)
   const navigatorSelectionQueue = useRef<Promise<unknown>>(Promise.resolve())
   const prepareClose = useRef<() => Promise<boolean>>(async () => true)
+  const prepareProfileSwitch = useRef<() => Promise<boolean>>(async () => true)
+  const expectedInstallationProfileId = useRef<string | null>(
+    window.jobos?.installationProfiles?.expectedProfileId ?? null
+  )
   const activePreset = layoutState.workspace.selectedPreset
   const activeTopLevelWorkspace = layoutState.workspace.activeTopLevelWorkspace ?? activePreset
   const activeLayout = layoutState.workspace.layouts[activePreset]
   const browseVisible = activeTopLevelWorkspace === 'browse' && browseDetachState === 'ready'
   const browserTransitionPending = browseDetachState === 'preparing'
-  const nativeBrowserVisible = layoutState.hydrated && activeTopLevelWorkspace !== 'browse' && !careerProfileOpen && !browserTransitionPending && !activeLayout.collapsed.includes('center') && !settingsOpen && !settingsPreparing
+  const nativeBrowserVisible = layoutState.hydrated && activeTopLevelWorkspace !== 'browse' && !careerProfileOpen && !browserTransitionPending && !activeLayout.collapsed.includes('center') && !settingsOpen && !settingsPreparing && !profileOverlayActive
 
   useEffect(() => {
     const bridge = window.jobos?.careerProfile
@@ -112,8 +117,22 @@ function WorkbenchApp() {
     return true
   }, [nativeBrowserVisible])
 
+  prepareProfileSwitch.current = async () => {
+    if (!await prepareClose.current()) return false
+    try {
+      await layoutState.flush()
+    } catch {
+      return false
+    }
+    return !Object.values(agentSessions.sessions).some(session => (
+      session.conversation.activeTurn !== null
+      || session.summary.recoveryState === 'recovering'
+      || session.operation !== null
+    ))
+  }
+
   useEffect(() => window.jobos?.lifecycle?.subscribePrepareClose(
-    () => prepareClose.current()
+    reason => reason === 'profile-switch' ? prepareProfileSwitch.current() : prepareClose.current()
   ), [])
 
   useEffect(() => setDocumentPreviewMode('pdf'), [jobState.selectedJobId])
@@ -165,6 +184,17 @@ function WorkbenchApp() {
       // Keep the panel closed rather than rendering it beneath an attached native browser view.
     } finally {
       setSettingsPreparing(false)
+    }
+  }
+
+  const prepareProfileOverlay = async () => {
+    if (profileOverlayActive) return true
+    try {
+      await window.jobos?.browser?.setBounds({ x: 0, y: 0, width: 0, height: 0, visible: false })
+      setProfileOverlayActive(true)
+      return true
+    } catch {
+      return false
     }
   }
 
@@ -261,6 +291,21 @@ function WorkbenchApp() {
     if (activeTopLevelWorkspace !== 'browse') await layoutState.selectTopLevelWorkspace('browse')
   }
 
+  const profileChangedElsewhere = Boolean(
+    expectedInstallationProfileId.current
+    && connectivity.installationProfileId
+    && expectedInstallationProfileId.current !== connectivity.installationProfileId
+  )
+  if (profileChangedElsewhere) {
+    return (
+      <main className="profile-changed-elsewhere">
+        <h1>JobOS switched to “{connectivity.installationProfileName ?? 'another profile'}” on another device.</h1>
+        <p>Restart JobOS to continue safely.</p>
+        <button onClick={() => { void window.jobos?.installationProfiles.restart() }} type="button">Restart JobOS</button>
+      </main>
+    )
+  }
+
   return (
     <div className="app-shell" data-layout={activePreset} data-workspace={activeTopLevelWorkspace}>
       <WorkspaceBar
@@ -270,6 +315,9 @@ function WorkbenchApp() {
         onReset={layoutState.reset}
         onToggleMode={theme.toggleMode}
         themeMode={theme.mode}
+        activeProfileName={connectivity.installationProfileName ?? 'Personal'}
+        onProfileOverlayClose={() => setProfileOverlayActive(false)}
+        prepareProfileOverlay={prepareProfileOverlay}
       />
       <div className="workspace-content">
       <div className="workbench-layer" hidden={browseVisible || careerProfileOpen}>

@@ -151,9 +151,19 @@ class ApiProcess:
         raise AssertionError("JobOS API did not become ready within 15 seconds")
 
     def client(self) -> httpx.Client:
+        headers = {"Authorization": f"Bearer {self.token}"}
+        profiles = httpx.get(
+            f"{self.base_url}/v1/installation-profiles",
+            headers=headers,
+            timeout=10,
+        )
+        if profiles.status_code == 200:
+            active_profile_id = profiles.json().get("active_profile_id")
+            if isinstance(active_profile_id, str) and active_profile_id:
+                headers["X-JobOS-Profile-Id"] = active_profile_id
         return httpx.Client(
             base_url=self.base_url,
-            headers={"Authorization": f"Bearer {self.token}"},
+            headers=headers,
             timeout=10,
         )
 

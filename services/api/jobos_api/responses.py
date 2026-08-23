@@ -39,3 +39,6 @@ class DeviceSessionResponse(ApiResponse):
     transport: Literal["local-loopback", "private-remote"]
     desktop: Literal["connected", "disconnected"]
     api_version: str = Field(min_length=1)
+    installation_profile_id: str = Field(pattern=r"^jprof_[a-f0-9]{32}$")
+    installation_profile_name: str = Field(min_length=1, max_length=64)
+    profile_registry_revision: int = Field(ge=1)

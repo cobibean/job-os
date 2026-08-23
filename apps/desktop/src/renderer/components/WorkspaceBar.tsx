@@ -1,6 +1,7 @@
 import { Moon, RotateCcw, Sun } from 'lucide-react'
 import type { TopLevelWorkspace } from '../workspaceLayout'
 import type { ThemeMode } from '../theme/themes'
+import { InstallationProfileMenu } from './InstallationProfileMenu'
 
 export type WorkspaceBarWorkspace = TopLevelWorkspace | 'career-profile'
 
@@ -11,6 +12,9 @@ interface WorkspaceBarProps {
   onReset: () => void
   onToggleMode: () => void
   themeMode: ThemeMode
+  activeProfileName?: string
+  onProfileOverlayClose?: () => void
+  prepareProfileOverlay?: () => Promise<boolean>
 }
 
 const workspaces: Array<{ id: WorkspaceBarWorkspace; label: string }> = [
@@ -20,12 +24,13 @@ const workspaces: Array<{ id: WorkspaceBarWorkspace; label: string }> = [
   { id: 'browse', label: 'Browse' }
 ]
 
-export function WorkspaceBar({ activeWorkspace, careerProfileEnabled, onWorkspaceChange, onReset, onToggleMode, themeMode }: WorkspaceBarProps) {
+export function WorkspaceBar({ activeWorkspace, careerProfileEnabled, onWorkspaceChange, onReset, onToggleMode, themeMode, activeProfileName = 'Personal', onProfileOverlayClose, prepareProfileOverlay }: WorkspaceBarProps) {
   const dark = themeMode === 'dark'
   return (
     <header className="workspace-bar">
       <div className="brand-lockup">
         <span className="brand">JobOS</span>
+        <InstallationProfileMenu activeProfileName={activeProfileName} onOverlayClose={onProfileOverlayClose} prepareOverlay={prepareProfileOverlay} />
       </div>
 
       <nav aria-label="Workspace layouts" className="layout-switcher">

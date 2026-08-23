@@ -138,10 +138,12 @@ class SQLiteJobRepository:
         initialize: bool = True,
         migrations: Sequence[Migration] = MIGRATIONS,
         backup_directory: Path | None = None,
+        installation_profile_id: str | None = None,
     ) -> None:
         self.database_path = Path(database_path)
         self._migrations = tuple(migrations)
         self._backup_directory = backup_directory
+        self._installation_profile_id = installation_profile_id
         if initialize:
             self.initialize()
 
@@ -150,6 +152,7 @@ class SQLiteJobRepository:
             self.database_path,
             migrations=self._migrations,
             backup_directory=self._backup_directory,
+            installation_profile_id=self._installation_profile_id,
         )
 
     def _connect(self) -> sqlite3.Connection:

@@ -1,8 +1,36 @@
 from fastapi.testclient import TestClient
 from jobos_api.agent_gateway import OfflineAgentGateway
 from jobos_api.app import create_app
+from jobos_api.installation_profiles import InstallationProfileRegistry
 from jobos_api.private_adapters.job_hunter import JobHunterArtifactGateway
 from jobos_api.settings import Settings
+
+
+def registry_backed_settings(tmp_path):
+    state_path = tmp_path / "state" / "jobos.db"
+    values = {
+        "job_provider": "sqlite",
+        "artifact_provider": "local",
+        "state_db_path": state_path,
+        "jobs_db_path": tmp_path / "jobs" / "jobs.db",
+        "local_artifact_root": tmp_path / "artifacts",
+        "artifact_roots": (),
+        "job_hunter_db_path": None,
+        "facade_source_path": None,
+    }
+    registry_path = tmp_path / "installation-profiles.json"
+    data = InstallationProfileRegistry(registry_path).load_or_bootstrap(values)
+    return Settings(
+        device_token="test-device-token",
+        mcp_token="test-mcp-trusted-token",
+        state_db_path=state_path,
+        jobs_db_path=tmp_path / "jobs" / "jobs.db",
+        local_artifact_root=tmp_path / "artifacts",
+        installation_profile_id=data.active_profile_id,
+        installation_profile_name=data.profiles[0].display_name,
+        installation_registry_path=registry_path,
+        profile_registry_revision=data.registry_revision,
+    )
 
 
 class ReadyArtifactFacade:
@@ -89,7 +117,72 @@ def test_device_session_requires_the_runtime_credential(tmp_path):
         "transport": "local-loopback",
         "desktop": "disconnected",
         "api_version": "0.1.0",
+        "installation_profile_id": app.state.installation_profile_id,
+        "installation_profile_name": "Personal",
+        "profile_registry_revision": 1,
     }
+
+
+def test_registry_backed_desktop_requests_require_the_exact_profile_header(tmp_path):
+    configured = registry_backed_settings(tmp_path)
+    app = create_app(configured)
+    authorization = {"Authorization": "Bearer test-device-token"}
+
+    with TestClient(app) as client:
+        correct = client.get(
+            "/v1/jobs",
+            headers={
+                **authorization,
+                "X-JobOS-Profile-Id": configured.installation_profile_id,
+            },
+        )
+        configured.installation_registry_path.unlink()
+        missing = client.get("/v1/jobs", headers=authorization)
+        stale = client.get(
+            "/v1/jobs",
+            headers={
+                **authorization,
+                "X-JobOS-Profile-Id": "jprof_ffffffffffffffffffffffffffffffff",
+            },
+        )
+        health = client.get("/v1/health")
+        device_session = client.get("/v1/device-session", headers=authorization)
+        mcp = client.get(
+            "/v1/conversations",
+            headers={
+                "Authorization": "Bearer test-mcp-trusted-token",
+                "X-JobOS-MCP-Token": "test-mcp-trusted-token",
+            },
+        )
+
+    assert correct.status_code == 200
+    assert missing.status_code == stale.status_code == 409
+    assert missing.json()["code"] == stale.json()["code"] == "profile_context_changed"
+    assert health.status_code == device_session.status_code == mcp.status_code == 200
+    assert "installation_profile_name" not in health.json()
+
+
+def test_device_session_refreshes_same_process_profile_metadata(tmp_path):
+    configured = registry_backed_settings(tmp_path)
+    registry = InstallationProfileRegistry(configured.installation_registry_path)
+    renamed = registry.rename(
+        configured.installation_profile_id,
+        "Renamed profile",
+        expected_registry_revision=configured.profile_registry_revision,
+        idempotency_key="rename-live-profile",
+    )
+    app = create_app(configured)
+
+    with TestClient(app) as client:
+        session = client.get(
+            "/v1/device-session",
+            headers={"Authorization": "Bearer test-device-token"},
+        )
+
+    assert session.status_code == 200
+    assert session.json()["installation_profile_id"] == configured.installation_profile_id
+    assert session.json()["installation_profile_name"] == "Renamed profile"
+    assert session.json()["profile_registry_revision"] == renamed.registry_revision
 
 
 def test_health_distinguishes_configured_offline_agent_and_private_remote_transport(tmp_path):
@@ -183,6 +276,10 @@ def test_version_and_openapi_describe_the_shared_workspace_contract(tmp_path):
         "/v1/health",
         "/v1/version",
         "/v1/device-session",
+        "/v1/installation-profiles",
+        "/v1/installation-profiles/{profile_id}",
+        "/v1/installation-profiles/{profile_id}/activate",
+        "/v1/installation-profiles/switches/{switch_id}",
         "/v1/career-profile",
         "/v1/career-profile/authority",
         "/v1/career-profile/authority/activate",
@@ -278,6 +375,9 @@ def test_version_and_openapi_describe_the_shared_workspace_contract(tmp_path):
         "transport",
         "desktop",
         "api_version",
+        "installation_profile_id",
+        "installation_profile_name",
+        "profile_registry_revision",
     }
     assert set(schemas["ApiErrorResponse"]["required"]) == {
         "error_schema",
@@ -328,7 +428,7 @@ def test_version_and_openapi_describe_the_shared_workspace_contract(tmp_path):
                 assert response["content"]["application/json"]["schema"] == {
                     "$ref": "#/components/schemas/ApiErrorResponse"
                 }
-    assert documented_errors < 410
+    assert documented_errors < 425
     assert set(schemas["JobListItem"]["required"]) == {
         "job_id",
         "company",

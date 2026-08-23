@@ -9,6 +9,10 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
+from jobos_api.installation_profiles import (
+    InstallationProfileRegistry,
+    effective_profile_runtime,
+)
 from jobos_api.macos_keychain import (
     delete_keychain_secret,
     keychain_helper_path,
@@ -131,17 +135,42 @@ def settings_from_config(path: Path) -> Settings:
     if artifact_provider not in {"local", "gateway"}:
         raise LocalConfigError("JobOS artifact provider is unsupported.")
     artifact_root = _resolved(data_dir, paths.get("artifacts"), "paths.artifacts")
+    base_runtime: dict[str, object] = {
+        "job_provider": str(config.get("jobProvider", "sqlite")),
+        "artifact_provider": artifact_provider,
+        "state_db_path": _resolved(data_dir, paths.get("stateDatabase"), "paths.stateDatabase"),
+        "jobs_db_path": _resolved(data_dir, paths.get("jobsDatabase"), "paths.jobsDatabase"),
+        "local_artifact_root": artifact_root,
+        "artifact_roots": (artifact_root,),
+        "job_hunter_db_path": None,
+        "facade_source_path": None,
+    }
+    registry_path = data_dir / "installation-profiles.json"
+    registry = InstallationProfileRegistry(registry_path)
+    registry_data = registry.load_or_bootstrap(base_runtime)
+    active = next(
+        profile
+        for profile in registry_data.profiles
+        if profile.profile_id == registry_data.active_profile_id
+    )
+    effective = effective_profile_runtime(base_runtime, active, data_dir)
     return Settings(
         device_token=device_token,
         mcp_token=mcp_token,
         device_id=str(config["deviceId"]),
-        state_db_path=_resolved(data_dir, paths.get("stateDatabase"), "paths.stateDatabase"),
-        jobs_db_path=_resolved(data_dir, paths.get("jobsDatabase"), "paths.jobsDatabase"),
-        artifact_provider=artifact_provider,
-        local_artifact_root=artifact_root,
-        artifact_roots=(artifact_root,),
-        job_provider=str(config.get("jobProvider", "sqlite")),
+        state_db_path=effective["state_db_path"],
+        jobs_db_path=effective["jobs_db_path"],
+        artifact_provider=effective["artifact_provider"],
+        local_artifact_root=effective["local_artifact_root"],
+        artifact_roots=effective["artifact_roots"],
+        job_provider=effective["job_provider"],
+        job_hunter_db_path=effective["job_hunter_db_path"],
         transport=("private-remote" if config.get("mode") == "remote-client" else "local-loopback"),
+        installation_profile_id=active.profile_id,
+        installation_profile_name=active.display_name,
+        installation_registry_path=registry_path,
+        profile_registry_revision=registry_data.registry_revision,
+        profile_switch_driver="desktop",
     )
 
 

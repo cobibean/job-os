@@ -166,6 +166,46 @@ def seed_profile(tmp_path: Path):
     }
 
 
+def test_agent_connection_is_shared_but_profile_access_starts_safe(tmp_path: Path):
+    profile_a = seed_profile(tmp_path / "profile-a")
+    collaboration_a = CareerProfileCollaborationStore(
+        profile_a["database"], profile_a["complete"]
+    )
+    collaboration_a.update_trust_mode(agent_id=AGENT_ID, trust_mode="direct")
+    current_a = profile_a["complete"].current()
+    profile_a["context"].update_scope(
+        principal=DEVICE_PRINCIPAL,
+        agent_id=AGENT_ID,
+        command=CareerProfileContextScopeUpdate(
+            expected_profile_revision=current_a.profile_revision,
+            expected_authority_epoch=current_a.authority_epoch,
+            idempotency_key="profile-a-broader-context-0001",
+            mode="broader",
+        ),
+    )
+    JobOsStateStore(profile_a["database"]).save_stored_session_id(
+        "stored-profile-a-session"
+    )
+
+    database_b, _, complete_b, _, context_b, _ = initialize(tmp_path / "profile-b")
+    collaboration_b = CareerProfileCollaborationStore(database_b, complete_b)
+    agent_b = collaboration_b.get_agent(AGENT_ID)
+    assert agent_b.active is True
+    assert agent_b.trust_mode == "review"
+    assert context_b.get_scope(AGENT_ID).mode == "none"
+    assert JobOsStateStore(database_b).stored_session_id() is None
+    with sqlite3.connect(database_b) as connection:
+        assert connection.execute(
+            "SELECT COUNT(*) FROM career_profile_change_proposals"
+        ).fetchone() == (0,)
+        assert connection.execute(
+            "SELECT COUNT(*) FROM career_profile_context_snapshots"
+        ).fetchone() == (0,)
+
+    collaboration_a.disconnect(agent_id=AGENT_ID)
+    assert collaboration_b.get_agent(AGENT_ID).active is True
+
+
 def archive_manifest(content_base64: str) -> tuple[dict[str, object], set[str]]:
     with zipfile.ZipFile(BytesIO(base64.b64decode(content_base64))) as archive:
         names = set(archive.namelist())

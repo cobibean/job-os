@@ -32,6 +32,40 @@ BROWSER_TITLE_POLICY_FIXTURES = json.loads(
 )
 
 
+def test_state_database_binds_once_to_an_installation_profile_and_preserves_legacy_rows(
+    tmp_path,
+):
+    database = tmp_path / "jobos.db"
+    legacy = JobOsStateStore(database)
+    legacy.initialize()
+    with sqlite3.connect(database) as connection:
+        connection.execute(
+            "INSERT INTO jobos_metadata(key, value, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)",
+            ("legacy-test-row", "preserved"),
+        )
+
+    profile_id = "jprof_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    legacy.initialize(installation_profile_id=profile_id)
+    legacy.initialize(installation_profile_id=profile_id)
+
+    with sqlite3.connect(database) as connection:
+        assert connection.execute(
+            "SELECT value FROM jobos_metadata WHERE key = 'legacy-test-row'"
+        ).fetchone() == ("preserved",)
+        assert connection.execute(
+            "SELECT value FROM jobos_metadata WHERE key = 'installation_profile_id'"
+        ).fetchone() == (profile_id,)
+    with pytest.raises(
+        IncompatibleSchemaError,
+        match="State database belongs to another JobOS Profile",
+    ) as error:
+        legacy.initialize(
+            installation_profile_id="jprof_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        )
+    assert profile_id not in str(error.value)
+    assert str(database) not in str(error.value)
+
+
 def test_browse_workspace_defaults_and_malformed_fields_repair_independently():
     old_snapshot = canonical_workspace_snapshot("job-1")
     for key in list(old_snapshot):

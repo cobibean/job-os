@@ -11,7 +11,9 @@ from jobos_api.sqlite_job_repository import SQLiteJobRepository
 def create_job_services(settings: Settings) -> tuple[JobRepository, ArtifactGateway]:
     if settings.job_provider == "sqlite":
         job_repository: JobRepository = SQLiteJobRepository(
-            settings.resolved_jobs_db_path(), initialize=False
+            settings.resolved_jobs_db_path(),
+            initialize=False,
+            installation_profile_id=settings.installation_profile_id,
         )
     elif settings.job_provider == "job-hunter":
         if settings.job_hunter_db_path is None:

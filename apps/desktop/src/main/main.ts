@@ -1,4 +1,3 @@
-import { randomUUID } from 'node:crypto'
 import { execFile, spawn } from 'node:child_process'
 import { writeFile } from 'node:fs/promises'
 import path from 'node:path'
@@ -7,11 +6,18 @@ import { fileURLToPath } from 'node:url'
 import { app, BrowserWindow, clipboard, dialog, ipcMain, session, shell, WebContentsView } from 'electron'
 import type { IpcMainEvent, IpcMainInvokeEvent } from 'electron'
 
-import type { BrowserBounds, DocumentKey, JobSortMode, JobStatus, WorkspaceSnapshot } from '../shared/contracts.js'
+import type {
+  BrowserBounds,
+  DocumentKey,
+  InstallationProfileListSnapshot,
+  JobSortMode,
+  JobStatus,
+  WorkspaceSnapshot
+} from '../shared/contracts.js'
 import { AgentConversationRegistry, createScopedMainAgentClient, startAgentEventStream } from './agent.js'
 import { registerAgentIpc } from './agentIpc.js'
 import { createApiLifecycle } from './apiLifecycle.js'
-import { BROWSER_PARTITION, BrowserManager, remoteBrowserViewOptions } from './browser.js'
+import { BrowserManager, remoteBrowserViewOptions } from './browser.js'
 import { canonicalListingUrl, safeApplicationUrl, validatedBrowserJobExtraction } from './browserJobExtraction.js'
 import { createMainCareerProfileClient } from './careerProfile.js'
 import { careerProfileAcceptanceDialogPaths } from './careerProfileAcceptanceDialogs.js'
@@ -26,15 +32,30 @@ import { registerDocxDocumentsIpc } from './docxDocumentsIpc.js'
 import { DocxDocumentsService } from './docxDocuments.js'
 import { DocxFileStore } from './docxFileStore.js'
 import { LocalDocxBindingStore } from './localDocxBindingStore.js'
-import { activateVisibleWindow } from './mainWindowLifecycle.js'
+import { activateVisibleWindow, RendererSafetyCoordinator } from './mainWindowLifecycle.js'
 import { createMainJobsClient, startJobEventStream } from './jobs.js'
 import type { JobsConfig } from './jobs.js'
 import { safeExternalUrl } from '../shared/externalLinks.js'
 import { createMainDocumentsClient } from './documents.js'
 import { createMainEditableDocumentsClient } from './editableDocuments.js'
 import { registerEditableDocumentsIpc } from './editableDocumentsIpc.js'
-import { isTrustedRendererUrl } from './security.js'
+import { applyDenyAllPermissionPolicy, isTrustedRendererUrl } from './security.js'
 import { createMainWorkspaceClient } from './workspace.js'
+import {
+  assertProfileSwitchDownloadSafe,
+  createInstallationProfilesClient,
+  prepareAndActivateDesktopProfileSwitch,
+  prepareDesktopProfileSwitch,
+  rollbackSourceProfileRuntime,
+  resolveProfileStorageIdentity
+} from './installationProfiles.js'
+import { probeConnectivity } from './connectivity.js'
+import {
+  browserPartition,
+  prepareProfileClientPaths,
+  rendererPartition,
+  type DesktopProfileStorageIdentity
+} from './profileStorage.js'
 import { bindMediaFixture, loadMediaCaptureSpec, runMediaCapture } from './mediaCapture.js'
 
 const currentDirectory = path.dirname(fileURLToPath(import.meta.url))
@@ -53,6 +74,11 @@ let markBrowserRestored: () => void = () => undefined
 let activeConfigPath: string | null = null
 let sourceApiProcess: ReturnType<typeof spawn> | null = null
 let mediaCaptureSpec: Awaited<ReturnType<typeof loadMediaCaptureSpec>> = null
+let activeProfileStorageIdentity: DesktopProfileStorageIdentity = { kind: 'recovery' }
+let requestMainWindowSafety: (reason: 'window-close' | 'profile-switch') => Promise<boolean> = (
+  async () => false
+)
+let profileSwitchInProgress = false
 const apiLifecycle = createApiLifecycle({ startSource: startSourceApi })
 let desktopRuntimeState: DesktopRuntimeState = {
   runtime: null,
@@ -80,8 +106,213 @@ function jobsConfig(): JobsConfig | null {
   if (!runtime || !deviceToken) return null
   return {
     baseUrl: runtime.apiBaseUrl,
-    deviceToken
+    deviceToken,
+    installationProfileId: desktopRuntimeState.connectivity.installationProfileId
   }
+}
+
+function installationProfileSnapshot(value: Awaited<ReturnType<ReturnType<typeof createInstallationProfilesClient>['list']>>): InstallationProfileListSnapshot {
+  return {
+    registryRevision: value.registry_revision,
+    activeProfileId: value.active_profile_id,
+    profiles: value.profiles.map(profile => ({
+      profileId: profile.profile_id,
+      displayName: profile.display_name,
+      active: profile.active,
+      createdAt: profile.created_at,
+      updatedAt: profile.updated_at
+    }))
+  }
+}
+
+function profileClient() {
+  const config = jobsConfig()
+  if (!config) throw new Error('JobOS device credential unavailable')
+  return createInstallationProfilesClient(config)
+}
+
+function rollbackSourceProfileSwitch(switchId: string): Promise<void> {
+  const configPath = activeConfigPath
+  if (!configPath || app.isPackaged) {
+    return Promise.reject(new Error('Source JobOS Profile rollback is unavailable'))
+  }
+  const uvExecutable = process.env.JOBOS_UV_EXECUTABLE ?? 'uv'
+  return new Promise((resolve, reject) => {
+    execFile(
+      uvExecutable,
+      [
+        'run',
+        'python',
+        '-m',
+        'jobos_api.macos_runtime',
+        'source-profile-rollback',
+        '--registry',
+        path.join(path.dirname(configPath), 'installation-profiles.json'),
+        '--switch-id',
+        switchId
+      ],
+      { cwd: sourceRoot, encoding: 'utf8', maxBuffer: 8192, timeout: 10_000 },
+      error => error ? reject(new Error('Source JobOS Profile rollback failed')) : resolve()
+    )
+  })
+}
+
+async function stopSourceApiProcess(): Promise<void> {
+  const child = sourceApiProcess
+  sourceApiProcess = null
+  if (!child || child.exitCode !== null) return
+  const exited = () => new Promise<void>(resolve => child.once('exit', () => resolve()))
+  child.kill()
+  await Promise.race([
+    exited(),
+    new Promise<void>(resolve => setTimeout(resolve, 2_000))
+  ])
+  if (child.exitCode === null) {
+    child.kill('SIGKILL')
+    await Promise.race([
+      exited(),
+      new Promise<void>(resolve => setTimeout(resolve, 2_000))
+    ])
+  }
+  if (child.exitCode === null) throw new Error('Source JobOS API did not stop')
+}
+
+async function completeDesktopProfileSwitch(
+  target: {
+    profileId: string
+    expectedRegistryRevision: number
+    activationIdempotencyKey: string
+  } | {
+    displayName: string
+    creationIdempotencyKey: string
+  }
+): Promise<void> {
+  if (profileSwitchInProgress) throw new Error('A JobOS Profile switch is already in progress')
+  profileSwitchInProgress = true
+  const previousBrowserBounds = browserManager?.getBounds()
+  let switchCompleted = false
+  browserManager?.setDownloadsAllowed(false)
+  try {
+    const client = profileClient()
+    const resolved = await prepareAndActivateDesktopProfileSwitch({
+      prepare: () => prepareDesktopProfileSwitch({
+        assertDownloadSafe: () => assertProfileSwitchDownloadSafe(browserManager?.getState().download),
+        requestWorkspaceSafety: () => requestMainWindowSafety('profile-switch'),
+        hideBrowser: () => browserManager?.setBounds({ x: 0, y: 0, width: 0, height: 0, visible: false })
+      }),
+      resolveTarget: async () => {
+        if ('profileId' in target) return target
+        const created = await client.create(target.displayName, target.creationIdempotencyKey)
+        return {
+          profileId: created.createdProfileId,
+          expectedRegistryRevision: created.profiles.registry_revision,
+          activationIdempotencyKey: `${target.creationIdempotencyKey}-activate`
+        }
+      },
+      activate: (profileId, expectedRegistryRevision, activationIdempotencyKey) => client.activate(
+        profileId,
+        expectedRegistryRevision,
+        activationIdempotencyKey
+      )
+    })
+    const { profileId, accepted } = resolved
+    if (accepted.to_profile_id !== profileId) throw new Error('JobOS Profile switch identity changed')
+    if (desktopRuntimeState.connectivity.installationProfileId === profileId) return
+
+    const runtime = desktopRuntimeState.runtime
+    const deviceToken = desktopRuntimeState.deviceToken
+    if (!runtime || !deviceToken) throw new Error('JobOS runtime became unavailable')
+    const sourceDriven = !runtime.launchdLabel && runtime.mode !== 'remote-client'
+    try {
+      if (!sourceDriven) {
+        await client.waitForTarget(accepted.switch_id, profileId)
+      } else {
+        await stopSourceApiProcess()
+      }
+
+      const deadline = Date.now() + 20_000
+      let confirmed = false
+      do {
+        const snapshot = await probeConnectivity({ baseUrl: runtime.apiBaseUrl, deviceToken })
+        if (snapshot.installationProfileId === profileId && snapshot.state === 'connected') {
+          confirmed = true
+          break
+        }
+        if (snapshot.state === 'disconnected' && sourceDriven) {
+          await apiLifecycle.ensureApiReady(runtime, deviceToken)
+        }
+        await new Promise(resolve => setTimeout(resolve, 200))
+      } while (Date.now() < deadline)
+      if (!confirmed) throw new Error('JobOS did not open the requested profile')
+    } catch (error) {
+      if (!sourceDriven) throw error
+      await rollbackSourceProfileRuntime({
+        stopTargetApi: stopSourceApiProcess,
+        rollbackRegistry: () => rollbackSourceProfileSwitch(accepted.switch_id),
+        reopenPreviousApi: () => apiLifecycle.ensureApiReady(runtime, deviceToken)
+      })
+      throw new Error('JobOS stayed in the previous profile; no workspace data was changed.')
+    }
+    switchCompleted = true
+    app.relaunch()
+    app.quit()
+  } finally {
+    if (!switchCompleted && previousBrowserBounds) browserManager?.setBounds(previousBrowserBounds)
+    browserManager?.setDownloadsAllowed(true)
+    profileSwitchInProgress = false
+  }
+}
+
+function registerInstallationProfilesInterface(): void {
+  ipcMain.on('jobos:installation-profiles:expected-id', event => {
+    assertTrustedRenderer(event)
+    event.returnValue = activeProfileStorageIdentity.kind === 'recovery'
+      ? null
+      : activeProfileStorageIdentity.profileId
+  })
+  ipcMain.handle('jobos:installation-profiles:list', async event => {
+    assertTrustedRenderer(event)
+    return installationProfileSnapshot(await profileClient().list())
+  })
+  ipcMain.handle(
+    'jobos:installation-profiles:rename',
+    async (event, profileId, displayName, expectedRevision, idempotencyKey) => {
+      assertTrustedRenderer(event)
+      const value = await profileClient().rename(
+        profileId,
+        displayName,
+        expectedRevision,
+        idempotencyKey
+      )
+      return installationProfileSnapshot(value)
+    }
+  )
+  ipcMain.handle(
+    'jobos:installation-profiles:activate',
+    async (event, profileId, expectedRevision, idempotencyKey) => {
+      assertTrustedRenderer(event)
+      await completeDesktopProfileSwitch({
+        profileId,
+        expectedRegistryRevision: expectedRevision,
+        activationIdempotencyKey: idempotencyKey
+      })
+    }
+  )
+  ipcMain.handle(
+    'jobos:installation-profiles:create-and-switch',
+    async (event, displayName, idempotencyKey) => {
+      assertTrustedRenderer(event)
+      await completeDesktopProfileSwitch({
+        displayName,
+        creationIdempotencyKey: idempotencyKey
+      })
+    }
+  )
+  ipcMain.handle('jobos:installation-profiles:restart', event => {
+    assertTrustedRenderer(event)
+    app.relaunch()
+    app.quit()
+  })
 }
 
 function registerShellInterface(): void {
@@ -154,9 +385,11 @@ function runInitializer(arguments_: string[]): Promise<void> {
 }
 
 function registerSetupInterface(configPath: string): void {
-  setupState = desktopRuntimeState.runtime && desktopRuntimeState.deviceToken
+  setupState = activeProfileStorageIdentity.kind !== 'recovery'
     ? { state: 'ready', message: 'JobOS is configured' }
-    : { state: 'required', message: 'JobOS setup or credential repair is required' }
+    : desktopRuntimeState.runtime && desktopRuntimeState.deviceToken
+      ? { state: 'error', message: 'JobOS Profile recovery is required. Restart or repair the local service.' }
+      : { state: 'required', message: 'JobOS setup or credential repair is required' }
   ipcMain.handle('jobos:setup:get', event => {
     assertTrustedRenderer(event)
     return setupState
@@ -198,6 +431,16 @@ function registerDiagnosticsInterface(configPath: string): void {
       appVersion: app.getVersion(),
       ...(desktopRuntimeState.connectivity.apiVersion
         ? { apiVersion: desktopRuntimeState.connectivity.apiVersion }
+        : {}),
+      ...(desktopRuntimeState.connectivity.installationProfileId
+        && desktopRuntimeState.connectivity.installationProfileName
+        ? {
+            installationProfile: {
+              id: desktopRuntimeState.connectivity.installationProfileId,
+              name: desktopRuntimeState.connectivity.installationProfileName,
+              switchStatus: profileSwitchInProgress ? 'switching' : 'idle'
+            }
+          }
         : {}),
       capabilities: {
         localService: !runtime || runtime.mode !== 'local-service' ? 'not-configured'
@@ -543,12 +786,14 @@ function registerDocumentsInterface(): void {
 
 async function registerDocxDocumentsInterface(): Promise<void> {
   const userData = app.getPath('userData')
-  const recoveryRoot = path.join(userData, 'docx-recovery')
-  const artifactRoot = path.join(userData, 'editable-docx-artifacts')
+  if (activeProfileStorageIdentity.kind === 'recovery') return
+  const clientPaths = prepareProfileClientPaths(userData, activeProfileStorageIdentity)
+  const recoveryRoot = clientPaths.recoveryRoot
+  const artifactRoot = clientPaths.artifactRoot
   docxWorkerManager = new DocxWorkerManager(ipcMain)
   docxDocumentsService = new DocxDocumentsService({
     dialog,
-    bindings: new LocalDocxBindingStore(path.join(userData, 'docx-bindings.json')),
+    bindings: new LocalDocxBindingStore(clientPaths.bindingsPath),
     files: new DocxFileStore({
       recoveryRoot,
       denyRoots: [recoveryRoot, path.join(app.getPath('temp'), 'jobos-artifacts')]
@@ -592,6 +837,7 @@ function registerEditableDocumentsInterface(): void {
 }
 
 async function createWindow(): Promise<BrowserWindow> {
+  const activeRendererPartition = rendererPartition(activeProfileStorageIdentity)
   const window = new BrowserWindow({
     width: 1440,
     height: 1024,
@@ -609,54 +855,56 @@ async function createWindow(): Promise<BrowserWindow> {
       nodeIntegration: false,
       preload: path.resolve(currentDirectory, '../preload/preload.cjs'),
       sandbox: true,
+      ...(activeRendererPartition ? { partition: activeRendererPartition } : {}),
       webSecurity: true
     }
   })
 
   window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
   window.webContents.on('will-navigate', event => event.preventDefault())
+  const rendererSession = activeRendererPartition
+    ? session.fromPartition(activeRendererPartition, { cache: true })
+    : session.defaultSession
+  applyDenyAllPermissionPolicy(rendererSession)
 
   let allowClose = false
-  let pendingClose: { requestId: string; timer: NodeJS.Timeout } | null = null
+  const safety = new RendererSafetyCoordinator((requestId, reason) => {
+    if (!window.isDestroyed()) {
+      window.webContents.send('jobos:window:prepare-close', requestId, reason)
+    }
+  })
+  requestMainWindowSafety = reason => safety.request(reason)
   const onPrepareCloseResult = (
     event: IpcMainEvent,
     requestId: unknown,
     safe: unknown
   ) => {
-    if (
-      event.sender !== window.webContents
-      || typeof requestId !== 'string'
-      || requestId !== pendingClose?.requestId
-    ) return
-    clearTimeout(pendingClose.timer)
-    pendingClose = null
-    if (safe !== true) {
-      appIsQuitting = false
-      return
-    }
-    allowClose = true
-    if (appIsQuitting) app.quit()
-    else window.close()
+    if (event.sender === window.webContents) safety.resolve(requestId, safe)
   }
   ipcMain.on('jobos:window:prepare-close-result', onPrepareCloseResult)
   window.on('close', event => {
     if (allowClose || window.webContents.isLoadingMainFrame()) return
     event.preventDefault()
-    if (pendingClose) return
-    const requestId = `close_${randomUUID()}`
-    const timer = setTimeout(() => {
-      if (pendingClose?.requestId === requestId) pendingClose = null
-      appIsQuitting = false
-    }, 15_000)
-    pendingClose = { requestId, timer }
-    window.webContents.send('jobos:window:prepare-close', requestId)
+    void safety.request('window-close').then(safe => {
+      if (!safe) {
+        appIsQuitting = false
+        return
+      }
+      allowClose = true
+      if (appIsQuitting) app.quit()
+      else window.close()
+    })
   })
 
-  const browserSession = session.fromPartition(BROWSER_PARTITION, { cache: true })
+  const activeBrowserPartition = browserPartition(activeProfileStorageIdentity)
+  const browserSession = session.fromPartition(activeBrowserPartition, { cache: true })
+  applyDenyAllPermissionPolicy(browserSession)
   browserManager = new BrowserManager({
     window,
     browserSession,
-    createView: options => new WebContentsView(remoteBrowserViewOptions(options)),
+    createView: options => new WebContentsView(
+      remoteBrowserViewOptions(options, activeBrowserPartition)
+    ),
     dialog,
     clipboard,
     downloadsPath: app.getPath('downloads')
@@ -714,7 +962,8 @@ async function createWindow(): Promise<BrowserWindow> {
     void hydrateRegistry()
   }
   window.once('closed', () => {
-    if (pendingClose) clearTimeout(pendingClose.timer)
+    safety.dispose()
+    requestMainWindowSafety = async () => false
     ipcMain.removeListener('jobos:window:prepare-close-result', onPrepareCloseResult)
     stopJobEvents()
     stopAgentEvents()
@@ -752,9 +1001,7 @@ async function createWindow(): Promise<BrowserWindow> {
 }
 
 app.whenReady().then(async () => {
-  session.defaultSession.setPermissionRequestHandler((_webContents, _permission, callback) => {
-    callback(false)
-  })
+  applyDenyAllPermissionPolicy(session.defaultSession)
   const configPath = process.env.JOBOS_CONFIG_PATH ?? runtimeConfigPath(app.getPath('appData'))
   mediaCaptureSpec = await loadMediaCaptureSpec(process.env.JOBOS_MEDIA_CAPTURE_SPEC)
   activeConfigPath = configPath
@@ -763,10 +1010,22 @@ app.whenReady().then(async () => {
     environment: process.env,
     ensureApiReady: apiLifecycle.ensureApiReady
   })
+  const activeProfileId = desktopRuntimeState.connectivity.installationProfileId
+  if (desktopRuntimeState.runtime && desktopRuntimeState.deviceToken && activeProfileId) {
+    const profiles = await createInstallationProfilesClient({
+      baseUrl: desktopRuntimeState.runtime.apiBaseUrl,
+      deviceToken: desktopRuntimeState.deviceToken,
+      installationProfileId: activeProfileId
+    }).list()
+    activeProfileStorageIdentity = resolveProfileStorageIdentity(profiles, activeProfileId)
+  } else {
+    activeProfileStorageIdentity = { kind: 'recovery' }
+  }
   registerSetupInterface(configPath)
   registerDiagnosticsInterface(configPath)
   registerShellInterface()
   registerConnectivityInterface()
+  registerInstallationProfilesInterface()
   registerCareerProfileInterface()
   registerAgentInterface()
   registerJobsInterface()

@@ -92,7 +92,11 @@ function toApi(snapshot: WorkspaceSnapshot, idempotencyKey: string) {
 }
 
 export function createMainWorkspaceClient(config: JobsConfig) {
-  const client = createJobOsApiClient(config.baseUrl, config.deviceToken)
+  const client = createJobOsApiClient(
+    config.baseUrl,
+    config.deviceToken,
+    config.installationProfileId
+  )
   return {
     async get(): Promise<WorkspaceSnapshot> {
       return fromApi(unwrap(await workspaceGetV1WorkspaceGet({ client }), 'Workspace unavailable'))

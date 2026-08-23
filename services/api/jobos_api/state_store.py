@@ -1646,7 +1646,12 @@ class JobOsStateStore:
     def __init__(self, path: Path) -> None:
         self._path = path
 
-    def initialize(self, *, owner_device_id: str = "primary-device") -> StateHealth:
+    def initialize(
+        self,
+        *,
+        owner_device_id: str = "primary-device",
+        installation_profile_id: str | None = None,
+    ) -> StateHealth:
         self._path.parent.mkdir(parents=True, exist_ok=True)
         with connect_sqlite(self._path) as connection:
             self._ensure_migration_ledger(connection)
@@ -1656,6 +1661,22 @@ class JobOsStateStore:
                 self._assert_compatible(applied)
                 for migration in MIGRATIONS[len(applied) :]:
                     self._apply_migration_statements(connection, migration)
+                if installation_profile_id is not None:
+                    ownership = connection.execute(
+                        "SELECT value FROM jobos_metadata WHERE key = 'installation_profile_id'"
+                    ).fetchone()
+                    if ownership is None:
+                        connection.execute(
+                            """
+                            INSERT INTO jobos_metadata(key, value, updated_at)
+                            VALUES ('installation_profile_id', ?, CURRENT_TIMESTAMP)
+                            """,
+                            (installation_profile_id,),
+                        )
+                    elif str(ownership[0]) != installation_profile_id:
+                        raise IncompatibleSchemaError(
+                            "State database belongs to another JobOS Profile"
+                        )
                 connection.execute(
                     """
                     UPDATE conversations SET owner_device_id = ?

@@ -11,6 +11,7 @@ import subprocess
 import sys
 import time
 from collections.abc import Callable
+from contextlib import suppress
 from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from typing import Any, Literal
@@ -18,6 +19,14 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
 from urllib.request import Request, urlopen
 
+from jobos_api.installation_profiles import (
+    InstallationProfileRecord,
+    InstallationProfileRegistry,
+    InstallationProfileRegistryData,
+    InstallationProfileRegistryError,
+    effective_profile_runtime,
+    ensure_managed_profile_storage,
+)
 from jobos_api.macos_keychain import (
     delete_keychain_secret,
     read_keychain_secret,
@@ -252,6 +261,11 @@ def build_service_environment(
     remote_device_tokens: dict[str, str] | None = None,
     hermes_dashboard_token: str | None,
     base_environment: dict[str, str] | None = None,
+    installation_profile_id: str | None = None,
+    installation_profile_name: str = "Personal",
+    installation_registry_path: Path | None = None,
+    profile_registry_revision: int = 1,
+    profile_switch_driver: Literal["launchd", "desktop"] = "launchd",
 ) -> dict[str, str]:
     if not 16 <= len(device_token) <= 4096 or any(char in device_token for char in "\r\n\0"):
         raise ValueError("device credential is invalid")
@@ -314,7 +328,51 @@ def build_service_environment(
         )
         if agent_token := source.get("JOBOS_CAREER_PROFILE_AGENT_TOKEN"):
             environment["JOBOS_CAREER_PROFILE_AGENT_TOKEN"] = agent_token
+    if installation_profile_id is not None:
+        environment.update(
+            {
+                "JOBOS_INSTALLATION_PROFILE_ID": installation_profile_id,
+                "JOBOS_INSTALLATION_PROFILE_NAME": installation_profile_name,
+                "JOBOS_INSTALLATION_REGISTRY_PATH": str(installation_registry_path),
+                "JOBOS_PROFILE_REGISTRY_REVISION": str(profile_registry_revision),
+                "JOBOS_PROFILE_SWITCH_DRIVER": profile_switch_driver,
+            }
+        )
     return environment
+
+
+def installation_registry_path_for_runtime(config_path: Path) -> Path:
+    if config_path.name == "runtime.json" and config_path.parent.name == "service":
+        return config_path.parent.parent / "installation-profiles.json"
+    return config_path.parent / "installation-profiles.json"
+
+
+def resolve_runtime_profile(
+    config: RuntimeServiceConfig,
+    registry_path: Path,
+) -> tuple[RuntimeServiceConfig, InstallationProfileRegistryData, InstallationProfileRecord]:
+    registry = InstallationProfileRegistry(registry_path)
+    data = registry.load_or_bootstrap(config)
+    profile = next(item for item in data.profiles if item.profile_id == data.active_profile_id)
+    if profile.storage_mode == "managed":
+        ensure_managed_profile_storage(registry_path.parent, profile.profile_id)
+    effective = effective_profile_runtime(config, profile, registry_path.parent)
+    resolved = replace(
+        config,
+        job_provider=effective["job_provider"],
+        artifact_provider=effective["artifact_provider"],
+        facade_source_path=effective["facade_source_path"],
+        state_db_path=Path(effective["state_db_path"]),
+        jobs_db_path=Path(effective["jobs_db_path"]),
+        local_artifact_root=Path(effective["local_artifact_root"]),
+        job_hunter_db_path=(
+            Path(effective["job_hunter_db_path"])
+            if effective["job_hunter_db_path"] is not None
+            else None
+        ),
+        artifact_roots=tuple(Path(item) for item in effective["artifact_roots"]),
+    )
+    return resolved, data, profile
 
 
 def build_uvicorn_arguments(config: RuntimeServiceConfig) -> list[str]:
@@ -516,6 +574,156 @@ def _verify_authenticated_readiness(
             pass
         time.sleep(0.2)
     raise RuntimeError("JobOS API did not become authenticated and ready")
+
+
+def _verify_profile_readiness(
+    config: RuntimeServiceConfig,
+    device_id: str,
+    device_token: str,
+    expected_profile_id: str,
+) -> None:
+    base_url = f"http://127.0.0.1:{config.port}"
+    deadline = time.monotonic() + 15
+    while time.monotonic() < deadline:
+        try:
+            request = Request(
+                f"{base_url}/v1/device-session",
+                headers={
+                    "Authorization": f"Bearer {device_token}",
+                    "X-JobOS-Device-Id": device_id,
+                },
+            )
+            with urlopen(request, timeout=1) as session:
+                value = json.loads(session.read())
+            if (
+                value.get("authenticated") is True
+                and value.get("installation_profile_id") == expected_profile_id
+            ):
+                return
+        except (HTTPError, URLError, OSError, ValueError):
+            pass
+        time.sleep(0.2)
+    raise RuntimeError("JobOS API did not open the expected JobOS Profile")
+
+
+def spawn_profile_switch_helper(
+    registry_path: Path,
+    target_profile_id: str,
+    switch_id: str,
+) -> None:
+    arguments = [
+        sys.executable,
+        "-m",
+        "jobos_api.macos_runtime",
+        "profile-switch",
+        "--registry",
+        str(registry_path),
+        "--target-profile-id",
+        target_profile_id,
+        "--switch-id",
+        switch_id,
+    ]
+    try:
+        subprocess.Popen(
+            arguments,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            close_fds=True,
+            start_new_session=True,
+            cwd="/",
+            env={"PATH": "/usr/bin:/bin:/usr/sbin:/sbin", "PYTHONUNBUFFERED": "1"},
+        )
+    except OSError as error:
+        raise RuntimeError("JobOS Profile switch helper could not start") from error
+
+
+def run_profile_switch(
+    registry_path: Path,
+    target_profile_id: str,
+    switch_id: str,
+    *,
+    uid: int,
+    run: Callable[[list[str], bool], None] = _run_command,
+    read_secret: Callable[[str, str], str | None] = read_keychain_secret,
+    verify_profile: Callable[[RuntimeServiceConfig, str, str, str], None] = (
+        _verify_profile_readiness
+    ),
+) -> None:
+    registry = InstallationProfileRegistry(registry_path)
+    try:
+        registry.claim_switch(switch_id, target_profile_id)
+    except InstallationProfileRegistryError as error:
+        with suppress(Exception):
+            registry.fail_pending_switch(switch_id, "registry_write_failed")
+        raise RuntimeError("JobOS Profile switch could not start") from error
+    config_path = registry_path.parent / "service/runtime.json"
+    base_config: RuntimeServiceConfig | None = None
+    restart: list[str] | None = None
+    device_token: str | None = None
+    try:
+        base_config = RuntimeServiceConfig.load(config_path)
+        restart = [
+            "/bin/launchctl",
+            "kickstart",
+            "-k",
+            f"gui/{uid}/{base_config.label}",
+        ]
+        target_config, _, _ = resolve_runtime_profile(base_config, registry_path)
+        validate_runtime_paths(target_config)
+        device_token = read_secret(DEVICE_TOKEN_SERVICE, base_config.device_id)
+    except Exception:
+        error_code = "target_startup_failed"
+    else:
+        if device_token is None:
+            error_code = "device_credential_unavailable"
+        else:
+            try:
+                run(restart, False)
+            except Exception:
+                error_code = "launchd_restart_failed"
+            else:
+                try:
+                    verify_profile(
+                        target_config,
+                        base_config.device_id,
+                        device_token,
+                        target_profile_id,
+                    )
+                    registry.complete_switch(switch_id, target_profile_id)
+                    return
+                except Exception:
+                    error_code = "target_startup_failed"
+
+    previous_profile_id = registry.rollback_switch(switch_id, error_code)
+    try:
+        if base_config is None:
+            base_config = RuntimeServiceConfig.load(config_path)
+        if restart is None:
+            restart = [
+                "/bin/launchctl",
+                "kickstart",
+                "-k",
+                f"gui/{uid}/{base_config.label}",
+            ]
+        previous_config, _, _ = resolve_runtime_profile(base_config, registry_path)
+        run(restart, False)
+        if device_token is None:
+            device_token = read_secret(DEVICE_TOKEN_SERVICE, base_config.device_id)
+        if device_token is None:
+            raise RuntimeError("device credential unavailable")
+        verify_profile(
+            previous_config,
+            base_config.device_id,
+            device_token,
+            previous_profile_id,
+        )
+    except Exception as rollback_error:
+        registry.replace_last_switch_error(switch_id, "rollback_startup_failed")
+        raise RuntimeError(
+            "JobOS Profile switch rollback could not be verified"
+        ) from rollback_error
+    raise RuntimeError("JobOS Profile switch rolled back")
 
 
 @dataclass(frozen=True)
@@ -833,7 +1041,9 @@ def validate_runtime_paths(config: RuntimeServiceConfig) -> None:
 
 
 def run_service(config_path: Path) -> None:
-    config = RuntimeServiceConfig.load(config_path)
+    base_config = RuntimeServiceConfig.load(config_path)
+    registry_path = installation_registry_path_for_runtime(config_path)
+    config, registry_data, profile = resolve_runtime_profile(base_config, registry_path)
     validate_runtime_paths(config)
     device_token = _read_keychain(DEVICE_TOKEN_SERVICE, config.device_id)
     mcp_token = read_keychain_secret(MCP_TOKEN_SERVICE, config.device_id)
@@ -855,6 +1065,11 @@ def run_service(config_path: Path) -> None:
         mcp_token=mcp_token,
         remote_device_tokens=remote_device_tokens,
         hermes_dashboard_token=hermes_token,
+        installation_profile_id=profile.profile_id,
+        installation_profile_name=profile.display_name,
+        installation_registry_path=registry_path,
+        profile_registry_revision=registry_data.registry_revision,
+        profile_switch_driver="launchd",
     )
     arguments = build_uvicorn_arguments(config)
     os.execve(arguments[0], arguments, environment)
@@ -890,6 +1105,18 @@ def parse_arguments(arguments: list[str]) -> argparse.Namespace:
     uninstall.add_argument("--home", type=Path, default=Path.home())
     service = subparsers.add_parser("service", help="run the launchd-owned API")
     service.add_argument("--config", type=Path, required=True)
+    profile_switch = subparsers.add_parser(
+        "profile-switch", help="complete one pending JobOS Profile switch"
+    )
+    profile_switch.add_argument("--registry", type=Path, required=True)
+    profile_switch.add_argument("--target-profile-id", required=True)
+    profile_switch.add_argument("--switch-id", required=True)
+    source_rollback = subparsers.add_parser(
+        "source-profile-rollback",
+        help="roll back one failed desktop-driven JobOS Profile switch",
+    )
+    source_rollback.add_argument("--registry", type=Path, required=True)
+    source_rollback.add_argument("--switch-id", required=True)
     return parser.parse_args(arguments)
 
 
@@ -949,6 +1176,18 @@ def main(arguments: list[str] | None = None) -> int:
             print("JobOS runtime uninstalled")
         elif options.command == "service":
             run_service(options.config)
+        elif options.command == "profile-switch":
+            run_profile_switch(
+                options.registry,
+                options.target_profile_id,
+                options.switch_id,
+                uid=os.getuid(),
+            )
+        elif options.command == "source-profile-rollback":
+            InstallationProfileRegistry(options.registry).rollback_completed_source_switch(
+                options.switch_id,
+                "target_startup_failed",
+            )
     except (RuntimeError, ValueError) as error:
         print(f"JobOS runtime failed: {error}", file=sys.stderr)
         return 1

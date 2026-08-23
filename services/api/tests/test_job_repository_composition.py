@@ -32,6 +32,7 @@ def test_public_default_uses_separate_local_sqlite_without_job_hunter(tmp_path):
     assert repository.database_path == tmp_path / "state" / "jobs.db"
     assert repository.database_path != configured.state_db_path
     assert "job_hunter" not in sys.modules
+    assert repository._installation_profile_id == configured.installation_profile_id
 
 
 def test_sqlite_jobs_can_select_the_private_artifact_gateway_independently(

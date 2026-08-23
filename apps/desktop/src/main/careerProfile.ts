@@ -1,3 +1,4 @@
+import { jobOsAuthenticatedHeaders } from '@jobos/contracts'
 import type {
   CareerProfileChangeProposal as ApiCareerProfileChangeProposal,
   CareerProfileCompleteCurrent as ApiCareerProfileCompleteCurrent,
@@ -647,7 +648,7 @@ async function request(config: JobsConfig, route: string, init?: RequestInit): P
   return fetch(new URL(route, config.baseUrl), {
     ...init,
     headers: {
-      Authorization: `Bearer ${config.deviceToken}`,
+      ...jobOsAuthenticatedHeaders(config.deviceToken, config.installationProfileId),
       ...(init?.body ? { 'Content-Type': 'application/json' } : {})
     },
     redirect: 'error'

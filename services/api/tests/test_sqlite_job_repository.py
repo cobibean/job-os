@@ -17,6 +17,37 @@ from jobos_api.job_repository_migrations import (
 from jobos_api.sqlite_job_repository import SQLiteJobRepository
 
 
+def test_jobs_database_binds_once_to_an_installation_profile_and_preserves_legacy_rows(
+    tmp_path,
+):
+    database = tmp_path / "jobs.db"
+    legacy = SQLiteJobRepository(database, migrations=MIGRATIONS[:2])
+    legacy.create_job(command("legacy-profile-row"))
+    profile_id = "jprof_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+
+    SQLiteJobRepository(database, installation_profile_id=profile_id)
+    reopened = SQLiteJobRepository(database, installation_profile_id=profile_id)
+    assert reopened.get_job("legacy-profile-row").job_id == "legacy-profile-row"
+    with sqlite3.connect(database) as connection:
+        assert connection.execute(
+            """
+            SELECT value FROM job_repository_metadata
+            WHERE key = 'installation_profile_id'
+            """
+        ).fetchone() == (profile_id,)
+
+    with pytest.raises(
+        MigrationError,
+        match="Canonical jobs database belongs to another JobOS Profile",
+    ) as error:
+        SQLiteJobRepository(
+            database,
+            installation_profile_id="jprof_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        )
+    assert profile_id not in str(error.value)
+    assert str(database) not in str(error.value)
+
+
 def test_sqlite_satisfies_repository_contract_and_restarts(tmp_path):
     database = tmp_path / "jobs.db"
     repository = SQLiteJobRepository(database)

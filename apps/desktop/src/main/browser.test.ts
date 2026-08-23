@@ -346,6 +346,7 @@ test('tabs reorder and bounds changes reuse the same live WebContentsView instan
   manager.setBounds({ x: 0, y: 0, width: 0, height: 0, visible: false })
   expect(attached).toEqual([])
   manager.setBounds({ x: 310, y: 180, width: 540, height: 510, visible: true })
+  expect(manager.getBounds()).toEqual({ x: 310, y: 180, width: 540, height: 510, visible: true })
   expect(attached).toEqual([views[0]])
 
   await manager.close('gmail')
@@ -357,6 +358,16 @@ test('tabs reorder and bounds changes reuse the same live WebContentsView instan
   })
   expect(views).toHaveLength(3)
   expect(browserSession.listenerCount('will-download')).toBe(1)
+  const cancelBlockedDownload = vi.fn()
+  manager.setDownloadsAllowed(false)
+  browserSession.emit(
+    'will-download',
+    {},
+    { cancel: cancelBlockedDownload },
+    views[0]?.webContents
+  )
+  expect(cancelBlockedDownload).toHaveBeenCalledOnce()
+  expect(manager.getState().notice).toContain('blocked a new download')
   manager.dispose()
   expect(browserSession.listenerCount('will-download')).toBe(0)
 })

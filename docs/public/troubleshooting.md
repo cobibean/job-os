@@ -60,6 +60,22 @@ unconfigured capability when absent. Do not add private paths or credentials
 merely to make a public-source test appear connected. This does not mean packaged
 binary provisioning or installed-app acceptance is complete.
 
+## JobOS Profile switch recovery
+
+`profile_context_changed` means another authorized desktop changed the one active
+JobOS Profile. The stale desktop stops data operations; use **Restart JobOS** and
+verify the profile name and opaque ID in authenticated Diagnostics.
+
+If a target API cannot start, the switch helper restores the prior active profile,
+restarts it, and records a generic rolled-back status. No profile directory is
+deleted. Retry only after resolving the reported blocker or service problem.
+
+If the installation registry is missing or corrupt, JobOS fails closed instead of
+opening arbitrary storage. Do not hand-edit it or substitute another profile's
+database. Stop JobOS and restore the private registry from a verified backup; if
+no backup exists, preserve all profile roots and seek support with sanitized
+metadata only.
+
 ## Resetting local development state
 
 Use `config.json` to locate the active state database, jobs database, artifact

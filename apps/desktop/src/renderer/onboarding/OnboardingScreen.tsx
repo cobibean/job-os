@@ -27,7 +27,7 @@ export function OnboardingScreen({ initial }: OnboardingScreenProps) {
       <section aria-labelledby="onboarding-title" className="onboarding-card">
         <span aria-hidden="true" className="onboarding-mark">J</span>
         <h1 id="onboarding-title">Set up JobOS on this Mac</h1>
-        <p>JobOS will create a private local profile, use a loopback-only service, and add one clearly labeled fictional demo job.</p>
+        <p>JobOS will create a local JobOS Profile, use a loopback-only service, and add one clearly labeled fictional demo job. A connected agent is optional.</p>
         <p className={`onboarding-status ${snapshot.state}`} role="status">
           {snapshot.state === 'working' ? <LoaderCircle aria-hidden="true" className="spin" /> : null}
           {snapshot.state === 'succeeded' ? <CheckCircle2 aria-hidden="true" /> : null}

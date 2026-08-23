@@ -3,6 +3,7 @@ import { mkdir, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 
 import type { Dialog, Shell } from 'electron'
+import { jobOsAuthenticatedHeaders } from '@jobos/contracts'
 import type { ArtifactRecord as ApiArtifact, JobArtifactsResponse as ApiArtifactList } from '@jobos/contracts'
 
 import type { DocumentArtifact, JobArtifactsState, PdfArtifactPayload } from '../shared/contracts.js'
@@ -67,7 +68,7 @@ function safeFilename(value: string | null, mediaType: string): string {
 async function apiJson<T>(config: JobsConfig, route: string, method = 'GET'): Promise<T> {
   const response = await fetch(new URL(route, config.baseUrl), {
     method,
-    headers: { Authorization: `Bearer ${config.deviceToken}` },
+    headers: jobOsAuthenticatedHeaders(config.deviceToken, config.installationProfileId),
     redirect: 'error'
   })
   if (!response.ok) {
@@ -86,7 +87,7 @@ export async function loadVerifiedArtifactBytes(
   const response = await fetch(
     new URL(`/v1/artifacts/${encodeURIComponent(id)}/${preview ? 'content' : 'download'}`, config.baseUrl),
     {
-      headers: { Authorization: `Bearer ${config.deviceToken}` },
+      headers: jobOsAuthenticatedHeaders(config.deviceToken, config.installationProfileId),
       redirect: 'error'
     }
   )

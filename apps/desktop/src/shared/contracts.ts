@@ -558,6 +558,23 @@ export interface ConnectivitySnapshot {
   desktop?: 'connected' | 'disconnected'
   artifactStorage?: 'available' | 'unavailable'
   artifactGateway?: 'not-configured' | 'available' | 'unavailable'
+  installationProfileId?: string
+  installationProfileName?: string
+  profileRegistryRevision?: number
+}
+
+export interface InstallationProfileSummary {
+  profileId: string
+  displayName: string
+  active: boolean
+  createdAt: string
+  updatedAt: string
+}
+
+export interface InstallationProfileListSnapshot {
+  registryRevision: number
+  activeProfileId: string
+  profiles: InstallationProfileSummary[]
 }
 
 export interface SetupSnapshot {
@@ -569,6 +586,11 @@ export interface DiagnosticsSnapshot {
   mode: 'local-service' | 'remote-client' | 'not-configured'
   appVersion: string
   apiVersion?: string
+  installationProfile?: {
+    id: string
+    name: string
+    switchStatus: 'idle' | 'switching'
+  }
   capabilities: {
     localService: 'available' | 'unavailable' | 'not-configured'
     agent: 'available' | 'connecting' | 'offline' | 'not-configured'
@@ -661,13 +683,32 @@ export interface JobOsRendererBridge {
     openLogs: () => Promise<void>
   }
   lifecycle: {
-    subscribePrepareClose: (handler: () => Promise<boolean>) => () => void
+    subscribePrepareClose: (
+      handler: (reason: 'window-close' | 'profile-switch') => Promise<boolean>
+    ) => () => void
   }
   shell: {
     openExternal: (url: string) => Promise<void>
   }
   connectivity: {
     get: () => Promise<ConnectivitySnapshot>
+  }
+  installationProfiles: {
+    expectedProfileId?: string
+    list: () => Promise<InstallationProfileListSnapshot>
+    createAndSwitch: (displayName: string, idempotencyKey: string) => Promise<void>
+    rename: (
+      profileId: string,
+      displayName: string,
+      expectedRegistryRevision: number,
+      idempotencyKey: string
+    ) => Promise<InstallationProfileListSnapshot>
+    activate: (
+      profileId: string,
+      expectedRegistryRevision: number,
+      idempotencyKey: string
+    ) => Promise<void>
+    restart: () => Promise<void>
   }
   careerProfile: CareerProfileBridge
   agent: {

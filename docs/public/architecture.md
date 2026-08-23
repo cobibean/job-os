@@ -20,6 +20,27 @@ FastAPI application core <---- MCP adapter
         +---- Browser/agent capabilities
 ```
 
+## JobOS Profiles
+
+One JobOS installation may contain multiple named **JobOS Profiles**. Exactly one
+is active for the installation at a time; switching profiles restarts the API and
+desktop, then verifies the target's opaque profile ID before reopening. The
+existing installation is adopted as the first profile by recording its validated
+storage locations. Adoption moves, copies, renames, or rewrites no user data.
+
+The installation owns binaries, device credentials, the profile registry, and
+optional agent connection setup. Each JobOS Profile owns separate state and jobs
+SQLite databases, artifacts, Career Profile Evidence, conversations and stored
+agent session IDs, workspace/browser metadata, renderer and browser partitions,
+and desktop DOCX client state. A managed profile always uses local SQLite jobs and
+local artifacts. Display names never determine filesystem paths.
+
+Authenticated desktop requests pin the expected profile with an opaque ID and
+fail with `profile_context_changed` after another desktop switches the
+installation. Profile-owned SQLite stores also bind once to that ID. MCP follows
+the one currently active profile and cannot resume a conversation ID from another
+profile because conversation records live in the isolated state database.
+
 ## Repository boundaries
 
 - `apps/desktop/` owns the Electron process, React renderer, native desktop

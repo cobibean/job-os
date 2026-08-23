@@ -25,9 +25,31 @@ The accepted public composition will store:
 - credentials in the platform credential provider, with a documented restrictive
   source-development fallback.
 
-A fresh profile will contain one unmistakably synthetic demo job and one
-publication-safe `(FAKE)` starter resume that repeatedly identifies itself as
-fictional and do-not-apply. No real jobs, people, companies, resumes, cover
+### Shared installation, isolated lives
+
+The installation-level JobOS Profile registry contains only opaque identifiers,
+display names, timestamps, active/switch status, and—in the one adopted profile—
+validated storage configuration needed to leave existing data in place. It never
+contains credentials, job content, documents, conversations, or Career Profile
+values. Managed JobOS Profiles have physically separate databases, artifacts,
+Evidence, browser/renderer partitions, and DOCX client state.
+
+Agent endpoint, credential, and identity setup is an installation-owned
+**agent connection**. Trust mode, grants, scopes, proposals, edit history, and
+stored sessions are profile-owned **agent access**. A new JobOS Profile begins in
+review mode without grants or a prior session. Removing access from one profile
+does not remove the installation connection or mutate another profile.
+
+JobOS can guarantee that it does not send, resume, or expose another JobOS
+Profile's data. It cannot guarantee that an external connected agent has forgotten
+information retained in that agent's own runtime, files, or memory. For a clean
+audit, use a blank JobOS Profile with the agent offline or a separately clean
+external agent.
+
+An initial source installation may contain one unmistakably synthetic demo job
+and one publication-safe `(FAKE)` starter resume that repeatedly identifies
+itself as fictional and do-not-apply. A newly created additional JobOS Profile is
+blank and does not inherit that starter data. No real jobs, people, companies, resumes, cover
 letters, browser history, or conversations may be included in source, fixtures,
 documentation, or launch media.
 

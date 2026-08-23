@@ -1,9 +1,15 @@
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import type { Session } from 'electron'
 
 export interface RendererTrustPolicy {
   developmentOrigin?: string
   rendererRoot: string
+}
+
+export function applyDenyAllPermissionPolicy(target: Pick<Session, 'setPermissionCheckHandler' | 'setPermissionRequestHandler'>): void {
+  target.setPermissionCheckHandler(() => false)
+  target.setPermissionRequestHandler((_contents, _permission, callback) => callback(false))
 }
 
 export function isTrustedRendererUrl(urlValue: string, policy: RendererTrustPolicy): boolean {

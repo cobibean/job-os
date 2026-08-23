@@ -59,6 +59,9 @@ function isDeviceSessionResponse(value: unknown): value is {
   transport: 'local-loopback' | 'private-remote'
   desktop: 'connected' | 'disconnected'
   api_version: string
+  installation_profile_id: string
+  installation_profile_name: string
+  profile_registry_revision: number
 } {
   return isRecord(value)
     && value.authenticated === true
@@ -66,6 +69,13 @@ function isDeviceSessionResponse(value: unknown): value is {
     && (value.desktop === 'connected' || value.desktop === 'disconnected')
     && typeof value.api_version === 'string'
     && value.api_version.length > 0
+    && typeof value.installation_profile_id === 'string'
+    && /^jprof_[a-f0-9]{32}$/.test(value.installation_profile_id)
+    && typeof value.installation_profile_name === 'string'
+    && value.installation_profile_name.trim().length > 0
+    && value.installation_profile_name.length <= 64
+    && Number.isInteger(value.profile_registry_revision)
+    && Number(value.profile_registry_revision) >= 1
 }
 
 export async function probeConnectivity(config: ConnectivityConfig): Promise<ConnectivitySnapshot> {
@@ -114,6 +124,9 @@ export async function probeConnectivity(config: ConnectivityConfig): Promise<Con
       desktop: deviceSession.data.desktop,
       artifactStorage: health.data.artifact_storage,
       artifactGateway: health.data.artifact_gateway,
+      installationProfileId: deviceSession.data.installation_profile_id,
+      installationProfileName: deviceSession.data.installation_profile_name,
+      profileRegistryRevision: deviceSession.data.profile_registry_revision,
       checkedAt,
       message: deviceSession.data.transport === 'local-loopback'
         ? 'Local loopback API authenticated'

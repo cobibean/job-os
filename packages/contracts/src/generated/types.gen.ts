@@ -5,6 +5,20 @@ export type ClientOptions = {
 };
 
 /**
+ * ActivateJobOsProfileRequest
+ */
+export type ActivateJobOsProfileRequest = {
+    /**
+     * Expected Registry Revision
+     */
+    expected_registry_revision: number;
+    /**
+     * Idempotency Key
+     */
+    idempotency_key: string;
+};
+
+/**
  * ActivityReportRequest
  */
 export type ActivityReportRequest = {
@@ -1253,6 +1267,20 @@ export type CreateExternalImportRequest = {
 };
 
 /**
+ * CreateJobOsProfileRequest
+ */
+export type CreateJobOsProfileRequest = {
+    /**
+     * Display Name
+     */
+    display_name: string;
+    /**
+     * Idempotency Key
+     */
+    idempotency_key: string;
+};
+
+/**
  * CreateRegisteredImportRequest
  */
 export type CreateRegisteredImportRequest = {
@@ -1410,6 +1438,18 @@ export type DeviceSessionResponse = {
      * Desktop
      */
     desktop: 'connected' | 'disconnected';
+    /**
+     * Installation Profile Id
+     */
+    installation_profile_id: string;
+    /**
+     * Installation Profile Name
+     */
+    installation_profile_name: string;
+    /**
+     * Profile Registry Revision
+     */
+    profile_registry_revision: number;
     /**
      * Transport
      */
@@ -2416,6 +2456,102 @@ export type JobMutationResponse = {
 };
 
 /**
+ * JobOsProfileList
+ */
+export type JobOsProfileList = {
+    /**
+     * Active Profile Id
+     */
+    active_profile_id: string;
+    /**
+     * Anchored Profile Id
+     */
+    anchored_profile_id: string;
+    /**
+     * Profiles
+     */
+    profiles: Array<JobOsProfileSummary>;
+    /**
+     * Registry Revision
+     */
+    registry_revision: number;
+};
+
+/**
+ * JobOsProfileSummary
+ */
+export type JobOsProfileSummary = {
+    /**
+     * Active
+     */
+    active: boolean;
+    /**
+     * Created At
+     */
+    created_at: string;
+    /**
+     * Display Name
+     */
+    display_name: string;
+    /**
+     * Profile Id
+     */
+    profile_id: string;
+    /**
+     * Updated At
+     */
+    updated_at: string;
+};
+
+/**
+ * JobOsProfileSwitchAccepted
+ */
+export type JobOsProfileSwitchAccepted = {
+    /**
+     * From Profile Id
+     */
+    from_profile_id: string;
+    /**
+     * Status
+     */
+    status?: 'accepted';
+    /**
+     * Switch Id
+     */
+    switch_id: string;
+    /**
+     * To Profile Id
+     */
+    to_profile_id: string;
+};
+
+/**
+ * JobOsProfileSwitchStatus
+ */
+export type JobOsProfileSwitchStatus = {
+    /**
+     * Active Profile Id
+     */
+    active_profile_id: string;
+    /**
+     * Error Code
+     */
+    error_code?: string | null;
+    /**
+     * Status
+     */
+    status: 'pending' | 'activating' | 'succeeded' | 'rolled_back';
+    /**
+     * Switch Id
+     */
+    switch_id: string;
+    /**
+     * Target Profile Id
+     */
+    target_profile_id: string;
+};
+
+/**
  * JobSelectionRequest
  */
 export type JobSelectionRequest = {
@@ -3105,6 +3241,24 @@ export type PublishEditableDocumentRequest = {
      * Unresolved Suggestion Count
      */
     unresolved_suggestion_count?: number;
+};
+
+/**
+ * RenameJobOsProfileRequest
+ */
+export type RenameJobOsProfileRequest = {
+    /**
+     * Display Name
+     */
+    display_name: string;
+    /**
+     * Expected Registry Revision
+     */
+    expected_registry_revision: number;
+    /**
+     * Idempotency Key
+     */
+    idempotency_key: string;
 };
 
 /**
@@ -6864,6 +7018,256 @@ export type HealthV1HealthGetResponses = {
 };
 
 export type HealthV1HealthGetResponse = HealthV1HealthGetResponses[keyof HealthV1HealthGetResponses];
+
+export type InstallationProfileListV1InstallationProfilesGetData = {
+    body?: never;
+    headers?: {
+        /**
+         * X-Jobos-Agent-Id
+         */
+        'X-JobOS-Agent-Id'?: string | null;
+        /**
+         * X-Jobos-Agent-Token
+         */
+        'X-JobOS-Agent-Token'?: string | null;
+        /**
+         * X-Jobos-Mcp-Token
+         */
+        'X-JobOS-MCP-Token'?: string | null;
+    };
+    path?: never;
+    query?: never;
+    url: '/v1/installation-profiles';
+};
+
+export type InstallationProfileListV1InstallationProfilesGetErrors = {
+    /**
+     * Device authentication required
+     */
+    401: ApiErrorResponse;
+    /**
+     * Request validation failed
+     */
+    422: ApiErrorResponse;
+    /**
+     * Internal server error
+     */
+    500: ApiErrorResponse;
+};
+
+export type InstallationProfileListV1InstallationProfilesGetError = InstallationProfileListV1InstallationProfilesGetErrors[keyof InstallationProfileListV1InstallationProfilesGetErrors];
+
+export type InstallationProfileListV1InstallationProfilesGetResponses = {
+    /**
+     * Successful Response
+     */
+    200: JobOsProfileList;
+};
+
+export type InstallationProfileListV1InstallationProfilesGetResponse = InstallationProfileListV1InstallationProfilesGetResponses[keyof InstallationProfileListV1InstallationProfilesGetResponses];
+
+export type InstallationProfileCreateV1InstallationProfilesPostData = {
+    body: CreateJobOsProfileRequest;
+    headers?: {
+        /**
+         * X-Jobos-Agent-Id
+         */
+        'X-JobOS-Agent-Id'?: string | null;
+        /**
+         * X-Jobos-Agent-Token
+         */
+        'X-JobOS-Agent-Token'?: string | null;
+        /**
+         * X-Jobos-Mcp-Token
+         */
+        'X-JobOS-MCP-Token'?: string | null;
+    };
+    path?: never;
+    query?: never;
+    url: '/v1/installation-profiles';
+};
+
+export type InstallationProfileCreateV1InstallationProfilesPostErrors = {
+    /**
+     * Device authentication required
+     */
+    401: ApiErrorResponse;
+    /**
+     * Request validation failed
+     */
+    422: ApiErrorResponse;
+    /**
+     * Internal server error
+     */
+    500: ApiErrorResponse;
+};
+
+export type InstallationProfileCreateV1InstallationProfilesPostError = InstallationProfileCreateV1InstallationProfilesPostErrors[keyof InstallationProfileCreateV1InstallationProfilesPostErrors];
+
+export type InstallationProfileCreateV1InstallationProfilesPostResponses = {
+    /**
+     * Successful Response
+     */
+    201: JobOsProfileList;
+};
+
+export type InstallationProfileCreateV1InstallationProfilesPostResponse = InstallationProfileCreateV1InstallationProfilesPostResponses[keyof InstallationProfileCreateV1InstallationProfilesPostResponses];
+
+export type InstallationProfileSwitchStatusV1InstallationProfilesSwitchesSwitchIdGetData = {
+    body?: never;
+    headers?: {
+        /**
+         * X-Jobos-Agent-Id
+         */
+        'X-JobOS-Agent-Id'?: string | null;
+        /**
+         * X-Jobos-Agent-Token
+         */
+        'X-JobOS-Agent-Token'?: string | null;
+        /**
+         * X-Jobos-Mcp-Token
+         */
+        'X-JobOS-MCP-Token'?: string | null;
+    };
+    path: {
+        /**
+         * Switch Id
+         */
+        switch_id: string;
+    };
+    query?: never;
+    url: '/v1/installation-profiles/switches/{switch_id}';
+};
+
+export type InstallationProfileSwitchStatusV1InstallationProfilesSwitchesSwitchIdGetErrors = {
+    /**
+     * Device authentication required
+     */
+    401: ApiErrorResponse;
+    /**
+     * Request validation failed
+     */
+    422: ApiErrorResponse;
+    /**
+     * Internal server error
+     */
+    500: ApiErrorResponse;
+};
+
+export type InstallationProfileSwitchStatusV1InstallationProfilesSwitchesSwitchIdGetError = InstallationProfileSwitchStatusV1InstallationProfilesSwitchesSwitchIdGetErrors[keyof InstallationProfileSwitchStatusV1InstallationProfilesSwitchesSwitchIdGetErrors];
+
+export type InstallationProfileSwitchStatusV1InstallationProfilesSwitchesSwitchIdGetResponses = {
+    /**
+     * Successful Response
+     */
+    200: JobOsProfileSwitchStatus;
+};
+
+export type InstallationProfileSwitchStatusV1InstallationProfilesSwitchesSwitchIdGetResponse = InstallationProfileSwitchStatusV1InstallationProfilesSwitchesSwitchIdGetResponses[keyof InstallationProfileSwitchStatusV1InstallationProfilesSwitchesSwitchIdGetResponses];
+
+export type InstallationProfileRenameV1InstallationProfilesProfileIdPatchData = {
+    body: RenameJobOsProfileRequest;
+    headers?: {
+        /**
+         * X-Jobos-Agent-Id
+         */
+        'X-JobOS-Agent-Id'?: string | null;
+        /**
+         * X-Jobos-Agent-Token
+         */
+        'X-JobOS-Agent-Token'?: string | null;
+        /**
+         * X-Jobos-Mcp-Token
+         */
+        'X-JobOS-MCP-Token'?: string | null;
+    };
+    path: {
+        /**
+         * Profile Id
+         */
+        profile_id: string;
+    };
+    query?: never;
+    url: '/v1/installation-profiles/{profile_id}';
+};
+
+export type InstallationProfileRenameV1InstallationProfilesProfileIdPatchErrors = {
+    /**
+     * Device authentication required
+     */
+    401: ApiErrorResponse;
+    /**
+     * Request validation failed
+     */
+    422: ApiErrorResponse;
+    /**
+     * Internal server error
+     */
+    500: ApiErrorResponse;
+};
+
+export type InstallationProfileRenameV1InstallationProfilesProfileIdPatchError = InstallationProfileRenameV1InstallationProfilesProfileIdPatchErrors[keyof InstallationProfileRenameV1InstallationProfilesProfileIdPatchErrors];
+
+export type InstallationProfileRenameV1InstallationProfilesProfileIdPatchResponses = {
+    /**
+     * Successful Response
+     */
+    200: JobOsProfileList;
+};
+
+export type InstallationProfileRenameV1InstallationProfilesProfileIdPatchResponse = InstallationProfileRenameV1InstallationProfilesProfileIdPatchResponses[keyof InstallationProfileRenameV1InstallationProfilesProfileIdPatchResponses];
+
+export type InstallationProfileActivateV1InstallationProfilesProfileIdActivatePostData = {
+    body: ActivateJobOsProfileRequest;
+    headers?: {
+        /**
+         * X-Jobos-Agent-Id
+         */
+        'X-JobOS-Agent-Id'?: string | null;
+        /**
+         * X-Jobos-Agent-Token
+         */
+        'X-JobOS-Agent-Token'?: string | null;
+        /**
+         * X-Jobos-Mcp-Token
+         */
+        'X-JobOS-MCP-Token'?: string | null;
+    };
+    path: {
+        /**
+         * Profile Id
+         */
+        profile_id: string;
+    };
+    query?: never;
+    url: '/v1/installation-profiles/{profile_id}/activate';
+};
+
+export type InstallationProfileActivateV1InstallationProfilesProfileIdActivatePostErrors = {
+    /**
+     * Device authentication required
+     */
+    401: ApiErrorResponse;
+    /**
+     * Request validation failed
+     */
+    422: ApiErrorResponse;
+    /**
+     * Internal server error
+     */
+    500: ApiErrorResponse;
+};
+
+export type InstallationProfileActivateV1InstallationProfilesProfileIdActivatePostError = InstallationProfileActivateV1InstallationProfilesProfileIdActivatePostErrors[keyof InstallationProfileActivateV1InstallationProfilesProfileIdActivatePostErrors];
+
+export type InstallationProfileActivateV1InstallationProfilesProfileIdActivatePostResponses = {
+    /**
+     * Successful Response
+     */
+    202: JobOsProfileSwitchAccepted;
+};
+
+export type InstallationProfileActivateV1InstallationProfilesProfileIdActivatePostResponse = InstallationProfileActivateV1InstallationProfilesProfileIdActivatePostResponses[keyof InstallationProfileActivateV1InstallationProfilesProfileIdActivatePostResponses];
 
 export type JobsListV1JobsGetData = {
     body?: never;

@@ -28,7 +28,10 @@ test('connectivity is healthy only after the Mini API authenticates the device',
         authenticated: true,
         transport: 'local-loopback',
         desktop: 'disconnected',
-        api_version: '0.1.0'
+        api_version: '0.1.0',
+        installation_profile_id: 'jprof_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+        installation_profile_name: 'Personal',
+        profile_registry_revision: 1
       })
     }
     return Response.json({ detail: 'Device authentication required' }, { status: 401 })
@@ -53,6 +56,9 @@ test('connectivity is healthy only after the Mini API authenticates the device',
     desktop: 'disconnected',
     artifactStorage: 'available',
     artifactGateway: 'not-configured',
+    installationProfileId: 'jprof_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+    installationProfileName: 'Personal',
+    profileRegistryRevision: 1,
     message: 'Local loopback API authenticated'
   })
   expect(JSON.stringify(connected)).not.toContain('integration-device-token')

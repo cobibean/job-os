@@ -290,7 +290,12 @@ interface SocketLike {
   close: () => void
 }
 
-interface CapabilityConfig { baseUrl: string; deviceToken: string; deviceId: string }
+interface CapabilityConfig {
+  baseUrl: string
+  deviceToken: string
+  deviceId: string
+  installationProfileId?: string
+}
 interface CapabilityDependencies {
   socketFactory?: (url: string) => SocketLike
   setTimer?: (callback: () => void, delay: number) => NodeJS.Timeout
@@ -332,7 +337,10 @@ export function startDesktopCapabilityClient(
     currentSocket.addEventListener('open', () => {
       if (stopped || socket !== currentSocket || currentSocket.readyState !== 1) return
       currentSocket.send(JSON.stringify({
-      type: 'authenticate', token: config.deviceToken, device_id: config.deviceId
+      type: 'authenticate',
+      token: config.deviceToken,
+      device_id: config.deviceId,
+      installation_profile_id: config.installationProfileId
       }))
     })
     currentSocket.addEventListener('message', event => {

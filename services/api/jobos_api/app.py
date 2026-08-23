@@ -196,6 +196,19 @@ from jobos_api.editable_documents import (
     validate_content,
 )
 from jobos_api.hermes_adapter import HermesGatewayFactory
+from jobos_api.installation_profiles import (
+    ActivateJobOsProfileRequest,
+    CreateJobOsProfileRequest,
+    InstallationProfileConflict,
+    InstallationProfileError,
+    InstallationProfileLimitReached,
+    InstallationProfileNotFound,
+    InstallationProfileRegistry,
+    JobOsProfileList,
+    JobOsProfileSwitchAccepted,
+    JobOsProfileSwitchStatus,
+    RenameJobOsProfileRequest,
+)
 from jobos_api.job_repository import (
     Conflict,
     CreateJobCommand,
@@ -227,6 +240,7 @@ from jobos_api.jobs import (
     normalize_job_detail,
 )
 from jobos_api.local_artifact_repository import LocalArtifactRepository
+from jobos_api.macos_runtime import spawn_profile_switch_helper
 from jobos_api.redaction import redact_detail, sanitize_text
 from jobos_api.responses import (
     ApiErrorResponse,
@@ -539,6 +553,8 @@ def create_app(
     local_artifacts = artifact_repository or LocalArtifactRepository(
         settings.resolved_local_artifact_root()
     )
+    installation_profiles = InstallationProfileRegistry(settings.installation_registry_path)
+    profile_fence_enabled = settings.installation_registry_path.is_file()
 
     def artifact_storage_is_available() -> bool:
         try:
@@ -661,7 +677,10 @@ def create_app(
 
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
-        state_store.initialize(owner_device_id=settings.device_id)
+        state_store.initialize(
+            owner_device_id=settings.device_id,
+            installation_profile_id=settings.installation_profile_id,
+        )
         if settings.career_profile_enabled:
             career_profiles.initialize()
             complete_career_profile.initialize()
@@ -685,6 +704,7 @@ def create_app(
         version=__version__,
         lifespan=lifespan,
     )
+    app.state.installation_profile_id = settings.installation_profile_id
 
     def correlation_id(request: Request) -> str:
         supplied = request.headers.get("x-correlation-id", "")
@@ -737,6 +757,29 @@ def create_app(
         response = await call_next(request)
         response.headers["X-Correlation-ID"] = request.state.correlation_id
         return response
+
+    @app.middleware("http")
+    async def enforce_installation_profile_context(request: Request, call_next):
+        """Reject stale authenticated desktop clients before route dispatch."""
+        exempt = request.url.path in {
+            "/v1/health",
+            "/v1/version",
+            "/v1/device-session",
+        } or request.url.path.startswith("/v1/installation-profiles")
+        authorization = request.headers.get("authorization")
+        mcp_header = request.headers.get("x-jobos-mcp-token")
+        if exempt or not profile_fence_enabled or authorization is None or mcp_header is not None:
+            return await call_next(request)
+        expected = request.headers.get("x-jobos-profile-id")
+        if expected != settings.installation_profile_id:
+            return error_response(
+                request,
+                status_code=409,
+                code="profile_context_changed",
+                message="JobOS switched profiles on another device. Restart to continue.",
+                retryable=False,
+            )
+        return await call_next(request)
 
     @app.exception_handler(HTTPException)
     async def http_error_handler(request: Request, error: HTTPException) -> JSONResponse:
@@ -841,6 +884,24 @@ def create_app(
             detail=str(error),
         )
 
+    @app.exception_handler(InstallationProfileError)
+    async def installation_profile_error_handler(
+        request: Request, error: InstallationProfileError
+    ) -> JSONResponse:
+        if isinstance(error, InstallationProfileNotFound):
+            status_code = 404
+        elif isinstance(error, (InstallationProfileConflict, InstallationProfileLimitReached)):
+            status_code = 409
+        else:
+            status_code = 503
+        return error_response(
+            request,
+            status_code=status_code,
+            code=error.code,
+            message=str(error),
+            retryable=status_code == 503,
+        )
+
     @app.get(
         "/v1/health",
         tags=["system"],
@@ -904,6 +965,161 @@ def create_app(
                 detail="MCP credentials must use the dedicated local runtime principal",
             )
         return identity
+
+    def direct_installation_profile_user(
+        identity: Annotated[DeviceIdentity, Depends(authenticated_device)],
+        agent_id: Annotated[str | None, Header(alias="X-JobOS-Agent-Id")] = None,
+        agent_token: Annotated[str | None, Header(alias="X-JobOS-Agent-Token")] = None,
+    ) -> DeviceIdentity:
+        if (
+            identity.device_id == MCP_RUNTIME_DEVICE_ID
+            or agent_id is not None
+            or agent_token is not None
+        ):
+            raise HTTPException(
+                status_code=403,
+                detail="JobOS Profile operations require a direct authenticated user",
+            )
+        return identity
+
+    def require_profile_switch_preflight() -> None:
+        with sqlite3.connect(settings.state_db_path) as connection:
+            if connection.execute(
+                """
+                SELECT 1 FROM conversation_turns
+                WHERE status IN ('queued', 'running', 'waiting') LIMIT 1
+                """
+            ).fetchone():
+                raise HTTPException(
+                    status_code=409,
+                    detail={
+                        "code": "profile_switch_blocked",
+                        "message": "Finish the active agent turn before switching profiles.",
+                        "retryable": False,
+                    },
+                )
+            for table, message in (
+                (
+                    "career_profile_erasure_journal",
+                    "Wait for Career Profile erasure recovery to finish before switching profiles.",
+                ),
+                (
+                    "career_profile_restore_journal",
+                    "Wait for Career Profile restore recovery to finish before switching profiles.",
+                ),
+            ):
+                if connection.execute(f"SELECT 1 FROM {table} LIMIT 1").fetchone():
+                    raise HTTPException(
+                        status_code=409,
+                        detail={
+                            "code": "profile_switch_blocked",
+                            "message": message,
+                            "retryable": False,
+                        },
+                    )
+
+    @app.get("/v1/installation-profiles", tags=["system"])
+    def installation_profile_list(
+        _identity: Annotated[DeviceIdentity, Depends(direct_installation_profile_user)],
+    ) -> JobOsProfileList:
+        return installation_profiles.list_public()
+
+    @app.post("/v1/installation-profiles", tags=["system"], status_code=201)
+    def installation_profile_create(
+        command: CreateJobOsProfileRequest,
+        response: Response,
+        _identity: Annotated[DeviceIdentity, Depends(direct_installation_profile_user)],
+    ) -> JobOsProfileList:
+        try:
+            result, created_profile_id = installation_profiles.create_with_identity(
+                command.display_name,
+                idempotency_key=command.idempotency_key,
+            )
+            response.headers["X-JobOS-Created-Profile-Id"] = created_profile_id
+            return result
+        except ValueError as error:
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "code": "installation_profile_name_invalid",
+                    "message": str(error),
+                    "retryable": False,
+                },
+            ) from error
+
+    @app.patch("/v1/installation-profiles/{profile_id}", tags=["system"])
+    def installation_profile_rename(
+        profile_id: str,
+        command: RenameJobOsProfileRequest,
+        _identity: Annotated[DeviceIdentity, Depends(direct_installation_profile_user)],
+    ) -> JobOsProfileList:
+        try:
+            return installation_profiles.rename(
+                profile_id,
+                command.display_name,
+                expected_registry_revision=command.expected_registry_revision,
+                idempotency_key=command.idempotency_key,
+            )
+        except ValueError as error:
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "code": "installation_profile_name_invalid",
+                    "message": str(error),
+                    "retryable": False,
+                },
+            ) from error
+
+    @app.post(
+        "/v1/installation-profiles/{profile_id}/activate",
+        tags=["system"],
+        status_code=202,
+    )
+    def installation_profile_activate(
+        profile_id: str,
+        command: ActivateJobOsProfileRequest,
+        _identity: Annotated[DeviceIdentity, Depends(direct_installation_profile_user)],
+    ) -> JobOsProfileSwitchAccepted:
+        require_profile_switch_preflight()
+        try:
+            accepted = installation_profiles.activate(
+                profile_id,
+                expected_registry_revision=command.expected_registry_revision,
+                idempotency_key=command.idempotency_key,
+                driver=settings.profile_switch_driver,
+            )
+            if (
+                settings.profile_switch_driver == "launchd"
+                and accepted.from_profile_id != accepted.to_profile_id
+            ):
+                try:
+                    spawn_profile_switch_helper(
+                        settings.installation_registry_path,
+                        accepted.to_profile_id,
+                        accepted.switch_id,
+                    )
+                except RuntimeError:
+                    installation_profiles.rollback_switch(
+                        accepted.switch_id, "switch_helper_unavailable"
+                    )
+                    raise
+            return accepted
+        except ValueError as error:
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "code": "installation_profile_id_invalid",
+                    "message": str(error),
+                    "retryable": False,
+                },
+            ) from error
+
+    @app.get("/v1/installation-profiles/switches/{switch_id}", tags=["system"])
+    def installation_profile_switch_status(
+        switch_id: str,
+        _identity: Annotated[DeviceIdentity, Depends(direct_installation_profile_user)],
+    ) -> JobOsProfileSwitchStatus:
+        return installation_profiles.switch_status(switch_id)
 
     def require_career_profile_owner(identity: DeviceIdentity) -> None:
         """Keep the foundation owner-only until explicit collaborator grants exist."""
@@ -1179,6 +1395,12 @@ def create_app(
             device_id = first.get("device_id")
             if not device_authenticator.matches(token, device_id):
                 await socket.close(code=4401, reason="Device authentication required")
+                return
+            if (
+                profile_fence_enabled
+                and first.get("installation_profile_id") != settings.installation_profile_id
+            ):
+                await socket.close(code=4409, reason="JobOS Profile context changed")
                 return
             registered = await browser_capabilities.register(socket, device_id)
             if not registered:
@@ -2167,11 +2389,24 @@ def create_app(
         identity: Annotated[DeviceIdentity, Depends(authenticated_device)],
     ) -> DeviceSessionResponse:
         presence = await browser_capabilities.presence(identity.device_id)
+        profile_name = settings.installation_profile_name
+        profile_revision = settings.profile_registry_revision
+        try:
+            registry_data, registry_profile = installation_profiles.active_profile()
+        except InstallationProfileError:
+            pass
+        else:
+            if registry_profile.profile_id == settings.installation_profile_id:
+                profile_name = registry_profile.display_name
+                profile_revision = registry_data.registry_revision
         return DeviceSessionResponse(
             authenticated=True,
             transport=settings.transport,
             desktop="connected" if presence.available else "disconnected",
             api_version=__version__,
+            installation_profile_id=settings.installation_profile_id,
+            installation_profile_name=profile_name,
+            profile_registry_revision=profile_revision,
         )
 
     def conversation_service(conversation_id: str, identity: DeviceIdentity):

@@ -4,6 +4,11 @@ from pathlib import Path
 
 import jobos_api.macos_runtime as macos_runtime
 import pytest
+from jobos_api.installation_profiles import (
+    InstallationProfileConflict,
+    InstallationProfileRegistry,
+    InstallationProfileRegistryError,
+)
 from jobos_api.macos_runtime import (
     RuntimeServiceConfig,
     authorize_remote_device,
@@ -14,6 +19,7 @@ from jobos_api.macos_runtime import (
     parse_arguments,
     render_desktop_runtime,
     render_launchd_plist,
+    run_profile_switch,
     uninstall_runtime,
 )
 
@@ -68,6 +74,165 @@ def legacy_private_runtime_mapping(tmp_path: Path) -> dict[str, object]:
         value.pop(field)
     return value
 
+
+def pending_profile_switch(tmp_path):
+    support = tmp_path / "Library/Application Support/JobOS"
+    mapping = local_runtime_mapping(tmp_path)
+    Path(mapping["python_path"]).parent.mkdir(parents=True)
+    Path(mapping["python_path"]).write_text("synthetic python", encoding="utf-8")
+    (Path(mapping["jobos_root"]) / "services/api/jobos_api").mkdir(parents=True)
+    config_path = support / "service/runtime.json"
+    config_path.parent.mkdir(parents=True)
+    config_path.write_text(json.dumps(mapping), encoding="utf-8")
+    config = RuntimeServiceConfig.from_mapping(mapping)
+    registry_path = support / "installation-profiles.json"
+    registry = InstallationProfileRegistry(registry_path)
+    data = registry.load_or_bootstrap(config)
+    created = registry.create("Fresh setup", idempotency_key="create-switch-target")
+    target = next(profile for profile in created.profiles if not profile.active)
+    accepted = registry.activate(
+        target.profile_id,
+        expected_registry_revision=created.registry_revision,
+        idempotency_key="activate-switch-target",
+        driver="launchd",
+    )
+    return registry, registry_path, target.profile_id, accepted.switch_id, data.active_profile_id
+
+
+def test_profile_switch_helper_requires_exact_target_identity_and_records_success(tmp_path):
+    registry, registry_path, target_id, switch_id, _ = pending_profile_switch(tmp_path)
+    commands = []
+    verified = []
+
+    run_profile_switch(
+        registry_path,
+        target_id,
+        switch_id,
+        uid=501,
+        run=lambda command, allow_failure: commands.append((command, allow_failure)),
+        read_secret=lambda _service, _account: "synthetic-device-token",
+        verify_profile=lambda _config, _device, _token, expected: verified.append(expected),
+    )
+
+    assert commands == [
+        (["/bin/launchctl", "kickstart", "-k", "gui/501/com.cobibean.jobos.api"], False)
+    ]
+    assert verified == [target_id]
+    status = registry.switch_status(switch_id)
+    assert status.status == "succeeded"
+    assert status.active_profile_id == target_id
+
+
+def test_profile_switch_helper_rolls_back_target_timeout_and_preserves_both_roots(tmp_path):
+    registry, registry_path, target_id, switch_id, previous_id = pending_profile_switch(tmp_path)
+    verified = []
+
+    def verify(_config, _device, _token, expected):
+        verified.append(expected)
+        if expected == target_id:
+            raise RuntimeError("synthetic target timeout")
+
+    with pytest.raises(RuntimeError, match="rolled back"):
+        run_profile_switch(
+            registry_path,
+            target_id,
+            switch_id,
+            uid=501,
+            run=lambda _command, _allow_failure: None,
+            read_secret=lambda _service, _account: "synthetic-device-token",
+            verify_profile=verify,
+        )
+
+    status = registry.switch_status(switch_id)
+    assert verified == [target_id, previous_id]
+    assert status.status == "rolled_back"
+    assert status.active_profile_id == previous_id
+    assert status.error_code == "target_startup_failed"
+    assert (registry_path.parent / "profiles" / target_id).is_dir()
+
+
+def test_profile_switch_helper_records_kickstart_and_rollback_readiness_failures(tmp_path):
+    registry, registry_path, target_id, switch_id, _ = pending_profile_switch(tmp_path)
+    attempts = 0
+
+    def run(_command, _allow_failure):
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise RuntimeError("synthetic kickstart failure")
+
+    with pytest.raises(RuntimeError, match="rollback could not be verified"):
+        run_profile_switch(
+            registry_path,
+            target_id,
+            switch_id,
+            uid=501,
+            run=run,
+            read_secret=lambda _service, _account: "synthetic-device-token",
+            verify_profile=lambda *_args: (_ for _ in ()).throw(
+                RuntimeError("synthetic rollback readiness failure")
+            ),
+        )
+
+    status = registry.switch_status(switch_id)
+    assert attempts == 2
+    assert status.status == "rolled_back"
+    assert status.error_code == "rollback_startup_failed"
+
+
+def test_profile_switch_helper_rejects_stale_or_concurrently_claimed_switch(tmp_path):
+    registry, registry_path, target_id, switch_id, _ = pending_profile_switch(tmp_path)
+    with pytest.raises(InstallationProfileConflict):
+        run_profile_switch(
+            registry_path,
+            target_id,
+            "jpswitch_ffffffffffffffffffffffffffffffff",
+            uid=501,
+            run=lambda *_args: None,
+        )
+    registry.claim_switch(switch_id, target_id)
+    with pytest.raises(InstallationProfileConflict):
+        run_profile_switch(
+            registry_path,
+            target_id,
+            switch_id,
+            uid=501,
+            run=lambda *_args: None,
+        )
+
+
+def test_profile_switch_helper_rolls_back_a_registry_claim_write_failure(
+    tmp_path, monkeypatch
+):
+    registry, registry_path, target_id, switch_id, previous_id = pending_profile_switch(tmp_path)
+    original = InstallationProfileRegistry._write_unlocked
+    failed = False
+
+    def fail_claim_once(self, data):
+        nonlocal failed
+        if (
+            data.pending_switch is not None
+            and data.pending_switch.status == "activating"
+            and not failed
+        ):
+            failed = True
+            raise InstallationProfileRegistryError("synthetic registry write failure")
+        return original(self, data)
+
+    monkeypatch.setattr(InstallationProfileRegistry, "_write_unlocked", fail_claim_once)
+    with pytest.raises(RuntimeError, match="could not start"):
+        run_profile_switch(
+            registry_path,
+            target_id,
+            switch_id,
+            uid=501,
+            run=lambda *_args: pytest.fail("launchd must not run after a failed claim"),
+        )
+
+    status = registry.switch_status(switch_id)
+    assert status.status == "rolled_back"
+    assert status.active_profile_id == previous_id
+    assert status.error_code == "registry_write_failed"
 
 def test_runtime_config_accepts_only_explicit_loopback_service_fields(tmp_path):
     config = RuntimeServiceConfig.from_mapping(runtime_mapping(tmp_path))
