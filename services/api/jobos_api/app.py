@@ -1122,10 +1122,13 @@ def create_app(
         return installation_profiles.switch_status(switch_id)
 
     def require_career_profile_owner(identity: DeviceIdentity) -> None:
-        """Keep the foundation owner-only until explicit collaborator grants exist."""
+        """Keep the foundation limited to explicitly identified owner devices."""
         if not settings.career_profile_enabled:
             raise HTTPException(status_code=404, detail="Career Profile is not enabled")
-        if identity.device_id != settings.device_id:
+        if identity.device_id not in {
+            settings.device_id,
+            *settings.career_profile_owner_device_ids,
+        }:
             raise HTTPException(
                 status_code=403,
                 detail="This device is not authorized to access the Career Profile",

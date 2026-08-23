@@ -12,7 +12,12 @@ SECONDARY_TOKEN = "secondary-device-token-tests"
 MCP_TOKEN = "trusted-mcp-token-for-tests"
 
 
-def settings(database: Path, *, career_profile_enabled: bool = True) -> Settings:
+def settings(
+    database: Path,
+    *,
+    career_profile_enabled: bool = True,
+    owner_devices: tuple[str, ...] = (),
+) -> Settings:
     return Settings(
         device_id="primary-device",
         device_token=PRIMARY_TOKEN,
@@ -20,6 +25,7 @@ def settings(database: Path, *, career_profile_enabled: bool = True) -> Settings
         mcp_token=MCP_TOKEN,
         state_db_path=database,
         career_profile_enabled=career_profile_enabled,
+        career_profile_owner_device_ids=owner_devices,
     )
 
 
@@ -112,6 +118,24 @@ def test_career_profile_routes_require_authentication_and_bounded_snapshot_scope
 
     assert invalid_scope.status_code == 422
     assert invalid_scope.json()["code"] == "request_validation_failed"
+
+
+def test_explicit_secondary_owner_device_can_access_career_profile(tmp_path: Path) -> None:
+    app = create_app(
+        settings(
+            tmp_path / "jobos.db",
+            owner_devices=("secondary-device",),
+        )
+    )
+
+    with TestClient(app) as client:
+        response = client.get(
+            "/v1/career-profile/work-arrangement",
+            headers=auth(SECONDARY_TOKEN),
+        )
+
+    assert response.status_code == 200
+    assert response.json() == {"profile_revision": 0, "record": None}
 
 
 def test_authenticated_api_edits_replays_rejects_stale_and_restores(tmp_path: Path) -> None:

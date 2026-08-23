@@ -6,6 +6,7 @@ from jobos_api.settings import (
     DeviceCredential,
     Settings,
     parse_device_credentials,
+    parse_device_ids,
 )
 from pydantic import ValidationError
 
@@ -79,3 +80,14 @@ def test_device_credential_parser_does_not_chain_secret_bearing_validation_error
 
     assert error.value.__cause__ is None
     assert secret not in str(error.value)
+
+
+def test_device_identifier_list_parser_is_strict():
+    assert parse_device_ids('["macbook-device"]') == ("macbook-device",)
+    with pytest.raises(ValueError, match="identifier list"):
+        parse_device_ids('{"macbook-device":true}')
+
+
+def test_career_profile_owner_devices_must_be_authorized_remote_devices():
+    with pytest.raises(ValidationError, match="owner devices"):
+        base_settings(career_profile_owner_device_ids=("unknown-device",))

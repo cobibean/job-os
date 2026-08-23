@@ -14,7 +14,7 @@ from jobos_api.local_config import (
     settings_from_config,
 )
 from jobos_api.responses import ApiErrorResponse
-from jobos_api.settings import Settings, parse_device_credentials
+from jobos_api.settings import Settings, parse_device_credentials, parse_device_ids
 
 
 def settings_from_environment() -> Settings:
@@ -24,7 +24,10 @@ def settings_from_environment() -> Settings:
         configured_path = Path(os.environ.get("JOBOS_CONFIG_PATH", config_path(default_data_dir())))
         configured = settings_from_config(configured_path)
         updates: dict[str, object] = {
-            "career_profile_enabled": os.environ.get("JOBOS_CAREER_PROFILE_ENABLED") == "1"
+            "career_profile_enabled": os.environ.get("JOBOS_CAREER_PROFILE_ENABLED") == "1",
+            "career_profile_owner_device_ids": parse_device_ids(
+                os.environ.get("JOBOS_CAREER_PROFILE_OWNER_DEVICE_IDS_JSON")
+            ),
         }
         for environment_name, field_name in (
             ("JOBOS_CAREER_PROFILE_AGENT_ID", "career_profile_agent_id"),
@@ -73,6 +76,9 @@ def settings_from_environment() -> Settings:
         hermes_job_hunter_cwd=Path(hermes_cwd) if hermes_cwd else None,
         hermes_request_timeout=float(os.environ.get("JOBOS_HERMES_REQUEST_TIMEOUT", "5")),
         career_profile_enabled=os.environ.get("JOBOS_CAREER_PROFILE_ENABLED") == "1",
+        career_profile_owner_device_ids=parse_device_ids(
+            os.environ.get("JOBOS_CAREER_PROFILE_OWNER_DEVICE_IDS_JSON")
+        ),
         career_profile_agent_id=os.environ.get(
             "JOBOS_CAREER_PROFILE_AGENT_ID", "trusted-local-mcp"
         ),
