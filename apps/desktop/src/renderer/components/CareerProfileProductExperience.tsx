@@ -178,12 +178,12 @@ const itemSpecs: ItemSpec[] = [
     ]
   },
   {
-    area: 'my_career', kind: 'claim', label: 'Career claim',
+    area: 'my_career', kind: 'claim', label: 'Professional statement',
     requiredAny: ['statement', 'qualifiers', 'forbidden_uses'],
     fields: [
-      { key: 'statement', kind: 'textarea', label: 'Statement' },
-      { key: 'qualifiers', kind: 'list', label: 'Qualifiers', placeholder: 'One qualifier per line' },
-      { key: 'forbidden_uses', kind: 'list', label: 'Do not use this claim for', placeholder: 'One restriction per line' }
+      { key: 'statement', kind: 'textarea', label: 'What JobOS should know' },
+      { key: 'qualifiers', kind: 'list', label: 'Context and qualifiers', placeholder: 'One piece of context per line' },
+      { key: 'forbidden_uses', kind: 'list', label: 'Do not use this for', placeholder: 'One restriction per line' }
     ]
   },
   {
@@ -276,7 +276,7 @@ const careerGroupLabels: Partial<Record<EditableItemKind, string>> = {
   positioning: 'Positioning',
   experience: 'Experience',
   project: 'Projects',
-  claim: 'Career claims',
+  claim: 'Professional statements',
   custom: 'Other details'
 }
 
@@ -287,7 +287,7 @@ const careerGroupDescriptions: Partial<Record<EditableItemKind, string>> = {
   positioning: 'The headline and framing you want JobOS to use for your career story.',
   experience: 'Roles and work history JobOS can reference as career context.',
   project: 'Concrete examples of what you built, led, or contributed to.',
-  claim: 'Qualified statements JobOS can use only within the boundaries you saved.',
+  claim: 'Statements you approved, with saved context and limits on how JobOS may use them.',
   custom: 'Additional career context that does not fit another section.'
 }
 

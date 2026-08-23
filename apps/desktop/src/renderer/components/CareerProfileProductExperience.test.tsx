@@ -262,6 +262,37 @@ test('explains My Career usage even before the first detail is added', async () 
   expect(screen.getByText('No career details yet')).not.toBeNull()
 })
 
+test('presents claim records as bounded professional statements', async () => {
+  const statement: CareerProfileItemSnapshot = {
+    ...skill,
+    itemId: 'cpi_fakeproductstatement1234',
+    value: {
+      kind: 'claim',
+      statement: 'I build trustworthy AI workflows.',
+      qualifiers: ['For product and engineering roles'],
+      forbidden_uses: ['Do not describe this as model research']
+    }
+  }
+  render(<CareerProfileWorkspace bridge={bridge({
+    getCareerProfile: vi.fn().mockResolvedValue(savedProfile({ items: [statement] }))
+  })} hasActiveTurn={false} />)
+  await screen.findByRole('heading', { name: 'Work arrangement' })
+  fireEvent.click(screen.getByRole('button', { name: /My Career/i }))
+
+  expect(await screen.findByRole('button', { name: 'Professional statements, 1 detail' })).not.toBeNull()
+  expect(screen.getByText(/Statements you approved, with saved context and limits/i)).not.toBeNull()
+  expect(screen.getByText('Professional statement')).not.toBeNull()
+  expect(screen.queryByText(/Career claims?/i)).toBeNull()
+
+  fireEvent.click(screen.getByRole('button', { name: 'Add career detail' }))
+  const editor = screen.getByRole('dialog', { name: 'Add career detail' })
+  fireEvent.change(within(editor).getByLabelText('Detail type'), { target: { value: 'claim' } })
+  expect(within(editor).getByRole('option', { name: 'Professional statement' })).not.toBeNull()
+  expect(within(editor).getByLabelText('What JobOS should know')).not.toBeNull()
+  expect(within(editor).getByLabelText('Context and qualifiers')).not.toBeNull()
+  expect(within(editor).getByLabelText('Do not use this for')).not.toBeNull()
+})
+
 test('adds a typed career detail and dismisses its success feedback', async () => {
   const nextSkill = { ...skill, itemId: 'cpi_fakeproductskill5678', value: { kind: 'skill', name: 'React', level: 'expert' } }
   const createCareerProfileItem = vi.fn().mockResolvedValue({
