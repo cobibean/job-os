@@ -5,6 +5,8 @@ import type { InstallationProfileListSnapshot, InstallationProfileSummary } from
 
 interface Props {
   activeProfileName: string
+  onOverlayClose?: () => void
+  prepareOverlay?: () => Promise<boolean>
 }
 
 type DialogState =
@@ -17,20 +19,44 @@ function idempotencyKey(prefix: string): string {
   return `${prefix}-${globalThis.crypto?.randomUUID?.() ?? Date.now()}`
 }
 
-export function InstallationProfileMenu({ activeProfileName }: Props) {
+function actionErrorMessage(failure: unknown, fallback: string): string {
+  if (!(failure instanceof Error)) return fallback
+  const message = failure.message.replace(
+    /^Error invoking remote method '[^']+':\s*(?:Error:\s*)?/,
+    ''
+  ).trim()
+  return message || fallback
+}
+
+export function InstallationProfileMenu({ activeProfileName, onOverlayClose, prepareOverlay }: Props) {
   const [profiles, setProfiles] = useState<InstallationProfileListSnapshot | null>(null)
   const [open, setOpen] = useState(false)
   const [dialog, setDialog] = useState<DialogState>(null)
   const [error, setError] = useState('')
   const [switching, setSwitching] = useState<string | null>(null)
+  const [overlayPrepared, setOverlayPrepared] = useState(false)
   const trigger = useRef<HTMLButtonElement>(null)
   const menu = useRef<HTMLDivElement>(null)
+  const currentActiveProfileName = profiles?.profiles.find(profile => profile.active)?.displayName
+    ?? activeProfileName
 
   const load = async () => {
     if (!window.jobos?.installationProfiles) return
     setProfiles(await window.jobos.installationProfiles.list())
   }
   useEffect(() => { void load().catch(() => setError('JobOS Profiles are unavailable.')) }, [])
+  useEffect(() => {
+    if (open || dialog || switching || !overlayPrepared) return
+    setOverlayPrepared(false)
+    onOverlayClose?.()
+  }, [dialog, onOverlayClose, open, overlayPrepared, switching])
+
+  const openMenu = async () => {
+    if (open) return
+    if (prepareOverlay && !await prepareOverlay()) return
+    setOverlayPrepared(true)
+    setOpen(true)
+  }
 
   const closeMenu = () => {
     setOpen(false)
@@ -64,7 +90,13 @@ export function InstallationProfileMenu({ activeProfileName }: Props) {
       await window.jobos.installationProfiles.createAndSwitch(name, idempotencyKey('create-profile'))
     } catch (failure) {
       setSwitching(null)
-      setError(failure instanceof Error ? failure.message : 'Couldn’t switch profiles.')
+      const message = actionErrorMessage(failure, 'Couldn’t switch profiles.')
+      const normalizedMessage = message.replace(/\.$/, '')
+      setError(normalizedMessage === 'JobOS stayed in the previous profile; no workspace data was changed'
+        ? `“${name}” was created, but JobOS couldn’t open it. JobOS returned to ${currentActiveProfileName}.`
+        : normalizedMessage === 'JobOS did not open the requested profile'
+          ? `Couldn’t confirm “${name}” opened. Check the active profile before retrying.`
+          : message)
     }
   }
   const rename = async () => {
@@ -81,7 +113,7 @@ export function InstallationProfileMenu({ activeProfileName }: Props) {
       setProfiles(updated)
       closeDialog()
     } catch (failure) {
-      setError(failure instanceof Error ? failure.message : 'Profile could not be renamed.')
+      setError(actionErrorMessage(failure, 'Profile could not be renamed.'))
     }
   }
   const activate = async () => {
@@ -96,7 +128,13 @@ export function InstallationProfileMenu({ activeProfileName }: Props) {
       )
     } catch (failure) {
       setSwitching(null)
-      setError(failure instanceof Error ? failure.message : 'Couldn’t switch profiles.')
+      const message = actionErrorMessage(failure, 'Couldn’t switch profiles.')
+      const normalizedMessage = message.replace(/\.$/, '')
+      setError(normalizedMessage === 'JobOS stayed in the previous profile; no workspace data was changed'
+        ? `Couldn’t open “${dialog.profile.displayName}”. JobOS returned to ${currentActiveProfileName}.`
+        : normalizedMessage === 'JobOS did not open the requested profile'
+          ? `Couldn’t confirm “${dialog.profile.displayName}” opened. Check the active profile before retrying.`
+          : message)
     }
   }
 
@@ -111,20 +149,22 @@ export function InstallationProfileMenu({ activeProfileName }: Props) {
         aria-expanded={open}
         aria-haspopup="menu"
         className="installation-profile-trigger"
-        onClick={() => setOpen(value => !value)}
+        onClick={() => {
+          if (open) closeMenu()
+          else void openMenu()
+        }}
         onKeyDown={event => {
           if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return
           event.preventDefault()
-          setOpen(true)
-          requestAnimationFrame(() => {
+          void openMenu().then(() => requestAnimationFrame(() => {
             const items = menu.current?.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')
             items?.[event.key === 'ArrowDown' ? 0 : items.length - 1]?.focus()
-          })
+          }))
         }}
         ref={trigger}
         type="button"
       >
-        <span>{profiles?.profiles.find(profile => profile.active)?.displayName ?? activeProfileName}</span>
+        <span>{currentActiveProfileName}</span>
         <ChevronDown aria-hidden="true" size={13} />
       </button>
       {open ? (
@@ -164,7 +204,7 @@ export function InstallationProfileMenu({ activeProfileName }: Props) {
           ))}
           <div className="installation-profile-separator" role="separator" />
           <button onClick={() => { setDialog({ kind: 'create', name: 'Fresh setup' }); closeMenu() }} role="menuitem" type="button">New profile…</button>
-          <button onClick={() => { setDialog({ kind: 'rename', name: activeProfileName }); closeMenu() }} role="menuitem" type="button">Rename current profile…</button>
+          <button onClick={() => { setDialog({ kind: 'rename', name: currentActiveProfileName }); closeMenu() }} role="menuitem" type="button">Rename current profile…</button>
         </div>
       ) : null}
       {dialog?.kind === 'create' || dialog?.kind === 'rename' ? (

@@ -44,6 +44,9 @@ import { createMainWorkspaceClient } from './workspace.js'
 import {
   assertProfileSwitchDownloadSafe,
   createInstallationProfilesClient,
+  prepareAndActivateDesktopProfileSwitch,
+  prepareDesktopProfileSwitch,
+  rollbackSourceProfileRuntime,
   resolveProfileStorageIdentity
 } from './installationProfiles.js'
 import { probeConnectivity } from './connectivity.js'
@@ -175,9 +178,14 @@ async function stopSourceApiProcess(): Promise<void> {
 }
 
 async function completeDesktopProfileSwitch(
-  profileId: string,
-  expectedRegistryRevision: number,
-  idempotencyKey: string
+  target: {
+    profileId: string
+    expectedRegistryRevision: number
+    activationIdempotencyKey: string
+  } | {
+    displayName: string
+    creationIdempotencyKey: string
+  }
 ): Promise<void> {
   if (profileSwitchInProgress) throw new Error('A JobOS Profile switch is already in progress')
   profileSwitchInProgress = true
@@ -185,14 +193,29 @@ async function completeDesktopProfileSwitch(
   let switchCompleted = false
   browserManager?.setDownloadsAllowed(false)
   try {
-    assertProfileSwitchDownloadSafe(browserManager?.getState().download)
-    browserManager?.setBounds({ x: 0, y: 0, width: 0, height: 0, visible: false })
-    if (!await requestMainWindowSafety('profile-switch')) {
-      throw new Error('Save or resolve the current workspace before switching profiles.')
-    }
-    assertProfileSwitchDownloadSafe(browserManager?.getState().download)
     const client = profileClient()
-    const accepted = await client.activate(profileId, expectedRegistryRevision, idempotencyKey)
+    const resolved = await prepareAndActivateDesktopProfileSwitch({
+      prepare: () => prepareDesktopProfileSwitch({
+        assertDownloadSafe: () => assertProfileSwitchDownloadSafe(browserManager?.getState().download),
+        requestWorkspaceSafety: () => requestMainWindowSafety('profile-switch'),
+        hideBrowser: () => browserManager?.setBounds({ x: 0, y: 0, width: 0, height: 0, visible: false })
+      }),
+      resolveTarget: async () => {
+        if ('profileId' in target) return target
+        const created = await client.create(target.displayName, target.creationIdempotencyKey)
+        return {
+          profileId: created.createdProfileId,
+          expectedRegistryRevision: created.profiles.registry_revision,
+          activationIdempotencyKey: `${target.creationIdempotencyKey}-activate`
+        }
+      },
+      activate: (profileId, expectedRegistryRevision, activationIdempotencyKey) => client.activate(
+        profileId,
+        expectedRegistryRevision,
+        activationIdempotencyKey
+      )
+    })
+    const { profileId, accepted } = resolved
     if (accepted.to_profile_id !== profileId) throw new Error('JobOS Profile switch identity changed')
     if (desktopRuntimeState.connectivity.installationProfileId === profileId) return
 
@@ -223,11 +246,12 @@ async function completeDesktopProfileSwitch(
       if (!confirmed) throw new Error('JobOS did not open the requested profile')
     } catch (error) {
       if (!sourceDriven) throw error
-      await stopSourceApiProcess()
-      await rollbackSourceProfileSwitch(accepted.switch_id)
-      await apiLifecycle.ensureApiReady(runtime, deviceToken)
-      const previousName = desktopRuntimeState.connectivity.installationProfileName ?? 'previous profile'
-      throw new Error(`Couldn’t switch profiles. You’re still in “${previousName}”; no workspace data was changed.`)
+      await rollbackSourceProfileRuntime({
+        stopTargetApi: stopSourceApiProcess,
+        rollbackRegistry: () => rollbackSourceProfileSwitch(accepted.switch_id),
+        reopenPreviousApi: () => apiLifecycle.ensureApiReady(runtime, deviceToken)
+      })
+      throw new Error('JobOS stayed in the previous profile; no workspace data was changed.')
     }
     switchCompleted = true
     app.relaunch()
@@ -267,19 +291,21 @@ function registerInstallationProfilesInterface(): void {
     'jobos:installation-profiles:activate',
     async (event, profileId, expectedRevision, idempotencyKey) => {
       assertTrustedRenderer(event)
-      await completeDesktopProfileSwitch(profileId, expectedRevision, idempotencyKey)
+      await completeDesktopProfileSwitch({
+        profileId,
+        expectedRegistryRevision: expectedRevision,
+        activationIdempotencyKey: idempotencyKey
+      })
     }
   )
   ipcMain.handle(
     'jobos:installation-profiles:create-and-switch',
     async (event, displayName, idempotencyKey) => {
       assertTrustedRenderer(event)
-      const created = await profileClient().create(displayName, idempotencyKey)
-      await completeDesktopProfileSwitch(
-        created.createdProfileId,
-        created.profiles.registry_revision,
-        `${idempotencyKey}-activate`
-      )
+      await completeDesktopProfileSwitch({
+        displayName,
+        creationIdempotencyKey: idempotencyKey
+      })
     }
   )
   ipcMain.handle('jobos:installation-profiles:restart', event => {

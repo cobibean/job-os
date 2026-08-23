@@ -5,6 +5,9 @@ import { describe, expect, it, vi } from 'vitest'
 import {
   assertProfileSwitchDownloadSafe,
   createInstallationProfilesClient,
+  prepareAndActivateDesktopProfileSwitch,
+  prepareDesktopProfileSwitch,
+  rollbackSourceProfileRuntime,
   resolveProfileStorageIdentity
 } from './installationProfiles.js'
 
@@ -23,6 +26,62 @@ describe('installation profiles main client', () => {
     expect(() => assertProfileSwitchDownloadSafe({ state: 'progressing' })).toThrow()
     expect(() => assertProfileSwitchDownloadSafe({ state: 'completed' })).not.toThrow()
     expect(() => assertProfileSwitchDownloadSafe(null)).not.toThrow()
+  })
+
+  it('keeps the browser visible when workspace switch preflight is rejected', async () => {
+    const hideBrowser = vi.fn()
+    const assertDownloadSafe = vi.fn()
+
+    await expect(prepareDesktopProfileSwitch({
+      assertDownloadSafe,
+      requestWorkspaceSafety: async () => false,
+      hideBrowser
+    })).rejects.toThrow('Save or resolve the current workspace')
+
+    expect(assertDownloadSafe).toHaveBeenCalledTimes(1)
+    expect(hideBrowser).not.toHaveBeenCalled()
+  })
+
+  it('rechecks downloads before hiding the browser after successful preflight', async () => {
+    const order: string[] = []
+
+    await prepareDesktopProfileSwitch({
+      assertDownloadSafe: () => { order.push('download') },
+      requestWorkspaceSafety: async () => { order.push('workspace'); return true },
+      hideBrowser: () => { order.push('hide') }
+    })
+
+    expect(order).toEqual(['download', 'workspace', 'download', 'hide'])
+  })
+
+  it('stops the failed source target before registry rollback and reopening the previous API', async () => {
+    const order: string[] = []
+
+    await rollbackSourceProfileRuntime({
+      stopTargetApi: async () => { order.push('stop-target') },
+      rollbackRegistry: async () => { order.push('rollback-registry') },
+      reopenPreviousApi: async () => { order.push('reopen-previous') }
+    })
+
+    expect(order).toEqual(['stop-target', 'rollback-registry', 'reopen-previous'])
+  })
+
+  it('does not durably create a profile until switch preflight succeeds', async () => {
+    const resolveTarget = vi.fn(async () => ({
+      profileId: PROFILE_B,
+      expectedRegistryRevision: 2,
+      activationIdempotencyKey: 'activate-b'
+    }))
+    const activate = vi.fn()
+
+    await expect(prepareAndActivateDesktopProfileSwitch({
+      prepare: async () => { throw new Error('preflight rejected') },
+      resolveTarget,
+      activate
+    })).rejects.toThrow('preflight rejected')
+
+    expect(resolveTarget).not.toHaveBeenCalled()
+    expect(activate).not.toHaveBeenCalled()
   })
 
   it('uses explicit anchored identity instead of timestamps or profile ordering', () => {

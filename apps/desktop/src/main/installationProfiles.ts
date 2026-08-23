@@ -52,6 +52,52 @@ export function assertProfileSwitchDownloadSafe(
   }
 }
 
+export async function prepareDesktopProfileSwitch(options: {
+  assertDownloadSafe: () => void
+  requestWorkspaceSafety: () => Promise<boolean>
+  hideBrowser: () => void
+}): Promise<void> {
+  options.assertDownloadSafe()
+  if (!await options.requestWorkspaceSafety()) {
+    throw new Error('Save or resolve the current workspace before switching profiles.')
+  }
+  options.assertDownloadSafe()
+  options.hideBrowser()
+}
+
+export async function prepareAndActivateDesktopProfileSwitch(options: {
+  prepare: () => Promise<void>
+  resolveTarget: () => Promise<{
+    profileId: string
+    expectedRegistryRevision: number
+    activationIdempotencyKey: string
+  }>
+  activate: (
+    profileId: string,
+    expectedRegistryRevision: number,
+    activationIdempotencyKey: string
+  ) => Promise<JobOsProfileSwitchAccepted>
+}): Promise<{ profileId: string, accepted: JobOsProfileSwitchAccepted }> {
+  await options.prepare()
+  const target = await options.resolveTarget()
+  const accepted = await options.activate(
+    target.profileId,
+    target.expectedRegistryRevision,
+    target.activationIdempotencyKey
+  )
+  return { profileId: target.profileId, accepted }
+}
+
+export async function rollbackSourceProfileRuntime(options: {
+  stopTargetApi: () => Promise<void>
+  rollbackRegistry: () => Promise<void>
+  reopenPreviousApi: () => Promise<unknown>
+}): Promise<void> {
+  await options.stopTargetApi()
+  await options.rollbackRegistry()
+  await options.reopenPreviousApi()
+}
+
 function errorValue(value: unknown, fallback: string): InstallationProfileClientError {
   if (value && typeof value === 'object') {
     const record = value as Record<string, unknown>

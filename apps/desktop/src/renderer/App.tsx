@@ -65,6 +65,7 @@ function WorkbenchApp() {
   const [documentPreviewMode, setDocumentPreviewMode] = useState<'pdf' | 'docx'>('pdf')
   const [editingDocument, setEditingDocument] = useState<DocxOpenResult | null>(null)
   const [panelReorderActive, setPanelReorderActive] = useState(false)
+  const [profileOverlayActive, setProfileOverlayActive] = useState(false)
   const nextJobListingRequestId = useRef(0)
   const latestNavigatorSelection = useRef(0)
   const browseTransitionGeneration = useRef(0)
@@ -80,7 +81,7 @@ function WorkbenchApp() {
   const activeLayout = layoutState.workspace.layouts[activePreset]
   const browseVisible = activeTopLevelWorkspace === 'browse' && browseDetachState === 'ready'
   const browserTransitionPending = browseDetachState === 'preparing'
-  const nativeBrowserVisible = layoutState.hydrated && activeTopLevelWorkspace !== 'browse' && !careerProfileOpen && !browserTransitionPending && !activeLayout.collapsed.includes('center') && !settingsOpen && !settingsPreparing
+  const nativeBrowserVisible = layoutState.hydrated && activeTopLevelWorkspace !== 'browse' && !careerProfileOpen && !browserTransitionPending && !activeLayout.collapsed.includes('center') && !settingsOpen && !settingsPreparing && !profileOverlayActive
 
   useEffect(() => {
     const bridge = window.jobos?.careerProfile
@@ -183,6 +184,17 @@ function WorkbenchApp() {
       // Keep the panel closed rather than rendering it beneath an attached native browser view.
     } finally {
       setSettingsPreparing(false)
+    }
+  }
+
+  const prepareProfileOverlay = async () => {
+    if (profileOverlayActive) return true
+    try {
+      await window.jobos?.browser?.setBounds({ x: 0, y: 0, width: 0, height: 0, visible: false })
+      setProfileOverlayActive(true)
+      return true
+    } catch {
+      return false
     }
   }
 
@@ -304,6 +316,8 @@ function WorkbenchApp() {
         onToggleMode={theme.toggleMode}
         themeMode={theme.mode}
         activeProfileName={connectivity.installationProfileName ?? 'Personal'}
+        onProfileOverlayClose={() => setProfileOverlayActive(false)}
+        prepareProfileOverlay={prepareProfileOverlay}
       />
       <div className="workspace-content">
       <div className="workbench-layer" hidden={browseVisible || careerProfileOpen}>
