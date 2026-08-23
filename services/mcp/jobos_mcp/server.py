@@ -332,11 +332,32 @@ def create_server(
         "JobOS Jobs",
         instructions=(
             "Operate JobOS only through the authenticated application API. "
-            "Before creating resume or cover-letter files, call "
-            "document_publication_prepare and write every source/PDF/DOCX into its returned "
-            "publication_directory. Publish each promised format, then verify with document_list."
+            "Before multi-step JobOS work, read the jobos://capability-map resource for "
+            "workflow sequencing, verification, and authority boundaries. Build Career Profiles "
+            "from plain-language user conversation with career_profile_get/search and "
+            "career_profile_edit/edit_batch; supporting Evidence is optional. Before creating "
+            "resume or cover-letter files, call document_publication_prepare and write every "
+            "source/PDF/DOCX into its returned publication_directory. Publish each promised "
+            "format, then verify with document_list."
         ),
     )
+
+    @server.resource(
+        "jobos://capability-map",
+        name="JobOS MCP capability map",
+        description=(
+            "Workflow recipes, operating rules, authority boundaries, and the complete JobOS "
+            "MCP tool catalog for connected agents."
+        ),
+        mime_type="text/markdown",
+    )
+    def capability_map() -> str:
+        """Read the agent operating manual shipped with this JobOS source revision."""
+        path = Path(__file__).resolve().parents[3] / "docs/public/mcp-capability-map.md"
+        try:
+            return path.read_text(encoding="utf-8")
+        except OSError as error:
+            raise RuntimeError("The JobOS MCP capability map is unavailable") from error
 
     @server.tool(name="job_list", structured_output=True)
     async def job_list(

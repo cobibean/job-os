@@ -130,6 +130,8 @@ The JobOS server contract itself:
 
 A fresh profile returns **Northstar Kites (Fictional Demo)**, **Imaginary Kite Systems Tuner — Demo Role**, and `synthetic_demo: true`. If the tool is missing, confirm JobOS is open, setup finished, the repo path is absolute, and the MCP process starts from this clone. See [troubleshooting](docs/public/troubleshooting.md).
 
+Connected agents receive the live tool names, descriptions, and input schemas through MCP discovery. For workflow sequencing—such as building a Career Profile through conversation, saving a browser job, or publishing documents—read the [`JobOS MCP capability map`](docs/public/mcp-capability-map.md). The same guide is exposed to MCP clients as the `jobos://capability-map` resource, and the server's connection instructions direct agents to read it before multi-step work.
+
 </details>
 
 <details>
