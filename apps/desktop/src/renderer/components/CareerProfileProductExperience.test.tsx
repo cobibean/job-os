@@ -229,6 +229,8 @@ test('organizes My Career into searchable collapsible type groups', async () => 
   const skillsGroup = await screen.findByRole('button', { name: 'Skills, 1 detail' })
   expect(screen.getByRole('button', { name: 'Experience, 1 detail' })).not.toBeNull()
   expect(screen.getByRole('button', { name: 'Projects, 1 detail' })).not.toBeNull()
+  expect(screen.getByText(/Capabilities JobOS can use to understand fit and keep drafts accurate/i)).not.toBeNull()
+  expect(screen.getByText(/Roles and work history JobOS can reference as career context/i)).not.toBeNull()
   expect(screen.getByRole('button', { name: /TypeScript details/i })).not.toBeNull()
 
   fireEvent.click(skillsGroup)
@@ -244,6 +246,20 @@ test('organizes My Career into searchable collapsible type groups', async () => 
   expect(screen.getByText('No career details match your search')).not.toBeNull()
   fireEvent.click(screen.getByRole('button', { name: 'Clear search' }))
   expect((screen.getByLabelText('Search career details') as HTMLInputElement).value).toBe('')
+})
+
+test('explains My Career usage even before the first detail is added', async () => {
+  render(<CareerProfileWorkspace bridge={bridge({
+    getCareerProfile: vi.fn().mockResolvedValue(savedProfile({ items: [] }))
+  })} hasActiveTurn={false} />)
+  await screen.findByRole('heading', { name: 'Work arrangement' })
+  fireEvent.click(screen.getByRole('button', { name: /My Career/i }))
+
+  const guidance = await screen.findByRole('region', { name: 'How JobOS uses My Career' })
+  expect(within(guidance).getByText('How JobOS uses this')).not.toBeNull()
+  expect(guidance.textContent).toMatch(/researching roles, comparing opportunities, and drafting documents/i)
+  expect(guidance.textContent).toMatch(/not a completeness score or automatic decision/i)
+  expect(screen.getByText('No career details yet')).not.toBeNull()
 })
 
 test('adds a typed career detail and dismisses its success feedback', async () => {
