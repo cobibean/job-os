@@ -209,6 +209,43 @@ test('renders list-valued career details as human-readable words', async () => {
   expect(detail.textContent).not.toMatch(/applied_ai_builder|internal_ai_enablement/)
 })
 
+test('organizes My Career into searchable collapsible type groups', async () => {
+  const experience: CareerProfileItemSnapshot = {
+    ...skill,
+    itemId: 'cpi_fakeproductexperience1234',
+    value: { kind: 'experience', organization: 'Acme', role: 'Product builder', summary: 'Shipped an internal platform.' }
+  }
+  const project: CareerProfileItemSnapshot = {
+    ...skill,
+    itemId: 'cpi_fakeproductproject123456',
+    value: { kind: 'project', name: 'Signal Desk', role: 'Lead', summary: 'Built a local-first workflow.' }
+  }
+  render(<CareerProfileWorkspace bridge={bridge({
+    getCareerProfile: vi.fn().mockResolvedValue(savedProfile({ items: [skill, experience, project] }))
+  })} hasActiveTurn={false} />)
+  await screen.findByRole('heading', { name: 'Work arrangement' })
+  fireEvent.click(screen.getByRole('button', { name: /My Career/i }))
+
+  const skillsGroup = await screen.findByRole('button', { name: 'Skills, 1 detail' })
+  expect(screen.getByRole('button', { name: 'Experience, 1 detail' })).not.toBeNull()
+  expect(screen.getByRole('button', { name: 'Projects, 1 detail' })).not.toBeNull()
+  expect(screen.getByRole('button', { name: /TypeScript details/i })).not.toBeNull()
+
+  fireEvent.click(skillsGroup)
+  expect(skillsGroup.getAttribute('aria-expanded')).toBe('false')
+  expect(screen.queryByRole('button', { name: /TypeScript details/i })).toBeNull()
+
+  fireEvent.change(screen.getByLabelText('Search career details'), { target: { value: 'type script' } })
+  expect(screen.getByRole('status').textContent).toMatch(/1 of 3 details/i)
+  expect(screen.getByRole('button', { name: /TypeScript details/i })).not.toBeNull()
+  expect(screen.queryByRole('button', { name: 'Experience, 1 detail' })).toBeNull()
+
+  fireEvent.change(screen.getByLabelText('Search career details'), { target: { value: 'no matching detail' } })
+  expect(screen.getByText('No career details match your search')).not.toBeNull()
+  fireEvent.click(screen.getByRole('button', { name: 'Clear search' }))
+  expect((screen.getByLabelText('Search career details') as HTMLInputElement).value).toBe('')
+})
+
 test('adds a typed career detail and dismisses its success feedback', async () => {
   const nextSkill = { ...skill, itemId: 'cpi_fakeproductskill5678', value: { kind: 'skill', name: 'React', level: 'expert' } }
   const createCareerProfileItem = vi.fn().mockResolvedValue({

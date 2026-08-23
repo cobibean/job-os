@@ -1804,6 +1804,25 @@ button:focus-visible {
 .career-product-recover p { margin: 0; }
 .career-product-area-heading h3 { font-size: var(--text-xl); letter-spacing: -.025em; }
 .career-product-area-heading p { max-width: 650px; color: var(--muted); font-size: var(--text-sm); line-height: 1.55; }
+.career-product-search { display: flex; align-items: center; gap: 8px; }
+.career-product-search label { min-width: 180px; flex: 1; display: flex; align-items: center; gap: 9px; padding: 0 12px; border: 1px solid var(--border); border-radius: var(--radius-md); color: var(--muted); background: var(--surface-inset); }
+.career-product-search label:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-tint-strong); }
+.career-product-search input { min-width: 0; flex: 1; padding: 10px 0; border: 0; outline: 0; color: var(--text); background: transparent; font: inherit; font-size: var(--text-sm); }
+.career-product-search input::placeholder { color: var(--muted); }
+.career-product-search > button { width: 36px; height: 36px; display: grid; place-items: center; flex: 0 0 auto; border: 1px solid var(--border); border-radius: var(--radius-md); color: var(--muted); background: var(--surface-raised); cursor: pointer; }
+.career-product-search > button:hover { color: var(--text); background: var(--surface-hover); }
+.career-product-search > button:focus-visible { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-tint-strong); }
+.career-product-search > span { flex: 0 0 auto; color: var(--muted); font-size: var(--text-xs); }
+.career-product-groups { display: grid; gap: 14px; }
+.career-product-group { display: grid; gap: 10px; }
+.career-product-group-toggle { width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 2px; border: 0; border-bottom: 1px solid var(--border-soft); color: var(--text); text-align: left; background: transparent; cursor: pointer; }
+.career-product-group-toggle > span { display: flex; align-items: center; gap: 8px; }
+.career-product-group-toggle strong { font-size: var(--text-base); }
+.career-product-group-toggle small { min-width: 24px; padding: 2px 7px; border-radius: 999px; color: var(--muted); text-align: center; background: var(--surface-inset); font-size: var(--text-xs); }
+.career-product-group-toggle svg { color: var(--muted); transition: transform var(--motion-fast); }
+.career-product-group-toggle[aria-expanded="false"] svg { transform: rotate(-90deg); }
+.career-product-group-toggle:hover { color: var(--accent-text); }
+.career-product-group-toggle:focus-visible { outline: none; border-color: var(--accent); box-shadow: 0 2px 0 var(--accent); }
 .career-product-card-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
 .career-product-card {
   min-width: 0;

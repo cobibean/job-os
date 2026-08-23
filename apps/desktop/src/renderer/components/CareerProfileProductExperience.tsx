@@ -1,5 +1,6 @@
 import {
   ArchiveRestore,
+  ChevronDown,
   ChevronRight,
   Clock3,
   Download,
@@ -10,6 +11,7 @@ import {
   Link2,
   Plus,
   RefreshCw,
+  Search,
   ShieldCheck,
   Trash2,
   Upload,
@@ -18,6 +20,7 @@ import {
 import {
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
   type ChangeEvent,
@@ -264,6 +267,32 @@ const areaLabels: Record<CareerProfileArea, string> = {
   my_career: 'My Career',
   what_im_looking_for: 'What I’m Looking For',
   my_evidence: 'My Evidence'
+}
+
+const careerGroupLabels: Partial<Record<EditableItemKind, string>> = {
+  identity: 'Identity',
+  education: 'Education',
+  skill: 'Skills',
+  positioning: 'Positioning',
+  experience: 'Experience',
+  project: 'Projects',
+  claim: 'Career claims',
+  custom: 'Other details'
+}
+
+function normalizeCareerSearch(value: string): string {
+  return value.toLocaleLowerCase().replaceAll(/[^a-z0-9]+/g, '')
+}
+
+function itemSearchText(item: CareerProfileItemSnapshot): string {
+  const kind = itemKind(item)
+  return normalizeCareerSearch([
+    kind ? specsByKind.get(kind)?.label ?? '' : '',
+    itemTitle(item),
+    itemSummary(item),
+    provenanceLabel(item),
+    ...Object.values(item.value).map(readableValue)
+  ].join(' '))
 }
 
 function requestId(prefix: string): string {
@@ -777,7 +806,21 @@ function ItemArea({ active, area, online, product }: {
 }) {
   const [detailItemId, setDetailItemId] = useState<string | null>(null)
   const [editorSession, setEditorSession] = useState<ItemEditorSession | null>(null)
+  const [query, setQuery] = useState('')
+  const [collapsedKinds, setCollapsedKinds] = useState<Set<EditableItemKind>>(() => new Set())
   const items = (product.current?.items ?? []).filter(item => item.area === area && itemKind(item) !== null)
+  const normalizedQuery = normalizeCareerSearch(query)
+  const filteredItems = area === 'my_career' && normalizedQuery
+    ? items.filter(item => itemSearchText(item).includes(normalizedQuery))
+    : items
+  const careerGroups = useMemo(() => itemSpecs
+    .filter(spec => spec.area === 'my_career')
+    .map(spec => ({
+      kind: spec.kind,
+      label: careerGroupLabels[spec.kind] ?? spec.label,
+      items: filteredItems.filter(item => itemKind(item) === spec.kind)
+    }))
+    .filter(group => group.items.length > 0), [filteredItems])
   const detailItem = detailItemId
     ? product.current?.items.find(item => item.itemId === detailItemId) ?? null
     : null
@@ -788,6 +831,24 @@ function ItemArea({ active, area, online, product }: {
     if (expectedProfileRevision === undefined) return
     setEditorSession({ expectedProfileRevision, item })
   }
+
+  const toggleGroup = (kind: EditableItemKind) => {
+    setCollapsedKinds(current => {
+      const next = new Set(current)
+      if (next.has(kind)) next.delete(kind)
+      else next.add(kind)
+      return next
+    })
+  }
+
+  const itemCard = (item: CareerProfileItemSnapshot) => (
+    <button aria-label={`${itemTitle(item)} details`} className="career-product-card" key={item.itemId} onClick={() => setDetailItemId(item.itemId)} type="button">
+      <div><span className="career-product-kind">{specsByKind.get(itemKind(item)!)?.label}</span><span className={`career-product-review ${item.reviewStatus}`}>{readableLabel(item.reviewStatus)}</span></div>
+      <strong>{itemTitle(item)}</strong>
+      <p>{itemSummary(item)}</p>
+      <footer><span>{provenanceLabel(item)}</span><span>{item.evidenceIds.length} Evidence</span><ChevronRight aria-hidden="true" size={16} /></footer>
+    </button>
+  )
 
   useEffect(() => {
     if (!active) {
@@ -806,22 +867,55 @@ function ItemArea({ active, area, online, product }: {
         </div>
         <button className="career-primary-button" disabled={!online || !product.current} onClick={() => openEditor(null)} type="button"><Plus aria-hidden="true" size={15} />Add {areaName}</button>
       </div>
+      {area === 'my_career' && items.length > 0 ? (
+        <div className="career-product-search">
+          <label>
+            <Search aria-hidden="true" size={16} />
+            <input aria-label="Search career details" onChange={event => setQuery(event.target.value)} placeholder="Search skills, roles, projects, or details" type="search" value={query} />
+          </label>
+          {query ? <button aria-label="Clear search field" onClick={() => setQuery('')} type="button"><X aria-hidden="true" size={15} /></button> : null}
+          <span role="status">{filteredItems.length} of {items.length} details</span>
+        </div>
+      ) : null}
       {items.length === 0 ? (
         <div className="career-product-empty">
           <FilePlus2 aria-hidden="true" size={22} />
           <strong>No {area === 'my_career' ? 'career details' : 'other preferences'} yet</strong>
           <p>Start with one useful fact. There is no completeness score to chase.</p>
         </div>
+      ) : area === 'my_career' && filteredItems.length === 0 ? (
+        <div className="career-product-empty">
+          <Search aria-hidden="true" size={22} />
+          <strong>No career details match your search</strong>
+          <p>Try a skill, role, company, project, or another word from the detail.</p>
+          <button className="career-secondary-button" onClick={() => setQuery('')} type="button">Clear search</button>
+        </div>
+      ) : area === 'my_career' ? (
+        <div className="career-product-groups">
+          {careerGroups.map(group => {
+            const expanded = normalizedQuery.length > 0 || !collapsedKinds.has(group.kind)
+            const groupId = `career-product-group-${group.kind}`
+            return (
+              <section className="career-product-group" key={group.kind}>
+                <button
+                  aria-controls={groupId}
+                  aria-expanded={expanded}
+                  aria-label={`${group.label}, ${group.items.length} ${group.items.length === 1 ? 'detail' : 'details'}`}
+                  className="career-product-group-toggle"
+                  onClick={() => toggleGroup(group.kind)}
+                  type="button"
+                >
+                  <span><strong>{group.label}</strong><small>{group.items.length}</small></span>
+                  <ChevronDown aria-hidden="true" size={18} />
+                </button>
+                {expanded ? <div className="career-product-card-grid" id={groupId}>{group.items.map(itemCard)}</div> : null}
+              </section>
+            )
+          })}
+        </div>
       ) : (
         <div className="career-product-card-grid">
-          {items.map(item => (
-            <button aria-label={`${itemTitle(item)} details`} className="career-product-card" key={item.itemId} onClick={() => setDetailItemId(item.itemId)} type="button">
-              <div><span className="career-product-kind">{specsByKind.get(itemKind(item)!)?.label}</span><span className={`career-product-review ${item.reviewStatus}`}>{readableLabel(item.reviewStatus)}</span></div>
-              <strong>{itemTitle(item)}</strong>
-              <p>{itemSummary(item)}</p>
-              <footer><span>{provenanceLabel(item)}</span><span>{item.evidenceIds.length} Evidence</span><ChevronRight aria-hidden="true" size={16} /></footer>
-            </button>
-          ))}
+          {items.map(itemCard)}
         </div>
       )}
       {detailItem ? <ItemDetails
