@@ -512,7 +512,7 @@ def open_directory_chain(root: Path, *segments: str) -> OpenedDirectoryChain:
             created = False
             try:
                 # This is a validated single segment opened relative to a no-follow descriptor.
-                # codeql[py/path-injection]
+                #codeql[py/path-injection]
                 os.mkdir(segment, mode=0o700, dir_fd=current)
                 created = True
             except FileExistsError:
@@ -520,7 +520,7 @@ def open_directory_chain(root: Path, *segments: str) -> OpenedDirectoryChain:
             if created:
                 os.fsync(current)
             # This is a validated single segment opened relative to a no-follow descriptor.
-            # codeql[py/path-injection]
+            #codeql[py/path-injection]
             descriptor = os.open(segment, _open_flags(directory=True), dir_fd=current)
             metadata = os.fstat(descriptor)
             if not stat.S_ISDIR(metadata.st_mode):

@@ -365,7 +365,7 @@ def _assert_safe_managed_root(installation_root: Path, profile_id: str) -> Path:
     for part in ("profiles", profile_id):
         current /= part
         # Profile IDs are fixed-format single segments and every ancestor is checked here.
-        # codeql[py/path-injection]
+        #codeql[py/path-injection]
         if current.exists() and stat.S_ISLNK(current.lstat().st_mode):
             raise InstallationProfileStorageError("Managed JobOS Profile root is unavailable")
     return root
