@@ -436,7 +436,7 @@
     },
     {
       "path": "tests/connected_agents/fixtures/(FAKE)-profile-v31.sql",
-      "sha256": "b55a996b77a3d511bdf7d1b33d7c58b8e00e02ac20e9ca6c84700736749bb469",
+      "sha256": "fbc6bc8a262508da8a636c29772c7d23c156735807265920779b1d6f92fbd7f0",
       "classification": "synthetic",
       "publication": "keep",
       "source": "Deterministically generated visibly (FAKE) profile schema v31 SQL",
@@ -460,7 +460,7 @@
     },
     {
       "path": "tests/connected_agents/fixtures/fixture-receipt.json",
-      "sha256": "bf8162e2b651364db38cd938818be50f8501935a7a746fdb22fc462d70f2e971",
+      "sha256": "692f8e1af560e9e9ba157e02c81875369683162ba58d6db448c8ae42c667cd01",
       "classification": "synthetic",
       "publication": "keep",
       "source": "Deterministic receipt for the visibly (FAKE) Connected Agents fixtures",

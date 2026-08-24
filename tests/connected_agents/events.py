@@ -21,6 +21,7 @@ EventKind = Literal[
     "recovery_state",
 ]
 TERMINAL_KINDS = frozenset({"turn_completed", "turn_cancelled", "turn_failed"})
+SUPPORTED_KINDS = frozenset(EventKind.__args__)
 
 
 class EventTraceViolation(AssertionError):
@@ -69,6 +70,8 @@ class EventTrace:
     def append(self, event: NormalizedEvent) -> None:
         if (event.profile_id, event.chat_id, event.turn_id) != self._scope:
             raise EventTraceViolation("event_scope_mismatch")
+        if event.kind not in SUPPORTED_KINDS:
+            raise EventTraceViolation("unsupported_event_kind")
         if event.source_event_id in self._source_ids:
             raise EventTraceViolation("duplicate_source_event")
         if event.sequence != len(self._events) + 1:

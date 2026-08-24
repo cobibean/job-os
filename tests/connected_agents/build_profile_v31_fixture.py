@@ -13,6 +13,28 @@ PROFILE_ID = "jprof_11111111111111111111111111111111"
 FIXED_TIME = "2026-08-01T12:00:00Z"
 
 
+def _foreign_key_safe_dump(connection: sqlite3.Connection) -> str:
+    """Keep dependent seed rows after the tables and rows they reference."""
+
+    dependency_order = (
+        'INSERT INTO "conversations"',
+        'INSERT INTO "conversation_turns"',
+        'INSERT INTO "conversation_events"',
+    )
+    deferred: dict[str, list[str]] = {prefix: [] for prefix in dependency_order}
+    statements: list[str] = []
+    for statement in connection.iterdump():
+        prefix = next((item for item in dependency_order if statement.startswith(item)), None)
+        if prefix is None:
+            statements.append(statement)
+        else:
+            deferred[prefix].append(statement)
+    commit_index = statements.index("COMMIT;")
+    ordered_inserts = [statement for prefix in dependency_order for statement in deferred[prefix]]
+    statements[commit_index:commit_index] = ordered_inserts
+    return "\n".join(statements) + "\n"
+
+
 def build(output: Path) -> None:
     if SCHEMA_VERSION != 31:
         raise RuntimeError("the pre-feature fixture generator must remain pinned to schema v31")
@@ -99,7 +121,7 @@ def build(output: Path) -> None:
             )
             connection.execute("UPDATE jobos_metadata SET updated_at = ?", (FIXED_TIME,))
             connection.commit()
-            dump = "\n".join(connection.iterdump()) + "\n"
+            dump = _foreign_key_safe_dump(connection)
         finally:
             connection.close()
     output.parent.mkdir(parents=True, exist_ok=True)

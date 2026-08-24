@@ -291,8 +291,6 @@ CREATE TABLE conversation_events (
                 FOREIGN KEY(conversation_id, turn_id)
                     REFERENCES conversation_turns(conversation_id, turn_id)
             );
-INSERT INTO "conversation_events" VALUES(1,'conv_current','(FAKE)-turn-legacy-1','user_message','working','(FAKE) User message','{"text":"(FAKE) Summarize the synthetic role."}','(FAKE)-source-event-1','2026-08-01T12:00:00Z');
-INSERT INTO "conversation_events" VALUES(2,'conv_current','(FAKE)-turn-legacy-1','assistant_message','completed','(FAKE) Assistant response','{"text":"(FAKE) Synthetic role summary."}','(FAKE)-source-event-2','2026-08-01T12:00:00Z');
 CREATE TABLE conversation_turns (
                 turn_id TEXT PRIMARY KEY,
                 conversation_id TEXT NOT NULL,
@@ -325,7 +323,6 @@ CREATE TABLE conversation_turns (
                 FOREIGN KEY(conversation_id, source_turn_id)
                     REFERENCES conversation_turns(conversation_id, turn_id)
             );
-INSERT INTO "conversation_turns" VALUES('(FAKE)-turn-legacy-1','conv_current','(FAKE)-message-legacy-1',NULL,'(FAKE) Summarize the synthetic role.','{"selected_job_id":"(FAKE)-job-legacy-1"}','completed',0,'2026-08-01T12:00:00Z','2026-08-01T12:00:00Z',NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL);
 CREATE TABLE conversations (
                 conversation_id TEXT PRIMARY KEY,
                 position INTEGER NOT NULL CHECK (position >= 1),
@@ -344,7 +341,6 @@ CREATE TABLE conversations (
                INTEGER NOT NULL DEFAULT 1 CHECK (active_artifact_page >= 1), active_artifact_zoom
                REAL NOT NULL DEFAULT 1.0
                CHECK (active_artifact_zoom >= 0.5 AND active_artifact_zoom <= 3.0));
-INSERT INTO "conversations" VALUES('conv_current',1,'(FAKE) Existing Hermes Chat','(FAKE)-opaque-hermes-session-1',NULL,NULL,NULL,NULL,NULL,NULL,'2026-08-01T12:00:00Z','2026-08-01T12:00:00Z','(FAKE)-authorized-macbook','(FAKE)-job-legacy-1',NULL,1,1.0);
 CREATE TABLE document_artifacts (
                 artifact_id TEXT PRIMARY KEY,
                 registry_key TEXT NOT NULL UNIQUE,
@@ -550,4 +546,8 @@ CREATE INDEX career_profile_context_snapshots_agent
 DELETE FROM "sqlite_sequence";
 INSERT INTO "sqlite_sequence" VALUES('document_file_observations',0);
 INSERT INTO "sqlite_sequence" VALUES('conversation_events',2);
+INSERT INTO "conversations" VALUES('conv_current',1,'(FAKE) Existing Hermes Chat','(FAKE)-opaque-hermes-session-1',NULL,NULL,NULL,NULL,NULL,NULL,'2026-08-01T12:00:00Z','2026-08-01T12:00:00Z','(FAKE)-authorized-macbook','(FAKE)-job-legacy-1',NULL,1,1.0);
+INSERT INTO "conversation_turns" VALUES('(FAKE)-turn-legacy-1','conv_current','(FAKE)-message-legacy-1',NULL,'(FAKE) Summarize the synthetic role.','{"selected_job_id":"(FAKE)-job-legacy-1"}','completed',0,'2026-08-01T12:00:00Z','2026-08-01T12:00:00Z',NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL);
+INSERT INTO "conversation_events" VALUES(1,'conv_current','(FAKE)-turn-legacy-1','user_message','working','(FAKE) User message','{"text":"(FAKE) Summarize the synthetic role."}','(FAKE)-source-event-1','2026-08-01T12:00:00Z');
+INSERT INTO "conversation_events" VALUES(2,'conv_current','(FAKE)-turn-legacy-1','assistant_message','completed','(FAKE) Assistant response','{"text":"(FAKE) Synthetic role summary."}','(FAKE)-source-event-2','2026-08-01T12:00:00Z');
 COMMIT;

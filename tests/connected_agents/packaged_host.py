@@ -8,6 +8,7 @@ import shutil
 import signal
 import subprocess
 import sys
+import tempfile
 import time
 from contextlib import suppress
 from dataclasses import dataclass
@@ -17,6 +18,7 @@ SENSITIVE_ENV = re.compile(
     r"(?:AUTH|TOKEN|SECRET|PASSWORD|CREDENTIAL|API_KEY|ACCESS_KEY|PRIVATE_KEY)", re.I
 )
 MIN_LISTENER_AUDIT_SECONDS = 0.05
+MAX_CAPTURE_BYTES = 4 * 1024 * 1024
 
 
 class PackagedHostError(AssertionError):
@@ -141,47 +143,65 @@ def run_packaged_host(
     confined_command, network_isolation = _network_confined_command(
         command, allowed_listeners=allowed_listeners
     )
-    process = subprocess.Popen(
-        confined_command,
-        env=environment,
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-        start_new_session=True,
-    )
-    observed: set[str] = set()
-    listener_audit_count = 0
-    started = time.monotonic()
-    deadline = started + timeout
-    try:
-        while True:
-            if time.monotonic() >= deadline:
-                raise PackagedHostError("packaged_host_timeout")
-            observed.update(_listeners(process.pid))
-            listener_audit_count += 1
-            unexpected = {
-                listener
-                for listener in observed
-                if not any(re.fullmatch(pattern, listener) for pattern in allowed_listeners)
-            }
-            if unexpected:
-                raise PackagedHostError("unexpected_listener_opened")
-            if process.poll() is not None:
-                break
-            time.sleep(0.01)
-        listener_audit_seconds = time.monotonic() - started
-        stdout, stderr = process.communicate(timeout=1)
-        if process.returncode != 0:
-            raise PackagedHostError("packaged_host_failed")
-        if listener_audit_count < 2 or listener_audit_seconds < MIN_LISTENER_AUDIT_SECONDS:
-            raise PackagedHostError("insufficient_listener_audit_window")
-        survivors = _process_group_pids(process.pid) - {process.pid}
-        if survivors:
-            raise PackagedHostError("packaged_host_descendant_survived")
-    except Exception:
-        _terminate_group(process)
-        raise
+    with (
+        tempfile.TemporaryFile(mode="w+", encoding="utf-8") as stdout_file,
+        tempfile.TemporaryFile(mode="w+", encoding="utf-8") as stderr_file,
+    ):
+        process = subprocess.Popen(
+            confined_command,
+            env=environment,
+            stdin=subprocess.DEVNULL,
+            stdout=stdout_file,
+            stderr=stderr_file,
+            text=True,
+            start_new_session=True,
+        )
+        observed: set[str] = set()
+        listener_audit_count = 0
+        started = time.monotonic()
+        deadline = started + timeout
+        try:
+            while True:
+                if time.monotonic() >= deadline:
+                    raise PackagedHostError("packaged_host_timeout")
+                if (
+                    os.fstat(stdout_file.fileno()).st_size > MAX_CAPTURE_BYTES
+                    or os.fstat(stderr_file.fileno()).st_size > MAX_CAPTURE_BYTES
+                ):
+                    raise PackagedHostError("packaged_host_output_limit")
+                observed.update(_listeners(process.pid))
+                listener_audit_count += 1
+                unexpected = {
+                    listener
+                    for listener in observed
+                    if not any(re.fullmatch(pattern, listener) for pattern in allowed_listeners)
+                }
+                if unexpected:
+                    raise PackagedHostError("unexpected_listener_opened")
+                if process.poll() is not None:
+                    break
+                time.sleep(0.01)
+            listener_audit_seconds = time.monotonic() - started
+            try:
+                process.communicate(timeout=1)
+            except subprocess.TimeoutExpired as error:
+                raise PackagedHostError("packaged_host_timeout") from error
+            stdout_file.seek(0)
+            stderr_file.seek(0)
+            stdout = stdout_file.read(MAX_CAPTURE_BYTES + 1)
+            stderr = stderr_file.read(MAX_CAPTURE_BYTES + 1)
+            if len(stdout) > MAX_CAPTURE_BYTES or len(stderr) > MAX_CAPTURE_BYTES:
+                raise PackagedHostError("packaged_host_output_limit")
+            if process.returncode != 0:
+                raise PackagedHostError("packaged_host_failed")
+            if listener_audit_count < 2 or listener_audit_seconds < MIN_LISTENER_AUDIT_SECONDS:
+                raise PackagedHostError("insufficient_listener_audit_window")
+            survivors = _process_group_pids(process.pid) - {process.pid}
+            if survivors:
+                raise PackagedHostError("packaged_host_descendant_survived")
+        except Exception:
+            _terminate_group(process)
+            raise
     return PackagedHostResult(
         returncode=process.returncode,
         stdout=stdout,

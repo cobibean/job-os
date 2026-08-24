@@ -106,6 +106,7 @@ def _scan_bytes(
     canaries: tuple[SecretCanary, ...],
     depth: int,
     issues: list[SecretScanIssue],
+    remaining_bytes: list[int],
 ) -> list[SecretFinding]:
     findings = _raw_findings(
         data, display_path=display_path, container="raw", canaries=canaries
@@ -127,23 +128,22 @@ def _scan_bytes(
     if data.startswith(ZIP_MAGIC):
         try:
             with zipfile.ZipFile(io.BytesIO(data)) as archive:
-                total = 0
                 for member in archive.infolist():
                     if member.is_dir():
                         continue
                     name = _safe_member_name(member.filename)
                     member_path = f"{display_path}!{name}"
-                    total += member.file_size
                     if member.file_size > MAX_MEMBER_BYTES:
                         issues.append(
                             SecretScanIssue(member_path, "zip", "archive_member_too_large")
                         )
                         continue
-                    if total > MAX_ARCHIVE_TOTAL_BYTES:
+                    if member.file_size > remaining_bytes[0]:
                         issues.append(
                             SecretScanIssue(display_path, "zip", "archive_expansion_limit")
                         )
                         break
+                    remaining_bytes[0] -= member.file_size
                     try:
                         member_data = archive.read(member)
                     except (OSError, RuntimeError, zipfile.BadZipFile):
@@ -158,6 +158,7 @@ def _scan_bytes(
                             canaries=canaries,
                             depth=depth + 1,
                             issues=issues,
+                            remaining_bytes=remaining_bytes,
                         )
                     )
         except (OSError, EOFError, zipfile.BadZipFile):
@@ -167,23 +168,22 @@ def _scan_bytes(
     if data.startswith(b"\x1f\x8b") or data[257:262] == b"ustar":
         try:
             with tarfile.open(fileobj=io.BytesIO(data), mode="r:*") as archive:
-                total = 0
                 for member in archive.getmembers():
                     if not member.isfile():
                         continue
                     name = _safe_member_name(member.name)
                     member_path = f"{display_path}!{name}"
-                    total += member.size
                     if member.size > MAX_MEMBER_BYTES:
                         issues.append(
                             SecretScanIssue(member_path, "tar", "archive_member_too_large")
                         )
                         continue
-                    if total > MAX_ARCHIVE_TOTAL_BYTES:
+                    if member.size > remaining_bytes[0]:
                         issues.append(
                             SecretScanIssue(display_path, "tar", "archive_expansion_limit")
                         )
                         break
+                    remaining_bytes[0] -= member.size
                     extracted = archive.extractfile(member)
                     if extracted is None:
                         issues.append(
@@ -197,6 +197,7 @@ def _scan_bytes(
                             canaries=canaries,
                             depth=depth + 1,
                             issues=issues,
+                            remaining_bytes=remaining_bytes,
                         )
                     )
             return findings
@@ -206,13 +207,20 @@ def _scan_bytes(
                 return findings
         try:
             with gzip.GzipFile(fileobj=io.BytesIO(data), mode="rb") as archive:
-                expanded = archive.read(MAX_MEMBER_BYTES + 1)
+                read_limit = min(MAX_MEMBER_BYTES, remaining_bytes[0])
+                expanded = archive.read(read_limit + 1)
         except (OSError, EOFError, gzip.BadGzipFile):
             issues.append(SecretScanIssue(display_path, "gzip", "malformed_archive"))
             return findings
-        if len(expanded) > MAX_MEMBER_BYTES:
-            issues.append(SecretScanIssue(display_path, "gzip", "archive_member_too_large"))
+        if len(expanded) > read_limit:
+            reason = (
+                "archive_member_too_large"
+                if read_limit == MAX_MEMBER_BYTES
+                else "archive_expansion_limit"
+            )
+            issues.append(SecretScanIssue(display_path, "gzip", reason))
             return findings
+        remaining_bytes[0] -= len(expanded)
         findings.extend(
             _scan_bytes(
                 expanded,
@@ -220,6 +228,7 @@ def _scan_bytes(
                 canaries=canaries,
                 depth=depth + 1,
                 issues=issues,
+                remaining_bytes=remaining_bytes,
             )
         )
     return findings
@@ -265,13 +274,22 @@ def _scan_sqlite(
 def _scan_paths(
     root: Path, canaries: tuple[SecretCanary, ...]
 ) -> tuple[tuple[SecretFinding, ...], tuple[SecretScanIssue, ...]]:
+    if root.is_symlink():
+        return (), (SecretScanIssue(root.name or ".", "root", "symbolic_link_rejected"),)
     if not root.exists():
         return (), (SecretScanIssue(root.name or ".", "root", "evidence_root_missing"),)
-    paths = [root] if root.is_file() else sorted(path for path in root.rglob("*") if path.is_file())
+    paths = (
+        [root]
+        if root.is_file()
+        else sorted(path for path in root.rglob("*") if path.is_file() or path.is_symlink())
+    )
     findings: list[SecretFinding] = []
     issues: list[SecretScanIssue] = []
     for path in paths:
         display_path = path.name if root.is_file() else str(path.relative_to(root))
+        if path.is_symlink():
+            issues.append(SecretScanIssue(display_path, "raw", "symbolic_link_rejected"))
+            continue
         try:
             data = path.read_bytes()
         except OSError:
@@ -284,6 +302,7 @@ def _scan_paths(
                 canaries=canaries,
                 depth=0,
                 issues=issues,
+                remaining_bytes=[MAX_ARCHIVE_TOTAL_BYTES],
             )
         )
         sqlite_expected = path.name.casefold().endswith(SQLITE_SUFFIXES)

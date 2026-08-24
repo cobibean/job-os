@@ -10,13 +10,14 @@ import sqlite3
 import sys
 import tarfile
 import threading
+import time
 import zipfile
 from pathlib import Path
 
 import pytest
 from jobos_api.installation_profiles import InstallationProfileRegistryData
 
-from . import packaged_host
+from . import packaged_host, secret_scan
 from .build_profile_v31_fixture import build
 from .events import (
     EventTrace,
@@ -28,6 +29,7 @@ from .events import (
 from .fakes import DeterministicFakeCredentialVault, DeterministicFakeProvider, FakeBinding
 from .faults import ConcurrencyCoordinator, DeterministicFaultInjector, InjectedFault
 from .packaged_host import (
+    MAX_CAPTURE_BYTES,
     MIN_LISTENER_AUDIT_SECONDS,
     PackagedHostError,
     isolated_host_environment,
@@ -39,7 +41,7 @@ from .remote_device import (
     authorize_remote_device,
     load_remote_devices,
 )
-from .run_phase0_baseline import code_snapshot_sha256
+from .run_phase0_baseline import code_snapshot_sha256, isolated_environment, run_command
 from .secret_scan import (
     SecretCanaryDetected,
     SecretScanIncomplete,
@@ -159,6 +161,15 @@ def test_profile_v31_sql_is_reproducible_and_has_exact_history(tmp_path: Path):
     )
 
 
+def test_profile_v31_sql_restores_with_foreign_keys_enabled(tmp_path: Path):
+    database = tmp_path / "foreign-key-checked.db"
+    fixture = FIXTURES / "(FAKE)-profile-v31.sql"
+    with sqlite3.connect(database) as connection:
+        connection.execute("PRAGMA foreign_keys = ON")
+        connection.executescript(fixture.read_text(encoding="utf-8"))
+        assert connection.execute("PRAGMA foreign_key_check").fetchall() == []
+
+
 def test_exact_sqlite_snapshot_detects_deliberate_migration_corruption(tmp_path: Path):
     database = tmp_path / "profile.db"
     before = restore_sql_fixture(FIXTURES / "(FAKE)-profile-v31.sql", database)
@@ -201,6 +212,16 @@ def test_event_trace_detects_duplicate_out_of_order_and_cross_chat_leakage():
     )
     with pytest.raises(EventTraceViolation, match="event_scope_mismatch"):
         scoped.append(event(1, chat="(FAKE)-chat-b"))
+
+    unknown = EventTrace(
+        profile_id=event(1).profile_id,
+        chat_id=event(1).chat_id,
+        turn_id=event(1).turn_id,
+    )
+    unsupported = event(1)
+    object.__setattr__(unsupported, "kind", "(FAKE)-future-event")
+    with pytest.raises(EventTraceViolation, match="unsupported_event_kind"):
+        unknown.append(unsupported)
 
 
 def test_event_trace_requires_one_terminal_and_isolates_source_ids():
@@ -387,6 +408,65 @@ def test_secret_scanner_fails_closed_on_oversized_and_malformed_archives(tmp_pat
         scan_secret_canaries(tmp_path / "missing-evidence")
 
 
+def test_secret_scanner_rejects_symbolic_links(tmp_path: Path):
+    outside = tmp_path.parent / "(FAKE)-outside-secret.txt"
+    outside.write_text(phase0_canaries()[0].value, encoding="utf-8")
+    linked_file = tmp_path / "linked-evidence.txt"
+    linked_file.symlink_to(outside)
+
+    with pytest.raises(SecretScanIncomplete, match="symbolic_link_rejected"):
+        scan_secret_canaries(tmp_path)
+    with pytest.raises(SecretScanIncomplete, match="symbolic_link_rejected"):
+        scan_secret_canaries(linked_file)
+
+
+def test_secret_scanner_shares_archive_expansion_budget_across_nested_members(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.setattr(secret_scan, "MAX_ARCHIVE_TOTAL_BYTES", 1_000)
+    monkeypatch.setattr(secret_scan, "MAX_MEMBER_BYTES", 900)
+    nested = tmp_path / "nested-budget.zip"
+    with zipfile.ZipFile(nested, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        for name in ("first.gz", "second.gz"):
+            payload = io.BytesIO()
+            with gzip.GzipFile(fileobj=payload, mode="wb") as compressed:
+                compressed.write(b"x" * 700)
+            archive.writestr(name, payload.getvalue())
+
+    with pytest.raises(SecretScanIncomplete) as caught:
+        scan_secret_canaries(nested)
+    assert "archive_expansion_limit" in {issue.reason for issue in caught.value.issues}
+
+
+def test_baseline_command_timeout_is_bounded_and_fail_closed(tmp_path: Path):
+    child_pid = tmp_path / "child.pid"
+    script = tmp_path / "spawn-child.py"
+    script.write_text(
+        "import pathlib,subprocess,sys,time\n"
+        "child=subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(30)'])\n"
+        f"pathlib.Path({str(child_pid)!r}).write_text(str(child.pid))\n"
+        "time.sleep(30)\n",
+        encoding="utf-8",
+    )
+    result = run_command(
+        f"{sys.executable} {script}",
+        isolated_environment(),
+        timeout_seconds=0.2,
+    )
+    assert result["exit_code"] == 124
+    assert result["result"] == "failed"
+    pid = int(child_pid.read_text(encoding="utf-8"))
+    deadline = time.monotonic() + 2
+    while time.monotonic() < deadline:
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            break
+        time.sleep(0.01)
+    else:
+        pytest.fail("timed-out baseline command left a descendant process alive")
+
+
 def test_fault_injector_and_concurrency_coordinator_are_deterministic():
     injector = DeterministicFaultInjector((("after_registry_write", 2),))
     injector.checkpoint("after_registry_write")
@@ -445,6 +525,36 @@ def test_packaged_host_environment_isolated_and_inherited_auth_stripped(
     assert result.listeners == ()
     assert result.listener_audit_count >= 2
     assert result.listener_audit_seconds >= MIN_LISTENER_AUDIT_SECONDS
+
+
+@pytest.mark.skipif(
+    sys.platform != "darwin"
+    or shutil.which("lsof") is None
+    or shutil.which("sandbox-exec") is None,
+    reason="macOS packaged-host proof needs lsof and sandbox-exec",
+)
+def test_packaged_host_captures_output_larger_than_pipe_capacity(tmp_path: Path):
+    expected_bytes = 256 * 1024
+    script = f"import sys,time; sys.stdout.write('x'*{expected_bytes}); time.sleep(0.1)"
+    result = run_packaged_host(
+        [sys.executable, "-c", script], root=tmp_path / "large-output", timeout=2
+    )
+    assert result.returncode == 0
+    assert len(result.stdout) == expected_bytes
+
+
+@pytest.mark.skipif(
+    sys.platform != "darwin"
+    or shutil.which("lsof") is None
+    or shutil.which("sandbox-exec") is None,
+    reason="macOS packaged-host proof needs lsof and sandbox-exec",
+)
+def test_packaged_host_rejects_unbounded_output(tmp_path: Path):
+    script = f"import sys,time; sys.stdout.write('x'*{MAX_CAPTURE_BYTES + 1}); time.sleep(0.1)"
+    with pytest.raises(PackagedHostError, match="packaged_host_output_limit"):
+        run_packaged_host(
+            [sys.executable, "-c", script], root=tmp_path / "output-limit", timeout=2
+        )
 
 
 def test_packaged_host_runner_fails_closed_without_network_confinement(

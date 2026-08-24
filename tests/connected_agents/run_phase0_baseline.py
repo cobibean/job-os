@@ -10,7 +10,10 @@ import os
 import platform
 import re
 import shlex
+import signal
 import subprocess
+import time
+from contextlib import suppress
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -111,21 +114,52 @@ def _test_counts(output: str) -> dict[str, int]:
     return counts
 
 
-def run_command(command: str, environment: dict[str, str]) -> dict[str, object]:
+def run_command(
+    command: str, environment: dict[str, str], *, timeout_seconds: float = 1800.0
+) -> dict[str, object]:
     started = datetime.now(UTC)
-    result = subprocess.run(
+    process = subprocess.Popen(
         shlex.split(command),
         cwd=ROOT,
         env=environment,
-        check=False,
-        capture_output=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
         text=True,
+        start_new_session=True,
     )
-    output = f"{result.stdout}\n{result.stderr}"
+    try:
+        stdout, stderr = process.communicate(timeout=timeout_seconds)
+        exit_code = process.returncode
+        output = f"{stdout}\n{stderr}"
+    except subprocess.TimeoutExpired as error:
+        exit_code = 124
+        with suppress(ProcessLookupError):
+            os.killpg(process.pid, signal.SIGTERM)
+        deadline = time.monotonic() + 2
+        while time.monotonic() < deadline and process.poll() is None:
+            time.sleep(0.01)
+        if process.poll() is None:
+            with suppress(ProcessLookupError):
+                os.killpg(process.pid, signal.SIGKILL)
+        trailing_stdout, trailing_stderr = process.communicate()
+        stdout = (
+            error.stdout.decode(errors="replace")
+            if isinstance(error.stdout, bytes)
+            else (error.stdout or "")
+        )
+        stderr = (
+            error.stderr.decode(errors="replace")
+            if isinstance(error.stderr, bytes)
+            else (error.stderr or "")
+        )
+        output = (
+            f"{stdout}{trailing_stdout or ''}\n{stderr}{trailing_stderr or ''}"
+            "\ncommand_timed_out"
+        )
     return {
         "command": command,
-        "exit_code": result.returncode,
-        "result": "passed" if result.returncode == 0 else "failed",
+        "exit_code": exit_code,
+        "result": "passed" if exit_code == 0 else "failed",
         "duration_seconds": round((datetime.now(UTC) - started).total_seconds(), 3),
         "test_counts": _test_counts(output),
         "output_sha256": hashlib.sha256(output.encode()).hexdigest(),

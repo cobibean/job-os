@@ -9,3 +9,11 @@ The executable proof harness and visibly synthetic fixtures live in
 writes only hashes/counts/statuses to `verification-results.json`, and can add a
 read-only authenticated installed-Hermes control smoke. No Codex archive, executable,
 credential, user database, or raw command output is tracked.
+
+Regenerate the committed receipt with the complete command map and the read-only
+installed control check:
+
+```bash
+uv run python tests/connected_agents/run_phase0_baseline.py \
+  --include-full-gates --installed-smoke
+```

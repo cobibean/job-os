@@ -8,7 +8,7 @@
   },
   "profile_sqlite_v31": {
     "path": "(FAKE)-profile-v31.sql",
-    "sha256": "b55a996b77a3d511bdf7d1b33d7c58b8e00e02ac20e9ca6c84700736749bb469",
+    "sha256": "fbc6bc8a262508da8a636c29772c7d23c156735807265920779b1d6f92fbd7f0",
     "production_schema_version": 31,
     "canonical_snapshot_sha256": "c08e5c7e6ed373d30e110a512ead1efbc2a1797b105f9f80a304b63c86fa764d",
     "integrity_check": ["ok"],
