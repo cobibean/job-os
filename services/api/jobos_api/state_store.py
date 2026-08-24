@@ -81,6 +81,10 @@ class ConversationLimit(RuntimeError):
     """The active conversation limit has been reached."""
 
 
+class ConversationProvisioningFailed(RuntimeError):
+    """A provider session definitively failed before acceptance."""
+
+
 class ConversationNotFound(RuntimeError):
     """The requested active conversation does not exist."""
 
@@ -2256,6 +2260,25 @@ class JobOsStateStore:
             ).fetchall()
         return [dict(row) for row in rows]
 
+    def connected_agent_chat_impact(self, agent_id: str) -> dict[str, int]:
+        return self.connected_agent_chat_impact_at(self._path, agent_id)
+
+    @staticmethod
+    def connected_agent_chat_impact_at(path: Path, agent_id: str) -> dict[str, int]:
+        if not path.exists():
+            return {"active_chats": 0, "locked_chats": 0}
+        with connect_sqlite(f"file:{path}?mode=ro", uri=True) as connection:
+            row = connection.execute(
+                """
+                SELECT COUNT(*) AS active_count,
+                       SUM(CASE WHEN creation_state = 'locked' THEN 1 ELSE 0 END) AS locked_count
+                FROM conversations
+                WHERE archived_at IS NULL AND connected_agent_id = ?
+                """,
+                (agent_id,),
+            ).fetchone()
+        return {"active_chats": int(row[0]), "locked_chats": int(row[1] or 0)}
+
     def create_conversation(
         self,
         *,
@@ -2266,6 +2289,8 @@ class JobOsStateStore:
         model_id: str | None = None,
         reasoning_effort: str | None = None,
         connection_account_fingerprint: str | None = None,
+        idempotency_key: str | None = None,
+        client_request_hash: str | None = None,
     ) -> dict[str, object]:
         supplied = (connected_agent_id, provider, model_id, reasoning_effort)
         if any(value is not None for value in supplied) and any(
@@ -2286,10 +2311,52 @@ class JobOsStateStore:
             r"[a-f0-9]{64}", connection_account_fingerprint
         ):
             raise ValueError("Connection account fingerprint is invalid")
+        request_json = json.dumps(
+            {
+                "selected_job_id": selected_job_id,
+                "connected_agent_id": connected_agent_id,
+                "provider": provider,
+                "model_id": model_id,
+                "reasoning_effort": reasoning_effort,
+                "connection_account_fingerprint": connection_account_fingerprint,
+            },
+            separators=(",", ":"),
+            sort_keys=True,
+        )
+        request_hash = client_request_hash or sha256(request_json.encode()).hexdigest()
         conversation_id = f"conv_{secrets.token_urlsafe(16)}"
         with connect_sqlite(self._path) as connection:
             connection.row_factory = sqlite3.Row
             connection.execute("BEGIN IMMEDIATE")
+            if idempotency_key is not None:
+                replay = connection.execute(
+                    """
+                    SELECT request_hash, result_json, outcome FROM job_events
+                    WHERE actor_id = ? AND target_resource = 'profile/conversations'
+                      AND command_name = 'conversation.create' AND idempotency_key = ?
+                    """,
+                    (actor_id, idempotency_key),
+                ).fetchone()
+                if replay is not None:
+                    if replay["request_hash"] != request_hash:
+                        connection.rollback()
+                        raise IdempotencyConflict("Idempotency key was reused for a different chat")
+                    replayed = json.loads(str(replay["result_json"]))
+                    if replay["outcome"] == "failed":
+                        connection.rollback()
+                        raise ConversationProvisioningFailed(
+                            str(replayed.get("code") or "AGENT_PROVIDER_UNAVAILABLE")
+                        )
+                    row = connection.execute(
+                        """SELECT conversation_id, position, title, created_at, updated_at
+                           FROM conversations WHERE conversation_id = ? AND archived_at IS NULL""",
+                        (replayed["conversation_id"],),
+                    ).fetchone()
+                    if row is None:
+                        connection.rollback()
+                        raise IdempotencyConflict("Previous chat creation is no longer available")
+                    connection.commit()
+                    return {**dict(row), "created": False}
             compatibility_unbound = connected_agent_id is None
             count = int(
                 connection.execute(
@@ -2335,13 +2402,19 @@ class JobOsStateStore:
                 """
                 INSERT INTO job_events(
                     event_type, origin, payload_json, actor_id, target_resource,
-                    command_name, outcome, result_json
+                    command_name, outcome, idempotency_key, request_hash, result_json
                 ) VALUES ('conversation_created', 'user', '{}', ?, ?,
-                          'conversation.create', 'succeeded', ?)
+                          'conversation.create', 'succeeded', ?, ?, ?)
                 """,
                 (
                     actor_id,
-                    f"conversation/{conversation_id}",
+                    (
+                        "profile/conversations"
+                        if idempotency_key
+                        else f"conversation/{conversation_id}"
+                    ),
+                    idempotency_key,
+                    request_hash if idempotency_key else None,
                     json.dumps(
                         {"conversation_id": conversation_id, "position": position, "title": title},
                         separators=(",", ":"),
@@ -2357,7 +2430,38 @@ class JobOsStateStore:
                 (conversation_id,),
             ).fetchone()
             connection.commit()
-        return dict(row)
+        return {**dict(row), "created": True}
+
+    def conversation_creation_replay(
+        self, *, actor_id: str, idempotency_key: str, client_request_hash: str
+    ) -> dict[str, object] | None:
+        with connect_sqlite(f"file:{self._path}?mode=ro", uri=True) as connection:
+            connection.row_factory = sqlite3.Row
+            replay = connection.execute(
+                """
+                SELECT request_hash, result_json, outcome FROM job_events
+                WHERE actor_id = ? AND target_resource = 'profile/conversations'
+                  AND command_name = 'conversation.create' AND idempotency_key = ?
+                """,
+                (actor_id, idempotency_key),
+            ).fetchone()
+            if replay is None:
+                return None
+            if replay["request_hash"] != client_request_hash:
+                raise IdempotencyConflict("Idempotency key was reused for a different chat")
+            replayed = json.loads(str(replay["result_json"]))
+            if replay["outcome"] == "failed":
+                raise ConversationProvisioningFailed(
+                    str(replayed.get("code") or "AGENT_PROVIDER_UNAVAILABLE")
+                )
+            row = connection.execute(
+                """SELECT conversation_id, position, title, created_at, updated_at
+                   FROM conversations WHERE conversation_id = ? AND archived_at IS NULL""",
+                (replayed["conversation_id"],),
+            ).fetchone()
+        if row is None:
+            raise IdempotencyConflict("Previous chat creation is no longer available")
+        return {**dict(row), "created": False}
 
     def conversation_job_context(
         self, conversation_id: str, owner_device_id: str
@@ -2452,6 +2556,57 @@ class JobOsStateStore:
                           updated_at = CURRENT_TIMESTAMP WHERE selected_job_id = ?""",
                 (job_id,),
             )
+
+    def discard_provisioning_conversation(
+        self,
+        conversation_id: str,
+        *,
+        actor_id: str,
+        idempotency_key: str,
+        failure_code: str,
+    ) -> None:
+        with connect_sqlite(self._path) as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute(
+                """SELECT position FROM conversations
+                   WHERE conversation_id = ? AND archived_at IS NULL
+                     AND creation_state = 'provisioning'
+                     AND NOT EXISTS (
+                         SELECT 1 FROM conversation_turns WHERE conversation_id = ?
+                     )""",
+                (conversation_id, conversation_id),
+            ).fetchone()
+            if row is None:
+                connection.rollback()
+                raise ConversationBusy("Conversation can no longer be compensated")
+            position = int(row[0])
+            connection.execute(
+                "DELETE FROM conversations WHERE conversation_id = ?", (conversation_id,)
+            )
+            remaining = connection.execute(
+                """SELECT conversation_id, position FROM conversations
+                   WHERE archived_at IS NULL AND position > ? ORDER BY position""",
+                (position,),
+            ).fetchall()
+            for remaining_id, old_position in remaining:
+                connection.execute(
+                    "UPDATE conversations SET position = ? WHERE conversation_id = ?",
+                    (int(old_position) - 1, remaining_id),
+                )
+            cursor = connection.execute(
+                """UPDATE job_events SET outcome = 'failed', result_json = ?
+                   WHERE actor_id = ? AND target_resource = 'profile/conversations'
+                     AND command_name = 'conversation.create' AND idempotency_key = ?""",
+                (
+                    json.dumps({"code": failure_code}, separators=(",", ":")),
+                    actor_id,
+                    idempotency_key,
+                ),
+            )
+            if cursor.rowcount != 1:
+                connection.rollback()
+                raise IdempotencyConflict("Conversation creation receipt is missing")
+            connection.commit()
 
     def archive_conversation(self, conversation_id: str, *, actor_id: str) -> None:
         with connect_sqlite(self._path) as connection:

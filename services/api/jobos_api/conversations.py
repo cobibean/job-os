@@ -68,6 +68,25 @@ class ConversationJobContext(ConversationModel):
 
 class CreateConversationRequest(ConversationModel):
     selected_job_id: str | None = Field(default=None, max_length=512)
+    connected_agent_id: str | None = Field(
+        default=None, pattern=r"^jagent_[a-f0-9]{32}$"
+    )
+    model_id: str | None = Field(default=None, min_length=1, max_length=256)
+    reasoning_effort: str | None = Field(default=None, min_length=1, max_length=64)
+    idempotency_key: str | None = Field(default=None, min_length=8, max_length=200)
+    expected_profile_revision: int | None = Field(default=None, ge=1)
+    expected_agent_registry_revision: int | None = Field(default=None, ge=1)
+
+    @property
+    def coordinated(self) -> bool:
+        values = (
+            self.idempotency_key,
+            self.expected_profile_revision,
+            self.expected_agent_registry_revision,
+        )
+        if any(value is not None for value in values) and any(value is None for value in values):
+            raise ValueError("Coordinated chat creation requires revisions and idempotency key")
+        return self.idempotency_key is not None
 
 
 class ConversationDocumentViewRequest(ConversationModel):
@@ -94,6 +113,12 @@ class ConversationResponse(ConversationModel):
     recovery_state: Literal["ready", "recovering", "quarantined"]
     latest_event_id: int
     job_context: ConversationJobContext
+
+
+class BoundConversationResponse(ConversationResponse):
+    binding: dict[str, object]
+    availability: dict[str, object]
+    agent: dict[str, object]
 
 
 class ConversationService:

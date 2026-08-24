@@ -146,8 +146,23 @@ from jobos_api.career_profile_portability import (
     CareerProfileRestoreResult,
 )
 from jobos_api.composition import create_job_services
+from jobos_api.connected_agents import (
+    ConnectedAgentConflict,
+    ConnectedAgentImpactResponse,
+    ConnectedAgentListResponse,
+    ConnectedAgentModelsResponse,
+    ConnectedAgentPublic,
+    ConnectedAgentRuntimeControl,
+    ConnectedAgentService,
+    CreateConnectedAgentRequest,
+    DisconnectConnectedAgentRequest,
+    SetDefaultConnectedAgentRequest,
+    UnavailableConnectedAgentRuntime,
+    UpdateConnectedAgentRequest,
+)
 from jobos_api.conversation_manager import ConversationListResponse, ConversationManager
 from jobos_api.conversations import (
+    BoundConversationResponse,
     ConversationDocumentViewRequest,
     ConversationJobContext,
     ConversationJobContextMutation,
@@ -268,6 +283,7 @@ from jobos_api.state_store import (
     ConversationBusy,
     ConversationLimit,
     ConversationNotFound,
+    ConversationProvisioningFailed,
     EditableDocumentConflict,
     EditablePublicationConflict,
     IdempotencyConflict,
@@ -548,6 +564,7 @@ def create_app(
     agent_gateway_factory: AgentGatewayFactory | None = None,
     capability_broker: CapabilityBroker | None = None,
     state_store: JobOsStateStore | None = None,
+    connected_agent_runtime: ConnectedAgentRuntimeControl | None = None,
 ) -> FastAPI:
     state_store = state_store or JobOsStateStore(settings.state_db_path)
     career_profiles = CareerProfileStore(settings.state_db_path)
@@ -584,6 +601,12 @@ def create_app(
         settings.resolved_local_artifact_root()
     )
     installation_profiles = InstallationProfileRegistry(settings.installation_registry_path)
+    connected_agents = ConnectedAgentService(
+        installation_profiles,
+        connected_agent_runtime or UnavailableConnectedAgentRuntime(),
+        profile_id=settings.installation_profile_id,
+        state_store=state_store,
+    )
     profile_fence_enabled = settings.installation_registry_path.is_file()
     hermes_agent_ids: set[str] = set()
     if profile_fence_enabled:
@@ -665,10 +688,7 @@ def create_app(
     runtime_router = AgentRuntimeRouter(
         {
             "hermes": selected_gateway_factory,
-            **{
-                ("hermes", agent_id): selected_gateway_factory
-                for agent_id in hermes_agent_ids
-            },
+            **{("hermes", agent_id): selected_gateway_factory for agent_id in hermes_agent_ids},
         },
         profile_id=settings.installation_profile_id,
     )
@@ -868,7 +888,7 @@ def create_app(
             candidate_message = detail.get("message")
             candidate_retryable = detail.get("retryable")
             if isinstance(candidate_code, str) and re.fullmatch(
-                r"[a-z][a-z0-9_]{0,63}", candidate_code
+                r"[A-Za-z][A-Za-z0-9_]{0,63}", candidate_code
             ):
                 code = candidate_code[:64]
             if isinstance(candidate_message, str):
@@ -1264,9 +1284,8 @@ def create_app(
     ) -> Response:
         """Fence every valid MCP credential to one exact active turn."""
         supplied_mcp_token = request.headers.get("x-jobos-mcp-token")
-        if (
-            supplied_mcp_token is None
-            or not hmac.compare_digest(supplied_mcp_token, settings.mcp_token)
+        if supplied_mcp_token is None or not hmac.compare_digest(
+            supplied_mcp_token, settings.mcp_token
         ):
             return await call_next(request)
 
@@ -1359,9 +1378,7 @@ def create_app(
             else:
                 editable_match = re.match(r"^/v1/editable-documents/([^/]+)", request.url.path)
                 if editable_match is not None:
-                    document = state_store.get_editable_document(
-                        unquote(editable_match.group(1))
-                    )
+                    document = state_store.get_editable_document(unquote(editable_match.group(1)))
                     if document is not None and isinstance(document.get("job_id"), str):
                         job_id = cast(str, document["job_id"])
                 else:
@@ -1566,15 +1583,12 @@ def create_app(
         command: BrowserCommandRequest,
         identity: Annotated[DeviceIdentity, Depends(authenticated_device)],
         mcp_token: Annotated[str | None, Header(alias="X-JobOS-MCP-Token")] = None,
-        correlated_conversation_id: Annotated[
-            str | None, Query(alias="conversation_id")
-        ] = None,
+        correlated_conversation_id: Annotated[str | None, Query(alias="conversation_id")] = None,
         correlated_turn_id: Annotated[str | None, Query(alias="turn_id")] = None,
     ) -> BrowserCommandResponse:
         require_trusted_mcp(identity, command.origin, mcp_token)
         if command.origin == "mcp" and (
-            command.conversation_id is None
-            or command.conversation_id != correlated_conversation_id
+            command.conversation_id is None or command.conversation_id != correlated_conversation_id
         ):
             raise HTTPException(
                 status_code=422,
@@ -1990,9 +2004,7 @@ def create_app(
         agent_id: Annotated[str | None, Header(alias="X-JobOS-Agent-Id")] = None,
         agent_token: Annotated[str | None, Header(alias="X-JobOS-Agent-Token")] = None,
     ) -> AgentProfileSearchResult:
-        agent = authenticated_career_profile_agent(
-            identity, mcp_token, agent_id, agent_token
-        )
+        agent = authenticated_career_profile_agent(identity, mcp_token, agent_id, agent_token)
         try:
             complete_career_profile.require_consumer_projection()
             preview = career_profile_context.preview(agent_id=agent.agent_id)
@@ -2024,9 +2036,7 @@ def create_app(
         agent_id: Annotated[str | None, Header(alias="X-JobOS-Agent-Id")] = None,
         agent_token: Annotated[str | None, Header(alias="X-JobOS-Agent-Token")] = None,
     ) -> AgentProfileChanges:
-        agent = authenticated_career_profile_agent(
-            identity, mcp_token, agent_id, agent_token
-        )
+        agent = authenticated_career_profile_agent(identity, mcp_token, agent_id, agent_token)
         try:
             complete_career_profile.require_consumer_projection()
             preview = career_profile_context.preview(agent_id=agent.agent_id)
@@ -2083,9 +2093,7 @@ def create_app(
         agent_id: Annotated[str | None, Header(alias="X-JobOS-Agent-Id")] = None,
         agent_token: Annotated[str | None, Header(alias="X-JobOS-Agent-Token")] = None,
     ) -> AgentProfileBatchEditResult:
-        agent = authenticated_career_profile_agent(
-            identity, mcp_token, agent_id, agent_token
-        )
+        agent = authenticated_career_profile_agent(identity, mcp_token, agent_id, agent_token)
         try:
             complete_career_profile.require_consumer_projection()
             preview = career_profile_context.preview(agent_id=agent.agent_id)
@@ -2391,9 +2399,7 @@ def create_app(
         agent_id: Annotated[str | None, Header(alias="X-JobOS-Agent-Id")] = None,
         agent_token: Annotated[str | None, Header(alias="X-JobOS-Agent-Token")] = None,
     ) -> AgentEvidenceInspectResult:
-        agent = authenticated_career_profile_agent(
-            identity, mcp_token, agent_id, agent_token
-        )
+        agent = authenticated_career_profile_agent(identity, mcp_token, agent_id, agent_token)
         try:
             complete_career_profile.require_consumer_projection()
             preview = career_profile_context.preview(agent_id=agent.agent_id)
@@ -2441,9 +2447,7 @@ def create_app(
         agent_id: Annotated[str | None, Header(alias="X-JobOS-Agent-Id")] = None,
         agent_token: Annotated[str | None, Header(alias="X-JobOS-Agent-Token")] = None,
     ) -> AgentEvidenceImportResult:
-        agent = authenticated_career_profile_agent(
-            identity, mcp_token, agent_id, agent_token
-        )
+        agent = authenticated_career_profile_agent(identity, mcp_token, agent_id, agent_token)
         try:
             complete_career_profile.require_consumer_projection()
             profile = complete_career_profile.import_evidence(
@@ -2771,6 +2775,145 @@ def create_app(
             raise HTTPException(status_code=422, detail="Invalid turn ID")
         return turn_id
 
+    @app.get("/v1/connected-agents", tags=["agent"])
+    async def connected_agents_list(
+        identity: Annotated[DeviceIdentity, Depends(authenticated_device)],
+    ) -> ConnectedAgentListResponse:
+        del identity
+        return await connected_agents.list()
+
+    @app.post("/v1/connected-agents", tags=["agent"], status_code=201)
+    async def connected_agent_create(
+        command: CreateConnectedAgentRequest,
+        identity: Annotated[DeviceIdentity, Depends(authenticated_device)],
+    ) -> ConnectedAgentPublic:
+        del identity
+        try:
+            return await connected_agents.create(command)
+        except ConnectedAgentConflict as error:
+            raise HTTPException(
+                status_code=409,
+                detail={"code": str(error), "message": str(error), "retryable": False},
+            ) from error
+        except InstallationProfileConflict as error:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "PROFILE_REVISION_CONFLICT",
+                    "message": str(error),
+                    "retryable": False,
+                },
+            ) from error
+        except ValueError as error:
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "code": "REQUEST_VALIDATION_FAILED",
+                    "message": str(error),
+                    "retryable": False,
+                },
+            ) from error
+
+    @app.get("/v1/connected-agents/{agent_id}", tags=["agent"])
+    async def connected_agent_get(
+        agent_id: str,
+        identity: Annotated[DeviceIdentity, Depends(authenticated_device)],
+    ) -> ConnectedAgentPublic:
+        del identity
+        try:
+            return await connected_agents.get(agent_id)
+        except InstallationProfileNotFound as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+
+    @app.patch("/v1/connected-agents/{agent_id}", tags=["agent"])
+    async def connected_agent_update(
+        agent_id: str,
+        command: UpdateConnectedAgentRequest,
+        identity: Annotated[DeviceIdentity, Depends(authenticated_device)],
+    ) -> ConnectedAgentPublic:
+        del identity
+        try:
+            return await connected_agents.update(agent_id, command)
+        except InstallationProfileNotFound as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        except ConnectedAgentConflict as error:
+            raise HTTPException(
+                status_code=409,
+                detail={"code": str(error), "message": str(error), "retryable": False},
+            ) from error
+        except InstallationProfileConflict as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
+        except ValueError as error:
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "code": "REQUEST_VALIDATION_FAILED",
+                    "message": str(error),
+                    "retryable": False,
+                },
+            ) from error
+
+    @app.post("/v1/connected-agents/{agent_id}/test", tags=["agent"])
+    async def connected_agent_test(
+        agent_id: str,
+        identity: Annotated[DeviceIdentity, Depends(authenticated_device)],
+    ) -> ConnectedAgentPublic:
+        del identity
+        try:
+            return await connected_agents.get(agent_id)
+        except InstallationProfileNotFound as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+
+    @app.get("/v1/connected-agents/{agent_id}/models", tags=["agent"])
+    async def connected_agent_models(
+        agent_id: str,
+        identity: Annotated[DeviceIdentity, Depends(authenticated_device)],
+    ) -> ConnectedAgentModelsResponse:
+        del identity
+        try:
+            return await connected_agents.models(agent_id)
+        except InstallationProfileNotFound as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+
+    @app.get("/v1/connected-agents/{agent_id}/disconnect-impact", tags=["agent"])
+    def connected_agent_disconnect_impact(
+        agent_id: str,
+        identity: Annotated[DeviceIdentity, Depends(authenticated_device)],
+    ) -> ConnectedAgentImpactResponse:
+        del identity
+        try:
+            return connected_agents.impact(agent_id)
+        except InstallationProfileNotFound as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+
+    @app.post("/v1/connected-agents/{agent_id}/disconnect", tags=["agent"])
+    async def connected_agent_disconnect(
+        agent_id: str,
+        command: DisconnectConnectedAgentRequest,
+        identity: Annotated[DeviceIdentity, Depends(authenticated_device)],
+    ) -> ConnectedAgentPublic:
+        del identity
+        try:
+            return await connected_agents.disconnect(agent_id, command)
+        except InstallationProfileNotFound as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        except (ConnectedAgentConflict, InstallationProfileConflict) as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
+
+    @app.put("/v1/installation-profiles/{profile_id}/default-agent", tags=["profiles"])
+    async def installation_profile_default_agent(
+        profile_id: str,
+        command: SetDefaultConnectedAgentRequest,
+        identity: Annotated[DeviceIdentity, Depends(authenticated_device)],
+    ) -> dict[str, object]:
+        del identity
+        try:
+            return await connected_agents.set_default(profile_id, command)
+        except InstallationProfileNotFound as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        except (ConnectedAgentConflict, InstallationProfileConflict) as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
+
     @app.get("/v1/conversations", tags=["agent"])
     def conversations_list(
         identity: Annotated[DeviceIdentity, Depends(authenticated_device)],
@@ -2779,18 +2922,99 @@ def create_app(
 
     @app.post("/v1/conversations", tags=["agent"], status_code=201)
     async def conversation_create(
+        response: Response,
         identity: Annotated[DeviceIdentity, Depends(authenticated_device)],
         command: CreateConversationRequest | None = None,
-    ) -> ConversationResponse:
+    ) -> ConversationResponse | BoundConversationResponse:
         selected_job_id = command.selected_job_id if command else None
         if selected_job_id is not None:
             ensure_job(selected_job_id)
         try:
+            if command is not None and command.coordinated:
+                client_request_json = json.dumps(
+                    command.model_dump(mode="json"), separators=(",", ":"), sort_keys=True
+                )
+                client_request_hash = hashlib.sha256(client_request_json.encode()).hexdigest()
+                replay = state_store.conversation_creation_replay(
+                    actor_id=identity.device_id,
+                    idempotency_key=cast(str, command.idempotency_key),
+                    client_request_hash=client_request_hash,
+                )
+                if replay is not None:
+                    binding = state_store.conversation_store(
+                        str(replay["conversation_id"])
+                    ).binding()
+                    response.status_code = 200
+                    return await conversation_manager.replay_bound(
+                        conversation_id=str(replay["conversation_id"]),
+                        actor_id=identity.device_id,
+                        agent_summary=connected_agents.presentation(
+                            cast(str, binding["connected_agent_id"])
+                        ),
+                    )
+                resolved = await connected_agents.resolve_for_chat(
+                    connected_agent_id=command.connected_agent_id,
+                    model_id=command.model_id,
+                    reasoning_effort=command.reasoning_effort,
+                    expected_profile_revision=cast(int, command.expected_profile_revision),
+                    expected_agent_registry_revision=cast(
+                        int, command.expected_agent_registry_revision
+                    ),
+                )
+                record = resolved["record"]
+                snapshot, created = await conversation_manager.create_bound(
+                    actor_id=identity.device_id,
+                    selected_job_id=selected_job_id,
+                    connected_agent_id=record.id,
+                    provider=record.provider,
+                    model_id=resolved["model_id"],
+                    reasoning_effort=resolved["reasoning_effort"],
+                    connection_account_fingerprint=record.account_fingerprint,
+                    idempotency_key=cast(str, command.idempotency_key),
+                    client_request_hash=client_request_hash,
+                    agent_summary={
+                        "id": record.id,
+                        "provider": record.provider,
+                        "display_name": record.display_name,
+                        "avatar_id": record.avatar_id,
+                    },
+                )
+                if not created:
+                    response.status_code = 200
+                return snapshot
             return await conversation_manager.create(
                 actor_id=identity.device_id, selected_job_id=selected_job_id
             )
         except ConversationLimit as error:
-            raise HTTPException(status_code=409, detail=str(error)) from error
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "CHAT_LIMIT_REACHED",
+                    "message": str(error),
+                    "retryable": False,
+                },
+            ) from error
+        except ConversationProvisioningFailed as error:
+            raise HTTPException(
+                status_code=503,
+                detail={
+                    "code": str(error),
+                    "message": "Agent session could not be created",
+                    "retryable": True,
+                },
+            ) from error
+        except IdempotencyConflict as error:
+            raise HTTPException(
+                status_code=409,
+                detail={"code": "CHAT_BINDING_CONFLICT", "message": str(error), "retryable": False},
+            ) from error
+        except ConnectedAgentConflict as error:
+            raise HTTPException(
+                status_code=409,
+                detail={"code": str(error), "message": str(error), "retryable": False},
+            ) from error
+        except ValueError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
 
     @app.get("/v1/conversations/current", tags=["agent"], deprecated=True)
     def conversation_current(

@@ -28,6 +28,10 @@ class AmbiguousDeliveryError(RuntimeError):
     """The provider may have accepted an operation whose result was not observed."""
 
 
+class DefinitiveSessionCreationError(RuntimeError):
+    """The provider rejected session creation before accepting it."""
+
+
 @dataclass(frozen=True)
 class AgentContext:
     turn_id: str
@@ -201,12 +205,10 @@ class AgentRuntimeRouter:
     ) -> None:
         async with self._session_lock:
             keys = tuple(
-                (provider, identity, session_id)
-                for session_id in dict.fromkeys(session_ids)
+                (provider, identity, session_id) for session_id in dict.fromkeys(session_ids)
             )
             if any(
-                (owner := self._session_owners.get(key)) is not None
-                and owner != conversation_id
+                (owner := self._session_owners.get(key)) is not None and owner != conversation_id
                 for key in keys
             ):
                 raise RuntimeError("Provider session is already owned by another conversation")

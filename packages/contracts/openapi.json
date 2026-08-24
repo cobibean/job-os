@@ -652,7 +652,7 @@
           "code": {
             "maxLength": 64,
             "minLength": 1,
-            "pattern": "^[a-z][a-z0-9_]*$",
+            "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
             "title": "Code",
             "type": "string"
           },
@@ -1032,6 +1032,98 @@
           "artifact_reference"
         ],
         "title": "ArtifactRegistrationRequest",
+        "type": "object"
+      },
+      "BoundConversationResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "active_turn": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Active Turn"
+          },
+          "agent": {
+            "additionalProperties": true,
+            "title": "Agent",
+            "type": "object"
+          },
+          "availability": {
+            "additionalProperties": true,
+            "title": "Availability",
+            "type": "object"
+          },
+          "binding": {
+            "additionalProperties": true,
+            "title": "Binding",
+            "type": "object"
+          },
+          "connection": {
+            "$ref": "#/components/schemas/ConnectionResponse"
+          },
+          "conversation_id": {
+            "title": "Conversation Id",
+            "type": "string"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "entries": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Entries",
+            "type": "array"
+          },
+          "job_context": {
+            "$ref": "#/components/schemas/ConversationJobContext"
+          },
+          "latest_event_id": {
+            "title": "Latest Event Id",
+            "type": "integer"
+          },
+          "position": {
+            "title": "Position",
+            "type": "integer"
+          },
+          "recovery_state": {
+            "enum": [
+              "ready",
+              "recovering",
+              "quarantined"
+            ],
+            "title": "Recovery State",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "conversation_id",
+          "title",
+          "position",
+          "created_at",
+          "entries",
+          "active_turn",
+          "connection",
+          "recovery_state",
+          "latest_event_id",
+          "job_context",
+          "binding",
+          "availability",
+          "agent"
+        ],
+        "title": "BoundConversationResponse",
         "type": "object"
       },
       "BrowserCommandError": {
@@ -2352,6 +2444,78 @@
         "title": "ConnectedAgent",
         "type": "object"
       },
+      "ConnectedAgentHealth": {
+        "additionalProperties": false,
+        "properties": {
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "provider_available": {
+            "title": "Provider Available",
+            "type": "boolean"
+          },
+          "retry_after_seconds": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Retry After Seconds"
+          },
+          "state": {
+            "title": "State",
+            "type": "string"
+          },
+          "tools_available": {
+            "title": "Tools Available",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "state",
+          "label",
+          "provider_available",
+          "tools_available"
+        ],
+        "title": "ConnectedAgentHealth",
+        "type": "object"
+      },
+      "ConnectedAgentImpactResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "active_chats": {
+            "title": "Active Chats",
+            "type": "integer"
+          },
+          "agent_id": {
+            "title": "Agent Id",
+            "type": "string"
+          },
+          "default_profile_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Default Profile Ids",
+            "type": "array"
+          },
+          "locked_chats": {
+            "title": "Locked Chats",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "agent_id",
+          "default_profile_ids",
+          "active_chats",
+          "locked_chats"
+        ],
+        "title": "ConnectedAgentImpactResponse",
+        "type": "object"
+      },
       "ConnectedAgentList": {
         "additionalProperties": false,
         "properties": {
@@ -2367,6 +2531,206 @@
           "agents"
         ],
         "title": "ConnectedAgentList",
+        "type": "object"
+      },
+      "ConnectedAgentListResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "agents": {
+            "items": {
+              "$ref": "#/components/schemas/ConnectedAgentPublic"
+            },
+            "title": "Agents",
+            "type": "array"
+          },
+          "registry_revision": {
+            "title": "Registry Revision",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "registry_revision",
+          "agents"
+        ],
+        "title": "ConnectedAgentListResponse",
+        "type": "object"
+      },
+      "ConnectedAgentModelOption": {
+        "additionalProperties": false,
+        "properties": {
+          "display_name": {
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Display Name",
+            "type": "string"
+          },
+          "model_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Model Id",
+            "type": "string"
+          },
+          "reasoning_efforts": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Reasoning Efforts",
+            "type": "array"
+          }
+        },
+        "required": [
+          "model_id",
+          "display_name",
+          "reasoning_efforts"
+        ],
+        "title": "ConnectedAgentModelOption",
+        "type": "object"
+      },
+      "ConnectedAgentModelsResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "live": {
+            "title": "Live",
+            "type": "boolean"
+          },
+          "models": {
+            "items": {
+              "$ref": "#/components/schemas/ConnectedAgentModelOption"
+            },
+            "title": "Models",
+            "type": "array"
+          }
+        },
+        "required": [
+          "live",
+          "models"
+        ],
+        "title": "ConnectedAgentModelsResponse",
+        "type": "object"
+      },
+      "ConnectedAgentPublic": {
+        "additionalProperties": false,
+        "properties": {
+          "account_fingerprint": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Account Fingerprint"
+          },
+          "account_summary": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Account Summary"
+          },
+          "avatar_id": {
+            "title": "Avatar Id",
+            "type": "string"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "default_model_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Model Id"
+          },
+          "default_reasoning_effort": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Reasoning Effort"
+          },
+          "disconnected_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Disconnected At"
+          },
+          "display_name": {
+            "title": "Display Name",
+            "type": "string"
+          },
+          "health": {
+            "$ref": "#/components/schemas/ConnectedAgentHealth"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "impact": {
+            "additionalProperties": true,
+            "title": "Impact",
+            "type": "object"
+          },
+          "lifecycle": {
+            "enum": [
+              "connected",
+              "disconnected"
+            ],
+            "title": "Lifecycle",
+            "type": "string"
+          },
+          "provider": {
+            "enum": [
+              "hermes",
+              "codex"
+            ],
+            "title": "Provider",
+            "type": "string"
+          },
+          "updated_at": {
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "provider",
+          "display_name",
+          "avatar_id",
+          "default_model_id",
+          "default_reasoning_effort",
+          "lifecycle",
+          "account_summary",
+          "account_fingerprint",
+          "created_at",
+          "updated_at",
+          "disconnected_at",
+          "health",
+          "impact"
+        ],
+        "title": "ConnectedAgentPublic",
         "type": "object"
       },
       "ConnectionResponse": {
@@ -2692,9 +3056,168 @@
         "title": "CreateBlankRequest",
         "type": "object"
       },
+      "CreateConnectedAgentRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "avatar_id": {
+            "pattern": "^[a-z][a-z0-9_-]{0,63}$",
+            "title": "Avatar Id",
+            "type": "string"
+          },
+          "connection_config": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Connection Config"
+          },
+          "default_model_id": {
+            "anyOf": [
+              {
+                "maxLength": 256,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Model Id"
+          },
+          "default_reasoning_effort": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Reasoning Effort"
+          },
+          "display_name": {
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Display Name",
+            "type": "string"
+          },
+          "expected_registry_revision": {
+            "minimum": 1.0,
+            "title": "Expected Registry Revision",
+            "type": "integer"
+          },
+          "idempotency_key": {
+            "maxLength": 200,
+            "minLength": 8,
+            "title": "Idempotency Key",
+            "type": "string"
+          },
+          "provider": {
+            "enum": [
+              "hermes",
+              "codex"
+            ],
+            "title": "Provider",
+            "type": "string"
+          }
+        },
+        "required": [
+          "provider",
+          "display_name",
+          "avatar_id",
+          "expected_registry_revision",
+          "idempotency_key"
+        ],
+        "title": "CreateConnectedAgentRequest",
+        "type": "object"
+      },
       "CreateConversationRequest": {
         "additionalProperties": false,
         "properties": {
+          "connected_agent_id": {
+            "anyOf": [
+              {
+                "pattern": "^jagent_[a-f0-9]{32}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Connected Agent Id"
+          },
+          "expected_agent_registry_revision": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expected Agent Registry Revision"
+          },
+          "expected_profile_revision": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expected Profile Revision"
+          },
+          "idempotency_key": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "minLength": 8,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Idempotency Key"
+          },
+          "model_id": {
+            "anyOf": [
+              {
+                "maxLength": 256,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Id"
+          },
+          "reasoning_effort": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reasoning Effort"
+          },
           "selected_job_id": {
             "anyOf": [
               {
@@ -3097,6 +3620,35 @@
           "profile_registry_revision"
         ],
         "title": "DeviceSessionResponse",
+        "type": "object"
+      },
+      "DisconnectConnectedAgentRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "confirmation_token": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Confirmation Token",
+            "type": "string"
+          },
+          "expected_registry_revision": {
+            "minimum": 1.0,
+            "title": "Expected Registry Revision",
+            "type": "integer"
+          },
+          "idempotency_key": {
+            "maxLength": 200,
+            "minLength": 8,
+            "title": "Idempotency Key",
+            "type": "string"
+          }
+        },
+        "required": [
+          "confirmation_token",
+          "expected_registry_revision",
+          "idempotency_key"
+        ],
+        "title": "DisconnectConnectedAgentRequest",
         "type": "object"
       },
       "DocumentComment": {
@@ -6954,6 +7506,46 @@
         "title": "SetBlockRole",
         "type": "object"
       },
+      "SetDefaultConnectedAgentRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "connected_agent_id": {
+            "anyOf": [
+              {
+                "pattern": "^jagent_[a-f0-9]{32}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Connected Agent Id"
+          },
+          "expected_agent_registry_revision": {
+            "minimum": 1.0,
+            "title": "Expected Agent Registry Revision",
+            "type": "integer"
+          },
+          "expected_profile_revision": {
+            "minimum": 1.0,
+            "title": "Expected Profile Revision",
+            "type": "integer"
+          },
+          "idempotency_key": {
+            "maxLength": 200,
+            "minLength": 8,
+            "title": "Idempotency Key",
+            "type": "string"
+          }
+        },
+        "required": [
+          "expected_profile_revision",
+          "expected_agent_registry_revision",
+          "idempotency_key"
+        ],
+        "title": "SetDefaultConnectedAgentRequest",
+        "type": "object"
+      },
       "SkillValue": {
         "additionalProperties": false,
         "properties": {
@@ -7270,6 +7862,81 @@
           "turn_id"
         ],
         "title": "TurnMutationResponse",
+        "type": "object"
+      },
+      "UpdateConnectedAgentRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "avatar_id": {
+            "pattern": "^[a-z][a-z0-9_-]{0,63}$",
+            "title": "Avatar Id",
+            "type": "string"
+          },
+          "connection_config": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Connection Config"
+          },
+          "default_model_id": {
+            "anyOf": [
+              {
+                "maxLength": 256,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Model Id"
+          },
+          "default_reasoning_effort": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Reasoning Effort"
+          },
+          "display_name": {
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Display Name",
+            "type": "string"
+          },
+          "expected_registry_revision": {
+            "minimum": 1.0,
+            "title": "Expected Registry Revision",
+            "type": "integer"
+          },
+          "idempotency_key": {
+            "maxLength": 200,
+            "minLength": 8,
+            "title": "Idempotency Key",
+            "type": "string"
+          }
+        },
+        "required": [
+          "display_name",
+          "avatar_id",
+          "expected_registry_revision",
+          "idempotency_key"
+        ],
+        "title": "UpdateConnectedAgentRequest",
         "type": "object"
       },
       "VersionResponse": {
@@ -13115,6 +13782,678 @@
         ]
       }
     },
+    "/v1/connected-agents": {
+      "get": {
+        "operationId": "connected_agents_list_v1_connected_agents_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-JobOS-MCP-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Jobos-Mcp-Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConnectedAgentListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Device authentication required"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Request validation failed"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Internal server error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Connected Agents List",
+        "tags": [
+          "agent"
+        ]
+      },
+      "post": {
+        "operationId": "connected_agent_create_v1_connected_agents_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-JobOS-MCP-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Jobos-Mcp-Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateConnectedAgentRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConnectedAgentPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Device authentication required"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Request validation failed"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Internal server error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Connected Agent Create",
+        "tags": [
+          "agent"
+        ]
+      }
+    },
+    "/v1/connected-agents/{agent_id}": {
+      "get": {
+        "operationId": "connected_agent_get_v1_connected_agents__agent_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "agent_id",
+            "required": true,
+            "schema": {
+              "title": "Agent Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-JobOS-MCP-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Jobos-Mcp-Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConnectedAgentPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Device authentication required"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Request validation failed"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Internal server error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Connected Agent Get",
+        "tags": [
+          "agent"
+        ]
+      },
+      "patch": {
+        "operationId": "connected_agent_update_v1_connected_agents__agent_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "agent_id",
+            "required": true,
+            "schema": {
+              "title": "Agent Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-JobOS-MCP-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Jobos-Mcp-Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateConnectedAgentRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConnectedAgentPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Device authentication required"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Request validation failed"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Internal server error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Connected Agent Update",
+        "tags": [
+          "agent"
+        ]
+      }
+    },
+    "/v1/connected-agents/{agent_id}/disconnect": {
+      "post": {
+        "operationId": "connected_agent_disconnect_v1_connected_agents__agent_id__disconnect_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "agent_id",
+            "required": true,
+            "schema": {
+              "title": "Agent Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-JobOS-MCP-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Jobos-Mcp-Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DisconnectConnectedAgentRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConnectedAgentPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Device authentication required"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Request validation failed"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Internal server error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Connected Agent Disconnect",
+        "tags": [
+          "agent"
+        ]
+      }
+    },
+    "/v1/connected-agents/{agent_id}/disconnect-impact": {
+      "get": {
+        "operationId": "connected_agent_disconnect_impact_v1_connected_agents__agent_id__disconnect_impact_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "agent_id",
+            "required": true,
+            "schema": {
+              "title": "Agent Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-JobOS-MCP-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Jobos-Mcp-Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConnectedAgentImpactResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Device authentication required"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Request validation failed"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Internal server error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Connected Agent Disconnect Impact",
+        "tags": [
+          "agent"
+        ]
+      }
+    },
+    "/v1/connected-agents/{agent_id}/models": {
+      "get": {
+        "operationId": "connected_agent_models_v1_connected_agents__agent_id__models_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "agent_id",
+            "required": true,
+            "schema": {
+              "title": "Agent Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-JobOS-MCP-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Jobos-Mcp-Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConnectedAgentModelsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Device authentication required"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Request validation failed"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Internal server error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Connected Agent Models",
+        "tags": [
+          "agent"
+        ]
+      }
+    },
+    "/v1/connected-agents/{agent_id}/test": {
+      "post": {
+        "operationId": "connected_agent_test_v1_connected_agents__agent_id__test_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "agent_id",
+            "required": true,
+            "schema": {
+              "title": "Agent Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-JobOS-MCP-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Jobos-Mcp-Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConnectedAgentPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Device authentication required"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Request validation failed"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Internal server error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Connected Agent Test",
+        "tags": [
+          "agent"
+        ]
+      }
+    },
     "/v1/conversations": {
       "get": {
         "operationId": "conversations_list_v1_conversations_get",
@@ -13230,7 +14569,15 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ConversationResponse"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/ConversationResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/BoundConversationResponse"
+                    }
+                  ],
+                  "title": "Response Conversation Create V1 Conversations Post"
                 }
               }
             },
@@ -16131,6 +17478,101 @@
         "summary": "Installation Profile Activate",
         "tags": [
           "system"
+        ]
+      }
+    },
+    "/v1/installation-profiles/{profile_id}/default-agent": {
+      "put": {
+        "operationId": "installation_profile_default_agent_v1_installation_profiles__profile_id__default_agent_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "profile_id",
+            "required": true,
+            "schema": {
+              "title": "Profile Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-JobOS-MCP-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Jobos-Mcp-Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetDefaultConnectedAgentRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Installation Profile Default Agent V1 Installation Profiles  Profile Id  Default Agent Put",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Device authentication required"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Request validation failed"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Internal server error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Installation Profile Default Agent",
+        "tags": [
+          "profiles"
         ]
       }
     },
