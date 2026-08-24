@@ -3,7 +3,7 @@ from typing import Literal
 
 from pydantic import Field
 
-from .agent_gateway import AgentGatewayFactory
+from .agent_gateway import AgentGatewayFactory, AgentRuntimeRouter
 from .career_profile_context import CareerProfileContextStore
 from .conversations import (
     ConnectionResponse,
@@ -35,14 +35,16 @@ class ConversationManager:
     def __init__(
         self,
         store: JobOsStateStore,
-        gateway_factory: AgentGatewayFactory,
+        gateway_factory: AgentGatewayFactory | AgentRuntimeRouter,
         *,
+        profile_id: str | None = None,
         career_profile_principal: str | None = None,
         career_profile_context: CareerProfileContextStore | None = None,
         career_profile_agent_id: str | None = None,
     ) -> None:
         self.store = store
         self.gateway_factory = gateway_factory
+        self.profile_id = profile_id
         self.career_profile_principal = career_profile_principal
         self.career_profile_context = career_profile_context
         self.career_profile_agent_id = career_profile_agent_id
@@ -85,10 +87,19 @@ class ConversationManager:
                     raise result
 
     def _make_service(self, conversation_id: str) -> ConversationService:
+        scoped_store = self.store.conversation_store(conversation_id)
+        binding = scoped_store.binding()
+        binding["_normalized_event_sequences"] = scoped_store.normalized_event_sequences()
+        gateway = (
+            self.gateway_factory.create(conversation_id, binding)
+            if isinstance(self.gateway_factory, AgentRuntimeRouter)
+            else self.gateway_factory.create(conversation_id)
+        )
         return ConversationService(
-            self.store.conversation_store(conversation_id),
-            self.gateway_factory.create(conversation_id),
+            scoped_store,
+            gateway,
             conversation_id,
+            profile_id=self.profile_id,
             career_profile_principal=self.career_profile_principal,
             career_profile_context=self.career_profile_context,
             career_profile_agent_id=self.career_profile_agent_id,

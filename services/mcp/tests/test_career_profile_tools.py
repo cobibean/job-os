@@ -121,10 +121,15 @@ async def test_career_profile_mcp_tools_keep_review_decisions_user_owned():
         transport=httpx.MockTransport(handler),
     )
     server = create_server(client)
+    scope = {
+        "conversation_id": "conv_career_profile_tools",
+        "turn_id": "turn_career_profile_tools_0001",
+    }
 
     _, edit = await server.call_tool(
         "career_profile_edit",
-        {
+        scope
+        | {
             "expected_profile_revision": 0,
             "operation": "item.create",
             "reason": "Remember a user-authored skill",
@@ -188,10 +193,15 @@ async def test_career_profile_agent_operating_tools_map_to_scoped_api_contracts(
         transport=httpx.MockTransport(handler),
     )
     server = create_server(client)
+    scope = {
+        "conversation_id": "conv_career_profile_operating",
+        "turn_id": "turn_career_profile_operating_0001",
+    }
 
     await server.call_tool(
         "career_profile_search",
-        {
+        scope
+        | {
             "query": "Python",
             "kinds": ["skill"],
             "areas": ["my_career"],
@@ -202,7 +212,8 @@ async def test_career_profile_agent_operating_tools_map_to_scoped_api_contracts(
     )
     await server.call_tool(
         "career_profile_edit_batch",
-        {
+        scope
+        | {
             "expected_profile_revision": 4,
             "edits": [
                 {
@@ -217,11 +228,12 @@ async def test_career_profile_agent_operating_tools_map_to_scoped_api_contracts(
     )
     await server.call_tool(
         "career_profile_changes_list",
-        {"status": "all", "limit": 20},
+        scope | {"status": "all", "limit": 20},
     )
     await server.call_tool(
         "career_profile_evidence_import",
-        {
+        scope
+        | {
             "expected_profile_revision": 6,
             "original_filename": "synthetic.txt",
             "media_type": "text/plain",
@@ -234,7 +246,8 @@ async def test_career_profile_agent_operating_tools_map_to_scoped_api_contracts(
     )
     await server.call_tool(
         "career_profile_evidence_inspect",
-        {
+        scope
+        | {
             "evidence_id": "cpe_fixturefixture1234",
             "byte_start": 0,
             "byte_length": 1000,

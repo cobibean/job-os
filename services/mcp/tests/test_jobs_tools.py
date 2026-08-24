@@ -204,9 +204,7 @@ def test_mcp_error_sanitizer_preserves_urls_prose_and_ordinary_identifiers():
         ),
     ],
 )
-def test_mcp_error_sanitizer_has_api_parity_for_every_sensitive_category(
-    category, raw, expected
-):
+def test_mcp_error_sanitizer_has_api_parity_for_every_sensitive_category(category, raw, expected):
     assert _safe_error_message(raw) == expected, category
     assert sanitize_text(raw) == expected, category
 
@@ -229,7 +227,7 @@ async def test_job_tools_use_only_the_authenticated_jobos_http_contract():
         mcp_token="test-mcp-trusted-token",
         transport=httpx.MockTransport(handler),
     )
-    client.scope_conversation("conv_test")
+    client.scope_turn("conv_test", "turn_contract_test_0001")
 
     await client.list_jobs(sort="status", query="builder")
     await client.inspect_job("job-1")
@@ -265,8 +263,7 @@ async def test_job_tools_use_only_the_authenticated_jobos_http_contract():
         ("PUT", "/v1/jobs/job-1/description"),
     ]
     assert all(
-        request.headers["authorization"] == "Bearer test-mcp-trusted-token"
-        for request in requests
+        request.headers["authorization"] == "Bearer test-mcp-trusted-token" for request in requests
     )
     assert json.loads(requests[2].content) == {
         "company_name": "Northstar Labs",
@@ -437,9 +434,7 @@ def test_document_input_rejects_same_inode_same_size_in_place_mutation(tmp_path,
     assert changed.st_size == identity.st_size
 
 
-def test_document_artifact_root_uses_local_config_and_never_cwd_or_hermes(
-    tmp_path, monkeypatch
-):
+def test_document_artifact_root_uses_local_config_and_never_cwd_or_hermes(tmp_path, monkeypatch):
     working = tmp_path / "working"
     working.mkdir()
     hermes = tmp_path / ".hermes/profiles/job-hunter/cache/documents"
@@ -500,9 +495,7 @@ def test_publication_workspace_rejects_symlinked_inbox(tmp_path):
     (artifact_root / "publication-inbox").symlink_to(outside, target_is_directory=True)
 
     with pytest.raises(RuntimeError, match="symbolic links"):
-        _prepare_document_publication_workspace(
-            "conv_alpha", "job-1", artifact_root=artifact_root
-        )
+        _prepare_document_publication_workspace("conv_alpha", "job-1", artifact_root=artifact_root)
 
 
 def test_publication_workspace_rejects_parent_replaced_by_symlink(tmp_path):
@@ -520,14 +513,10 @@ def test_publication_workspace_rejects_parent_replaced_by_symlink(tmp_path):
     conversation_directory.symlink_to(outside, target_is_directory=True)
 
     with pytest.raises(RuntimeError, match="symbolic links"):
-        _existing_document_publication_workspace(
-            "conv_alpha", "job-1", artifact_root=artifact_root
-        )
+        _existing_document_publication_workspace("conv_alpha", "job-1", artifact_root=artifact_root)
 
 
-def test_publication_read_cannot_follow_parent_swapped_after_workspace_check(
-    tmp_path, monkeypatch
-):
+def test_publication_read_cannot_follow_parent_swapped_after_workspace_check(tmp_path, monkeypatch):
     artifact_root = tmp_path / "artifacts"
     artifact_root.mkdir()
     workspace = _prepare_document_publication_workspace(
@@ -547,9 +536,7 @@ def test_publication_read_cannot_follow_parent_swapped_after_workspace_check(
         checked.parent.symlink_to(outside, target_is_directory=True)
         return checked
 
-    monkeypatch.setattr(
-        server_module, "_existing_document_publication_workspace", check_then_swap
-    )
+    monkeypatch.setattr(server_module, "_existing_document_publication_workspace", check_then_swap)
     with pytest.raises(ValueError, match="symbolic link|inaccessible component"):
         _read_publication_input(
             str(target),
@@ -581,7 +568,11 @@ async def test_publication_prepare_and_publish_use_only_the_app_owned_inbox(tmp_
 
     _, prepared = await server.call_tool(
         "document_publication_prepare",
-        {"conversation_id": "conv_alpha", "job_id": "job-1"},
+        {
+            "conversation_id": "conv_alpha",
+            "turn_id": "turn_publication_test_0001",
+            "job_id": "job-1",
+        },
     )
     assert isinstance(prepared, dict)
     workspace = Path(prepared["publication_directory"])
@@ -594,6 +585,7 @@ async def test_publication_prepare_and_publish_use_only_the_app_owned_inbox(tmp_
         "document_publish",
         {
             "conversation_id": "conv_alpha",
+            "turn_id": "turn_publication_test_0001",
             "job_id": "job-1",
             "document_key": "resume",
             "document_label": "Resume",
@@ -612,6 +604,7 @@ async def test_publication_prepare_and_publish_use_only_the_app_owned_inbox(tmp_
             "document_publish",
             {
                 "conversation_id": "conv_alpha",
+                "turn_id": "turn_publication_test_0001",
                 "job_id": "job-1",
                 "document_key": "resume",
                 "document_label": "Resume",
@@ -689,25 +682,15 @@ async def test_mcp_server_exposes_public_v1_parity_tools_while_retaining_job_too
     assert "Other filesystem paths are never read" in (
         tools_by_name["document_publish"].description or ""
     )
-    correlated = [
-        tool
-        for tool in tools
-        if tool.name.startswith("browser_")
-        or tool.name.startswith("document_")
-        or tool.name
-        in {
-            "job_select",
-            "job_update_status",
-            "job_update_description",
-            "workspace_inspect",
-            "workspace_update",
-        }
-    ]
-    for tool in correlated:
+    for tool in tools:
         conversation = tool.inputSchema["properties"]["conversation_id"]
+        turn = tool.inputSchema["properties"]["turn_id"]
         assert "conversation_id" in tool.inputSchema["required"]
+        assert "turn_id" in tool.inputSchema["required"]
         assert conversation["maxLength"] == 133
         assert conversation["pattern"] == "^conv_[A-Za-z0-9_-]{1,128}$"
+        assert turn["maxLength"] == 205
+        assert turn["pattern"] == "^turn_[A-Za-z0-9_-]{8,200}$"
     snapshot_schema = tools_by_name["browser_snapshot"].inputSchema
     assert "text_start" not in snapshot_schema["required"]
     assert "text_length" not in snapshot_schema["required"]
@@ -764,28 +747,29 @@ async def test_save_current_tab_contract_pages_oversized_listing_then_creates_an
             start = body["arguments"]["text_start"]
             length = body["arguments"]["text_length"]
             text = listing_text[start : start + length]
-            return httpx.Response(200, json={
-                "state": "completed",
-                "outcome": "page.snapshot",
-                "data": {
-                    "tab_id": "live-applied-systems-tab",
-                    "url": "https://www.linkedin.com/jobs/view/4431837844/",
-                    "title": "AI Product Manager",
-                    "text": text,
-                    "requested_text_start": start,
-                    "text_start": start,
-                    "text_length": len(text),
-                    "next_text_start": (
-                        start + len(text)
-                        if start + len(text) < len(listing_text)
-                        else None
-                    ),
-                    "total_text_length": len(listing_text),
-                    "has_more": start + len(text) < len(listing_text),
-                    "page_revision": revision,
-                    "targets": [],
+            return httpx.Response(
+                200,
+                json={
+                    "state": "completed",
+                    "outcome": "page.snapshot",
+                    "data": {
+                        "tab_id": "live-applied-systems-tab",
+                        "url": "https://www.linkedin.com/jobs/view/4431837844/",
+                        "title": "AI Product Manager",
+                        "text": text,
+                        "requested_text_start": start,
+                        "text_start": start,
+                        "text_length": len(text),
+                        "next_text_start": (
+                            start + len(text) if start + len(text) < len(listing_text) else None
+                        ),
+                        "total_text_length": len(listing_text),
+                        "has_more": start + len(text) < len(listing_text),
+                        "page_revision": revision,
+                        "targets": [],
+                    },
                 },
-            })
+            )
         if request.url.path == "/v1/jobs":
             return httpx.Response(200, json={"job_id": "job-applied-systems", "created": True})
         return httpx.Response(200, json={"state": "completed", "outcome": "tab.associate"})
@@ -800,13 +784,17 @@ async def test_save_current_tab_contract_pages_oversized_listing_then_creates_an
     captured = []
     start = 0
     while True:
-        content, snapshot = await server.call_tool("browser_snapshot", {
-            "conversation_id": "conv_save_current_tab",
-            "tab_id": "live-applied-systems-tab",
-            "text_start": start,
-            "text_length": 12_000,
-            "include_targets": False,
-        })
+        content, snapshot = await server.call_tool(
+            "browser_snapshot",
+            {
+                "conversation_id": "conv_save_current_tab",
+                "turn_id": "turn_save_current_tab_0001",
+                "tab_id": "live-applied-systems-tab",
+                "text_start": start,
+                "text_length": 12_000,
+                "include_targets": False,
+            },
+        )
         assert sum(len(item.text) for item in content if hasattr(item, "text")) < 25_000
         assert snapshot["data"]["page_revision"] == revision
         captured.append(snapshot["data"]["text"])
@@ -814,19 +802,28 @@ async def test_save_current_tab_contract_pages_oversized_listing_then_creates_an
             break
         start = snapshot["data"]["next_text_start"]
 
-    _, created = await server.call_tool("job_create_from_browser", {
-        "company_name": "Applied Systems",
-        "title": "AI Product Manager",
-        "canonical_url": "https://www.linkedin.com/jobs/view/4431837844/",
-        "location_text": "Not specified",
-        "description_text": "".join(captured),
-        "application_url": "https://www.linkedin.com/jobs/view/4431837844/",
-    })
-    await server.call_tool("browser_tab_associate", {
-        "conversation_id": "conv_save_current_tab",
-        "tab_id": "live-applied-systems-tab",
-        "job_id": created["job_id"],
-    })
+    _, created = await server.call_tool(
+        "job_create_from_browser",
+        {
+            "conversation_id": "conv_save_current_tab",
+            "turn_id": "turn_save_current_tab_0001",
+            "company_name": "Applied Systems",
+            "title": "AI Product Manager",
+            "canonical_url": "https://www.linkedin.com/jobs/view/4431837844/",
+            "location_text": "Not specified",
+            "description_text": "".join(captured),
+            "application_url": "https://www.linkedin.com/jobs/view/4431837844/",
+        },
+    )
+    await server.call_tool(
+        "browser_tab_associate",
+        {
+            "conversation_id": "conv_save_current_tab",
+            "turn_id": "turn_save_current_tab_0001",
+            "tab_id": "live-applied-systems-tab",
+            "job_id": created["job_id"],
+        },
+    )
     await client.aclose()
 
     assert "".join(captured) == listing_text
@@ -836,7 +833,8 @@ async def test_save_current_tab_contract_pages_oversized_listing_then_creates_an
     assert create_body["company_name"] == "Applied Systems"
     assert create_body["title"] == "AI Product Manager"
     assert associate_body["arguments"] == {
-        "tab_id": "live-applied-systems-tab", "job_id": "job-applied-systems"
+        "tab_id": "live-applied-systems-tab",
+        "job_id": "job-applied-systems",
     }
 
 
@@ -919,7 +917,7 @@ async def test_document_select_reads_workspace_silently_then_emits_one_shared_mu
         mcp_token="test-mcp-trusted-token",
         transport=httpx.MockTransport(handler),
     )
-    client.scope_conversation("conv_test")
+    client.scope_turn("conv_test", "turn_document_test_0001")
     await client.select_document("art_1234567890abcdef", idempotency_key="select-document-1")
     await client.aclose()
 

@@ -39,6 +39,7 @@ from jobos_api.activity import ActivityReportRequest, ActivityReportResponse
 from jobos_api.agent_gateway import (
     AgentGateway,
     AgentGatewayFactory,
+    AgentRuntimeRouter,
     OfflineAgentGateway,
     OfflineAgentGatewayFactory,
 )
@@ -584,6 +585,7 @@ def create_app(
     )
     installation_profiles = InstallationProfileRegistry(settings.installation_registry_path)
     profile_fence_enabled = settings.installation_registry_path.is_file()
+    hermes_agent_ids: set[str] = set()
     if profile_fence_enabled:
         migration_runtime = {
             "job_provider": settings.job_provider,
@@ -596,6 +598,9 @@ def create_app(
             "facade_source_path": None,
         }
         registry_data = installation_profiles.load_or_bootstrap(migration_runtime)
+        hermes_agent_ids = {
+            agent.id for agent in registry_data.connected_agents if agent.provider == "hermes"
+        }
         if (
             registry_data.connected_agent_migration is not None
             and any(
@@ -656,9 +661,21 @@ def create_app(
             request_timeout=settings.hermes_request_timeout,
         )
         configured_gateway = True
+    selected_gateway_factory = gateway_factory or OfflineAgentGatewayFactory()
+    runtime_router = AgentRuntimeRouter(
+        {
+            "hermes": selected_gateway_factory,
+            **{
+                ("hermes", agent_id): selected_gateway_factory
+                for agent_id in hermes_agent_ids
+            },
+        },
+        profile_id=settings.installation_profile_id,
+    )
     conversation_manager = ConversationManager(
         state_store,
-        gateway_factory or OfflineAgentGatewayFactory(),
+        runtime_router,
+        profile_id=settings.installation_profile_id,
         career_profile_principal=(
             principal_for_device(settings.device_id) if settings.career_profile_enabled else None
         ),
@@ -1245,40 +1262,50 @@ def create_app(
     async def enforce_mcp_conversation_job_scope(
         request: Request, call_next: Callable[[Request], Any]
     ) -> Response:
-        """Fence conversation-scoped MCP job/document calls at the API boundary."""
+        """Fence every valid MCP credential to one exact active turn."""
         supplied_mcp_token = request.headers.get("x-jobos-mcp-token")
-        conversation_id = request.query_params.get("conversation_id")
         if (
             supplied_mcp_token is None
             or not hmac.compare_digest(supplied_mcp_token, settings.mcp_token)
-            or conversation_id is None
         ):
             return await call_next(request)
 
-        job_id: str | None = None
-        job_match = re.match(
-            r"^/v1/jobs/([^/]+)/(?:status|description|artifacts(?:/|$)|"
-            r"editable-documents(?:/|$)|editable-document-outlines(?:/|$))",
-            request.url.path,
+        path = request.url.path
+        is_mcp_capability = (
+            path == "/v1/activity"
+            or path == "/v1/browser/commands"
+            or path == "/v1/jobs"
+            or path.startswith("/v1/jobs/")
+            or path == "/v1/workspace"
+            or path == "/v1/workspace/jobs"
+            or path.startswith("/v1/editable-documents/")
+            or bool(re.match(r"^/v1/conversations/[^/]+/workspace/(?:job|document)$", path))
+            or path == "/v1/career-profile/consumer-projection"
+            or path.startswith("/v1/career-profile/agent-")
         )
-        if job_match is not None:
-            job_id = unquote(job_match.group(1))
-        else:
-            editable_match = re.match(r"^/v1/editable-documents/([^/]+)", request.url.path)
-            if editable_match is not None:
-                document = state_store.get_editable_document(unquote(editable_match.group(1)))
-                if document is not None and isinstance(document.get("job_id"), str):
-                    job_id = cast(str, document["job_id"])
-            else:
-                artifact_match = re.match(r"^/v1/artifacts/([^/]+)", request.url.path)
-                if artifact_match is not None:
-                    artifact = state_store.get_document_artifact(unquote(artifact_match.group(1)))
-                    if artifact is not None and isinstance(artifact.get("job_id"), str):
-                        job_id = cast(str, artifact["job_id"])
-
-        if job_id is None:
+        if not is_mcp_capability:
             return await call_next(request)
 
+        conversation_id = request.query_params.get("conversation_id")
+        turn_id = request.query_params.get("turn_id")
+        if conversation_id is None and turn_id is None:
+            if path != "/v1/browser/commands":
+                return await call_next(request)
+            return error_response(
+                request,
+                status_code=422,
+                code="mcp_turn_required",
+                message="MCP operations require trusted conversation and turn correlation",
+                retryable=False,
+            )
+        if conversation_id is None or turn_id is None:
+            return error_response(
+                request,
+                status_code=422,
+                code="mcp_turn_required",
+                message="MCP operations require trusted conversation and turn correlation",
+                retryable=False,
+            )
         authorization = request.headers.get("authorization", "")
         scheme, _, token = authorization.partition(" ")
         identity = device_authenticator.authenticate(
@@ -1293,7 +1320,7 @@ def create_app(
                 retryable=False,
             )
         try:
-            context = conversation_manager.get(conversation_id).store.snapshot()["job_context"]
+            scoped_service = conversation_manager.get(conversation_id)
         except ConversationNotFound:
             return error_response(
                 request,
@@ -1302,16 +1329,62 @@ def create_app(
                 message="Conversation not found",
                 retryable=False,
             )
-        assert isinstance(context, dict)
-        if context.get("selected_job_id") != job_id:
-            return error_response(
-                request,
-                status_code=409,
-                code="conversation_job_mismatch",
-                message="This agent session is attached to a different job",
-                retryable=False,
+
+        async with scoped_service.turn_scope_lease():
+            turn = scoped_service.store.turn_record(turn_id)
+            active = scoped_service.store.conversation_snapshot().get("active_turn")
+            if (
+                turn is None
+                or not isinstance(active, dict)
+                or active.get("turn_id") != turn_id
+                or turn.get("status") not in {"queued", "running", "waiting"}
+                or turn.get("cancel_requested") is True
+            ):
+                return error_response(
+                    request,
+                    status_code=409,
+                    code="mcp_turn_mismatch",
+                    message="This MCP operation is not correlated to the active JobOS turn",
+                    retryable=False,
+                )
+
+            job_id: str | None = None
+            job_match = re.match(
+                r"^/v1/jobs/([^/]+)/(?:status|description|artifacts(?:/|$)|"
+                r"editable-documents(?:/|$)|editable-document-outlines(?:/|$))",
+                request.url.path,
             )
-        return await call_next(request)
+            if job_match is not None:
+                job_id = unquote(job_match.group(1))
+            else:
+                editable_match = re.match(r"^/v1/editable-documents/([^/]+)", request.url.path)
+                if editable_match is not None:
+                    document = state_store.get_editable_document(
+                        unquote(editable_match.group(1))
+                    )
+                    if document is not None and isinstance(document.get("job_id"), str):
+                        job_id = cast(str, document["job_id"])
+                else:
+                    artifact_match = re.match(r"^/v1/artifacts/([^/]+)", request.url.path)
+                    if artifact_match is not None:
+                        artifact = state_store.get_document_artifact(
+                            unquote(artifact_match.group(1))
+                        )
+                        if artifact is not None and isinstance(artifact.get("job_id"), str):
+                            job_id = cast(str, artifact["job_id"])
+
+            if job_id is not None:
+                context = scoped_service.store.snapshot()["job_context"]
+                assert isinstance(context, dict)
+                if context.get("selected_job_id") != job_id:
+                    return error_response(
+                        request,
+                        status_code=409,
+                        code="conversation_job_mismatch",
+                        message="This agent session is attached to a different job",
+                        retryable=False,
+                    )
+            return await call_next(request)
 
     def mutation_hash(command_name: str, payload: dict[str, object]) -> str:
         return hashlib.sha256(
@@ -1493,11 +1566,18 @@ def create_app(
         command: BrowserCommandRequest,
         identity: Annotated[DeviceIdentity, Depends(authenticated_device)],
         mcp_token: Annotated[str | None, Header(alias="X-JobOS-MCP-Token")] = None,
+        correlated_conversation_id: Annotated[
+            str | None, Query(alias="conversation_id")
+        ] = None,
     ) -> BrowserCommandResponse:
         require_trusted_mcp(identity, command.origin, mcp_token)
-        if command.origin == "mcp" and command.conversation_id is None:
+        if command.origin == "mcp" and (
+            command.conversation_id is None
+            or command.conversation_id != correlated_conversation_id
+        ):
             raise HTTPException(
-                status_code=422, detail="MCP browser commands require a conversation ID"
+                status_code=422,
+                detail="MCP browser commands require matching query and body correlation",
             )
         try:
             arguments = command.validated_arguments()

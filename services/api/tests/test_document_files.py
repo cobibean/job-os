@@ -230,11 +230,15 @@ def test_mcp_document_commands_require_an_explicit_active_conversation(tmp_path)
         accepted = client.post(
             "/v1/browser/commands",
             headers=mcp_headers(),
+            params={
+                "conversation_id": conversation_id,
+                "turn_id": started.json()["turn_id"],
+            },
             json={**command, "conversation_id": conversation_id},
         )
 
     assert missing.status_code == 422
-    assert missing.json()["detail"] == "MCP browser commands require a conversation ID"
+    assert missing.json()["code"] == "mcp_turn_required"
     assert started.status_code == 201
     assert accepted.status_code == 200
     assert len(broker.commands) == 1

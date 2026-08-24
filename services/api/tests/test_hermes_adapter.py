@@ -3,7 +3,7 @@ import json
 from urllib.parse import parse_qs, urlsplit
 
 import pytest
-from jobos_api.agent_gateway import AgentContext, GatewayEvent
+from jobos_api.agent_gateway import AgentContext, AmbiguousDeliveryError, GatewayEvent
 from jobos_api.career_profile import (
     CareerProfileStore,
     WorkArrangementMutation,
@@ -124,6 +124,25 @@ async def next_non_connection(stream):
         item = await asyncio.wait_for(anext(stream), 1)
         if item.event_type != "connection":
             return item
+
+
+def test_session_attachment_timeout_is_ambiguous_delivery(tmp_path):
+    async def scenario():
+        socket = FakeWebSocket(lambda request: [])
+        gateway = HermesWebSocketGateway(
+            url="ws://127.0.0.1:9119/api/ws",
+            token=TOKEN,
+            cwd=tmp_path,
+            request_timeout=0.01,
+            connector=FakeConnector(socket),
+        )
+        await gateway.start()
+        with pytest.raises(AmbiguousDeliveryError):
+            await gateway.create_or_resume_conversation(None)
+        assert [request["method"] for request in socket.requests] == ["session.create"]
+        await gateway.close()
+
+    asyncio.run(scenario())
 
 
 def test_adapter_scopes_create_submit_events_and_interrupt_to_job_hunter(tmp_path):
@@ -296,8 +315,11 @@ def test_prompt_contract_preserves_user_agency_and_typed_reuse_boundaries():
         "Use my explicit claim in a hypothetical resume example",
         {},
         "conv_prompt_contract",
+        "turn_prompt_contract_0001",
     )
 
+    assert 'conversation_id="conv_prompt_contract"' in prompt
+    assert 'turn_id="turn_prompt_contract_0001"' in prompt
     assert "Never silently invent or infer career claims" in prompt
     assert (
         "User-authored or user-approved claims may be used without supporting Evidence or proof"
@@ -1597,12 +1619,9 @@ def test_adapter_timeout_is_safe_and_does_not_disclose_credentials(tmp_path):
             connector=FakeConnector(socket),
         )
         await gateway.start()
-        try:
+        with pytest.raises(AmbiguousDeliveryError) as caught:
             await gateway.create_or_resume_conversation(None)
-        except TimeoutError as error:
-            assert TOKEN not in str(error)
-        else:
-            raise AssertionError("expected timeout")
+        assert TOKEN not in str(caught.value)
         await gateway.close()
 
     asyncio.run(scenario())

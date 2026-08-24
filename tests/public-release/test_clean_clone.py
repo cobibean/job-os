@@ -5,6 +5,7 @@ import hashlib
 import importlib.util
 import json
 import os
+import sqlite3
 import stat
 import subprocess
 import xml.etree.ElementTree as ElementTree
@@ -291,6 +292,53 @@ async def test_clean_home_golden_path(clean_runtime) -> None:
                 "conv_current",
                 conversation_id,
             ]
+            turn = assert_response(
+                client.post(
+                    f"/v1/conversations/{conversation_id}/messages",
+                    json={
+                        "text": "Run the clean-clone acceptance workflow",
+                        "idempotency_key": "clean-turn-1",
+                    },
+                ),
+                201,
+            )
+            turn_id = turn["turn_id"]
+
+        # The clean-clone runtime intentionally has no agent provider. Let that
+        # dispatch settle, then retain its legitimate turn as the trusted MCP
+        # scope used by this synthetic acceptance workflow.
+        await anyio.sleep(0.1)
+        with sqlite3.connect(profile / "state/jobos.db") as connection:
+            connection.execute(
+                "UPDATE conversation_turns SET status = 'running', cancel_requested = 0 "
+                "WHERE turn_id = ?",
+                (turn_id,),
+            )
+
+        async def correlated_call(
+            session: ClientSession, name: str, arguments: dict[str, Any]
+        ) -> dict[str, Any]:
+            return await call(
+                session,
+                name,
+                {**arguments, "conversation_id": conversation_id, "turn_id": turn_id},
+            )
+
+        async def correlated_optional_error(
+            session: ClientSession,
+            name: str,
+            arguments: dict[str, Any],
+            code: str,
+            *,
+            retryable: bool = True,
+        ) -> None:
+            await assert_optional_error(
+                session,
+                name,
+                {**arguments, "conversation_id": conversation_id, "turn_id": turn_id},
+                code,
+                retryable=retryable,
+            )
 
         async with mcp_session(
             root,
@@ -300,17 +348,19 @@ async def test_clean_home_golden_path(clean_runtime) -> None:
             mcp_token=mcp_token,
             label="first",
         ) as mcp:
-            jobs = (await call(mcp, "job_list", {"idempotency_key": "clean-list-1"}))["jobs"]
+            jobs = (
+                await correlated_call(mcp, "job_list", {"idempotency_key": "clean-list-1"})
+            )["jobs"]
             assert len(jobs) == 1
             demo = jobs[0]
             assert demo["synthetic_demo"] is True
             assert demo["dataset_version"] == "jobos-demo-v1"
             job_id = demo["job_id"]
-            inspected = await call(
+            inspected = await correlated_call(
                 mcp, "job_inspect", {"job_id": job_id, "idempotency_key": "clean-inspect-1"}
             )
             assert inspected["job_id"] == job_id
-            selected = await call(
+            selected = await correlated_call(
                 mcp,
                 "job_select",
                 {
@@ -320,7 +370,7 @@ async def test_clean_home_golden_path(clean_runtime) -> None:
                 },
             )
             assert selected["job_context"]["selected_job_id"] == job_id
-            updated_status = await call(
+            updated_status = await correlated_call(
                 mcp,
                 "job_update_status",
                 {
@@ -332,7 +382,7 @@ async def test_clean_home_golden_path(clean_runtime) -> None:
                 },
             )
             assert updated_status["job"]["status"] == "reviewed"
-            updated_description = await call(
+            updated_description = await correlated_call(
                 mcp,
                 "job_update_description",
                 {
@@ -344,7 +394,7 @@ async def test_clean_home_golden_path(clean_runtime) -> None:
                 },
             )
             assert updated_description["job"]["description"] == values["description"]
-            workspace = await call(
+            workspace = await correlated_call(
                 mcp,
                 "workspace_inspect",
                 {
@@ -355,7 +405,7 @@ async def test_clean_home_golden_path(clean_runtime) -> None:
             for response_only in ("repaired_presets", "repaired_browser", "browser_repair_reasons"):
                 workspace.pop(response_only, None)
             workspace["browse_query"] = values["workspaceQuery"]
-            persisted_workspace = await call(
+            persisted_workspace = await correlated_call(
                 mcp,
                 "workspace_update",
                 {
@@ -396,7 +446,7 @@ async def test_clean_home_golden_path(clean_runtime) -> None:
                         },
                     )
                 )
-            draft = await call(
+            draft = await correlated_call(
                 mcp,
                 "document_draft_get",
                 {
@@ -407,7 +457,7 @@ async def test_clean_home_golden_path(clean_runtime) -> None:
                 },
             )
             assert any(block["text"] == values["documentText"] for block in draft["outline"])
-            snapshot = await call(
+            snapshot = await correlated_call(
                 mcp,
                 "document_draft_snapshot",
                 {
@@ -459,14 +509,13 @@ async def test_clean_home_golden_path(clean_runtime) -> None:
                         assert downloaded.content == expected
                         artifact_bytes[artifact["artifact_id"]] = expected
 
-            await assert_optional_error(
+            await correlated_optional_error(
                 mcp,
                 "browser_tabs_inspect",
                 {"conversation_id": conversation_id, "timeout_ms": 500},
-                "http_409",
-                retryable=False,
+                "desktop_unavailable",
             )
-            await assert_optional_error(
+            await correlated_optional_error(
                 mcp,
                 "document_refresh",
                 {
@@ -476,7 +525,7 @@ async def test_clean_home_golden_path(clean_runtime) -> None:
                 },
                 "artifact_provider_unavailable",
             )
-            await assert_optional_error(
+            await correlated_optional_error(
                 mcp,
                 "document_render",
                 {
@@ -516,6 +565,13 @@ async def test_clean_home_golden_path(clean_runtime) -> None:
 
     try:
         api.start("restart")
+        await anyio.sleep(0.1)
+        with sqlite3.connect(profile / "state/jobos.db") as connection:
+            connection.execute(
+                "UPDATE conversation_turns SET status = 'running', cancel_requested = 0 "
+                "WHERE turn_id = ?",
+                (turn_id,),
+            )
         async with mcp_session(
             root,
             environment,
@@ -524,15 +580,17 @@ async def test_clean_home_golden_path(clean_runtime) -> None:
             mcp_token=mcp_token,
             label="restart",
         ) as mcp:
-            jobs = (await call(mcp, "job_list", {"idempotency_key": "clean-list-2"}))["jobs"]
+            jobs = (
+                await correlated_call(mcp, "job_list", {"idempotency_key": "clean-list-2"})
+            )["jobs"]
             assert len(jobs) == 1
             assert jobs[0]["job_id"] == job_id
             assert jobs[0]["status"] == "reviewed"
-            inspected = await call(
+            inspected = await correlated_call(
                 mcp, "job_inspect", {"job_id": job_id, "idempotency_key": "clean-inspect-2"}
             )
             assert inspected["description"] == values["description"]
-            workspace = await call(
+            workspace = await correlated_call(
                 mcp,
                 "workspace_inspect",
                 {
