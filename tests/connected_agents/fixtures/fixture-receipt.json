@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "classification": "visibly synthetic (FAKE) acceptance fixtures",
+  "installation_registry_v1": {
+    "path": "(FAKE)-installation-registry-v1.json",
+    "sha256": "c5d5ebd124af8985ad3f099d3580ba5f20dcd8b753d84db1ee1bdd09255fe54b",
+    "production_schema_version": 1
+  },
+  "profile_sqlite_v31": {
+    "path": "(FAKE)-profile-v31.sql",
+    "sha256": "b55a996b77a3d511bdf7d1b33d7c58b8e00e02ac20e9ca6c84700736749bb469",
+    "production_schema_version": 31,
+    "canonical_snapshot_sha256": "c08e5c7e6ed373d30e110a512ead1efbc2a1797b105f9f80a304b63c86fa764d",
+    "integrity_check": ["ok"],
+    "tracked_binary_database": false,
+    "generator": "tests/connected_agents/build_profile_v31_fixture.py"
+  },
+  "remote_devices": {
+    "path": "(FAKE)-remote-devices.json",
+    "sha256": "4f6b6b64e39151c149696896d2b4a2bac45dc24a625eec07dcb980546f184b0d",
+    "header_contract": ["Authorization", "X-JobOS-Profile-Id"]
+  }
+}

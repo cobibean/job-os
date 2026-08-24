@@ -1,0 +1,79 @@
+{
+  "schema_version": 1,
+  "receipt_id": "codex-app-server-rust-v0.144.4-aarch64-apple-darwin",
+  "candidate": {
+    "release": "rust-v0.144.4",
+    "version": "0.144.4",
+    "source_commit": "8c68d4c87dc54d38861f5114e920c3de2efa5876",
+    "target": "aarch64-apple-darwin",
+    "release_url": "https://github.com/openai/codex/releases/tag/rust-v0.144.4",
+    "source_url": "https://github.com/openai/codex/commit/8c68d4c87dc54d38861f5114e920c3de2efa5876"
+  },
+  "package": {
+    "asset": "codex-app-server-package-aarch64-apple-darwin.tar.gz",
+    "asset_url": "https://github.com/openai/codex/releases/download/rust-v0.144.4/codex-app-server-package-aarch64-apple-darwin.tar.gz",
+    "sha256": "70772846e663a1bc7cbc0417de1306344e1516b9420925b4d67efd788dd3c88e",
+    "layout_version": 1,
+    "entrypoint": "bin/codex-app-server",
+    "resources_dir": "codex-resources",
+    "path_dir": "codex-path",
+    "members": [
+      {"path": "bin/codex-app-server", "mode": "0755", "size": 217169632},
+      {"path": "bin/codex-code-mode-host", "mode": "0755", "size": 46374288},
+      {"path": "codex-package.json", "mode": "0644", "size": 222},
+      {"path": "codex-path/rg", "mode": "0755", "size": 4048816},
+      {"path": "codex-resources/zsh/bin/zsh", "mode": "0755", "size": 737520}
+    ]
+  },
+  "app_server_binary": {
+    "sha256": "27d324bc906014c77e4e4286edae6b6d093ee60f49bdcf71495e0f57c31dc6fe",
+    "architecture": "arm64",
+    "signed": true,
+    "codesign_strict": {
+      "command": "codesign --verify --strict --verbose=2 bin/codex-app-server",
+      "result": "passed",
+      "authority": "lead-provided outside-sandbox verification",
+      "repeat_count": 2,
+      "note": "The lead independently extracted the identical hash-pinned archive twice outside the Codex sandbox; both strict verifications passed."
+    }
+  },
+  "protocol_contracts": [
+    {
+      "path": "tests/connected_agents/contracts/codex_app_server_protocol.schemas.json",
+      "sha256": "5c40798d0ea83e14988a6f73e854f905f35df8b8c41c4ac61afb67f8698a4c4f",
+      "source": "exact upstream rust-v0.144.4 aggregate schema",
+      "local_0_144_4_generation_semantically_equal": true,
+      "local_0_144_4_generation_byte_equal": false,
+      "byte_difference": "JSON object key order only"
+    },
+    {
+      "path": "tests/connected_agents/contracts/codex_app_server_protocol.v2.schemas.json",
+      "sha256": "007e12d25541eb0a50bc778dfcff9e6ab88b3124c9425c4e8f79391d3538bec0",
+      "source": "exact upstream rust-v0.144.4 aggregate v2 schema",
+      "local_0_144_4_generation_semantically_equal": true,
+      "local_0_144_4_generation_byte_equal": false,
+      "byte_difference": "JSON object key order only"
+    }
+  ],
+  "redistribution": {
+    "license": {
+      "spdx": "Apache-2.0",
+      "path": "tests/connected_agents/receipts/codex-0.144.4/LICENSE",
+      "sha256": "d17f227e4df5da1600391338865ce0f3055211760a36688f816941d58232d8dc"
+    },
+    "notice": {
+      "path": "tests/connected_agents/receipts/codex-0.144.4/NOTICE",
+      "sha256": "9d71575ecfd9a843fc1677b0efb08053c6ba9fd686a0de1a6f5382fd3c220915"
+    },
+    "obligations": [
+      "Bundle the upstream LICENSE with redistributed Codex runtime bytes.",
+      "Bundle the upstream NOTICE with redistributed Codex runtime bytes.",
+      "Phase 4 must not silently change this asset or version; any change requires an explicit compatibility and redistribution gate."
+    ]
+  },
+  "repository_policy": {
+    "archive_or_binary_tracked": false,
+    "production_packaging_changed": false,
+    "phase_4_distribution_gate": "candidate_verified"
+  }
+}

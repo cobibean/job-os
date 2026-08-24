@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "devices": [
+    {
+      "label": "authorized-macbook",
+      "device_id": "(FAKE)-authorized-macbook",
+      "profile_id": "jprof_11111111111111111111111111111111",
+      "token": "(FAKE)-authorized-device-token-111",
+      "authorized": true
+    },
+    {
+      "label": "reachable-unauthorized-device",
+      "device_id": "(FAKE)-reachable-unauthorized-device",
+      "profile_id": "jprof_11111111111111111111111111111111",
+      "token": "(FAKE)-unauthorized-device-token-111",
+      "authorized": false
+    }
+  ]
+}

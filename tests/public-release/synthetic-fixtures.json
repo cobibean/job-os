@@ -421,6 +421,54 @@
         "trackedSource": "docs/implementation/career-profile-migration-inventory.md",
         "method": "Hand-authored from the public source-shape inventory with every user-like value visibly marked (FAKE)."
       }
+    },
+    {
+      "path": "tests/connected_agents/fixtures/(FAKE)-installation-registry-v1.json",
+      "sha256": "c5d5ebd124af8985ad3f099d3580ba5f20dcd8b753d84db1ee1bdd09255fe54b",
+      "classification": "synthetic",
+      "publication": "keep",
+      "source": "Hand-authored visibly (FAKE) pre-Connected-Agents registry",
+      "purpose": "Issue #111 installation registry v1 migration baseline",
+      "provenance": {
+        "trackedSource": "docs/implementation/connected-agents-codex-plan.md",
+        "method": "Hand-authored from the locked v1 registry contract with every user-like value visibly marked (FAKE)."
+      }
+    },
+    {
+      "path": "tests/connected_agents/fixtures/(FAKE)-profile-v31.sql",
+      "sha256": "b55a996b77a3d511bdf7d1b33d7c58b8e00e02ac20e9ca6c84700736749bb469",
+      "classification": "synthetic",
+      "publication": "keep",
+      "source": "Deterministically generated visibly (FAKE) profile schema v31 SQL",
+      "purpose": "Issue #111 legacy Hermes chat migration and corruption baseline",
+      "provenance": {
+        "trackedSource": "tests/connected_agents/build_profile_v31_fixture.py",
+        "method": "Generated through the production schema-v31 initializer with fixed timestamps and visibly (FAKE) rows."
+      }
+    },
+    {
+      "path": "tests/connected_agents/fixtures/(FAKE)-remote-devices.json",
+      "sha256": "4f6b6b64e39151c149696896d2b4a2bac45dc24a625eec07dcb980546f184b0d",
+      "classification": "synthetic",
+      "publication": "keep",
+      "source": "Hand-authored visibly (FAKE) authorized and unauthorized device cases",
+      "purpose": "Issue #111 remote-device authorization and profile-fence proof",
+      "provenance": {
+        "trackedSource": "docs/implementation/connected-agents-codex-plan.md",
+        "method": "Hand-authored from the locked remote authorization contract with visibly (FAKE) credentials."
+      }
+    },
+    {
+      "path": "tests/connected_agents/fixtures/fixture-receipt.json",
+      "sha256": "bf8162e2b651364db38cd938818be50f8501935a7a746fdb22fc462d70f2e971",
+      "classification": "synthetic",
+      "publication": "keep",
+      "source": "Deterministic receipt for the visibly (FAKE) Connected Agents fixtures",
+      "purpose": "Issue #111 fixture inventory, checksums, schema versions, and generator provenance",
+      "provenance": {
+        "trackedSource": "tests/connected_agents/build_profile_v31_fixture.py",
+        "method": "Generated and checked from the three tracked Phase 0 fixtures without retaining a binary database."
+      }
     }
   ]
 }

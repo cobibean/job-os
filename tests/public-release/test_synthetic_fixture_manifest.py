@@ -25,6 +25,11 @@ CONTROLLED_BINARY_SUFFIXES = {
     ".webp",
     ".zip",
 }
+REGISTERED_TEXT_FIXTURE_ROOTS = (
+    "services/api/tests/fixtures/",
+    "tests/connected_agents/fixtures/",
+)
+REQUIRED_TEXT_FIXTURE_ROOTS = ("tests/connected_agents/fixtures/",)
 PROHIBITED_DIRECTORY_NAMES = {
     ".hermes": "agent run state",
     "backups": "backup data",
@@ -113,11 +118,18 @@ def test_every_tracked_binary_asset_has_a_publication_manifest_entry():
     assert len(declared_paths) == len(entries)
     controlled_assets = tracked_controlled_binary_assets()
     assert controlled_assets <= declared_paths
-    registered_text_fixtures = declared_paths - controlled_assets
     tracked = set(tracked_files())
+    required_text_fixtures = {
+        path for path in tracked if path.startswith(REQUIRED_TEXT_FIXTURE_ROOTS)
+    }
+    declared_required_text_fixtures = {
+        path for path in declared_paths if path.startswith(REQUIRED_TEXT_FIXTURE_ROOTS)
+    }
+    assert declared_required_text_fixtures == required_text_fixtures
+    registered_text_fixtures = declared_paths - controlled_assets
     assert all(
         path in tracked
-        and path.startswith("services/api/tests/fixtures/")
+        and path.startswith(REGISTERED_TEXT_FIXTURE_ROOTS)
         and (REPOSITORY_ROOT / path).is_file()
         for path in registered_text_fixtures
     )

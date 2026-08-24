@@ -24,6 +24,11 @@ CONTROLLED_BINARY_SUFFIXES = {
     ".webp",
     ".zip",
 }
+REGISTERED_TEXT_FIXTURE_ROOTS = (
+    "services/api/tests/fixtures/",
+    "tests/connected_agents/fixtures/",
+)
+REQUIRED_TEXT_FIXTURE_ROOTS = ("tests/connected_agents/fixtures/",)
 
 
 def tracked_files(root: Path) -> list[str]:
@@ -54,6 +59,14 @@ def controlled_assets(root: Path, tracked: list[str]) -> set[str]:
     return assets
 
 
+def required_text_fixtures(tracked: list[str]) -> set[str]:
+    return {
+        relative_path
+        for relative_path in tracked
+        if relative_path.startswith(REQUIRED_TEXT_FIXTURE_ROOTS)
+    }
+
+
 def verify(root: Path, manifest_path: Path) -> list[str]:
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     errors: list[str] = []
@@ -71,7 +84,7 @@ def verify(root: Path, manifest_path: Path) -> list[str]:
     if len(paths) != len(set(paths)):
         errors.append("manifest contains duplicate paths")
     declared = {path for path in paths if isinstance(path, str)}
-    actual = controlled_assets(root, tracked)
+    actual = controlled_assets(root, tracked) | required_text_fixtures(tracked)
     tracked_set = set(tracked)
     entry_by_path = {
         entry["path"]: entry
@@ -85,7 +98,7 @@ def verify(root: Path, manifest_path: Path) -> list[str]:
         is_registered_text_fixture = (
             path in tracked_set
             and entry.get("classification") == "synthetic"
-            and path.startswith("services/api/tests/fixtures/")
+            and path.startswith(REGISTERED_TEXT_FIXTURE_ROOTS)
             and (root / path).is_file()
         )
         if not is_registered_text_fixture:
