@@ -4,12 +4,22 @@
   ],
   "acceptance_phase": 0,
   "all_passed": true,
+  "checkout": {
+    "code_snapshot_sha256": "c4d453c1666141a75fbc48ce2b10bea9793f80f15c833a03dcace19b1275d838",
+    "head_at_execution": "c4d1099821d00a85d2638094745ad6a76ba8c6ca",
+    "head_tree_at_execution": "2069bdc5e7d884b9ce655a28fe2178ea148ea2eb",
+    "index_tree_at_execution": "2069bdc5e7d884b9ce655a28fe2178ea148ea2eb",
+    "snapshot_excludes": "docs/acceptance/connected-agents/phase-0/verification-results.json",
+    "staged_diff_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "untracked_paths": [],
+    "working_diff_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
   "commands": [
     {
       "command": "uv run pytest services/api/tests/test_hermes_adapter.py services/api/tests/test_agent_contract.py",
-      "duration_seconds": 3.439,
+      "duration_seconds": 3.341,
       "exit_code": 0,
-      "output_sha256": "4e23f3d7d786b4e6ac7dad1d7aee5777c7b78343bbace8cfa3aee4300a2ba863",
+      "output_sha256": "f8deaecac8fcb5c4c7296438c245dece810873a65d41680fd52ae9729dbb952f",
       "result": "passed",
       "test_counts": {
         "passed": 118
@@ -17,9 +27,9 @@
     },
     {
       "command": "uv run pytest services/api/tests/test_state_store.py services/api/tests/test_activity.py",
-      "duration_seconds": 0.785,
+      "duration_seconds": 0.802,
       "exit_code": 0,
-      "output_sha256": "0f6a4cb3c558be5fc11142ad1fceedd1db5d9b0a302e54d0fbae6bf2f2649df5",
+      "output_sha256": "eede1b98d2ce9f6e6726855a6e0bfb21b2d3e1e8c9058b40f6dd946fdafb9fb2",
       "result": "passed",
       "test_counts": {
         "passed": 123
@@ -27,9 +37,9 @@
     },
     {
       "command": "uv run pytest services/api/tests/test_jobs_contract.py services/api/tests/test_sqlite_job_repository.py",
-      "duration_seconds": 9.412,
+      "duration_seconds": 9.487,
       "exit_code": 0,
-      "output_sha256": "f6b54cf76f439ff2cae496579e3a7babb4806e9a3f79c864db21957753a21ac0",
+      "output_sha256": "899a51e398a35c690145f5325c77029e2aea3711ac35ea6c1bc27804cd1330c4",
       "result": "passed",
       "test_counts": {
         "passed": 151
@@ -37,9 +47,9 @@
     },
     {
       "command": "uv run pytest services/api/tests/test_career_profile_product_api.py services/api/tests/test_career_profile_store.py",
-      "duration_seconds": 1.401,
+      "duration_seconds": 1.427,
       "exit_code": 0,
-      "output_sha256": "b219b856ccc03050f236b655920d55a5bb982055c889dd73cf835a8edf6303e8",
+      "output_sha256": "6862b3ea4c5fcd94f918570ea13f68b232ecfd954e60b74fe96a756b89875ca6",
       "result": "passed",
       "test_counts": {
         "passed": 33
@@ -47,9 +57,9 @@
     },
     {
       "command": "uv run pytest services/api/tests/test_browser_capability.py",
-      "duration_seconds": 1.474,
+      "duration_seconds": 1.479,
       "exit_code": 0,
-      "output_sha256": "8340d0d2b023655cfd2a79bc16785298c8bbdeff7d86c0af6c19520cd15afbd8",
+      "output_sha256": "d7072a351c3e42f5d282a9fc5bd2a942d21c83b7582ef3fb0eb745b4be8d3d6e",
       "result": "passed",
       "test_counts": {
         "passed": 18
@@ -57,9 +67,9 @@
     },
     {
       "command": "uv run pytest services/api/tests/test_editable_documents.py services/api/tests/test_document_files.py",
-      "duration_seconds": 0.69,
+      "duration_seconds": 0.683,
       "exit_code": 0,
-      "output_sha256": "bde957966517062c0cdf189b5fcc2b1893ff10af13fe9b9cd94c33788b492b77",
+      "output_sha256": "552b7e7a2e0da03b6871eecc4c65fd704047b0aecdda1aa9420d9d09c0422ef5",
       "result": "passed",
       "test_counts": {
         "passed": 16
@@ -67,9 +77,9 @@
     },
     {
       "command": "uv run pytest services/api/tests/test_installation_profile_api.py services/api/tests/test_installation_profile_isolation.py",
-      "duration_seconds": 1.066,
+      "duration_seconds": 1.044,
       "exit_code": 0,
-      "output_sha256": "cf5c5430788f9ee4dbf1e9eb76e2e40a6f1fcc065b1713e1118904db7be74a9d",
+      "output_sha256": "6d5e3bb44e587deb63f7fc27d0bdcf7ab7b691854f1f6465c434cbf90567b997",
       "result": "passed",
       "test_counts": {
         "passed": 7
@@ -77,14 +87,43 @@
     },
     {
       "command": "pnpm --filter @jobos/desktop test:macbook-update",
-      "duration_seconds": 0.32,
+      "duration_seconds": 0.266,
       "exit_code": 0,
-      "output_sha256": "e3d04f915483574c5e54aefa39ec714e36fb0ce1446cea833b3e2411e0b49b9f",
+      "output_sha256": "e066373e11315f0bc28a84798c5e1a3c3f6cbb77c921dccb68c9caba6b799284",
       "result": "passed",
       "test_counts": {
         "node_fail": 0,
         "node_pass": 10
       }
+    },
+    {
+      "command": "pnpm check",
+      "duration_seconds": 53.931,
+      "exit_code": 0,
+      "output_sha256": "c11886278a34b4da959c9bcfc552b7be36faaf9ce6b00771ed8460bf98b2c1ef",
+      "result": "passed",
+      "test_counts": {
+        "node_fail": 0,
+        "node_pass": 10,
+        "passed": 1522,
+        "skipped": 5
+      }
+    },
+    {
+      "command": "pnpm contracts:check",
+      "duration_seconds": 1.426,
+      "exit_code": 0,
+      "output_sha256": "7c61547f8a07489d3af0b3ec5c63d8919f7a13b767e5f93da8f7699dc1f71649",
+      "result": "passed",
+      "test_counts": {}
+    },
+    {
+      "command": "pnpm public:smoke-clean-clone",
+      "duration_seconds": 43.913,
+      "exit_code": 0,
+      "output_sha256": "17d2ae4a00b83f22f394ddf94d59295b86750645bdfb9c06322ef20be3b4a550",
+      "result": "passed",
+      "test_counts": {}
     }
   ],
   "credentials_recorded": false,
@@ -95,7 +134,7 @@
     "python": "3.11.15",
     "uv": "uv 0.11.29 (Homebrew 2026-07-15 aarch64-apple-darwin)"
   },
-  "executed_at": "2026-08-24T13:22:16.348038Z",
+  "executed_at": "2026-08-24T13:46:18.775178Z",
   "installed_hermes_control": {
     "active_turn_count": 0,
     "agent_status": "online",
