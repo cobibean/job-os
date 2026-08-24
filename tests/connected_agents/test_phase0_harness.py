@@ -16,6 +16,7 @@ from pathlib import Path
 import pytest
 from jobos_api.installation_profiles import InstallationProfileRegistryData
 
+from . import packaged_host
 from .build_profile_v31_fixture import build
 from .events import (
     EventTrace,
@@ -409,7 +410,12 @@ def test_fault_injector_and_concurrency_coordinator_are_deterministic():
     assert completed == ["released"]
 
 
-@pytest.mark.skipif(shutil.which("lsof") is None, reason="macOS packaged-host audit needs lsof")
+@pytest.mark.skipif(
+    sys.platform != "darwin"
+    or shutil.which("lsof") is None
+    or shutil.which("sandbox-exec") is None,
+    reason="macOS packaged-host proof needs lsof and sandbox-exec",
+)
 def test_packaged_host_environment_isolated_and_inherited_auth_stripped(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
@@ -441,8 +447,18 @@ def test_packaged_host_environment_isolated_and_inherited_auth_stripped(
     assert result.listener_audit_seconds >= MIN_LISTENER_AUDIT_SECONDS
 
 
+def test_packaged_host_runner_fails_closed_without_network_confinement(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.setattr(packaged_host.shutil, "which", lambda _: None)
+    with pytest.raises(PackagedHostError, match="network_confinement_unavailable"):
+        run_packaged_host([sys.executable, "-c", "pass"], root=tmp_path, timeout=2)
+
+
 @pytest.mark.skipif(
-    shutil.which("lsof") is None or shutil.which("sandbox-exec") is None,
+    sys.platform != "darwin"
+    or shutil.which("lsof") is None
+    or shutil.which("sandbox-exec") is None,
     reason="macOS packaged-host network confinement needs lsof and sandbox-exec",
 )
 def test_packaged_host_runner_continuously_blocks_transient_listener(tmp_path: Path):
@@ -462,7 +478,12 @@ def test_packaged_host_runner_continuously_blocks_transient_listener(tmp_path: P
     assert result.listeners == ()
 
 
-@pytest.mark.skipif(shutil.which("lsof") is None, reason="macOS packaged-host audit needs lsof")
+@pytest.mark.skipif(
+    sys.platform != "darwin"
+    or shutil.which("lsof") is None
+    or shutil.which("sandbox-exec") is None,
+    reason="macOS packaged-host proof needs lsof and sandbox-exec",
+)
 def test_packaged_host_runner_fails_distinctly_when_child_cannot_start(tmp_path: Path):
     script = "import sys; sys.exit(7)"
     with pytest.raises(PackagedHostError, match="packaged_host_failed"):

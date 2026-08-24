@@ -122,7 +122,9 @@ def _network_confined_command(
     """Continuously deny networking on macOS when the proof permits no listeners."""
 
     sandbox_exec = shutil.which("sandbox-exec")
-    if sys.platform == "darwin" and sandbox_exec and not allowed_listeners:
+    if not allowed_listeners:
+        if sys.platform != "darwin" or not sandbox_exec:
+            raise PackagedHostError("network_confinement_unavailable")
         profile = "(version 1) (allow default) (deny network*)"
         return [sandbox_exec, "-p", profile, *command], "sandbox-exec-deny-network"
     return command, "listener-audit-only"
