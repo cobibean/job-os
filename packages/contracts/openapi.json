@@ -8432,6 +8432,22 @@
             }
           },
           {
+            "in": "query",
+            "name": "turn_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Turn Id"
+            }
+          },
+          {
             "in": "header",
             "name": "X-JobOS-MCP-Token",
             "required": false,

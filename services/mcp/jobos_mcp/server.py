@@ -728,6 +728,7 @@ def create_server(client: JobOsMcpClient, *, artifact_root: Path | None = None) 
         workspace, repository, temporary folder, or agent-profile cache for publication.
         """
         client.scope_turn(conversation_id, turn_id)
+        await client.inspect_job(job_id)
         workspace = _prepare_document_publication_workspace(
             conversation_id, job_id, artifact_root=artifact_root
         )

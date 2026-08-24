@@ -343,11 +343,9 @@ class _RoutedAgentGateway:
             self._conversation_id,
         )
         self._active_turn_id = turn_id
-        try:
-            await self._gateway.recover_active_turn(stored_session_id, turn_id)
-        finally:
-            if self._active_turn_id == turn_id:
-                self._active_turn_id = None
+        await self._gateway.recover_active_turn(stored_session_id, turn_id)
+        if self._active_turn_id == turn_id:
+            self._active_turn_id = None
 
     async def _pump_events(self) -> None:
         try:

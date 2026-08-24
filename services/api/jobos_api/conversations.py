@@ -453,6 +453,7 @@ class ConversationService:
                 type(error).__name__,
                 getattr(error, "code", None),
             )
+            self._restore_session_after_isolated_turn(turn_id)
             self._recovery_turn_id = turn_id
             self.store.mark_recovery_turn(turn_id)
             self.store.append_conversation_event(

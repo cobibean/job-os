@@ -575,6 +575,10 @@ async def test_publication_prepare_and_publish_use_only_the_app_owned_inbox(tmp_
         },
     )
     assert isinstance(prepared, dict)
+    assert len(requests) == 1
+    assert requests[0].url.path == "/v1/jobs/job-1"
+    assert requests[0].url.params["conversation_id"] == "conv_alpha"
+    assert requests[0].url.params["turn_id"] == "turn_publication_test_0001"
     workspace = Path(prepared["publication_directory"])
     source = workspace / "resume.md"
     artifact = workspace / "resume.docx"
@@ -595,7 +599,7 @@ async def test_publication_prepare_and_publish_use_only_the_app_owned_inbox(tmp_
         },
     )
     assert isinstance(published, dict)
-    assert len(requests) == 1
+    assert len(requests) == 2
 
     outside = tmp_path / "outside.docx"
     outside.write_bytes(b"PK\x03\x04private")
@@ -612,7 +616,7 @@ async def test_publication_prepare_and_publish_use_only_the_app_owned_inbox(tmp_
                 "artifact_path": str(outside),
             },
         )
-    assert len(requests) == 1
+    assert len(requests) == 2
     await client.aclose()
 
 

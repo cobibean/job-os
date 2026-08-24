@@ -20,7 +20,7 @@ from jobos_api.conversations import (
 from jobos_api.hermes_adapter import HermesGatewayFactory
 from jobos_api.private_adapters.job_hunter import adapt_job_hunter_facade
 from jobos_api.settings import DeviceCredential, Settings
-from jobos_api.state_store import ConversationBusy, ConversationNotFound, JobOsStateStore
+from jobos_api.state_store import ConversationNotFound, JobOsStateStore
 
 TOKEN = "agent-contract-device-token"
 
@@ -1990,12 +1990,13 @@ def test_ambiguous_attachment_survives_restart_without_blind_retry(tmp_path):
         path = tmp_path / "jobos.db"
         store = JobOsStateStore(path)
         store.initialize()
+        store.save_stored_session_id("previous-session")
         gateway = AmbiguousAttachmentGateway()
         service = ConversationService(store, gateway)
         created = await service.send(
             SendMessageRequest(
                 text="Do not submit this twice",
-                idempotency_key="ambiguous-attachment-turn",
+                idempotency_key="browser-save-ambiguous-attachment-turn",
             ),
             actor_id="device-a",
             context={"selected_job_id": None, "workspace": {}},
@@ -2005,19 +2006,18 @@ def test_ambiguous_attachment_survives_restart_without_blind_retry(tmp_path):
         assert turn is not None
         assert turn["status"] == "waiting"
         assert store.recovery_turn_id() == created.turn_id
+        assert store.stored_session_id() == "previous-session"
         assert gateway.submissions == []
 
         restarted_store = JobOsStateStore(path)
         restarted_store.initialize()
         restarted_gateway = FakeGateway()
         restarted = ConversationService(restarted_store, restarted_gateway)
-        with pytest.raises(ConversationBusy, match="cleanup must be confirmed"):
-            await restarted.retry(
-                created.turn_id,
-                RetryTurnRequest(idempotency_key="ambiguous-attachment-retry"),
-                actor_id="device-a",
-            )
+        cancelled = await restarted.cancel(created.turn_id)
+        assert cancelled is not None
+        assert cancelled.status == "interrupted"
         assert restarted_gateway.submissions == []
+        assert restarted_gateway.interruptions == [created.turn_id]
         entries = restarted_store.conversation_snapshot()["entries"]
         assert sum(entry["type"] == "turn" for entry in entries) == 1
 

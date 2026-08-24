@@ -4333,6 +4333,10 @@ export type BrowserCommandV1BrowserCommandsPostData = {
          * Conversation Id
          */
         conversation_id?: string | null;
+        /**
+         * Turn Id
+         */
+        turn_id?: string | null;
     };
     url: '/v1/browser/commands';
 };

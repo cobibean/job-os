@@ -1569,6 +1569,7 @@ def create_app(
         correlated_conversation_id: Annotated[
             str | None, Query(alias="conversation_id")
         ] = None,
+        correlated_turn_id: Annotated[str | None, Query(alias="turn_id")] = None,
     ) -> BrowserCommandResponse:
         require_trusted_mcp(identity, command.origin, mcp_token)
         if command.origin == "mcp" and (

@@ -304,10 +304,22 @@ async def test_clean_home_golden_path(clean_runtime) -> None:
             )
             turn_id = turn["turn_id"]
 
+        async def wait_for_agentless_turn_to_settle() -> None:
+            with anyio.fail_after(5):
+                while True:
+                    with sqlite3.connect(profile / "state/jobos.db") as connection:
+                        row = connection.execute(
+                            "SELECT status FROM conversation_turns WHERE turn_id = ?",
+                            (turn_id,),
+                        ).fetchone()
+                    if row is not None and row[0] not in {"queued", "running", "waiting"}:
+                        return
+                    await anyio.sleep(0.05)
+
         # The clean-clone runtime intentionally has no agent provider. Let that
         # dispatch settle, then retain its legitimate turn as the trusted MCP
         # scope used by this synthetic acceptance workflow.
-        await anyio.sleep(0.1)
+        await wait_for_agentless_turn_to_settle()
         with sqlite3.connect(profile / "state/jobos.db") as connection:
             connection.execute(
                 "UPDATE conversation_turns SET status = 'running', cancel_requested = 0 "
@@ -565,7 +577,7 @@ async def test_clean_home_golden_path(clean_runtime) -> None:
 
     try:
         api.start("restart")
-        await anyio.sleep(0.1)
+        await wait_for_agentless_turn_to_settle()
         with sqlite3.connect(profile / "state/jobos.db") as connection:
             connection.execute(
                 "UPDATE conversation_turns SET status = 'running', cancel_requested = 0 "
