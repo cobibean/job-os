@@ -1,9 +1,9 @@
 # Connected Agents and ChatGPT/Codex Implementation Plan
 
-**Status:** Build-ready specification  
-**Wayfinder:** [#100](https://github.com/cobibean/job-os/issues/100)  
-**Planning ticket:** [#109](https://github.com/cobibean/job-os/issues/109)  
-**Verified source baseline:** `ee542e9d7c19d5c5a16bb15cb9e1072121415ff1` on `origin/main`, verified 2026-08-23  
+- **Status:** Build-ready specification
+- **Wayfinder:** [#100](https://github.com/cobibean/job-os/issues/100)
+- **Planning ticket:** [#109](https://github.com/cobibean/job-os/issues/109)
+- **Verified source baseline:** `ee542e9d7c19d5c5a16bb15cb9e1072121415ff1` on `origin/main`, verified 2026-08-23
 **Goal:** Let a JobOS user connect and manage multiple agent identities, choose a profile default, and create a chat permanently owned by a selected Hermes or ChatGPT/Codex agent and supported model—without weakening JobOS context, tools, recovery, privacy, or existing Hermes behavior.
 
 **Architecture:** JobOS owns installation-global Connected Agent identities, per-profile defaults, immutable chat bindings, trusted turn envelopes, normalized events, and local conversation history. Thin provider adapters connect the API-owned runtime router to Hermes or a host-local, version-pinned Codex App Server. Device-code authentication and credentials remain on the runtime host behind replaceable auth/vault interfaces.
