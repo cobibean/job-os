@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-import gzip
 import hashlib
 import io
 import sqlite3
 import tarfile
 import zipfile
+import zlib
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
@@ -137,10 +137,10 @@ def _scan_bytes(
                         SecretScanIssue(display_path, "zip", "evidence_file_count_limit")
                     )
                     return findings
+                remaining_entries[0] -= len(archive.filelist)
                 for member in archive.infolist():
                     if member.is_dir():
                         continue
-                    remaining_entries[0] -= 1
                     name = _safe_member_name(member.filename)
                     member_path = f"{display_path}!{name}"
                     if member.file_size > MAX_MEMBER_BYTES:
@@ -180,14 +180,14 @@ def _scan_bytes(
         try:
             with tarfile.open(fileobj=io.BytesIO(data), mode="r|*") as archive:
                 for member in archive:
-                    if not member.isfile():
-                        continue
                     if remaining_entries[0] <= 0:
                         issues.append(
                             SecretScanIssue(display_path, "tar", "evidence_file_count_limit")
                         )
                         break
                     remaining_entries[0] -= 1
+                    if not member.isfile():
+                        continue
                     name = _safe_member_name(member.name)
                     member_path = f"{display_path}!{name}"
                     if member.size > MAX_MEMBER_BYTES:
@@ -223,28 +223,36 @@ def _scan_bytes(
             if not data.startswith(b"\x1f\x8b"):
                 issues.append(SecretScanIssue(display_path, "tar", "malformed_archive"))
                 return findings
-        try:
+        expanded_parts: list[bytes] = []
+        compressed = data
+        while compressed:
             if remaining_entries[0] <= 0:
                 issues.append(
                     SecretScanIssue(display_path, "gzip", "evidence_file_count_limit")
                 )
                 return findings
             remaining_entries[0] -= 1
-            with gzip.GzipFile(fileobj=io.BytesIO(data), mode="rb") as archive:
-                read_limit = min(MAX_MEMBER_BYTES, remaining_bytes[0])
-                expanded = archive.read(read_limit + 1)
-        except (OSError, EOFError, gzip.BadGzipFile):
-            issues.append(SecretScanIssue(display_path, "gzip", "malformed_archive"))
-            return findings
-        if len(expanded) > read_limit:
-            reason = (
-                "archive_member_too_large"
-                if read_limit == MAX_MEMBER_BYTES
-                else "archive_expansion_limit"
-            )
-            issues.append(SecretScanIssue(display_path, "gzip", reason))
-            return findings
-        remaining_bytes[0] -= len(expanded)
+            read_limit = min(MAX_MEMBER_BYTES, remaining_bytes[0])
+            decompressor = zlib.decompressobj(16 + zlib.MAX_WBITS)
+            try:
+                member_data = decompressor.decompress(compressed, read_limit + 1)
+            except zlib.error:
+                issues.append(SecretScanIssue(display_path, "gzip", "malformed_archive"))
+                return findings
+            if len(member_data) > read_limit or not decompressor.eof:
+                reason = (
+                    "archive_member_too_large"
+                    if read_limit == MAX_MEMBER_BYTES and len(member_data) >= read_limit
+                    else "archive_expansion_limit"
+                    if len(member_data) >= read_limit
+                    else "malformed_archive"
+                )
+                issues.append(SecretScanIssue(display_path, "gzip", reason))
+                return findings
+            remaining_bytes[0] -= len(member_data)
+            expanded_parts.append(member_data)
+            compressed = decompressor.unused_data
+        expanded = b"".join(expanded_parts)
         findings.extend(
             _scan_bytes(
                 expanded,

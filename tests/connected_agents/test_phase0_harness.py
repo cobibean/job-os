@@ -504,6 +504,11 @@ def test_secret_scanner_bounds_top_level_files_and_shared_archive_budget(
     with pytest.raises(SecretScanIncomplete, match="evidence_file_count_limit"):
         scan_secret_canaries(entry_limited)
 
+    concatenated_gzip = tmp_path / "entry-limited.gz"
+    concatenated_gzip.write_bytes(b"".join(gzip.compress(b"") for _ in range(3)))
+    with pytest.raises(SecretScanIncomplete, match="evidence_file_count_limit"):
+        scan_secret_canaries(concatenated_gzip)
+
 
 def test_installed_smoke_rejects_non_loopback_and_never_bootstraps_registry(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
