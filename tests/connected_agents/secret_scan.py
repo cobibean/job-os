@@ -110,6 +110,7 @@ def _scan_bytes(
     depth: int,
     issues: list[SecretScanIssue],
     remaining_bytes: list[int],
+    remaining_entries: list[int],
 ) -> list[SecretFinding]:
     findings = _raw_findings(
         data, display_path=display_path, container="raw", canaries=canaries
@@ -131,9 +132,15 @@ def _scan_bytes(
     if data.startswith(ZIP_MAGIC):
         try:
             with zipfile.ZipFile(io.BytesIO(data)) as archive:
+                if len(archive.filelist) > remaining_entries[0]:
+                    issues.append(
+                        SecretScanIssue(display_path, "zip", "evidence_file_count_limit")
+                    )
+                    return findings
                 for member in archive.infolist():
                     if member.is_dir():
                         continue
+                    remaining_entries[0] -= 1
                     name = _safe_member_name(member.filename)
                     member_path = f"{display_path}!{name}"
                     if member.file_size > MAX_MEMBER_BYTES:
@@ -162,6 +169,7 @@ def _scan_bytes(
                             depth=depth + 1,
                             issues=issues,
                             remaining_bytes=remaining_bytes,
+                            remaining_entries=remaining_entries,
                         )
                     )
         except (OSError, EOFError, zipfile.BadZipFile):
@@ -170,10 +178,16 @@ def _scan_bytes(
 
     if data.startswith(b"\x1f\x8b") or data[257:262] == b"ustar":
         try:
-            with tarfile.open(fileobj=io.BytesIO(data), mode="r:*") as archive:
-                for member in archive.getmembers():
+            with tarfile.open(fileobj=io.BytesIO(data), mode="r|*") as archive:
+                for member in archive:
                     if not member.isfile():
                         continue
+                    if remaining_entries[0] <= 0:
+                        issues.append(
+                            SecretScanIssue(display_path, "tar", "evidence_file_count_limit")
+                        )
+                        break
+                    remaining_entries[0] -= 1
                     name = _safe_member_name(member.name)
                     member_path = f"{display_path}!{name}"
                     if member.size > MAX_MEMBER_BYTES:
@@ -201,6 +215,7 @@ def _scan_bytes(
                             depth=depth + 1,
                             issues=issues,
                             remaining_bytes=remaining_bytes,
+                            remaining_entries=remaining_entries,
                         )
                     )
             return findings
@@ -209,6 +224,12 @@ def _scan_bytes(
                 issues.append(SecretScanIssue(display_path, "tar", "malformed_archive"))
                 return findings
         try:
+            if remaining_entries[0] <= 0:
+                issues.append(
+                    SecretScanIssue(display_path, "gzip", "evidence_file_count_limit")
+                )
+                return findings
+            remaining_entries[0] -= 1
             with gzip.GzipFile(fileobj=io.BytesIO(data), mode="rb") as archive:
                 read_limit = min(MAX_MEMBER_BYTES, remaining_bytes[0])
                 expanded = archive.read(read_limit + 1)
@@ -232,6 +253,7 @@ def _scan_bytes(
                 depth=depth + 1,
                 issues=issues,
                 remaining_bytes=remaining_bytes,
+                remaining_entries=remaining_entries,
             )
         )
     return findings
@@ -298,6 +320,7 @@ def _scan_paths(
     issues: list[SecretScanIssue] = []
     remaining_evidence_bytes = [MAX_EVIDENCE_TOTAL_BYTES]
     remaining_archive_bytes = [MAX_ARCHIVE_TOTAL_BYTES]
+    remaining_entries = [MAX_EVIDENCE_FILES - len(paths)]
     for path in paths:
         display_path = path.name if root.is_file() else str(path.relative_to(root))
         if path.is_symlink():
@@ -332,6 +355,7 @@ def _scan_paths(
                 depth=0,
                 issues=issues,
                 remaining_bytes=remaining_archive_bytes,
+                remaining_entries=remaining_entries,
             )
         )
         sqlite_expected = path.name.casefold().endswith(SQLITE_SUFFIXES)

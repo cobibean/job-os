@@ -496,6 +496,14 @@ def test_secret_scanner_bounds_top_level_files_and_shared_archive_budget(
     with pytest.raises(SecretScanIncomplete, match="archive_expansion_limit"):
         scan_secret_canaries(archive_collection)
 
+    entry_limited = tmp_path / "entry-limited.zip"
+    with zipfile.ZipFile(entry_limited, "w") as archive:
+        for index in range(3):
+            archive.writestr(f"empty-{index}.txt", b"")
+    monkeypatch.setattr(secret_scan, "MAX_EVIDENCE_FILES", 3)
+    with pytest.raises(SecretScanIncomplete, match="evidence_file_count_limit"):
+        scan_secret_canaries(entry_limited)
+
 
 def test_installed_smoke_rejects_non_loopback_and_never_bootstraps_registry(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
