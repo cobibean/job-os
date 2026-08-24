@@ -1917,7 +1917,7 @@ def test_api_collection_cap_archive_and_global_sse_envelopes(tmp_path):
     assert [item["position"] for item in listed] == [1, 2, 3, 4]
 
 
-def test_conversation_routes_and_sse_enforce_authenticated_device_owner(tmp_path):
+def test_conversation_routes_share_profile_authority_across_authenticated_devices(tmp_path):
     remote_token = "remote-device-token-value"
     repository, artifact_gateway = adapt_job_hunter_facade(FakeJobFacade())
     app = create_app(
@@ -1935,38 +1935,23 @@ def test_conversation_routes_and_sse_enforce_authenticated_device_owner(tmp_path
     remote_headers = {"Authorization": f"Bearer {remote_token}"}
     with TestClient(app) as client:
         primary_id = current_id(client)
-        assert client.get("/v1/conversations", headers=remote_headers).json() == {
-            "conversations": []
-        }
+        initial_remote = client.get("/v1/conversations", headers=remote_headers).json()[
+            "conversations"
+        ]
         remote = client.post("/v1/conversations", headers=remote_headers)
-        remote_id = remote.json()["conversation_id"]
-        remote_final_archive = client.delete(
-            f"/v1/conversations/{remote_id}", headers=remote_headers
-        )
-        remote_turn = client.post(
-            f"/v1/conversations/{remote_id}/messages",
-            headers=remote_headers,
-            json={"text": "Remote-owned", "idempotency_key": "remote-owner-key"},
-        )
         primary_turn = client.post(
             f"/v1/conversations/{primary_id}/messages",
             headers=headers(),
             json={"text": "Primary-owned", "idempotency_key": "primary-owner-key"},
         )
         cross_get = client.get(f"/v1/conversations/{primary_id}", headers=remote_headers)
-        cross_send = client.post(
-            f"/v1/conversations/{primary_id}/messages",
-            headers=remote_headers,
-            json={"text": "Forbidden", "idempotency_key": "cross-owner-key"},
-        )
         cross_cancel = client.post(
             f"/v1/conversations/{primary_id}/turns/{primary_turn.json()['turn_id']}/cancel",
             headers=remote_headers,
         )
-        cross_archive = client.delete(f"/v1/conversations/{primary_id}", headers=remote_headers)
-        for _ in range(4):
-            assert client.post("/v1/conversations", headers=headers()).status_code == 201
-            assert client.post("/v1/conversations", headers=remote_headers).status_code == 201
+        for index in range(3):
+            request_headers = headers() if index % 2 == 0 else remote_headers
+            assert client.post("/v1/conversations", headers=request_headers).status_code == 201
         primary_list = client.get("/v1/conversations", headers=headers()).json()["conversations"]
         remote_list = client.get("/v1/conversations", headers=remote_headers).json()[
             "conversations"
@@ -1975,14 +1960,14 @@ def test_conversation_routes_and_sse_enforce_authenticated_device_owner(tmp_path
         remote_cap = client.post("/v1/conversations", headers=remote_headers)
         stream = client.get("/v1/conversations/events/stream?once=true", headers=remote_headers)
 
-    assert remote.status_code == remote_turn.status_code == primary_turn.status_code == 201
-    assert remote_final_archive.status_code == 409
-    assert cross_get.status_code == cross_send.status_code == 404
-    assert cross_cancel.status_code == cross_archive.status_code == 404
+    assert [item["conversation_id"] for item in initial_remote] == [primary_id]
+    assert remote.status_code == primary_turn.status_code == 201
+    assert cross_get.status_code == 200
+    assert cross_cancel.status_code == 200
+    assert [item["conversation_id"] for item in primary_list] == [
+        item["conversation_id"] for item in remote_list
+    ]
     assert [item["position"] for item in primary_list] == [1, 2, 3, 4, 5]
-    assert [item["position"] for item in remote_list] == [1, 2, 3, 4, 5]
     assert [item["title"] for item in primary_list] == [f"Session {value}" for value in range(1, 6)]
-    assert [item["title"] for item in remote_list] == [f"Session {value}" for value in range(1, 6)]
     assert primary_cap.status_code == remote_cap.status_code == 409
-    assert f'"conversation_id":"{remote_id}"' in stream.text
-    assert f'"conversation_id":"{primary_id}"' not in stream.text
+    assert f'"conversation_id":"{primary_id}"' in stream.text

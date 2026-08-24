@@ -287,7 +287,10 @@ async def test_clean_home_golden_path(clean_runtime) -> None:
             created_conversation = assert_response(client.post("/v1/conversations"), 201)
             conversation_id = created_conversation["conversation_id"]
             conversations = assert_response(client.get("/v1/conversations"))["conversations"]
-            assert [item["conversation_id"] for item in conversations] == [conversation_id]
+            assert [item["conversation_id"] for item in conversations] == [
+                "conv_current",
+                conversation_id,
+            ]
 
         async with mcp_session(
             root,

@@ -82,7 +82,7 @@ def test_health_reports_truthful_public_capability_states(tmp_path):
         "status": "ready",
         "service": "jobos-api",
         "version": "0.1.0",
-        "state_schema": 31,
+        "state_schema": 32,
         "transport": "local-loopback",
         "agent": "not-configured",
         "artifact_storage": "available",

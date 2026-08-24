@@ -7,16 +7,24 @@ import json
 import os
 import shutil
 import sqlite3
+import subprocess
 import sys
 import tarfile
 import threading
 import time
 import zipfile
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
 from jobos_api import state_store
-from jobos_api.installation_profiles import InstallationProfileRegistryData
+from jobos_api.installation_profiles import (
+    AnchoredRuntime,
+    InstallationProfileRecord,
+    InstallationProfileRegistry,
+    InstallationProfileRegistryData,
+    InstallationProfileRegistryError,
+)
 
 from . import packaged_host, secret_scan
 from .build_profile_v31_fixture import build
@@ -388,6 +396,61 @@ def test_recursive_secret_scanner_detects_text_json_sqlite_journal_and_archives(
     assert ("wal-evidence.sqlite-wal", "raw", "device-code") in coordinates
     assert ("capture.zip!nested/evidence.json", "raw", "oauth-token") in coordinates
     assert ("capture.tar.gz!nested/evidence.txt", "raw", "device-code") in coordinates
+
+
+def test_phase1_migration_persistence_is_secret_free_across_crash_resume(tmp_path: Path):
+    now = datetime(2026, 8, 24, tzinfo=UTC)
+    profile_id = "jprof_11111111111111111111111111111111"
+    runtime = AnchoredRuntime(
+        job_provider="sqlite",
+        artifact_provider="local",
+        state_db_path=(tmp_path / "state.db").absolute(),
+        jobs_db_path=(tmp_path / "jobs.db").absolute(),
+        local_artifact_root=(tmp_path / "artifacts").absolute(),
+    )
+    registry = InstallationProfileRegistry(tmp_path / "installation-profiles.json")
+    registry.write(
+        InstallationProfileRegistryData(
+            schema_version=1,
+            registry_revision=1,
+            active_profile_id=profile_id,
+            profiles=(
+                InstallationProfileRecord(
+                    profile_id=profile_id,
+                    display_name="Personal",
+                    storage_mode="anchored",
+                    created_at=now,
+                    updated_at=now,
+                    anchored_runtime=runtime,
+                ),
+            ),
+        )
+    )
+    state_store.JobOsStateStore(runtime.state_db_path).initialize(
+        installation_profile_id=profile_id
+    )
+    pending = registry.load_or_bootstrap(runtime, now=now)
+    assert pending.connected_agent_migration is not None
+
+    with pytest.raises(InstallationProfileRegistryError, match="registry update is invalid"):
+        registry.create_connected_agent(
+            provider="hermes",
+            display_name=phase0_canaries()[1].value,
+            avatar_id="hermes",
+            default_model_id="model",
+            default_reasoning_effort="high",
+            connection_config={"endpoint_url": "http://127.0.0.1:9120"},
+            credential_reference="vault_ref_safe",
+            expected_registry_revision=pending.registry_revision,
+            idempotency_key="secret-canary-rejected",
+            now=now,
+        )
+    assert_no_secret_canaries(tmp_path)
+
+    completed = registry.resume_connected_agent_migration(runtime)
+    assert completed.connected_agent_migration is not None
+    assert {item.status for item in completed.connected_agent_migration.profiles} == {"complete"}
+    assert_no_secret_canaries(tmp_path)
 
 
 def test_secret_scanner_fails_closed_on_oversized_and_malformed_archives(tmp_path: Path):
@@ -809,7 +872,18 @@ def test_machine_readable_receipts_pin_exact_baselines_without_unrun_claims():
     assert verification["credentials_recorded"] is False
     assert verification["raw_command_output_recorded"] is False
     empty_digest = hashlib.sha256(b"").hexdigest()
-    assert verification["checkout"]["code_snapshot_sha256"] == code_snapshot_sha256()
+    recorded_head = verification["checkout"]["head_at_execution"]
+    assert (
+        subprocess.run(
+            ["git", "cat-file", "-e", f"{recorded_head}^{{commit}}"],
+            cwd=ROOT,
+            check=False,
+        ).returncode
+        == 0
+    )
+    assert verification["checkout"]["code_snapshot_sha256"] == code_snapshot_sha256(
+        ref=recorded_head
+    )
     assert verification["checkout"]["staged_diff_sha256"] == empty_digest
     assert verification["checkout"]["working_diff_sha256"] == empty_digest
     assert verification["checkout"]["untracked_paths"] == []
@@ -837,6 +911,21 @@ def test_machine_readable_receipts_pin_exact_baselines_without_unrun_claims():
         "27d324bc906014c77e4e4286edae6b6d093ee60f49bdcf71495e0f57c31dc6fe"
     )
     assert receipt["app_server_binary"]["codesign_strict"]["result"] == "passed"
+
+
+def test_phase0_historical_snapshot_ignores_future_tracked_source_changes(monkeypatch):
+    verification = json.loads(VERIFICATION_RESULTS.read_text(encoding="utf-8"))
+    recorded_head = verification["checkout"]["head_at_execution"]
+    expected = verification["checkout"]["code_snapshot_sha256"]
+    original = Path.read_bytes
+
+    def sabotaged_read(path: Path) -> bytes:
+        if path.resolve() == (ROOT / "services/api/jobos_api/state_store.py").resolve():
+            return b"future tracked source change"
+        return original(path)
+
+    monkeypatch.setattr(Path, "read_bytes", sabotaged_read)
+    assert code_snapshot_sha256(ref=recorded_head) == expected
 
 
 @pytest.mark.parametrize(

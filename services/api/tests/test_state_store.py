@@ -16,7 +16,6 @@ from jobos_api.state_store import (
     SCHEMA_VERSION,
     ConversationBusy,
     ConversationLimit,
-    ConversationNotFound,
     IncompatibleSchemaError,
     JobOsStateStore,
     Migration,
@@ -59,9 +58,7 @@ def test_state_database_binds_once_to_an_installation_profile_and_preserves_lega
         IncompatibleSchemaError,
         match="State database belongs to another JobOS Profile",
     ) as error:
-        legacy.initialize(
-            installation_profile_id="jprof_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
-        )
+        legacy.initialize(installation_profile_id="jprof_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
     assert profile_id not in str(error.value)
     assert str(database) not in str(error.value)
 
@@ -177,7 +174,7 @@ def test_initialization_applies_every_migration_once(tmp_path):
     first = store.initialize()
     second = store.initialize()
 
-    assert first.schema_version == SCHEMA_VERSION == 31
+    assert first.schema_version == SCHEMA_VERSION == 32
     assert second.schema_version == SCHEMA_VERSION
     assert applied_versions(database) == [
         1,
@@ -211,6 +208,7 @@ def test_initialization_applies_every_migration_once(tmp_path):
         29,
         30,
         31,
+        32,
     ]
     assert metadata_columns(database) == {"key", "value", "updated_at"}
 
@@ -280,6 +278,7 @@ def test_initialization_upgrades_a_behind_database(tmp_path):
         29,
         30,
         31,
+        32,
     ]
     assert metadata_columns(database) == {"key", "value", "updated_at"}
 
@@ -781,6 +780,7 @@ def test_document_identity_migration_clears_legacy_docx_approval(tmp_path):
             30,
             31,
             32,
+            33,
         ],
         [2],
     ),
@@ -917,8 +917,7 @@ def test_terminal_agent_continuation_does_not_replace_active_user_turn(tmp_path)
     continuation_entries = [
         entry
         for entry in entries
-        if isinstance(entry, dict)
-        and entry["turn_id"] == "turn_agent_continuation_1234"
+        if isinstance(entry, dict) and entry["turn_id"] == "turn_agent_continuation_1234"
     ]
     assert [entry["type"] for entry in continuation_entries] == [
         "turn",
@@ -1760,9 +1759,7 @@ def test_conversation_job_selections_are_independent_and_restore_after_restart(t
     store.initialize(owner_device_id="device-a")
     first_id = store.first_active_conversation_id("device-a")
     second_id = str(
-        store.create_conversation(actor_id="device-a", selected_job_id="job-b")[
-            "conversation_id"
-        ]
+        store.create_conversation(actor_id="device-a", selected_job_id="job-b")["conversation_id"]
     )
 
     first = store.select_conversation_job(first_id, "device-a", "job-a")
@@ -1784,11 +1781,10 @@ def test_conversation_job_selections_are_independent_and_restore_after_restart(t
     restored = JobOsStateStore(database)
     assert restored.conversation_job_context(first_id, "device-a") == first
     assert restored.conversation_job_context(second_id, "device-a") == second
-    with pytest.raises(ConversationNotFound, match="not found"):
-        restored.conversation_job_context(first_id, "device-b")
+    assert restored.conversation_job_context(first_id, "device-b") == first
 
 
-def test_migration_claims_legacy_conversations_for_configured_device(tmp_path):
+def test_migration_preserves_owner_attribution_with_profile_wide_visibility(tmp_path):
     database = tmp_path / "owner-migration.db"
     with sqlite3.connect(database) as connection:
         connection.execute(
@@ -1803,10 +1799,10 @@ def test_migration_claims_legacy_conversations_for_configured_device(tmp_path):
     owned = store.list_active_conversations(owner_device_id="configured-device")
     assert len(owned) == 1
     assert owned[0]["owner_device_id"] == "configured-device"
-    assert store.list_active_conversations(owner_device_id="other-device") == []
+    assert store.list_active_conversations(owner_device_id="other-device") == owned
 
 
-def test_conversation_event_collection_filters_by_durable_owner(tmp_path):
+def test_conversation_event_collection_is_profile_wide(tmp_path):
     store = JobOsStateStore(tmp_path / "owner-events.db")
     store.initialize(owner_device_id="device-a")
     first_id = store.first_active_conversation_id("device-a")
@@ -1820,49 +1816,52 @@ def test_conversation_event_collection_filters_by_durable_owner(tmp_path):
 
     a_events = store.all_conversation_events_after(0, owner_device_id="device-a")
     b_events = store.all_conversation_events_after(0, owner_device_id="device-b")
-    assert [entry["event"]["summary"] for entry in a_events] == ["Only A"]
-    assert [entry["event"]["summary"] for entry in b_events] == ["Only B"]
+    assert [entry["event"]["summary"] for entry in a_events] == ["Only A", "Only B"]
+    assert [entry["event"]["summary"] for entry in b_events] == ["Only A", "Only B"]
 
 
-def test_two_owners_have_independent_positions_caps_compaction_and_final_guards(tmp_path):
+def test_profile_wide_positions_cap_compaction_and_final_guard_preserve_attribution(tmp_path):
     store = JobOsStateStore(tmp_path / "cap.db")
     store.initialize(owner_device_id="device-a")
-    a_created = [store.create_conversation(actor_id="device-a") for _ in range(4)]
-    b_created = [store.create_conversation(actor_id="device-b") for _ in range(5)]
+    a_created = [store.create_conversation(actor_id="device-a") for _ in range(2)]
+    b_created = [store.create_conversation(actor_id="device-b") for _ in range(2)]
 
-    assert [
-        item["position"] for item in store.list_active_conversations(owner_device_id="device-a")
-    ] == [1, 2, 3, 4, 5]
-    assert [
-        item["position"] for item in store.list_active_conversations(owner_device_id="device-b")
-    ] == [1, 2, 3, 4, 5]
-    assert store.first_active_conversation_id("device-a") != store.first_active_conversation_id(
+    visible_a = store.list_active_conversations(owner_device_id="device-a")
+    visible_b = store.list_active_conversations(owner_device_id="device-b")
+    assert [item["position"] for item in visible_a] == [1, 2, 3, 4, 5]
+    assert visible_b == visible_a
+    assert store.first_active_conversation_id("device-a") == store.first_active_conversation_id(
         "device-b"
     )
+    assert [item["owner_device_id"] for item in visible_a] == [
+        "device-a",
+        "device-a",
+        "device-a",
+        "device-b",
+        "device-b",
+    ]
     with pytest.raises(ConversationLimit, match="Maximum 5 sessions"):
         store.create_conversation(actor_id="device-a")
     with pytest.raises(ConversationLimit, match="Maximum 5 sessions"):
         store.create_conversation(actor_id="device-b")
 
-    with pytest.raises(ConversationNotFound, match="not found"):
-        store.archive_conversation(str(b_created[0]["conversation_id"]), actor_id="device-a")
-    store.archive_conversation(str(a_created[1]["conversation_id"]), actor_id="device-a")
+    store.archive_conversation(str(b_created[0]["conversation_id"]), actor_id="device-a")
     assert [
-        item["position"] for item in store.list_active_conversations(owner_device_id="device-a")
-    ] == [1, 2, 3, 4]
-    assert [
-        item["title"] for item in store.list_active_conversations(owner_device_id="device-a")
+        item["position"] for item in store.list_active_conversations(owner_device_id="device-b")
     ] == [
-        "Session 1",
-        "Session 2",
-        "Session 3",
-        "Session 4",
+        1,
+        2,
+        3,
+        4,
     ]
-    assert store.create_conversation(actor_id="device-a")["position"] == 5
+    assert store.create_conversation(actor_id="device-b")["position"] == 5
     for item in list(store.list_active_conversations(owner_device_id="device-a"))[1:]:
-        store.archive_conversation(str(item["conversation_id"]), actor_id="device-a")
+        store.archive_conversation(str(item["conversation_id"]), actor_id="device-b")
     with pytest.raises(ConversationBusy, match="final session"):
         store.archive_conversation(
             store.first_active_conversation_id("device-a"), actor_id="device-a"
         )
-    assert len(store.list_active_conversations(owner_device_id="device-b")) == 5
+    assert len(store.list_active_conversations(owner_device_id="device-b")) == 1
+    assert {item["conversation_id"] for item in a_created}.issubset(
+        {item["conversation_id"] for item in visible_a}
+    )

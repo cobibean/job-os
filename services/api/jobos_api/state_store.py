@@ -1,4 +1,5 @@
 import json
+import re
 import secrets
 import sqlite3
 from collections.abc import Callable, Iterator
@@ -1386,6 +1387,168 @@ MIGRATIONS = (
             """,
         ),
     ),
+    Migration(
+        version=32,
+        statements=(
+            "DROP INDEX conversations_owner_active_position",
+            """
+            UPDATE conversations
+            SET archived_at = COALESCE(updated_at, created_at)
+            WHERE archived_at IS NULL AND conversation_id IN (
+                SELECT conversation_id
+                FROM (
+                    SELECT conversation_id,
+                           ROW_NUMBER() OVER (ORDER BY created_at, rowid) AS profile_rank
+                    FROM conversations
+                    WHERE archived_at IS NULL
+                ) AS ranked
+                WHERE ranked.profile_rank > 5
+            )
+            """,
+            """
+            UPDATE conversations
+            SET position = (
+                SELECT ranked.position
+                FROM (
+                    SELECT conversation_id,
+                           ROW_NUMBER() OVER (ORDER BY created_at, rowid) AS position
+                    FROM conversations
+                    WHERE archived_at IS NULL
+                ) AS ranked
+                WHERE ranked.conversation_id = conversations.conversation_id
+            )
+            WHERE archived_at IS NULL
+            """,
+            """
+            CREATE UNIQUE INDEX conversations_profile_active_position
+            ON conversations(position) WHERE archived_at IS NULL
+            """,
+            """ALTER TABLE conversations ADD COLUMN connected_agent_id TEXT
+               CHECK (
+                   connected_agent_id IS NULL OR (
+                       substr(connected_agent_id, 1, 7) = 'jagent_'
+                       AND length(connected_agent_id) = 39
+                       AND substr(connected_agent_id, 8) NOT GLOB '*[^0-9a-f]*'
+                   )
+               )""",
+            """ALTER TABLE conversations ADD COLUMN provider TEXT
+               CHECK (provider IS NULL OR provider IN ('hermes', 'codex'))""",
+            """ALTER TABLE conversations ADD COLUMN model_id TEXT
+               CHECK (model_id IS NULL OR length(model_id) BETWEEN 1 AND 256)""",
+            """ALTER TABLE conversations ADD COLUMN reasoning_effort TEXT
+               CHECK (
+                   reasoning_effort IS NULL OR length(reasoning_effort) BETWEEN 1 AND 64
+               )""",
+            """ALTER TABLE conversations ADD COLUMN binding_state TEXT
+               CHECK (binding_state IS NULL OR binding_state IN (
+                   'sealed', 'legacy_awaiting_resolution'
+               ))""",
+            """ALTER TABLE conversations ADD COLUMN connection_account_fingerprint TEXT
+               CHECK (
+                   connection_account_fingerprint IS NULL OR (
+                       length(connection_account_fingerprint) = 64
+                       AND connection_account_fingerprint NOT GLOB '*[^0-9a-f]*'
+                   )
+               )""",
+            """ALTER TABLE conversations ADD COLUMN creation_state TEXT NOT NULL
+               DEFAULT 'locked' CHECK (creation_state IN ('provisioning', 'ready', 'locked'))""",
+            "ALTER TABLE conversations ADD COLUMN lock_reason TEXT",
+            """
+            CREATE TABLE connected_agent_migration_journal (
+                migration_id TEXT PRIMARY KEY
+                    CHECK (
+                        substr(migration_id, 1, 10) = 'jagentmig_'
+                        AND length(migration_id) = 42
+                        AND substr(migration_id, 11) NOT GLOB '*[^0-9a-f]*'
+                    ),
+                connected_agent_id TEXT NOT NULL
+                    CHECK (
+                        substr(connected_agent_id, 1, 7) = 'jagent_'
+                        AND length(connected_agent_id) = 39
+                        AND substr(connected_agent_id, 8) NOT GLOB '*[^0-9a-f]*'
+                    ),
+                status TEXT NOT NULL CHECK (status IN ('sqlite_complete', 'complete')),
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+            """,
+            """
+            CREATE TRIGGER conversations_binding_identity_immutable
+            BEFORE UPDATE OF connected_agent_id, provider, connection_account_fingerprint
+            ON conversations
+            WHEN OLD.connected_agent_id IS NOT NULL AND (
+                NEW.connected_agent_id IS NOT OLD.connected_agent_id
+                OR NEW.provider IS NOT OLD.provider
+                OR NEW.connection_account_fingerprint
+                    IS NOT OLD.connection_account_fingerprint
+            )
+            BEGIN
+                SELECT RAISE(ABORT, 'conversation binding identity is immutable');
+            END
+            """,
+            """
+            CREATE TRIGGER conversations_sealed_binding_immutable
+            BEFORE UPDATE OF model_id, reasoning_effort, binding_state ON conversations
+            WHEN OLD.binding_state = 'sealed' AND (
+                NEW.model_id IS NOT OLD.model_id
+                OR NEW.reasoning_effort IS NOT OLD.reasoning_effort
+                OR NEW.binding_state IS NOT OLD.binding_state
+            )
+            BEGIN
+                SELECT RAISE(ABORT, 'sealed conversation binding is immutable');
+            END
+            """,
+            """
+            CREATE TRIGGER conversations_binding_valid_insert
+            BEFORE INSERT ON conversations
+            WHEN NEW.connected_agent_id IS NOT NULL AND (
+                NEW.provider IS NULL OR NEW.binding_state IS NULL
+                OR (NEW.binding_state = 'sealed' AND (
+                    NEW.model_id IS NULL OR NEW.reasoning_effort IS NULL
+                    OR (
+                        NEW.creation_state IN ('provisioning', 'ready')
+                        AND NEW.lock_reason IS NOT NULL
+                    )
+                    OR (NEW.creation_state = 'locked' AND NEW.lock_reason IS NULL)
+                ))
+                OR (NEW.binding_state = 'legacy_awaiting_resolution' AND (
+                    NEW.provider != 'hermes' OR NEW.model_id IS NOT NULL
+                    OR NEW.reasoning_effort IS NOT NULL
+                    OR NEW.creation_state != 'locked'
+                    OR NEW.lock_reason != 'LEGACY_MODEL_UNRESOLVED'
+                ))
+            )
+            BEGIN
+                SELECT RAISE(ABORT, 'conversation binding is invalid');
+            END
+            """,
+            """
+            CREATE TRIGGER conversations_binding_valid_update
+            BEFORE UPDATE OF connected_agent_id, provider, model_id, reasoning_effort,
+                             binding_state, creation_state, lock_reason ON conversations
+            WHEN NEW.connected_agent_id IS NOT NULL AND (
+                NEW.provider IS NULL OR NEW.binding_state IS NULL
+                OR (NEW.binding_state = 'sealed' AND (
+                    NEW.model_id IS NULL OR NEW.reasoning_effort IS NULL
+                    OR (
+                        NEW.creation_state IN ('provisioning', 'ready')
+                        AND NEW.lock_reason IS NOT NULL
+                    )
+                    OR (NEW.creation_state = 'locked' AND NEW.lock_reason IS NULL)
+                ))
+                OR (NEW.binding_state = 'legacy_awaiting_resolution' AND (
+                    NEW.provider != 'hermes' OR NEW.model_id IS NOT NULL
+                    OR NEW.reasoning_effort IS NOT NULL
+                    OR NEW.creation_state != 'locked'
+                    OR NEW.lock_reason != 'LEGACY_MODEL_UNRESOLVED'
+                ))
+            )
+            BEGIN
+                SELECT RAISE(ABORT, 'conversation binding is invalid');
+            END
+            """,
+        ),
+    ),
 )
 SCHEMA_VERSION = MIGRATIONS[-1].version
 
@@ -1651,6 +1814,10 @@ class JobOsStateStore:
         *,
         owner_device_id: str = "primary-device",
         installation_profile_id: str | None = None,
+        connected_agent_migration_id: str | None = None,
+        legacy_connected_agent_id: str | None = None,
+        legacy_model_id: str | None = None,
+        legacy_reasoning_effort: str | None = None,
     ) -> StateHealth:
         self._path.parent.mkdir(parents=True, exist_ok=True)
         with connect_sqlite(self._path) as connection:
@@ -1684,11 +1851,159 @@ class JobOsStateStore:
                     """,
                     (owner_device_id,),
                 )
+                if (connected_agent_migration_id is None) != (legacy_connected_agent_id is None):
+                    raise IncompatibleSchemaError(
+                        "Connected Agent migration identity is incomplete"
+                    )
+                if connected_agent_migration_id is not None:
+                    assert legacy_connected_agent_id is not None
+                    self._migrate_legacy_conversations_in_transaction(
+                        connection,
+                        migration_id=connected_agent_migration_id,
+                        connected_agent_id=legacy_connected_agent_id,
+                        model_id=legacy_model_id,
+                        reasoning_effort=legacy_reasoning_effort,
+                    )
                 connection.commit()
             except Exception:
                 connection.rollback()
                 raise
         return StateHealth(schema_version=SCHEMA_VERSION)
+
+    @staticmethod
+    def _migrate_legacy_conversations_in_transaction(
+        connection: sqlite3.Connection,
+        *,
+        migration_id: str,
+        connected_agent_id: str,
+        model_id: str | None,
+        reasoning_effort: str | None,
+    ) -> None:
+        if not re.fullmatch(r"jagentmig_[a-f0-9]{32}", migration_id) or not re.fullmatch(
+            r"jagent_[a-f0-9]{32}", connected_agent_id
+        ):
+            raise IncompatibleSchemaError("Connected Agent migration identity is invalid")
+        if (model_id is None) != (reasoning_effort is None):
+            raise IncompatibleSchemaError(
+                "Legacy Hermes model evidence must include model and reasoning effort"
+            )
+        existing = connection.execute(
+            "SELECT connected_agent_id, status FROM connected_agent_migration_journal "
+            "WHERE migration_id = ?",
+            (migration_id,),
+        ).fetchone()
+        if existing is not None:
+            if str(existing[0]) != connected_agent_id:
+                raise IncompatibleSchemaError("Connected Agent migration identity changed")
+            return
+        conflict = connection.execute(
+            "SELECT migration_id FROM connected_agent_migration_journal LIMIT 1"
+        ).fetchone()
+        if conflict is not None:
+            raise IncompatibleSchemaError(
+                "Profile already carries another Connected Agent migration"
+            )
+        sealed = model_id is not None
+        connection.execute(
+            """
+            UPDATE conversations
+            SET connected_agent_id = ?, provider = 'hermes', model_id = ?,
+                reasoning_effort = ?, binding_state = ?, creation_state = ?,
+                lock_reason = ?, updated_at = updated_at
+            WHERE connected_agent_id IS NULL
+            """,
+            (
+                connected_agent_id,
+                model_id,
+                reasoning_effort,
+                "sealed" if sealed else "legacy_awaiting_resolution",
+                "ready" if sealed else "locked",
+                None if sealed else "LEGACY_MODEL_UNRESOLVED",
+            ),
+        )
+        mismatched = connection.execute(
+            """
+            SELECT conversation_id FROM conversations
+            WHERE connected_agent_id IS NOT ? OR provider IS NOT 'hermes'
+               OR binding_state NOT IN ('sealed', 'legacy_awaiting_resolution')
+               OR (binding_state = 'sealed' AND (
+                    model_id IS NULL OR reasoning_effort IS NULL
+                    OR creation_state != 'ready' OR lock_reason IS NOT NULL
+               ))
+               OR (binding_state = 'legacy_awaiting_resolution' AND (
+                    model_id IS NOT NULL OR reasoning_effort IS NOT NULL
+                    OR creation_state != 'locked'
+                    OR lock_reason != 'LEGACY_MODEL_UNRESOLVED'
+               ))
+            LIMIT 1
+            """,
+            (connected_agent_id,),
+        ).fetchone()
+        if mismatched is not None:
+            raise IncompatibleSchemaError(
+                "Profile conversation already has a conflicting Connected Agent binding"
+            )
+        connection.execute(
+            """
+            INSERT INTO connected_agent_migration_journal(
+                migration_id, connected_agent_id, status
+            ) VALUES (?, ?, 'sqlite_complete')
+            """,
+            (migration_id, connected_agent_id),
+        )
+
+    def connected_agent_migration_status(self, migration_id: str) -> str | None:
+        with connect_sqlite(f"file:{self._path}?mode=ro", uri=True) as connection:
+            row = connection.execute(
+                "SELECT status FROM connected_agent_migration_journal WHERE migration_id = ?",
+                (migration_id,),
+            ).fetchone()
+        return str(row[0]) if row else None
+
+    def complete_connected_agent_migration(
+        self, migration_id: str, connected_agent_id: str
+    ) -> None:
+        with connect_sqlite(self._path) as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute(
+                "SELECT connected_agent_id, status FROM connected_agent_migration_journal "
+                "WHERE migration_id = ?",
+                (migration_id,),
+            ).fetchone()
+            if row is None or str(row[0]) != connected_agent_id:
+                connection.rollback()
+                raise IncompatibleSchemaError("Connected Agent migration receipt is missing")
+            missing = connection.execute(
+                """
+                SELECT conversation_id FROM conversations
+                WHERE connected_agent_id IS NOT ? OR provider IS NOT 'hermes'
+                   OR binding_state NOT IN ('sealed', 'legacy_awaiting_resolution')
+                   OR (binding_state = 'sealed' AND (
+                        model_id IS NULL OR reasoning_effort IS NULL
+                        OR creation_state != 'ready' OR lock_reason IS NOT NULL
+                   ))
+                   OR (binding_state = 'legacy_awaiting_resolution' AND (
+                        model_id IS NOT NULL OR reasoning_effort IS NOT NULL
+                        OR creation_state != 'locked'
+                        OR lock_reason != 'LEGACY_MODEL_UNRESOLVED'
+                   ))
+                LIMIT 1
+                """,
+                (connected_agent_id,),
+            ).fetchone()
+            if missing is not None:
+                connection.rollback()
+                raise IncompatibleSchemaError("Connected Agent migration binding is incomplete")
+            if str(row[1]) == "complete":
+                connection.rollback()
+                return
+            connection.execute(
+                "UPDATE connected_agent_migration_journal SET status = 'complete', "
+                "updated_at = CURRENT_TIMESTAMP WHERE migration_id = ? "
+                "AND status = 'sqlite_complete'",
+                (migration_id,),
+            )
+            connection.commit()
 
     @staticmethod
     def _ensure_migration_ledger(connection: sqlite3.Connection) -> None:
@@ -1923,32 +2238,62 @@ class JobOsStateStore:
     def list_active_conversations(
         self, *, owner_device_id: str | None = None
     ) -> list[dict[str, object]]:
+        # Kept as a compatibility argument and historical actor attribution only.
+        # Every authorized device sees the same profile-wide conversation set.
+        del owner_device_id
         with connect_sqlite(f"file:{self._path}?mode=ro", uri=True) as connection:
             connection.row_factory = sqlite3.Row
             rows = connection.execute(
                 """
                 SELECT conversation_id, position, title, owner_device_id, selected_job_id,
                        active_artifact_id, active_artifact_page, active_artifact_zoom,
+                       connected_agent_id, provider, model_id, reasoning_effort,
+                       binding_state, creation_state, lock_reason,
                        created_at, updated_at
                 FROM conversations WHERE archived_at IS NULL
-                  AND (? IS NULL OR owner_device_id = ?) ORDER BY position
-                """,
-                (owner_device_id, owner_device_id),
+                ORDER BY position
+                """
             ).fetchall()
         return [dict(row) for row in rows]
 
     def create_conversation(
-        self, *, actor_id: str, selected_job_id: str | None = None
+        self,
+        *,
+        actor_id: str,
+        selected_job_id: str | None = None,
+        connected_agent_id: str | None = None,
+        provider: str | None = None,
+        model_id: str | None = None,
+        reasoning_effort: str | None = None,
+        connection_account_fingerprint: str | None = None,
     ) -> dict[str, object]:
+        supplied = (connected_agent_id, provider, model_id, reasoning_effort)
+        if any(value is not None for value in supplied) and any(
+            value is None for value in supplied
+        ):
+            raise ValueError("A new conversation requires a complete sealed binding")
+        if provider is not None and provider not in {"hermes", "codex"}:
+            raise ValueError("Connected Agent provider is invalid")
+        if connected_agent_id is not None and not re.fullmatch(
+            r"jagent_[a-f0-9]{32}", connected_agent_id
+        ):
+            raise ValueError("Connected Agent identifier is invalid")
+        if model_id is not None and not 1 <= len(model_id) <= 256:
+            raise ValueError("Connected Agent model identifier is invalid")
+        if reasoning_effort is not None and not 1 <= len(reasoning_effort) <= 64:
+            raise ValueError("Connected Agent reasoning effort is invalid")
+        if connection_account_fingerprint is not None and not re.fullmatch(
+            r"[a-f0-9]{64}", connection_account_fingerprint
+        ):
+            raise ValueError("Connection account fingerprint is invalid")
         conversation_id = f"conv_{secrets.token_urlsafe(16)}"
         with connect_sqlite(self._path) as connection:
             connection.row_factory = sqlite3.Row
             connection.execute("BEGIN IMMEDIATE")
+            compatibility_unbound = connected_agent_id is None
             count = int(
                 connection.execute(
-                    """SELECT COUNT(*) FROM conversations
-                    WHERE archived_at IS NULL AND owner_device_id = ?""",
-                    (actor_id,),
+                    "SELECT COUNT(*) FROM conversations WHERE archived_at IS NULL"
                 ).fetchone()[0]
             )
             if count >= MAX_ACTIVE_CONVERSATIONS:
@@ -1959,10 +2304,32 @@ class JobOsStateStore:
             connection.execute(
                 """
                 INSERT INTO conversations(
-                    conversation_id, position, title, owner_device_id, selected_job_id
-                ) VALUES (?, ?, ?, ?, ?)
+                    conversation_id, position, title, owner_device_id, selected_job_id,
+                    connected_agent_id, provider, model_id, reasoning_effort,
+                    binding_state, connection_account_fingerprint, creation_state, lock_reason
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                (conversation_id, position, title, actor_id, selected_job_id),
+                (
+                    conversation_id,
+                    position,
+                    title,
+                    actor_id,
+                    selected_job_id,
+                    connected_agent_id,
+                    provider,
+                    model_id,
+                    reasoning_effort,
+                    "sealed" if connected_agent_id is not None else None,
+                    connection_account_fingerprint,
+                    "provisioning"
+                    if connected_agent_id is not None
+                    else "ready"
+                    if compatibility_unbound
+                    else "locked",
+                    None
+                    if connected_agent_id is not None or compatibility_unbound
+                    else "AGENT_NOT_CONFIGURED",
+                ),
             )
             connection.execute(
                 """
@@ -2000,9 +2367,8 @@ class JobOsStateStore:
             row = connection.execute(
                 """SELECT selected_job_id, active_artifact_id, active_artifact_page,
                           active_artifact_zoom FROM conversations
-                   WHERE conversation_id = ? AND owner_device_id = ?
-                     AND archived_at IS NULL""",
-                (conversation_id, owner_device_id),
+                   WHERE conversation_id = ? AND archived_at IS NULL""",
+                (conversation_id,),
             ).fetchone()
         if row is None:
             raise ConversationNotFound("Conversation not found")
@@ -2018,9 +2384,8 @@ class JobOsStateStore:
             connection.execute("BEGIN IMMEDIATE")
             row = connection.execute(
                 """SELECT selected_job_id FROM conversations
-                   WHERE conversation_id = ? AND owner_device_id = ?
-                     AND archived_at IS NULL""",
-                (conversation_id, owner_device_id),
+                   WHERE conversation_id = ? AND archived_at IS NULL""",
+                (conversation_id,),
             ).fetchone()
             if row is None:
                 connection.rollback()
@@ -2052,9 +2417,8 @@ class JobOsStateStore:
             connection.execute("BEGIN IMMEDIATE")
             row = connection.execute(
                 """SELECT selected_job_id FROM conversations
-                   WHERE conversation_id = ? AND owner_device_id = ?
-                     AND archived_at IS NULL""",
-                (conversation_id, owner_device_id),
+                   WHERE conversation_id = ? AND archived_at IS NULL""",
+                (conversation_id,),
             ).fetchone()
             if row is None:
                 connection.rollback()
@@ -2095,18 +2459,16 @@ class JobOsStateStore:
             row = connection.execute(
                 """
                 SELECT position, recovery_turn_id FROM conversations
-                WHERE conversation_id = ? AND owner_device_id = ? AND archived_at IS NULL
+                WHERE conversation_id = ? AND archived_at IS NULL
                 """,
-                (conversation_id, actor_id),
+                (conversation_id,),
             ).fetchone()
             if row is None:
                 connection.rollback()
                 raise ConversationNotFound("Conversation not found")
             count = int(
                 connection.execute(
-                    """SELECT COUNT(*) FROM conversations
-                    WHERE archived_at IS NULL AND owner_device_id = ?""",
-                    (actor_id,),
+                    "SELECT COUNT(*) FROM conversations WHERE archived_at IS NULL"
                 ).fetchone()[0]
             )
             if count <= 1:
@@ -2136,10 +2498,10 @@ class JobOsStateStore:
             remaining = connection.execute(
                 """
                 SELECT conversation_id, position FROM conversations
-                WHERE archived_at IS NULL AND owner_device_id = ? AND position > ?
+                WHERE archived_at IS NULL AND position > ?
                 ORDER BY position
                 """,
-                (actor_id, position),
+                (position,),
             ).fetchall()
             for remaining_id, old_position in remaining:
                 new_position = int(old_position) - 1
@@ -2169,9 +2531,9 @@ class JobOsStateStore:
             row = connection.execute(
                 """
                 SELECT position FROM conversations
-                WHERE conversation_id = ? AND owner_device_id = ? AND archived_at IS NULL
+                WHERE conversation_id = ? AND archived_at IS NULL
                 """,
-                (conversation_id, actor_id),
+                (conversation_id,),
             ).fetchone()
             if row is None:
                 connection.rollback()
@@ -2187,10 +2549,10 @@ class JobOsStateStore:
             remaining = connection.execute(
                 """
                 SELECT conversation_id, position FROM conversations
-                WHERE archived_at IS NULL AND owner_device_id = ? AND position > ?
+                WHERE archived_at IS NULL AND position > ?
                 ORDER BY position
                 """,
-                (actor_id, position),
+                (position,),
             ).fetchall()
             for remaining_id, old_position in remaining:
                 new_position = int(old_position) - 1
@@ -2214,6 +2576,7 @@ class JobOsStateStore:
     ) -> list[dict[str, object]]:
         from .conversation_store import event_row
 
+        del owner_device_id
         with connect_sqlite(f"file:{self._path}?mode=ro", uri=True) as connection:
             connection.row_factory = sqlite3.Row
             rows = connection.execute(
@@ -2225,9 +2588,8 @@ class JobOsStateStore:
                   ON active.conversation_id = conversation.conversation_id
                  AND active.status IN ('queued','running','waiting')
                 WHERE event.event_id > ? AND conversation.archived_at IS NULL
-                  AND (? IS NULL OR conversation.owner_device_id = ?)
                 ORDER BY event.event_id""",
-                (after, owner_device_id, owner_device_id),
+                (after,),
             ).fetchall()
         return [
             {

@@ -183,6 +183,38 @@
       }
     },
     {
+      "path": "docs/media/screenshots/jobos-agent-focus-1920x1080.png",
+      "sha256": "d1e5749b5fb32b11965e1ab6dea86f3c067a8f6d651c89fd70972134a6feaedb",
+      "classification": "project-asset",
+      "publication": "keep",
+      "source": "JobOS-owned product screenshot",
+      "purpose": "README Agent workspace product gallery"
+    },
+    {
+      "path": "docs/media/screenshots/jobos-browse-swipe-1920x1080.png",
+      "sha256": "87b180a6b811167d067849bacc25afcf8bf09ae30291d82383471d949822d704",
+      "classification": "project-asset",
+      "publication": "keep",
+      "source": "JobOS-owned product screenshot",
+      "purpose": "README Browse workspace product gallery"
+    },
+    {
+      "path": "docs/media/screenshots/jobos-research-workbench-1920x1080.png",
+      "sha256": "c15cce5bccc51219456599a585803ce4e40ec821c4d2f7f3cff19ed26e4f47d0",
+      "classification": "project-asset",
+      "publication": "keep",
+      "source": "JobOS-owned product screenshot",
+      "purpose": "README Research workspace product gallery"
+    },
+    {
+      "path": "docs/media/screenshots/jobos-review-resume-1920x1080.png",
+      "sha256": "9b3fc41998ecdeb4e7036e7043b8cc749cb4dfc7a2c9d39a16df9b46c6f789b3",
+      "classification": "project-asset",
+      "publication": "keep",
+      "source": "JobOS-owned product screenshot",
+      "purpose": "README Review workspace product gallery"
+    },
+    {
       "path": "docs/media/screenshots/jobos-browse-detail-1440x1024.png",
       "sha256": "6c92123b89a2b975b979bb0ac4e6c35d6b85458e6dee230c509d36140c980c64",
       "classification": "project-asset",

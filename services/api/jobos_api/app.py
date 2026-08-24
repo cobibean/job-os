@@ -584,6 +584,34 @@ def create_app(
     )
     installation_profiles = InstallationProfileRegistry(settings.installation_registry_path)
     profile_fence_enabled = settings.installation_registry_path.is_file()
+    if profile_fence_enabled:
+        migration_runtime = {
+            "job_provider": settings.job_provider,
+            "artifact_provider": settings.artifact_provider,
+            "state_db_path": settings.state_db_path,
+            "jobs_db_path": settings.resolved_jobs_db_path(),
+            "local_artifact_root": settings.resolved_local_artifact_root(),
+            "artifact_roots": settings.resolved_artifact_roots(),
+            "job_hunter_db_path": settings.job_hunter_db_path,
+            "facade_source_path": None,
+        }
+        registry_data = installation_profiles.load_or_bootstrap(migration_runtime)
+        if (
+            registry_data.connected_agent_migration is not None
+            and any(
+                item.status != "complete"
+                for item in registry_data.connected_agent_migration.profiles
+            )
+            and settings.hermes_dashboard_url
+            and settings.hermes_dashboard_token
+            and settings.hermes_job_hunter_cwd
+        ):
+            installation_profiles.apply_legacy_hermes_configuration(
+                endpoint_url=settings.hermes_dashboard_url
+            )
+        installation_profiles.resume_connected_agent_migration(
+            migration_runtime, owner_device_id=settings.device_id
+        )
 
     def artifact_storage_is_available() -> bool:
         try:
