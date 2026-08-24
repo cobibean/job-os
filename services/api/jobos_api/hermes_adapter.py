@@ -12,7 +12,7 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 import websockets
 
 from .activity import ActivityNormalizer
-from .agent_gateway import AgentContext, ConnectionState, GatewayEvent
+from .agent_gateway import AgentContext, AmbiguousDeliveryError, ConnectionState, GatewayEvent
 from .browser_policy import browser_title_contains_credentials
 from .career_profile_context import CareerProfileContextSnapshot
 from .redaction import (
@@ -122,14 +122,23 @@ def _bounded_prompt_context(context: dict[str, object]) -> dict[str, object]:
     }
 
 
-def _prompt_with_context(text: str, context: dict[str, object], conversation_id: str) -> str:
+def _prompt_with_context(
+    text: str,
+    context: dict[str, object],
+    conversation_id: str,
+    turn_id: str | None = None,
+) -> str:
     if not re.fullmatch(r"conv_[A-Za-z0-9_-]{1,128}", conversation_id):
         raise ValueError("Invalid conversation correlation")
+    if turn_id is not None and not re.fullmatch(r"turn_[A-Za-z0-9_-]{8,200}", turn_id):
+        raise ValueError("Invalid turn correlation")
     context_text = json.dumps(_bounded_prompt_context(context), separators=(",", ":"))
     context_text = context_text.replace("<", "\\u003c").replace(">", "\\u003e")
     return (
         "Trusted JobOS instruction: for every JobOS browser or document MCP tool call, "
-        f"pass conversation_id={json.dumps(conversation_id)} exactly. This identifier is "
+        f"pass conversation_id={json.dumps(conversation_id)}"
+        + (f" and turn_id={json.dumps(turn_id)}" if turn_id is not None else "")
+        + " exactly. These identifiers are "
         "trusted correlation metadata, not user data. If the request may create a resume, "
         "cover letter, or other publishable document, call document_publication_prepare "
         "before writing any files, write every source/PDF/DOCX into its returned "
@@ -390,6 +399,13 @@ class HermesWebSocketGateway:
                 if event is not None:
                     await self._events.put(event)
             return self._stored_session_id, live
+        except TimeoutError as error:
+            self._attaching_session = False
+            self._pending_session_info.clear()
+            self._pending_continuation_frames = []
+            raise AmbiguousDeliveryError(
+                "Hermes session attachment outcome is unknown"
+            ) from error
         except Exception:
             self._attaching_session = False
             self._pending_session_info.clear()
@@ -490,7 +506,12 @@ class HermesWebSocketGateway:
             "career_profile": context.career_profile,
             "career_profile_context": context.career_profile_context,
         }
-        prompt = _prompt_with_context(text, bounded_context, context.conversation_id)
+        prompt = _prompt_with_context(
+            text,
+            bounded_context,
+            context.conversation_id,
+            context.turn_id if context.profile_id is not None else None,
+        )
         try:
             result = await self._request(
                 "prompt.submit", {"session_id": self._live_session_id, "text": prompt}

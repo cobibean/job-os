@@ -4,7 +4,11 @@ import time
 
 import pytest
 from fastapi.testclient import TestClient
-from jobos_api.agent_gateway import AgentContext, GatewayEvent
+from jobos_api.agent_gateway import (
+    AgentContext,
+    AmbiguousDeliveryError,
+    GatewayEvent,
+)
 from jobos_api.app import create_app
 from jobos_api.conversation_manager import ConversationManager
 from jobos_api.conversations import (
@@ -52,8 +56,9 @@ class FakeJobFacade:
 
 
 class FakeGateway:
-    def __init__(self, *, online=True) -> None:
+    def __init__(self, *, online=True, session_scope="") -> None:
         self.online = online
+        self.session_scope = session_scope
         self.submissions: list[tuple[str, AgentContext]] = []
         self.session_requests: list[str | None] = []
         self.interruptions: list[str] = []
@@ -72,8 +77,8 @@ class FakeGateway:
     async def create_or_resume_conversation(self, stored_session_id):
         self.session_requests.append(stored_session_id)
         if not self.online:
-            raise ConnectionError("dashboard unavailable with Authorization: secret-value")
-        return "stored-session", "live-session"
+            raise ConnectionError("dashboard unavailable with Authorization: ***")
+        return f"stored-session{self.session_scope}", f"live-session{self.session_scope}"
 
     async def submit_turn(self, text, context):
         if not self.online:
@@ -146,6 +151,12 @@ class InterruptFailureGateway(FakeGateway):
     async def interrupt_turn(self, turn_id):
         self.interruptions.append(turn_id)
         raise ConnectionError("Authorization: Bearer cancellation-secret")
+
+
+class AmbiguousAttachmentGateway(FakeGateway):
+    async def create_or_resume_conversation(self, stored_session_id):
+        self.session_requests.append(stored_session_id)
+        raise AmbiguousDeliveryError("Provider attachment outcome is unknown")
 
 
 class RotatingSessionGateway(FakeGateway):
@@ -1028,7 +1039,8 @@ def test_rotated_durable_id_reconciles_without_transcript_or_raw_metadata(tmp_pa
 
     assert store.stored_session_id() == "stored-rotated"
     snapshot = store.conversation_snapshot()
-    assert snapshot["entries"] == []
+    assert len(snapshot["entries"]) == 1
+    assert snapshot["entries"][0]["summary"] == "Agent session reconciled"
     serialized = json.dumps(snapshot)
     assert "stored-rotated" not in serialized
     assert "running" not in serialized
@@ -1461,7 +1473,7 @@ class RecordingGatewayFactory:
         self.gateways = {}
 
     def create(self, conversation_id):
-        gateway = FakeGateway()
+        gateway = FakeGateway(session_scope=f"-{conversation_id}")
         self.gateways[conversation_id] = gateway
         return gateway
 
@@ -1971,3 +1983,142 @@ def test_conversation_routes_share_profile_authority_across_authenticated_device
     assert [item["title"] for item in primary_list] == [f"Session {value}" for value in range(1, 6)]
     assert primary_cap.status_code == remote_cap.status_code == 409
     assert f'"conversation_id":"{primary_id}"' in stream.text
+
+
+def test_ambiguous_attachment_survives_restart_without_blind_retry(tmp_path):
+    async def scenario():
+        path = tmp_path / "jobos.db"
+        store = JobOsStateStore(path)
+        store.initialize()
+        store.save_stored_session_id("previous-session")
+        gateway = AmbiguousAttachmentGateway()
+        service = ConversationService(store, gateway)
+        created = await service.send(
+            SendMessageRequest(
+                text="Do not submit this twice",
+                idempotency_key="browser-save-ambiguous-attachment-turn",
+            ),
+            actor_id="device-a",
+            context={"selected_job_id": None, "workspace": {}},
+        )
+
+        turn = store.turn_record(created.turn_id)
+        assert turn is not None
+        assert turn["status"] == "waiting"
+        assert store.recovery_turn_id() == created.turn_id
+        assert store.stored_session_id() == "previous-session"
+        assert gateway.submissions == []
+
+        restarted_store = JobOsStateStore(path)
+        restarted_store.initialize()
+        restarted_gateway = FakeGateway()
+        restarted = ConversationService(restarted_store, restarted_gateway)
+        cancelled = await restarted.cancel(created.turn_id)
+        assert cancelled is not None
+        assert cancelled.status == "interrupted"
+        assert restarted_gateway.submissions == []
+        assert restarted_gateway.interruptions == [created.turn_id]
+        entries = restarted_store.conversation_snapshot()["entries"]
+        assert sum(entry["type"] == "turn" for entry in entries) == 1
+
+    asyncio.run(scenario())
+
+
+def test_authorized_turn_scope_finishes_before_cancellation_settles(tmp_path):
+    async def scenario():
+        store = JobOsStateStore(tmp_path / "jobos.db")
+        store.initialize()
+        gateway = FakeGateway()
+        service = ConversationService(store, gateway)
+        created = await service.send(
+            SendMessageRequest(
+                text="Run one scoped operation",
+                idempotency_key="turn-scope-cancellation",
+            ),
+            actor_id="device-a",
+            context={"selected_job_id": None, "workspace": {}},
+        )
+        entered = asyncio.Event()
+        release = asyncio.Event()
+
+        async def authorized_operation():
+            async with service.turn_scope_lease():
+                entered.set()
+                await release.wait()
+
+        operation = asyncio.create_task(authorized_operation())
+        await entered.wait()
+        cancellation = asyncio.create_task(service.cancel(created.turn_id))
+        await asyncio.sleep(0)
+        assert not cancellation.done()
+        release.set()
+        await operation
+        cancelled = await cancellation
+        assert cancelled is not None
+        assert cancelled.status == "interrupted"
+
+    asyncio.run(scenario())
+
+
+def test_normalized_event_envelope_is_durable_across_store_restart(tmp_path):
+    async def scenario():
+        path = tmp_path / "jobos.db"
+        store = JobOsStateStore(path)
+        store.initialize()
+        gateway = FakeGateway()
+        service = ConversationService(store, gateway, profile_id="jprof_test")
+        created = await service.send(
+            SendMessageRequest(
+                text="Persist normalized events",
+                idempotency_key="normalized-event-replay",
+            ),
+            actor_id="device-a",
+            context={"selected_job_id": None, "workspace": {}},
+        )
+        gateway._events = [
+            GatewayEvent(
+                event_type="status",
+                state="working",
+                summary="Agent turn started",
+                turn_id=created.turn_id,
+                source_event_id="normalized-start",
+                normalized_kind="turn_started",
+                profile_id="jprof_test",
+                conversation_id=service.conversation_id,
+                sequence=1,
+                timestamp="2026-08-24T20:00:00Z",
+            ),
+            GatewayEvent(
+                event_type="assistant_message",
+                state="completed",
+                summary="Done",
+                turn_id=created.turn_id,
+                source_event_id="normalized-complete",
+                normalized_kind="turn_completed",
+                profile_id="jprof_test",
+                conversation_id=service.conversation_id,
+                sequence=2,
+                timestamp="2026-08-24T20:00:01Z",
+            ),
+        ]
+        await service._consume_gateway_events()
+
+        restarted = JobOsStateStore(path)
+        restarted.initialize()
+        entries = restarted.conversation_snapshot()["entries"]
+        normalized = [entry for entry in entries if entry.get("normalized_kind")]
+        assert [entry["normalized_kind"] for entry in normalized] == [
+            "turn_started",
+            "turn_completed",
+        ]
+        assert [entry["sequence"] for entry in normalized] == [1, 2]
+        assert all(entry["profile_id"] == "jprof_test" for entry in normalized)
+        assert all(
+            entry["conversation_id"] == service.conversation_id for entry in normalized
+        )
+        assert [entry["timestamp"] for entry in normalized] == [
+            "2026-08-24T20:00:00Z",
+            "2026-08-24T20:00:01Z",
+        ]
+
+    asyncio.run(scenario())

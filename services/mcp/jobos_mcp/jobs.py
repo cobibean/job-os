@@ -131,6 +131,9 @@ class JobOsMcpClient:
         self._conversation_scope: ContextVar[str | None] = ContextVar(
             "jobos_mcp_conversation_id", default=None
         )
+        self._turn_scope: ContextVar[str | None] = ContextVar(
+            "jobos_mcp_turn_id", default=None
+        )
         self._career_profile_agent_headers = {
             "X-JobOS-Agent-Id": agent_id,
             "X-JobOS-Agent-Token": agent_token or mcp_token,
@@ -151,6 +154,14 @@ class JobOsMcpClient:
         if not re.fullmatch(r"conv_[A-Za-z0-9_-]{1,128}", conversation_id):
             raise ValueError("Invalid conversation ID")
         self._conversation_scope.set(conversation_id)
+
+    def scope_turn(self, conversation_id: str, turn_id: str) -> None:
+        if not re.fullmatch(r"conv_[A-Za-z0-9_-]{1,128}", conversation_id):
+            raise ValueError("Invalid conversation ID")
+        if not re.fullmatch(r"turn_[A-Za-z0-9_-]{8,200}", turn_id):
+            raise ValueError("Invalid turn ID")
+        self._conversation_scope.set(conversation_id)
+        self._turn_scope.set(turn_id)
 
     async def list_jobs(
         self,
@@ -743,9 +754,13 @@ class JobOsMcpClient:
 
     async def _request(self, method: str, path: str, **kwargs: Any) -> dict[str, Any]:
         conversation_id = self._conversation_scope.get()
-        if conversation_id is not None:
+        turn_id = self._turn_scope.get()
+        if conversation_id is not None or turn_id is not None:
+            if conversation_id is None or turn_id is None:
+                raise ValueError("Conversation and turn correlation must be supplied together")
             params = dict(kwargs.pop("params", {}) or {})
             params["conversation_id"] = conversation_id
+            params["turn_id"] = turn_id
             kwargs["params"] = params
         try:
             response = await self._client.request(method, path, **kwargs)

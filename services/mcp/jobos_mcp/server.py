@@ -15,9 +15,8 @@ from pydantic import Field
 
 from jobos_mcp.jobs import JobOsMcpClient
 
-ConversationId = Annotated[
-    str, Field(pattern=r"^conv_[A-Za-z0-9_-]{1,128}$", max_length=133)
-]
+ConversationId = Annotated[str, Field(pattern=r"^conv_[A-Za-z0-9_-]{1,128}$", max_length=133)]
+TurnId = Annotated[str, Field(pattern=r"^turn_[A-Za-z0-9_-]{8,200}$", max_length=205)]
 
 
 def local_mcp_token() -> str:
@@ -78,9 +77,7 @@ def _document_artifact_root() -> Path:
         ValueError,
         json.JSONDecodeError,
     ) as error:
-        raise RuntimeError(
-            "Document publication requires a valid JobOS local config"
-        ) from error
+        raise RuntimeError("Document publication requires a valid JobOS local config") from error
 
     artifact_root = Path(raw_artifacts).expanduser()
     root = artifact_root if artifact_root.is_absolute() else path.parent / artifact_root
@@ -153,9 +150,7 @@ def _prepare_document_publication_workspace(
     if not resolved_root.is_dir():
         raise RuntimeError("The JobOS artifact root must be a directory")
     workspace = _publication_workspace_path(conversation_id, job_id, resolved_root)
-    _prepare_private_directory_chain(
-        resolved_root, workspace.relative_to(resolved_root).parts
-    )
+    _prepare_private_directory_chain(resolved_root, workspace.relative_to(resolved_root).parts)
     return workspace
 
 
@@ -171,9 +166,7 @@ def _existing_document_publication_workspace(
     for part in workspace.relative_to(resolved_root).parts:
         current = current / part
         if current.is_symlink():
-            raise RuntimeError(
-                "JobOS publication inbox directories must not use symbolic links"
-            )
+            raise RuntimeError("JobOS publication inbox directories must not use symbolic links")
         try:
             metadata = os.stat(current, follow_symlinks=False)
         except OSError as error:
@@ -325,9 +318,7 @@ def _read_publication_input(
     )
 
 
-def create_server(
-    client: JobOsMcpClient, *, artifact_root: Path | None = None
-) -> FastMCP:
+def create_server(client: JobOsMcpClient, *, artifact_root: Path | None = None) -> FastMCP:
     server = FastMCP(
         "JobOS Jobs",
         instructions=(
@@ -361,12 +352,15 @@ def create_server(
 
     @server.tool(name="job_list", structured_output=True)
     async def job_list(
+        conversation_id: ConversationId,
+        turn_id: TurnId,
         sort: str = "manual",
         query: str | None = None,
         status_group: str | None = None,
         idempotency_key: str | None = None,
     ) -> dict[str, Any]:
         """List jobs using JobOS filtering and ordering."""
+        client.scope_turn(conversation_id, turn_id)
         return await client.list_jobs(
             sort=sort,
             query=query,
@@ -375,12 +369,20 @@ def create_server(
         )
 
     @server.tool(name="job_inspect", structured_output=True)
-    async def job_inspect(job_id: str, idempotency_key: str | None = None) -> dict[str, Any]:
+    async def job_inspect(
+        conversation_id: ConversationId,
+        turn_id: TurnId,
+        job_id: str,
+        idempotency_key: str | None = None,
+    ) -> dict[str, Any]:
         """Inspect one normalized JobOS job record."""
+        client.scope_turn(conversation_id, turn_id)
         return await client.inspect_job(job_id, idempotency_key=idempotency_key)
 
     @server.tool(name="job_create_from_browser", structured_output=True)
     async def job_create_from_browser(
+        conversation_id: ConversationId,
+        turn_id: TurnId,
         company_name: str,
         title: str,
         canonical_url: str,
@@ -390,6 +392,7 @@ def create_server(
         idempotency_key: str | None = None,
     ) -> dict[str, Any]:
         """Save one listing inspected from the live JobOS browser through canonical ingest."""
+        client.scope_turn(conversation_id, turn_id)
         return await client.create_job(
             company_name=company_name,
             title=title,
@@ -402,27 +405,37 @@ def create_server(
 
     @server.tool(name="job_select", structured_output=True)
     async def job_select(
-        conversation_id: ConversationId, job_id: str, idempotency_key: str | None = None
+        conversation_id: ConversationId,
+        turn_id: TurnId,
+        job_id: str,
+        idempotency_key: str | None = None,
     ) -> dict[str, Any]:
         """Select this conversation's active JobOS job context."""
-        client.scope_conversation(conversation_id)
+        client.scope_turn(conversation_id, turn_id)
         return await client.select_job(job_id, idempotency_key=idempotency_key)
 
     @server.tool(name="job_reorder", structured_output=True)
-    async def job_reorder(job_ids: list[str], idempotency_key: str | None = None) -> dict[str, Any]:
+    async def job_reorder(
+        conversation_id: ConversationId,
+        turn_id: TurnId,
+        job_ids: list[str],
+        idempotency_key: str | None = None,
+    ) -> dict[str, Any]:
         """Replace the complete manual JobOS job order."""
+        client.scope_turn(conversation_id, turn_id)
         return await client.reorder_jobs(job_ids, idempotency_key=idempotency_key)
 
     @server.tool(name="job_update_status", structured_output=True)
     async def job_update_status(
         conversation_id: ConversationId,
+        turn_id: TurnId,
         job_id: str,
         target_status: str,
         reason: str | None = None,
         idempotency_key: str | None = None,
     ) -> dict[str, Any]:
         """Change a job status through the shared JobOS transition command."""
-        client.scope_conversation(conversation_id)
+        client.scope_turn(conversation_id, turn_id)
         return await client.update_status(
             job_id, target_status, reason=reason, idempotency_key=idempotency_key
         )
@@ -430,13 +443,14 @@ def create_server(
     @server.tool(name="job_update_description", structured_output=True)
     async def job_update_description(
         conversation_id: ConversationId,
+        turn_id: TurnId,
         job_id: str,
         description_text: str,
         source_note: str | None = None,
         idempotency_key: str | None = None,
     ) -> dict[str, Any]:
         """Replace a saved job's canonical full listing and refresh its durable packet."""
-        client.scope_conversation(conversation_id)
+        client.scope_turn(conversation_id, turn_id)
         return await client.update_description(
             job_id,
             description_text,
@@ -446,6 +460,8 @@ def create_server(
 
     @server.tool(name="career_profile_edit", structured_output=True)
     async def career_profile_edit(
+        conversation_id: ConversationId,
+        turn_id: TurnId,
         expected_profile_revision: int,
         operation: Literal["item.create", "item.update", "item.remove"],
         reason: str,
@@ -460,6 +476,7 @@ def create_server(
         edits, identity changes, removals, Evidence removal, and loosened claim boundaries
         become proposals for the user. Evidence is optional.
         """
+        client.scope_turn(conversation_id, turn_id)
         return await client.edit_career_profile(
             expected_profile_revision=expected_profile_revision,
             operation=operation,
@@ -471,12 +488,17 @@ def create_server(
         )
 
     @server.tool(name="career_profile_get", structured_output=True)
-    async def career_profile_get() -> dict[str, Any]:
+    async def career_profile_get(
+        conversation_id: ConversationId, turn_id: TurnId
+    ) -> dict[str, Any]:
         """Read the exact user-authorized post-cutover Career Profile projection."""
+        client.scope_turn(conversation_id, turn_id)
         return await client.get_career_profile_projection()
 
     @server.tool(name="career_profile_search", structured_output=True)
     async def career_profile_search(
+        conversation_id: ConversationId,
+        turn_id: TurnId,
         query: str,
         kinds: list[str] | None = None,
         areas: list[str] | None = None,
@@ -485,6 +507,7 @@ def create_server(
         limit: int = 25,
     ) -> dict[str, Any]:
         """Search only the Career Profile items and Evidence authorized for this agent."""
+        client.scope_turn(conversation_id, turn_id)
         return await client.search_career_profile(
             query=query,
             kinds=kinds,
@@ -496,6 +519,8 @@ def create_server(
 
     @server.tool(name="career_profile_edit_batch", structured_output=True)
     async def career_profile_edit_batch(
+        conversation_id: ConversationId,
+        turn_id: TurnId,
         expected_profile_revision: int,
         edits: list[dict[str, Any]],
         idempotency_key: str | None = None,
@@ -506,6 +531,7 @@ def create_server(
         career_profile_edit. Evidence IDs remain optional. If any edit is invalid,
         none of the batch is saved.
         """
+        client.scope_turn(conversation_id, turn_id)
         return await client.edit_career_profile_batch(
             expected_profile_revision=expected_profile_revision,
             edits=edits,
@@ -514,14 +540,19 @@ def create_server(
 
     @server.tool(name="career_profile_changes_list", structured_output=True)
     async def career_profile_changes_list(
+        conversation_id: ConversationId,
+        turn_id: TurnId,
         status: Literal["pending", "accepted", "rejected", "all"] = "pending",
         limit: int = 25,
     ) -> dict[str, Any]:
         """List this agent's proposals and directly applied Career Profile revisions."""
+        client.scope_turn(conversation_id, turn_id)
         return await client.list_career_profile_changes(status=status, limit=limit)
 
     @server.tool(name="career_profile_evidence_import", structured_output=True)
     async def career_profile_evidence_import(
+        conversation_id: ConversationId,
+        turn_id: TurnId,
         expected_profile_revision: int,
         original_filename: str,
         media_type: str,
@@ -537,6 +568,7 @@ def create_server(
         Evidence is never required to create or edit profile items. Any supplied
         extractions remain subject to JobOS review and truthfulness rules.
         """
+        client.scope_turn(conversation_id, turn_id)
         return await client.import_career_profile_evidence(
             expected_profile_revision=expected_profile_revision,
             original_filename=original_filename,
@@ -551,11 +583,14 @@ def create_server(
 
     @server.tool(name="career_profile_evidence_inspect", structured_output=True)
     async def career_profile_evidence_inspect(
+        conversation_id: ConversationId,
+        turn_id: TurnId,
         evidence_id: str,
         byte_start: int = 0,
         byte_length: int = 65_536,
     ) -> dict[str, Any]:
         """Read a bounded segment of Evidence already authorized for this agent."""
+        client.scope_turn(conversation_id, turn_id)
         return await client.inspect_career_profile_evidence(
             evidence_id,
             byte_start=byte_start,
@@ -564,45 +599,54 @@ def create_server(
 
     @server.tool(name="workspace_inspect", structured_output=True)
     async def workspace_inspect(
-        conversation_id: ConversationId, idempotency_key: str | None = None
+        conversation_id: ConversationId, turn_id: TurnId, idempotency_key: str | None = None
     ) -> dict[str, Any]:
         """Inspect global layout merged with this conversation's job context."""
-        client.scope_conversation(conversation_id)
+        client.scope_turn(conversation_id, turn_id)
         return await client.inspect_workspace(idempotency_key=idempotency_key)
 
     @server.tool(name="workspace_update", structured_output=True)
     async def workspace_update(
         conversation_id: ConversationId,
-        snapshot: dict[str, Any], idempotency_key: str | None = None
+        turn_id: TurnId,
+        snapshot: dict[str, Any],
+        idempotency_key: str | None = None,
     ) -> dict[str, Any]:
         """Update global layout and this conversation's document projection."""
-        client.scope_conversation(conversation_id)
+        client.scope_turn(conversation_id, turn_id)
         return await client.update_workspace(snapshot, idempotency_key=idempotency_key)
 
     @server.tool(name="document_list", structured_output=True)
     async def document_list(
-        conversation_id: ConversationId, job_id: str, idempotency_key: str | None = None
+        conversation_id: ConversationId,
+        turn_id: TurnId,
+        job_id: str,
+        idempotency_key: str | None = None,
     ) -> dict[str, Any]:
         """List trusted registered artifacts for a job."""
-        client.scope_conversation(conversation_id)
+        client.scope_turn(conversation_id, turn_id)
         return await client.list_documents(job_id, idempotency_key=idempotency_key)
 
     @server.tool(name="document_draft_get", structured_output=True)
     async def document_draft_get(
         conversation_id: ConversationId,
+        turn_id: TurnId,
         job_id: str,
         document_key: str,
         idempotency_key: str | None = None,
     ) -> dict[str, Any]:
         """Read a bounded semantic outline for one editable job document."""
-        client.scope_conversation(conversation_id)
+        client.scope_turn(conversation_id, turn_id)
         return await client.get_document_draft(
-            job_id, document_key, idempotency_key=idempotency_key  # gitleaks:allow
+            job_id,
+            document_key,
+            idempotency_key=idempotency_key,  # gitleaks:allow
         )
 
     @server.tool(name="document_draft_apply", structured_output=True)
     async def document_draft_apply(
         conversation_id: ConversationId,
+        turn_id: TurnId,
         job_id: str,
         document_id: str,
         base_revision: int,
@@ -610,7 +654,7 @@ def create_server(
         idempotency_key: str | None = None,
     ) -> dict[str, Any]:
         """Atomically apply only the five allowlisted editable-document operations."""
-        client.scope_conversation(conversation_id)
+        client.scope_turn(conversation_id, turn_id)
         return await client.apply_document_draft(
             job_id,
             document_id,
@@ -622,45 +666,51 @@ def create_server(
     @server.tool(name="document_draft_snapshot", structured_output=True)
     async def document_draft_snapshot(
         conversation_id: ConversationId,
+        turn_id: TurnId,
         job_id: str,
         document_id: str,
         label: str,
         idempotency_key: str | None = None,
     ) -> dict[str, Any]:
         """Create a durable manual checkpoint for one job-owned editable document."""
-        client.scope_conversation(conversation_id)
+        client.scope_turn(conversation_id, turn_id)
         return await client.snapshot_document_draft(
             job_id, document_id, label, idempotency_key=idempotency_key
         )
 
     @server.tool(name="document_refresh", structured_output=True)
     async def document_refresh(
-        conversation_id: ConversationId, job_id: str, idempotency_key: str | None = None
+        conversation_id: ConversationId,
+        turn_id: TurnId,
+        job_id: str,
+        idempotency_key: str | None = None,
     ) -> dict[str, Any]:
         """Refresh a job's trusted artifact manifest."""
-        client.scope_conversation(conversation_id)
+        client.scope_turn(conversation_id, turn_id)
         return await client.refresh_documents(job_id, idempotency_key=idempotency_key)
 
     @server.tool(name="document_render", structured_output=True)
     async def document_render(
         conversation_id: ConversationId,
+        turn_id: TurnId,
         job_id: str,
         source_id: str,
         idempotency_key: str | None = None,
     ) -> dict[str, Any]:
         """Start the fixed PDF resume render command for a job source."""
-        client.scope_conversation(conversation_id)
+        client.scope_turn(conversation_id, turn_id)
         return await client.render_document(job_id, source_id, idempotency_key=idempotency_key)
 
     @server.tool(name="document_register", structured_output=True)
     async def document_register(
         conversation_id: ConversationId,
+        turn_id: TurnId,
         job_id: str,
         artifact_reference: str,
         idempotency_key: str | None = None,
     ) -> dict[str, Any]:
         """Register an opaque facade artifact reference through JobOS."""
-        client.scope_conversation(conversation_id)
+        client.scope_turn(conversation_id, turn_id)
         return await client.register_document(
             job_id, artifact_reference, idempotency_key=idempotency_key
         )
@@ -668,6 +718,7 @@ def create_server(
     @server.tool(name="document_publication_prepare", structured_output=True)
     async def document_publication_prepare(
         conversation_id: ConversationId,
+        turn_id: TurnId,
         job_id: str,
     ) -> dict[str, Any]:
         """Prepare JobOS's only supported publication inbox for this session and job.
@@ -676,7 +727,8 @@ def create_server(
         every promised PDF/DOCX directly into publication_directory. Do not use a
         workspace, repository, temporary folder, or agent-profile cache for publication.
         """
-        client.scope_conversation(conversation_id)
+        client.scope_turn(conversation_id, turn_id)
+        await client.inspect_job(job_id)
         workspace = _prepare_document_publication_workspace(
             conversation_id, job_id, artifact_root=artifact_root
         )
@@ -696,6 +748,7 @@ def create_server(
     @server.tool(name="document_publish", structured_output=True)
     async def document_publish(
         conversation_id: ConversationId,
+        turn_id: TurnId,
         job_id: str,
         document_key: str,
         document_label: str,
@@ -709,7 +762,7 @@ def create_server(
         use the same source file for paired PDF/DOCX, then confirm every format with
         document_list before claiming completion. Other filesystem paths are never read.
         """
-        client.scope_conversation(conversation_id)
+        client.scope_turn(conversation_id, turn_id)
         resolved_artifact_root = artifact_root or _document_artifact_root()
         try:
             source_filename, source_bytes = _read_publication_input(
@@ -749,23 +802,25 @@ def create_server(
     @server.tool(name="document_select", structured_output=True)
     async def document_select(
         conversation_id: ConversationId,
+        turn_id: TurnId,
         artifact_id: str,
         idempotency_key: str | None = None,
     ) -> dict[str, Any]:
         """Select a registered artifact in the shared document workspace."""
-        client.scope_conversation(conversation_id)
+        client.scope_turn(conversation_id, turn_id)
         return await client.select_document(artifact_id, idempotency_key=idempotency_key)
 
     @server.tool(name="document_file_inspect", structured_output=True)
     async def document_file_inspect(
         conversation_id: ConversationId,
+        turn_id: TurnId,
         job_id: str,
         document_key: str,
         timeout_ms: int = 10_000,
         idempotency_key: str | None = None,
     ) -> dict[str, Any]:
         """Inspect the current canonical DOCX hash, capabilities, and bounded block context."""
-        client.scope_conversation(conversation_id)
+        client.scope_turn(conversation_id, turn_id)
         return await client.inspect_document_file(
             conversation_id,
             job_id,
@@ -777,6 +832,7 @@ def create_server(
     @server.tool(name="document_file_apply", structured_output=True)
     async def document_file_apply(
         conversation_id: ConversationId,
+        turn_id: TurnId,
         job_id: str,
         document_key: str,
         expected_sha256: str,
@@ -785,7 +841,7 @@ def create_server(
         idempotency_key: str | None = None,
     ) -> dict[str, Any]:
         """Apply typed operations to the canonical DOCX with an expected-hash conflict check."""
-        client.scope_conversation(conversation_id)
+        client.scope_turn(conversation_id, turn_id)
         return await client.apply_document_file_operations(
             conversation_id,
             job_id,
@@ -809,20 +865,23 @@ def create_server(
 
     @server.tool(name="browser_tabs_inspect", structured_output=True)
     async def browser_tabs_inspect(
-        conversation_id: ConversationId, timeout_ms: int = 5_000
+        conversation_id: ConversationId, turn_id: TurnId, timeout_ms: int = 5_000
     ) -> dict[str, Any]:
         """Inspect bounded metadata for live desktop browser tabs."""
+        client.scope_turn(conversation_id, turn_id)
         return await browser(conversation_id, "tabs.inspect", {}, None, timeout_ms)
 
     @server.tool(name="browser_tab_create", structured_output=True)
     async def browser_tab_create(
         conversation_id: ConversationId,
+        turn_id: TurnId,
         url: str,
         associated_job_id: str | None = None,
         activate: bool = True,
         idempotency_key: str | None = None,
     ) -> dict[str, Any]:
         """Create a live browser tab for an ordinary HTTP(S) URL."""
+        client.scope_turn(conversation_id, turn_id)
         return await browser(
             conversation_id,
             "tab.create",
@@ -832,90 +891,116 @@ def create_server(
 
     @server.tool(name="browser_tab_select", structured_output=True)
     async def browser_tab_select(
-        conversation_id: ConversationId, tab_id: str, idempotency_key: str | None = None
+        conversation_id: ConversationId,
+        turn_id: TurnId,
+        tab_id: str,
+        idempotency_key: str | None = None,
     ) -> dict[str, Any]:
         """Select a live browser tab."""
+        client.scope_turn(conversation_id, turn_id)
         return await browser(conversation_id, "tab.select", {"tab_id": tab_id}, idempotency_key)
 
     @server.tool(name="browser_tab_associate", structured_output=True)
     async def browser_tab_associate(
         conversation_id: ConversationId,
+        turn_id: TurnId,
         tab_id: str,
         job_id: str,
         idempotency_key: str | None = None,
     ) -> dict[str, Any]:
         """Link a live browser tab to the canonical JobOS job created from it."""
+        client.scope_turn(conversation_id, turn_id)
         return await browser(
-            conversation_id,
-            "tab.associate", {"tab_id": tab_id, "job_id": job_id}, idempotency_key
+            conversation_id, "tab.associate", {"tab_id": tab_id, "job_id": job_id}, idempotency_key
         )
 
     @server.tool(name="browser_tab_close", structured_output=True)
     async def browser_tab_close(
-        conversation_id: ConversationId, tab_id: str, idempotency_key: str | None = None
+        conversation_id: ConversationId,
+        turn_id: TurnId,
+        tab_id: str,
+        idempotency_key: str | None = None,
     ) -> dict[str, Any]:
         """Close a live browser tab."""
+        client.scope_turn(conversation_id, turn_id)
         return await browser(conversation_id, "tab.close", {"tab_id": tab_id}, idempotency_key)
 
     @server.tool(name="browser_tabs_reorder", structured_output=True)
     async def browser_tabs_reorder(
         conversation_id: ConversationId,
+        turn_id: TurnId,
         tab_ids: list[str],
         idempotency_key: str | None = None,
     ) -> dict[str, Any]:
         """Replace the complete live browser tab order."""
-        return await browser(
-            conversation_id, "tabs.reorder", {"tab_ids": tab_ids}, idempotency_key
-        )
+        client.scope_turn(conversation_id, turn_id)
+        return await browser(conversation_id, "tabs.reorder", {"tab_ids": tab_ids}, idempotency_key)
 
-    async def tab_command(
-        conversation_id: str, name: str, tab_id: str, key: str | None = None
-    ):
+    async def tab_command(conversation_id: str, name: str, tab_id: str, key: str | None = None):
         return await browser(conversation_id, name, {"tab_id": tab_id}, key)
 
     @server.tool(name="browser_navigate", structured_output=True)
     async def browser_navigate(
         conversation_id: ConversationId,
+        turn_id: TurnId,
         tab_id: str,
         url: str,
         idempotency_key: str | None = None,
     ) -> dict[str, Any]:
         """Navigate a live tab to an ordinary HTTP(S) URL."""
+        client.scope_turn(conversation_id, turn_id)
         return await browser(
             conversation_id, "tab.navigate", {"tab_id": tab_id, "url": url}, idempotency_key
         )
 
     @server.tool(name="browser_back", structured_output=True)
     async def browser_back(
-        conversation_id: ConversationId, tab_id: str, idempotency_key: str | None = None
+        conversation_id: ConversationId,
+        turn_id: TurnId,
+        tab_id: str,
+        idempotency_key: str | None = None,
     ) -> dict[str, Any]:
         """Go back in a live tab."""
+        client.scope_turn(conversation_id, turn_id)
         return await tab_command(conversation_id, "tab.back", tab_id, idempotency_key)
 
     @server.tool(name="browser_forward", structured_output=True)
     async def browser_forward(
-        conversation_id: ConversationId, tab_id: str, idempotency_key: str | None = None
+        conversation_id: ConversationId,
+        turn_id: TurnId,
+        tab_id: str,
+        idempotency_key: str | None = None,
     ) -> dict[str, Any]:
         """Go forward in a live tab."""
+        client.scope_turn(conversation_id, turn_id)
         return await tab_command(conversation_id, "tab.forward", tab_id, idempotency_key)
 
     @server.tool(name="browser_reload", structured_output=True)
     async def browser_reload(
-        conversation_id: ConversationId, tab_id: str, idempotency_key: str | None = None
+        conversation_id: ConversationId,
+        turn_id: TurnId,
+        tab_id: str,
+        idempotency_key: str | None = None,
     ) -> dict[str, Any]:
         """Reload a live tab."""
+        client.scope_turn(conversation_id, turn_id)
         return await tab_command(conversation_id, "tab.reload", tab_id, idempotency_key)
 
     @server.tool(name="browser_stop", structured_output=True)
     async def browser_stop(
-        conversation_id: ConversationId, tab_id: str, idempotency_key: str | None = None
+        conversation_id: ConversationId,
+        turn_id: TurnId,
+        tab_id: str,
+        idempotency_key: str | None = None,
     ) -> dict[str, Any]:
         """Stop loading a live tab."""
+        client.scope_turn(conversation_id, turn_id)
         return await tab_command(conversation_id, "tab.stop", tab_id, idempotency_key)
 
     @server.tool(name="browser_snapshot", structured_output=True)
     async def browser_snapshot(
         conversation_id: ConversationId,
+        turn_id: TurnId,
         tab_id: str,
         text_start: int = 0,
         text_length: int = 12_000,
@@ -928,6 +1013,7 @@ def create_server(
         For later segments, pass every pagination argument and use the returned
         next_text_start.
         """
+        client.scope_turn(conversation_id, turn_id)
         return await browser(
             conversation_id,
             "page.snapshot",
@@ -943,19 +1029,24 @@ def create_server(
     @server.tool(name="browser_click", structured_output=True)
     async def browser_click(
         conversation_id: ConversationId,
+        turn_id: TurnId,
         tab_id: str,
         target_id: str,
         idempotency_key: str | None = None,
     ) -> dict[str, Any]:
         """Click an opaque target from the latest semantic snapshot."""
+        client.scope_turn(conversation_id, turn_id)
         return await browser(
             conversation_id,
-            "element.click", {"tab_id": tab_id, "target_id": target_id}, idempotency_key
+            "element.click",
+            {"tab_id": tab_id, "target_id": target_id},
+            idempotency_key,
         )
 
     @server.tool(name="browser_type", structured_output=True)
     async def browser_type(
         conversation_id: ConversationId,
+        turn_id: TurnId,
         tab_id: str,
         target_id: str,
         text: str,
@@ -963,6 +1054,7 @@ def create_server(
         idempotency_key: str | None = None,
     ) -> dict[str, Any]:
         """Type bounded text into an opaque snapshot target."""
+        client.scope_turn(conversation_id, turn_id)
         return await browser(
             conversation_id,
             "element.type",
@@ -973,12 +1065,14 @@ def create_server(
     @server.tool(name="browser_scroll", structured_output=True)
     async def browser_scroll(
         conversation_id: ConversationId,
+        turn_id: TurnId,
         tab_id: str,
         direction: str,
         amount: int = 600,
         idempotency_key: str | None = None,
     ) -> dict[str, Any]:
         """Scroll a live tab by a bounded amount."""
+        client.scope_turn(conversation_id, turn_id)
         return await browser(
             conversation_id,
             "page.scroll",
@@ -988,12 +1082,15 @@ def create_server(
 
     @server.tool(name="activity_report", structured_output=True)
     async def activity_report(
+        conversation_id: ConversationId,
+        turn_id: TurnId,
         label: str,
         state: str,
         detail: dict[str, Any] | None = None,
         idempotency_key: str | None = None,
     ) -> dict[str, Any]:
         """Append one concise agent-origin action to JobOS chronology."""
+        client.scope_turn(conversation_id, turn_id)
         return await client.report_activity(
             label, state, detail=detail, idempotency_key=idempotency_key
         )

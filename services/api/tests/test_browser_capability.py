@@ -100,6 +100,13 @@ def begin_active_conversation(client, *, token=TOKEN, key="browser-active-turn-1
     return conversation_id
 
 
+def active_correlation(client, conversation_id):
+    active = client.get(
+        f"/v1/conversations/{conversation_id}", headers=auth()
+    ).json()["active_turn"]
+    return {"conversation_id": conversation_id, "turn_id": active["turn_id"]}
+
+
 def test_tab_association_requires_a_bounded_job_id():
     request = BrowserCommandRequest(
         command="tab.associate",
@@ -187,10 +194,15 @@ def test_tab_association_rejects_unknown_jobs_before_desktop_dispatch(tmp_path):
     }
     with TestClient(app) as client:
         body["conversation_id"] = begin_active_conversation(client)
-        missing = client.post("/v1/browser/commands", headers=mcp_auth(), json=body)
+        params = active_correlation(client, body["conversation_id"])
+        missing = client.post(
+            "/v1/browser/commands", headers=mcp_auth(), params=params, json=body
+        )
         body["arguments"]["job_id"] = "job-known"
         body["idempotency_key"] = "associate-known-1"
-        known = client.post("/v1/browser/commands", headers=mcp_auth(), json=body)
+        known = client.post(
+            "/v1/browser/commands", headers=mcp_auth(), params=params, json=body
+        )
 
     assert missing.status_code == 422
     assert missing.json()["detail"] == "Cannot associate a browser tab with an unknown job"
@@ -323,6 +335,10 @@ def test_mcp_browser_command_targets_the_desktop_that_started_the_turn(tmp_path)
         result = client.post(
             "/v1/browser/commands",
             headers=mcp_auth(),
+            params={
+                "conversation_id": conversation_id,
+                "turn_id": turn.json()["turn_id"],
+            },
             json={
                 "command": "page.snapshot",
                 "arguments": {"tab_id": "macbook-tab"},
@@ -341,11 +357,15 @@ def test_mcp_browser_commands_are_correlated_to_one_active_conversation(tmp_path
     class Gateway:
         connection_state = "online"
 
+        def __init__(self, conversation_id):
+            self.conversation_id = conversation_id
+
         async def start(self):
             return None
 
         async def create_or_resume_conversation(self, stored_session_id):
-            return "stored-session", "live-session"
+            session_id = stored_session_id or f"stored-{self.conversation_id}"
+            return session_id, f"live-{self.conversation_id}"
 
         async def submit_turn(self, text, context):
             return None
@@ -368,7 +388,7 @@ def test_mcp_browser_commands_are_correlated_to_one_active_conversation(tmp_path
 
     class Factory:
         def create(self, conversation_id):
-            return Gateway()
+            return Gateway(conversation_id)
 
     class CapturingBroker:
         def __init__(self):
@@ -400,24 +420,22 @@ def test_mcp_browser_commands_are_correlated_to_one_active_conversation(tmp_path
             "/v1/conversations", headers={"Authorization": f"Bearer {REMOTE_TOKEN}"}
         ).json()["conversation_id"]
         idle_id = client.post("/v1/conversations", headers=auth()).json()["conversation_id"]
-        assert (
-            client.post(
-                f"/v1/conversations/{first_id}/messages",
-                headers=auth(),
-                json={"text": "First", "idempotency_key": "correlation-first-1"},
-            ).status_code
-            == 201
+        first_turn = client.post(
+            f"/v1/conversations/{first_id}/messages",
+            headers=auth(),
+            json={"text": "First", "idempotency_key": "correlation-first-1"},
         )
-        assert (
-            client.post(
-                f"/v1/conversations/{second_id}/messages",
-                headers={"Authorization": f"Bearer {REMOTE_TOKEN}"},
-                json={"text": "Second", "idempotency_key": "correlation-second-1"},
-            ).status_code
-            == 201
+        second_turn = client.post(
+            f"/v1/conversations/{second_id}/messages",
+            headers={"Authorization": f"Bearer {REMOTE_TOKEN}"},
+            json={"text": "Second", "idempotency_key": "correlation-second-1"},
         )
+        assert first_turn.status_code == 201
+        assert second_turn.status_code == 201
+        first_turn_id = first_turn.json()["turn_id"]
+        second_turn_id = second_turn.json()["turn_id"]
 
-        def command(conversation_id=None, key="correlation-command-1"):
+        def command(conversation_id=None, turn_id=None, key="correlation-command-1"):
             body = {
                 "command": "tabs.inspect",
                 "arguments": {},
@@ -426,15 +444,29 @@ def test_mcp_browser_commands_are_correlated_to_one_active_conversation(tmp_path
             }
             if conversation_id is not None:
                 body["conversation_id"] = conversation_id
-            return client.post("/v1/browser/commands", headers=mcp_auth(), json=body)
+            params = {}
+            if conversation_id is not None:
+                params["conversation_id"] = conversation_id
+            if turn_id is not None:
+                params["turn_id"] = turn_id
+            return client.post("/v1/browser/commands", headers=mcp_auth(), params=params, json=body)
 
-        assert command(second_id, "correlation-second-command").status_code == 200
-        assert command(first_id, "correlation-first-command").status_code == 200
-        assert command(None, "correlation-missing-command").status_code == 422
-        assert command("conv_unknown", "correlation-wrong-command").status_code == 404
-        assert command(idle_id, "correlation-idle-command").status_code == 409
+        assert command(second_id, second_turn_id, "correlation-second-command").status_code == 200
+        assert command(first_id, first_turn_id, "correlation-first-command").status_code == 200
+        assert command(first_id, None, "correlation-missing-turn").status_code == 422
+        cross_chat = command(first_id, second_turn_id, "correlation-cross-chat")
+        assert cross_chat.status_code == 409
+        assert cross_chat.json()["code"] == "mcp_turn_mismatch"
+        stale_turn = command(first_id, "turn_stale_00000001", "correlation-stale-turn")
+        assert stale_turn.status_code == 409
+        assert stale_turn.json()["code"] == "mcp_turn_mismatch"
+        assert command(None, None, "correlation-missing-command").status_code == 422
+        assert (
+            command("conv_unknown", first_turn_id, "correlation-wrong-command").status_code == 404
+        )
+        assert command(idle_id, first_turn_id, "correlation-idle-command").status_code == 409
         assert client.delete(f"/v1/conversations/{idle_id}", headers=auth()).status_code == 204
-        assert command(idle_id, "correlation-archived-command").status_code == 404
+        assert command(idle_id, first_turn_id, "correlation-archived-command").status_code == 404
 
     assert broker.device_ids == ["example-macbook", "primary-device"]
 
@@ -506,6 +538,7 @@ def test_browser_command_fails_immediately_without_a_desktop(tmp_path):
         response = client.post(
             "/v1/browser/commands",
             headers=mcp_auth(),
+            params=active_correlation(client, conversation_id),
             json={
                 "command": "tabs.inspect",
                 "arguments": {},
@@ -541,6 +574,7 @@ def test_authenticated_desktop_receives_correlated_command_and_replay_is_idempot
         assert presence["available"] is True
         assert 0 < presence["lease_remaining_ms"] <= 15_000
         conversation_id = begin_active_conversation(client)
+        params = active_correlation(client, conversation_id)
         chronology_before = client.get("/v1/conversations/current", headers=auth()).json()[
             "entries"
         ]
@@ -550,6 +584,7 @@ def test_authenticated_desktop_receives_correlated_command_and_replay_is_idempot
                 client.post,
                 "/v1/browser/commands",
                 headers=mcp_auth(),
+                params=params,
                 json={
                     "command": "tab.navigate",
                     "arguments": {"tab_id": "tab-1", "url": "https://example.com/jobs/1"},
@@ -584,6 +619,7 @@ def test_authenticated_desktop_receives_correlated_command_and_replay_is_idempot
             replay = client.post(
                 "/v1/browser/commands",
                 headers=mcp_auth(),
+                params=params,
                 json={
                     "command": "tab.navigate",
                     "arguments": {"tab_id": "tab-1", "url": "https://example.com/jobs/1"},
@@ -631,8 +667,15 @@ def test_concurrent_durable_browser_retries_execute_the_desktop_once(tmp_path):
         ThreadPoolExecutor(max_workers=2) as executor,
     ):
         body["conversation_id"] = begin_active_conversation(client)
+        params = active_correlation(client, body["conversation_id"])
         futures = [
-            executor.submit(client.post, "/v1/browser/commands", headers=mcp_auth(), json=body)
+            executor.submit(
+                client.post,
+                "/v1/browser/commands",
+                headers=mcp_auth(),
+                params=params,
+                json=body,
+            )
             for _ in range(2)
         ]
         responses = [future.result(timeout=2) for future in futures]
@@ -659,14 +702,19 @@ def test_browser_replay_does_not_inject_activity_into_agent_chat(tmp_path):
     database = tmp_path / "jobos.db"
     with TestClient(make_app(tmp_path, broker=Broker())) as client:
         body["conversation_id"] = begin_active_conversation(client)
+        params = active_correlation(client, body["conversation_id"])
         entries_before = client.get("/v1/conversations/current", headers=auth()).json()["entries"]
-        first = client.post("/v1/browser/commands", headers=mcp_auth(), json=body)
+        first = client.post(
+            "/v1/browser/commands", headers=mcp_auth(), params=params, json=body
+        )
         with sqlite3.connect(database) as connection:
             connection.execute(
                 "DELETE FROM conversation_events WHERE summary = ?",
                 ("Browser: tab select",),
             )
-        replay = client.post("/v1/browser/commands", headers=mcp_auth(), json=body)
+        replay = client.post(
+            "/v1/browser/commands", headers=mcp_auth(), params=params, json=body
+        )
         entries = client.get("/v1/conversations/current", headers=auth()).json()["entries"]
 
     assert replay.json() == first.json()
@@ -689,10 +737,12 @@ def test_distinct_browser_actions_may_reuse_a_key_without_injecting_chat_activit
 
     with TestClient(make_app(tmp_path, broker=Broker())) as client:
         conversation_id = begin_active_conversation(client)
+        params = active_correlation(client, conversation_id)
         entries_before = client.get("/v1/conversations/current", headers=auth()).json()["entries"]
         inspect = client.post(
             "/v1/browser/commands",
             headers=mcp_auth(),
+            params=params,
             json={
                 "command": "tabs.inspect",
                 "arguments": {},
@@ -705,6 +755,7 @@ def test_distinct_browser_actions_may_reuse_a_key_without_injecting_chat_activit
         select = client.post(
             "/v1/browser/commands",
             headers=mcp_auth(),
+            params=params,
             json={
                 "command": "tab.select",
                 "arguments": {"tab_id": "tab-1"},
@@ -738,13 +789,18 @@ def test_activity_report_is_idempotent_without_injecting_agent_chat_activity(tmp
         "idempotency_key": "activity-repair-1",
     }
     with TestClient(make_app(tmp_path)) as client:
-        first = client.post("/v1/activity", headers=mcp_auth(), json=body)
-        replay = client.post("/v1/activity", headers=mcp_auth(), json=body)
+        conversation_id = begin_active_conversation(client)
+        params = active_correlation(client, conversation_id)
+        entries_before = client.get(
+            "/v1/conversations/current", headers=auth()
+        ).json()["entries"]
+        first = client.post("/v1/activity", headers=mcp_auth(), params=params, json=body)
+        replay = client.post("/v1/activity", headers=mcp_auth(), params=params, json=body)
         entries = client.get("/v1/conversations/current", headers=auth()).json()["entries"]
 
     assert first.status_code == 200
     assert replay.json() == first.json()
-    assert entries == []
+    assert entries == entries_before
     with sqlite3.connect(tmp_path / "jobos.db") as connection:
         detail = json.loads(
             connection.execute(
@@ -778,7 +834,12 @@ def test_browser_command_validation_rejects_scripts_and_selector_like_targets(
     }
     with TestClient(make_app(tmp_path)) as client:
         body["conversation_id"] = begin_active_conversation(client)
-        response = client.post("/v1/browser/commands", headers=mcp_auth(), json=body)
+        response = client.post(
+            "/v1/browser/commands",
+            headers=mcp_auth(),
+            params=active_correlation(client, body["conversation_id"]),
+            json=body,
+        )
     assert response.status_code == 422
     assert message in str(response.json())
 

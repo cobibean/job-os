@@ -4,12 +4,18 @@ import logging
 import re
 import time
 from collections.abc import AsyncIterator
-from contextlib import suppress
-from typing import Literal, Protocol
+from contextlib import asynccontextmanager, suppress
+from typing import Literal, Protocol, cast
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from .agent_gateway import AgentContext, AgentGateway
+from .agent_gateway import (
+    AgentContext,
+    AgentGateway,
+    AmbiguousDeliveryError,
+    ConnectedAgentProvider,
+    GatewayEvent,
+)
 from .career_profile_context import CareerProfileContextStore
 from .conversation_store import ConversationStore
 from .redaction import safe_error_summary, sanitize_user_text
@@ -96,6 +102,7 @@ class ConversationService:
         store: ConversationStore | JobOsStateStore,
         gateway: AgentGateway,
         conversation_id: str | None = None,
+        profile_id: str | None = None,
         career_profile_principal: str | None = None,
         career_profile_context: CareerProfileContextStore | None = None,
         career_profile_agent_id: str | None = None,
@@ -104,6 +111,7 @@ class ConversationService:
             conversation_id = conversation_id or store.first_active_conversation_id()
             store = store.conversation_store(conversation_id)
         self.conversation_id = conversation_id or store.conversation_id
+        self.profile_id = profile_id
         self.store = store
         self.gateway = gateway
         self.career_profile_principal = career_profile_principal
@@ -114,7 +122,14 @@ class ConversationService:
         self._recovery_turn_id: str | None = None
         self._isolated_session_ids: set[str] = set()
         self._submission_lock = asyncio.Lock()
+        self._turn_scope_lock = asyncio.Lock()
         self._event_consumer_restart_delay = 1.0
+
+    @asynccontextmanager
+    async def turn_scope_lease(self) -> AsyncIterator[None]:
+        """Keep cancellation settlement outside an authorized MCP operation."""
+        async with self._turn_scope_lock:
+            yield
 
     def _restore_session_after_isolated_turn(self, turn_id: str) -> None:
         self.store.restore_isolated_agent_session(turn_id)
@@ -323,6 +338,10 @@ class ConversationService:
         return TurnMutationResponse(**created)
 
     async def cancel(self, turn_id: str) -> TurnMutationResponse | None:
+        async with self._turn_scope_lock:
+            return await self._cancel_under_lease(turn_id)
+
+    async def _cancel_under_lease(self, turn_id: str) -> TurnMutationResponse | None:
         initial = self.store.turn_record(turn_id)
         if initial is None:
             return None
@@ -428,6 +447,27 @@ class ConversationService:
             if context.get(FRESH_AGENT_SESSION_CONTEXT_KEY) is True:
                 self._isolated_session_ids.add(stored_id)
                 self.store.record_isolated_agent_session(turn_id, stored_id)
+        except AmbiguousDeliveryError as error:
+            logger.warning(
+                "Agent conversation attachment is ambiguous (%s, code=%s)",
+                type(error).__name__,
+                getattr(error, "code", None),
+            )
+            self._restore_session_after_isolated_turn(turn_id)
+            self._recovery_turn_id = turn_id
+            self.store.mark_recovery_turn(turn_id)
+            self.store.append_conversation_event(
+                turn_id=turn_id,
+                event_type="status",
+                state="waiting",
+                summary="Agent attachment outcome must be confirmed before retrying",
+                detail={"actionable": True, "recovery_pending": True, "retry": False},
+                source_event_id=f"ambiguous-attachment:{turn_id}",
+            )
+            self.store.transition_active_turn_status(
+                turn_id, "waiting", expected=("queued", "running", "waiting")
+            )
+            return
         except Exception as error:
             logger.warning(
                 "Agent conversation attachment failed (%s, code=%s)",
@@ -457,6 +497,7 @@ class ConversationService:
                 ):
                     return
                 selected_job = context.get("selected_job")
+                binding = self.store.binding()
                 await self.gateway.submit_turn(
                     str(turn["text"]),
                     AgentContext(
@@ -471,6 +512,28 @@ class ConversationService:
                         ),
                         career_profile=career_profile,
                         career_profile_context=career_profile_context,
+                        profile_id=self.profile_id,
+                        connected_agent_id=(
+                            str(binding["connected_agent_id"])
+                            if binding.get("connected_agent_id") is not None
+                            else None
+                        ),
+                        provider=(
+                            cast(ConnectedAgentProvider, binding["provider"])
+                            if binding.get("provider") in {"hermes", "codex"}
+                            else None
+                        ),
+                        model_id=(
+                            str(binding["model_id"])
+                            if binding.get("model_id") is not None
+                            else None
+                        ),
+                        reasoning_effort=(
+                            str(binding["reasoning_effort"])
+                            if binding.get("reasoning_effort") is not None
+                            else None
+                        ),
+                        permission_state={"scope": "global"},
                     ),
                 )
         except Exception as error:
@@ -498,11 +561,12 @@ class ConversationService:
                 state = event.detail.get("agent_connection")
                 if state in {"online", "connecting", "offline"}:
                     self.store.append_conversation_event(
-                        turn_id=None,
+                        turn_id=event.turn_id,
                         event_type="status",
                         state="working",
                         summary=f"Agent {state}",
-                        detail={"agent_connection": state},
+                        detail=self._event_detail(event, {"agent_connection": state}),
+                        source_event_id=event.source_event_id,
                     )
                 continue
             if event.event_type == "reconciliation":
@@ -515,6 +579,14 @@ class ConversationService:
                     continue
                 if isinstance(stored_session_id, str) and 0 < len(stored_session_id) <= 256:
                     self.store.save_stored_session_id(stored_session_id)
+                self.store.append_conversation_event(
+                    turn_id=event.turn_id,
+                    event_type="status",
+                    state="working",
+                    summary="Agent session reconciled",
+                    detail=self._event_detail(event, {}),
+                    source_event_id=event.source_event_id,
+                )
                 continue
             turn_id = event.turn_id
             if turn_id and self.store.turn_record(turn_id) is None:
@@ -528,7 +600,7 @@ class ConversationService:
                         status=event.state,
                         event_type=event.event_type,
                         summary=event.summary,
-                        detail={**event.detail, "activity_id": event.activity_id},
+                        detail=self._event_detail(event),
                         source_event_id=event.source_event_id,
                         career_profile_principal=self.career_profile_principal,
                         career_profile_context=self.career_profile_context,
@@ -546,7 +618,7 @@ class ConversationService:
                     event.state,
                     event_type=event.event_type,
                     summary=event.summary,
-                    detail={**event.detail, "activity_id": event.activity_id},
+                    detail=self._event_detail(event),
                     source_event_id=event.source_event_id,
                     quarantine=event.detail.get("reason") == "transport_lost",
                 )
@@ -563,7 +635,7 @@ class ConversationService:
                 event_type=event.event_type,
                 state=event.state,
                 summary=event.summary,
-                detail={**event.detail, "activity_id": event.activity_id},
+                detail=self._event_detail(event),
                 source_event_id=event.source_event_id,
                 continuation_ids=continuation_ids,
             )
@@ -583,6 +655,24 @@ class ConversationService:
                 and event.state == "working"
             ):
                 self.store.transition_active_turn_status(turn_id, "running", expected=("waiting",))
+
+    @staticmethod
+    def _event_detail(
+        event: GatewayEvent, detail: dict[str, object] | None = None
+    ) -> dict[str, object]:
+        safe = dict(event.detail if detail is None else detail)
+        if event.activity_id is not None:
+            safe["activity_id"] = event.activity_id
+        for key, value in (
+            ("normalized_kind", event.normalized_kind),
+            ("profile_id", event.profile_id),
+            ("conversation_id", event.conversation_id),
+            ("sequence", event.sequence),
+            ("timestamp", event.timestamp),
+        ):
+            if value is not None:
+                safe[key] = value
+        return safe
 
     async def _supervise_gateway_events(self) -> None:
         while True:

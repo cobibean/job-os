@@ -47,6 +47,15 @@ def event_row(row: sqlite3.Row) -> dict[str, object]:
             context=detail.get("context", {}),
             source_turn_id=detail.get("source_turn_id"),
         )
+    for key in (
+        "normalized_kind",
+        "profile_id",
+        "conversation_id",
+        "sequence",
+        "timestamp",
+    ):
+        if key in detail:
+            entry[key] = detail[key]
     return entry
 
 
@@ -87,6 +96,24 @@ class ConversationStore:
             "creation_state": row["creation_state"],
             "lock_reason": row["lock_reason"],
         }
+
+    def normalized_event_sequences(self) -> dict[str, int]:
+        """Return the durable high-water mark for each normalized turn trace."""
+        with connect_sqlite(f"file:{self._path}?mode=ro", uri=True) as connection:
+            rows = connection.execute(
+                "SELECT turn_id, detail_json FROM conversation_events "
+                "WHERE conversation_id = ? AND turn_id IS NOT NULL ORDER BY event_id",
+                (self.conversation_id,),
+            ).fetchall()
+        sequences: dict[str, int] = {}
+        for turn_id, detail_json in rows:
+            try:
+                sequence = json.loads(str(detail_json)).get("sequence")
+            except (AttributeError, TypeError, json.JSONDecodeError):
+                continue
+            if isinstance(turn_id, str) and isinstance(sequence, int) and sequence >= 0:
+                sequences[turn_id] = max(sequences.get(turn_id, 0), sequence)
+        return sequences
 
     def seal_legacy_binding(
         self,
