@@ -809,9 +809,7 @@ def test_machine_readable_receipts_pin_exact_baselines_without_unrun_claims():
     assert verification["credentials_recorded"] is False
     assert verification["raw_command_output_recorded"] is False
     empty_digest = hashlib.sha256(b"").hexdigest()
-    assert verification["checkout"]["code_snapshot_sha256"] == code_snapshot_sha256(
-        ref=verification["checkout"]["head_at_execution"]
-    )
+    assert verification["checkout"]["code_snapshot_sha256"] == code_snapshot_sha256()
     assert verification["checkout"]["staged_diff_sha256"] == empty_digest
     assert verification["checkout"]["working_diff_sha256"] == empty_digest
     assert verification["checkout"]["untracked_paths"] == []
