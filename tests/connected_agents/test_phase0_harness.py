@@ -21,6 +21,7 @@ from jobos_api.installation_profiles import InstallationProfileRegistryData
 from . import packaged_host, secret_scan
 from .build_profile_v31_fixture import build
 from .events import (
+    SUPPORTED_KINDS,
     EventTrace,
     EventTraceViolation,
     NormalizedEvent,
@@ -42,7 +43,14 @@ from .remote_device import (
     authorize_remote_device,
     load_remote_devices,
 )
-from .run_phase0_baseline import code_snapshot_sha256, isolated_environment, run_command
+from .run_phase0_baseline import (
+    checkout_is_clean,
+    code_snapshot_sha256,
+    installed_hermes_smoke,
+    isolated_environment,
+    loopback_base_url,
+    run_command,
+)
 from .secret_scan import (
     SecretCanaryDetected,
     SecretScanIncomplete,
@@ -74,8 +82,9 @@ def event(sequence: int, *, source: str | None = None, chat: str = "(FAKE)-chat-
     return NormalizedEvent(
         sequence=sequence,
         source_event_id=source or f"(FAKE)-source-{sequence}",
+        timestamp=f"2026-08-01T12:00:{sequence:02d}Z",
         profile_id="jprof_11111111111111111111111111111111",
-        chat_id=chat,
+        conversation_id=chat,
         turn_id="(FAKE)-turn-a",
         kind=kinds[sequence],  # type: ignore[arg-type]
         payload={"text": "(FAKE) synthetic"} if sequence == 2 else {},
@@ -190,9 +199,10 @@ def test_exact_sqlite_snapshot_detects_deliberate_migration_corruption(tmp_path:
 
 
 def test_event_trace_detects_duplicate_out_of_order_and_cross_chat_leakage():
+    assert {"connection_changed", "recovery_required"} <= SUPPORTED_KINDS
     duplicate = EventTrace(
         profile_id=event(1).profile_id,
-        chat_id=event(1).chat_id,
+        conversation_id=event(1).conversation_id,
         turn_id=event(1).turn_id,
     )
     duplicate.append(event(1, source="(FAKE)-duplicate"))
@@ -201,7 +211,7 @@ def test_event_trace_detects_duplicate_out_of_order_and_cross_chat_leakage():
 
     out_of_order = EventTrace(
         profile_id=event(1).profile_id,
-        chat_id=event(1).chat_id,
+        conversation_id=event(1).conversation_id,
         turn_id=event(1).turn_id,
     )
     with pytest.raises(EventTraceViolation, match="event_sequence_out_of_order"):
@@ -209,7 +219,7 @@ def test_event_trace_detects_duplicate_out_of_order_and_cross_chat_leakage():
 
     scoped = EventTrace(
         profile_id=event(1).profile_id,
-        chat_id=event(1).chat_id,
+        conversation_id=event(1).conversation_id,
         turn_id=event(1).turn_id,
     )
     with pytest.raises(EventTraceViolation, match="event_scope_mismatch"):
@@ -217,13 +227,23 @@ def test_event_trace_detects_duplicate_out_of_order_and_cross_chat_leakage():
 
     unknown = EventTrace(
         profile_id=event(1).profile_id,
-        chat_id=event(1).chat_id,
+        conversation_id=event(1).conversation_id,
         turn_id=event(1).turn_id,
     )
     unsupported = event(1)
     object.__setattr__(unsupported, "kind", "(FAKE)-future-event")
     with pytest.raises(EventTraceViolation, match="unsupported_event_kind"):
         unknown.append(unsupported)
+
+    invalid_timestamp = EventTrace(
+        profile_id=event(1).profile_id,
+        conversation_id=event(1).conversation_id,
+        turn_id=event(1).turn_id,
+    )
+    malformed = event(1)
+    object.__setattr__(malformed, "timestamp", "(FAKE)-not-a-timestamp")
+    with pytest.raises(EventTraceViolation, match="event_timestamp_invalid"):
+        invalid_timestamp.append(malformed)
 
 
 def test_event_trace_requires_one_terminal_and_isolates_source_ids():
@@ -244,7 +264,7 @@ def test_event_trace_requires_one_terminal_and_isolates_source_ids():
     second = provider.complete_turn(second_binding)
     first_expected = TraceExpectation(
         profile_id=first_binding.profile_id,
-        chat_id=first_binding.chat_id,
+        conversation_id=first_binding.chat_id,
         turn_id=first_binding.turn_id,
         agent_id=first_binding.agent_id,
         session_id=provider.session_id(first_binding),
@@ -253,7 +273,7 @@ def test_event_trace_requires_one_terminal_and_isolates_source_ids():
     )
     second_expected = TraceExpectation(
         profile_id=second_binding.profile_id,
-        chat_id=second_binding.chat_id,
+        conversation_id=second_binding.chat_id,
         turn_id=second_binding.turn_id,
         agent_id=second_binding.agent_id,
         session_id=provider.session_id(second_binding),
@@ -263,7 +283,7 @@ def test_event_trace_requires_one_terminal_and_isolates_source_ids():
     assert_trace_isolation(((first, first_expected), (second, second_expected)))
     reused_session = TraceExpectation(
         profile_id=second_expected.profile_id,
-        chat_id=second_expected.chat_id,
+        conversation_id=second_expected.conversation_id,
         turn_id=second_expected.turn_id,
         agent_id=second_expected.agent_id,
         session_id=first_expected.session_id,
@@ -272,7 +292,7 @@ def test_event_trace_requires_one_terminal_and_isolates_source_ids():
     )
     reused_session_trace = EventTrace(
         profile_id=second_binding.profile_id,
-        chat_id=second_binding.chat_id,
+        conversation_id=second_binding.chat_id,
         turn_id=second_binding.turn_id,
     )
     for event in second.events:
@@ -283,8 +303,9 @@ def test_event_trace_requires_one_terminal_and_isolates_source_ids():
             NormalizedEvent(
                 sequence=event.sequence,
                 source_event_id=f"{event.source_event_id}-shared-session",
+                timestamp=event.timestamp,
                 profile_id=event.profile_id,
-                chat_id=event.chat_id,
+                conversation_id=event.conversation_id,
                 turn_id=event.turn_id,
                 kind=event.kind,
                 payload=payload,
@@ -302,8 +323,9 @@ def test_event_trace_requires_one_terminal_and_isolates_source_ids():
             NormalizedEvent(
                 sequence=4,
                 source_event_id="(FAKE)-late-event",
+                timestamp="2026-08-01T12:00:04Z",
                 profile_id=first.events[0].profile_id,
-                chat_id=first.events[0].chat_id,
+                conversation_id=first.events[0].conversation_id,
                 turn_id=first.events[0].turn_id,
                 kind="turn_failed",
                 payload={},
@@ -438,6 +460,96 @@ def test_secret_scanner_shares_archive_expansion_budget_across_nested_members(
     with pytest.raises(SecretScanIncomplete) as caught:
         scan_secret_canaries(nested)
     assert "archive_expansion_limit" in {issue.reason for issue in caught.value.issues}
+
+
+def test_secret_scanner_bounds_top_level_files_and_shared_archive_budget(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    oversized = tmp_path / "oversized.bin"
+    oversized.write_bytes(b"x" * 11)
+    monkeypatch.setattr(secret_scan, "MAX_EVIDENCE_FILE_BYTES", 10)
+    with pytest.raises(SecretScanIncomplete, match="evidence_file_too_large"):
+        scan_secret_canaries(oversized)
+
+    evidence = tmp_path / "collection"
+    evidence.mkdir()
+    monkeypatch.setattr(secret_scan, "MAX_EVIDENCE_FILE_BYTES", 10_000)
+    monkeypatch.setattr(secret_scan, "MAX_EVIDENCE_TOTAL_BYTES", 15)
+    (evidence / "first.txt").write_bytes(b"a" * 10)
+    (evidence / "second.txt").write_bytes(b"b" * 10)
+    with pytest.raises(SecretScanIncomplete, match="evidence_total_limit"):
+        scan_secret_canaries(evidence)
+
+    monkeypatch.setattr(secret_scan, "MAX_EVIDENCE_FILES", 1)
+    with pytest.raises(SecretScanIncomplete, match="evidence_file_count_limit"):
+        scan_secret_canaries(evidence)
+    monkeypatch.setattr(secret_scan, "MAX_EVIDENCE_FILES", 10_000)
+
+    archive_collection = tmp_path / "archive-collection"
+    archive_collection.mkdir()
+    monkeypatch.setattr(secret_scan, "MAX_EVIDENCE_TOTAL_BYTES", 100_000)
+    monkeypatch.setattr(secret_scan, "MAX_ARCHIVE_TOTAL_BYTES", 1_000)
+    monkeypatch.setattr(secret_scan, "MAX_MEMBER_BYTES", 900)
+    for name in ("first.zip", "second.zip"):
+        with zipfile.ZipFile(archive_collection / name, "w", zipfile.ZIP_DEFLATED) as archive:
+            archive.writestr("payload.txt", b"x" * 700)
+    with pytest.raises(SecretScanIncomplete, match="archive_expansion_limit"):
+        scan_secret_canaries(archive_collection)
+
+
+def test_installed_smoke_rejects_non_loopback_and_never_bootstraps_registry(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    assert loopback_base_url({"host": "127.0.0.1", "port": 8766}) == "http://127.0.0.1:8766"
+    assert loopback_base_url({"host": "::1", "port": 8766}) == "http://[::1]:8766"
+    with pytest.raises(ValueError, match="installed_runtime_not_loopback"):
+        loopback_base_url({"host": "203.0.113.10", "port": 8766})
+
+    from jobos_api import local_config
+
+    credential_path = tmp_path / "credentials.json"
+    credential_path.write_text(
+        json.dumps({"deviceToken": "(FAKE)-device", "mcpToken": "(FAKE)-mcp"}),
+        encoding="utf-8",
+    )
+    credential_path.chmod(0o600)
+    (tmp_path / "config.json").write_text(
+        json.dumps(
+            {
+                "schemaVersion": 1,
+                "deviceId": "(FAKE)-device",
+                "credentialStore": {"provider": "file", "path": "credentials.json"},
+            }
+        ),
+        encoding="utf-8",
+    )
+    (tmp_path / "service").mkdir()
+    (tmp_path / "service/runtime.json").write_text(
+        json.dumps({"host": "127.0.0.1", "port": 8766}), encoding="utf-8"
+    )
+    monkeypatch.setattr(local_config, "default_data_dir", lambda: tmp_path)
+
+    result = installed_hermes_smoke()
+    assert result["result"] == "failed"
+    assert result["mutation_performed"] is False
+    assert not (tmp_path / "installation-profiles.json").exists()
+    assert not (tmp_path / "installation-profiles.lock").exists()
+
+
+def test_phase0_receipt_fails_closed_for_dirty_checkout():
+    empty = hashlib.sha256(b"").hexdigest()
+    clean = {
+        "staged_diff_sha256": empty,
+        "working_diff_sha256": empty,
+        "untracked_paths": [],
+    }
+    assert checkout_is_clean(clean)
+    for dirty in (
+        {**clean, "staged_diff_sha256": hashlib.sha256(b"staged").hexdigest()},
+        {**clean, "working_diff_sha256": hashlib.sha256(b"working").hexdigest()},
+        {**clean, "untracked_paths": ["(FAKE)-untracked"]},
+    ):
+        assert not checkout_is_clean(dirty)
 
 
 def test_baseline_command_timeout_is_bounded_and_fail_closed(tmp_path: Path):

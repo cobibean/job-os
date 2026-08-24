@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import ipaddress
 import json
 import os
 import platform
@@ -181,20 +182,51 @@ def run_command(
     }
 
 
+def loopback_base_url(runtime: object) -> str:
+    if not isinstance(runtime, dict):
+        raise ValueError("installed_runtime_invalid")
+    host = runtime.get("host")
+    port = runtime.get("port")
+    if not isinstance(host, str):
+        raise ValueError("installed_runtime_not_loopback")
+    try:
+        address = ipaddress.ip_address(host)
+    except ValueError as error:
+        raise ValueError("installed_runtime_not_loopback") from error
+    if not address.is_loopback:
+        raise ValueError("installed_runtime_not_loopback")
+    if isinstance(port, bool) or not isinstance(port, int) or not 1 <= port <= 65535:
+        raise ValueError("installed_runtime_port_invalid")
+    host_literal = f"[{host}]" if address.version == 6 else host
+    return f"http://{host_literal}:{port}"
+
+
+def checkout_is_clean(checkout: dict[str, object]) -> bool:
+    empty_digest = hashlib.sha256(b"").hexdigest()
+    return (
+        checkout.get("staged_diff_sha256") == empty_digest
+        and checkout.get("working_diff_sha256") == empty_digest
+        and checkout.get("untracked_paths") == []
+    )
+
+
 def installed_hermes_smoke() -> dict[str, object]:
     """Read only the installed control's safe health and conversation state."""
 
     try:
         import httpx
-        from jobos_api.local_config import default_data_dir, settings_from_config
+        from jobos_api.installation_profiles import InstallationProfileRegistry
+        from jobos_api.local_config import default_data_dir, load_credentials, read_config
 
         data_dir = default_data_dir()
-        settings = settings_from_config(data_dir / "config.json")
+        config = read_config(data_dir / "config.json")
         runtime = json.loads((data_dir / "service/runtime.json").read_text(encoding="utf-8"))
-        base_url = f"http://{runtime['host']}:{runtime['port']}"
+        base_url = loopback_base_url(runtime)
+        registry = InstallationProfileRegistry(data_dir / "installation-profiles.json").load()
+        device_token, _ = load_credentials(config, data_dir)
         headers = {
-            "Authorization": f"Bearer {settings.device_token}",
-            "X-JobOS-Profile-Id": settings.installation_profile_id,
+            "Authorization": f"Bearer {device_token}",
+            "X-JobOS-Profile-Id": registry.active_profile_id,
         }
         health_response = httpx.get(f"{base_url}/v1/health", headers=headers, timeout=5)
         conversations_response = httpx.get(
@@ -265,13 +297,14 @@ def main() -> int:
     ]
     environment = isolated_environment()
     commands = [run_command(item["command"], environment) for item in selected]
+    checkout = checkout_receipt(args.output)
     receipt = {
         "schema_version": 1,
         "acceptance_phase": 0,
         "acceptance_ids": ["REG-01"],
         "executed_at": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
         "source_baseline_commit": manifest["source"]["commit"],
-        "checkout": checkout_receipt(args.output),
+        "checkout": checkout,
         "environment": {
             "platform": f"{platform.system()} {platform.machine()}",
             "node": _version(["node", "--version"], environment),
@@ -281,7 +314,8 @@ def main() -> int:
         },
         "commands": commands,
         "installed_hermes_control": installed_hermes_smoke() if args.installed_smoke else None,
-        "all_passed": all(item["result"] == "passed" for item in commands),
+        "all_passed": checkout_is_clean(checkout)
+        and all(item["result"] == "passed" for item in commands),
         "credentials_recorded": False,
         "raw_command_output_recorded": False,
     }

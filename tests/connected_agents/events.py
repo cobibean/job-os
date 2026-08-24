@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Literal
 
 EventKind = Literal[
@@ -17,8 +18,8 @@ EventKind = Literal[
     "turn_completed",
     "turn_cancelled",
     "turn_failed",
-    "connection_state",
-    "recovery_state",
+    "connection_changed",
+    "recovery_required",
 ]
 TERMINAL_KINDS = frozenset({"turn_completed", "turn_cancelled", "turn_failed"})
 SUPPORTED_KINDS = frozenset(EventKind.__args__)
@@ -36,8 +37,9 @@ class EventTraceViolation(AssertionError):
 class NormalizedEvent:
     sequence: int
     source_event_id: str
+    timestamp: str
     profile_id: str
-    chat_id: str
+    conversation_id: str
     turn_id: str
     kind: EventKind
     payload: dict[str, object]
@@ -46,7 +48,7 @@ class NormalizedEvent:
 @dataclass(frozen=True)
 class TraceExpectation:
     profile_id: str
-    chat_id: str
+    conversation_id: str
     turn_id: str
     agent_id: str
     session_id: str
@@ -57,8 +59,8 @@ class TraceExpectation:
 class EventTrace:
     """Collect one scoped turn while enforcing ordering and terminal integrity."""
 
-    def __init__(self, *, profile_id: str, chat_id: str, turn_id: str) -> None:
-        self._scope = (profile_id, chat_id, turn_id)
+    def __init__(self, *, profile_id: str, conversation_id: str, turn_id: str) -> None:
+        self._scope = (profile_id, conversation_id, turn_id)
         self._events: list[NormalizedEvent] = []
         self._source_ids: set[str] = set()
         self._terminal = False
@@ -68,8 +70,14 @@ class EventTrace:
         return tuple(self._events)
 
     def append(self, event: NormalizedEvent) -> None:
-        if (event.profile_id, event.chat_id, event.turn_id) != self._scope:
+        if (event.profile_id, event.conversation_id, event.turn_id) != self._scope:
             raise EventTraceViolation("event_scope_mismatch")
+        try:
+            parsed_timestamp = datetime.fromisoformat(event.timestamp.replace("Z", "+00:00"))
+        except (TypeError, ValueError) as error:
+            raise EventTraceViolation("event_timestamp_invalid") from error
+        if parsed_timestamp.tzinfo is None:
+            raise EventTraceViolation("event_timestamp_invalid")
         if event.kind not in SUPPORTED_KINDS:
             raise EventTraceViolation("unsupported_event_kind")
         if event.source_event_id in self._source_ids:
@@ -102,9 +110,9 @@ def assert_trace_isolation(
     for trace, expected in traces:
         trace.assert_complete()
         for event in trace.events:
-            if (event.profile_id, event.chat_id, event.turn_id) != (
+            if (event.profile_id, event.conversation_id, event.turn_id) != (
                 expected.profile_id,
-                expected.chat_id,
+                expected.conversation_id,
                 expected.turn_id,
             ):
                 raise EventTraceViolation("cross_trace_binding_mismatch")
@@ -113,7 +121,7 @@ def assert_trace_isolation(
             raise EventTraceViolation("cross_trace_agent_mismatch")
         if started.payload.get("session_id") != expected.session_id:
             raise EventTraceViolation("cross_trace_session_mismatch")
-        owner = (expected.profile_id, expected.chat_id)
+        owner = (expected.profile_id, expected.conversation_id)
         existing_owner = session_owners.setdefault(expected.session_id, owner)
         if existing_owner != owner:
             raise EventTraceViolation("cross_trace_session_reuse")

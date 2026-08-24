@@ -30,7 +30,7 @@ class DeterministicFakeProvider:
     def complete_turn(self, binding: FakeBinding, text: str | None = None) -> EventTrace:
         trace = EventTrace(
             profile_id=binding.profile_id,
-            chat_id=binding.chat_id,
+            conversation_id=binding.chat_id,
             turn_id=binding.turn_id,
         )
         kinds_and_payloads = (
@@ -54,8 +54,9 @@ class DeterministicFakeProvider:
                 NormalizedEvent(
                     sequence=sequence,
                     source_event_id=f"{self.session_id(binding)}:{binding.turn_id}:{sequence}",
+                    timestamp=f"2026-08-01T12:00:{sequence:02d}Z",
                     profile_id=binding.profile_id,
-                    chat_id=binding.chat_id,
+                    conversation_id=binding.chat_id,
                     turn_id=binding.turn_id,
                     kind=kind,  # type: ignore[arg-type]
                     payload=payload,

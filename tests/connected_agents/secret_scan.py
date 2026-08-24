@@ -14,6 +14,9 @@ from pathlib import Path, PurePosixPath
 MAX_ARCHIVE_DEPTH = 4
 MAX_MEMBER_BYTES = 16 * 1024 * 1024
 MAX_ARCHIVE_TOTAL_BYTES = 64 * 1024 * 1024
+MAX_EVIDENCE_FILE_BYTES = 64 * 1024 * 1024
+MAX_EVIDENCE_TOTAL_BYTES = 128 * 1024 * 1024
+MAX_EVIDENCE_FILES = 10_000
 SQLITE_MAGIC = b"SQLite format 3\x00"
 ZIP_MAGIC = (b"PK\x03\x04", b"PK\x05\x06", b"PK\x07\x08")
 SQLITE_SUFFIXES = (".db", ".sqlite", ".sqlite3")
@@ -278,23 +281,49 @@ def _scan_paths(
         return (), (SecretScanIssue(root.name or ".", "root", "symbolic_link_rejected"),)
     if not root.exists():
         return (), (SecretScanIssue(root.name or ".", "root", "evidence_root_missing"),)
-    paths = (
-        [root]
-        if root.is_file()
-        else sorted(path for path in root.rglob("*") if path.is_file() or path.is_symlink())
-    )
+    if root.is_file():
+        paths = [root]
+    else:
+        paths = []
+        for path in root.rglob("*"):
+            if not (path.is_file() or path.is_symlink()):
+                continue
+            paths.append(path)
+            if len(paths) > MAX_EVIDENCE_FILES:
+                return (), (
+                    SecretScanIssue(root.name or ".", "root", "evidence_file_count_limit"),
+                )
+        paths.sort()
     findings: list[SecretFinding] = []
     issues: list[SecretScanIssue] = []
+    remaining_evidence_bytes = [MAX_EVIDENCE_TOTAL_BYTES]
+    remaining_archive_bytes = [MAX_ARCHIVE_TOTAL_BYTES]
     for path in paths:
         display_path = path.name if root.is_file() else str(path.relative_to(root))
         if path.is_symlink():
             issues.append(SecretScanIssue(display_path, "raw", "symbolic_link_rejected"))
             continue
         try:
-            data = path.read_bytes()
+            file_size = path.stat().st_size
         except OSError:
             issues.append(SecretScanIssue(display_path, "raw", "file_unreadable"))
             continue
+        if file_size > MAX_EVIDENCE_FILE_BYTES:
+            issues.append(SecretScanIssue(display_path, "raw", "evidence_file_too_large"))
+            continue
+        try:
+            with path.open("rb") as source:
+                data = source.read(MAX_EVIDENCE_FILE_BYTES + 1)
+        except OSError:
+            issues.append(SecretScanIssue(display_path, "raw", "file_unreadable"))
+            continue
+        if len(data) > MAX_EVIDENCE_FILE_BYTES:
+            issues.append(SecretScanIssue(display_path, "raw", "evidence_file_too_large"))
+            continue
+        if len(data) > remaining_evidence_bytes[0]:
+            issues.append(SecretScanIssue(display_path, "raw", "evidence_total_limit"))
+            continue
+        remaining_evidence_bytes[0] -= len(data)
         findings.extend(
             _scan_bytes(
                 data,
@@ -302,7 +331,7 @@ def _scan_paths(
                 canaries=canaries,
                 depth=0,
                 issues=issues,
-                remaining_bytes=[MAX_ARCHIVE_TOTAL_BYTES],
+                remaining_bytes=remaining_archive_bytes,
             )
         )
         sqlite_expected = path.name.casefold().endswith(SQLITE_SUFFIXES)
