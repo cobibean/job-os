@@ -13,7 +13,16 @@ JobOS is an open-source, **agent-native**, local-first desktop workspace that ke
   <img alt="Status: alpha" src="https://img.shields.io/badge/status-alpha-orange">
 </p>
 
-![JobOS Review workbench with the fictional Northstar Kites Demo job selected](docs/media/screenshots/jobos-hero-1440x1024.png)
+<table>
+  <tr>
+    <td width="50%"><img src="docs/media/screenshots/jobos-research-workbench-1920x1080.png" alt="JobOS research workbench with a live browser and an agent comparing application narratives"></td>
+    <td width="50%"><img src="docs/media/screenshots/jobos-review-resume-1920x1080.png" alt="JobOS Review workspace with an applied-role list, resume preview, and agent guidance"></td>
+  </tr>
+  <tr>
+    <td width="50%"><img src="docs/media/screenshots/jobos-agent-focus-1920x1080.png" alt="JobOS Agent Focus workspace tailoring a resume and cover letter for a selected role"></td>
+    <td width="50%"><img src="docs/media/screenshots/jobos-browse-swipe-1920x1080.png" alt="JobOS Browse workspace showing the swipe interface for reviewing saved jobs"></td>
+  </tr>
+</table>
 
 <details>
 <summary>▶ Watch the 10-second walkthrough</summary>
@@ -217,7 +226,3 @@ This table is intentionally conservative: clean-home source acceptance does not 
 JobOS is licensed under the [Apache License 2.0](LICENSE). Attribution and redistribution details are in [NOTICE](NOTICE) and [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
 The two GenOffice-derived DOCX packages keep their own `LICENSE`, `NOTICE`, and `UPSTREAM.md` files, including the pinned upstream source and a summary of JobOS modifications.
-
----
-
-<sub>The preview above uses only fictional starter data and a checksum-pinned `(FAKE)` DOCX fixture. Optional agent and artifact-refresh integrations stay unavailable unless you explicitly configure them.</sub>
