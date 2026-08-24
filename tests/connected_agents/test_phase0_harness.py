@@ -509,6 +509,15 @@ def test_secret_scanner_bounds_top_level_files_and_shared_archive_budget(
     with pytest.raises(SecretScanIncomplete, match="evidence_file_count_limit"):
         scan_secret_canaries(concatenated_gzip)
 
+    monkeypatch.setattr(secret_scan, "MAX_EVIDENCE_FILES", 10)
+    ambiguous_gzip = tmp_path / "concatenated-canary.gz"
+    ambiguous_gzip.write_bytes(
+        gzip.compress(b"(FAKE)-safe-first-member")
+        + gzip.compress(phase0_canaries()[0].value.encode())
+    )
+    with pytest.raises(SecretScanIncomplete, match="concatenated_gzip_rejected"):
+        scan_secret_canaries(ambiguous_gzip)
+
 
 def test_installed_smoke_rejects_non_loopback_and_never_bootstraps_registry(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
