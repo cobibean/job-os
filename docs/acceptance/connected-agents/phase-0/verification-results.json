@@ -5,10 +5,10 @@
   "acceptance_phase": 0,
   "all_passed": true,
   "checkout": {
-    "code_snapshot_sha256": "c4d453c1666141a75fbc48ce2b10bea9793f80f15c833a03dcace19b1275d838",
-    "head_at_execution": "c4d1099821d00a85d2638094745ad6a76ba8c6ca",
-    "head_tree_at_execution": "2069bdc5e7d884b9ce655a28fe2178ea148ea2eb",
-    "index_tree_at_execution": "2069bdc5e7d884b9ce655a28fe2178ea148ea2eb",
+    "code_snapshot_sha256": "5913a02aa76a152cbcb8ae683f45cfa5e4f873436795e545502f542719d29fb4",
+    "head_at_execution": "36365762f974aeabab7f8c8109a0b002bbb2431d",
+    "head_tree_at_execution": "1c4cf23a1745746129c85e72e7f6de10a1f7185a",
+    "index_tree_at_execution": "1c4cf23a1745746129c85e72e7f6de10a1f7185a",
     "snapshot_excludes": "docs/acceptance/connected-agents/phase-0/verification-results.json",
     "staged_diff_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
     "untracked_paths": [],
@@ -17,9 +17,9 @@
   "commands": [
     {
       "command": "uv run pytest services/api/tests/test_hermes_adapter.py services/api/tests/test_agent_contract.py",
-      "duration_seconds": 3.341,
+      "duration_seconds": 3.268,
       "exit_code": 0,
-      "output_sha256": "f8deaecac8fcb5c4c7296438c245dece810873a65d41680fd52ae9729dbb952f",
+      "output_sha256": "1f4a85d4b6a5d93ba331fab992e569c1feb988f731548f8e932494e9d4ae7978",
       "result": "passed",
       "test_counts": {
         "passed": 118
@@ -27,9 +27,9 @@
     },
     {
       "command": "uv run pytest services/api/tests/test_state_store.py services/api/tests/test_activity.py",
-      "duration_seconds": 0.802,
+      "duration_seconds": 0.997,
       "exit_code": 0,
-      "output_sha256": "eede1b98d2ce9f6e6726855a6e0bfb21b2d3e1e8c9058b40f6dd946fdafb9fb2",
+      "output_sha256": "36516eb2d2d409ce3c822f37a4aa5016e277a1b242150cbf190f85aefe4b57b3",
       "result": "passed",
       "test_counts": {
         "passed": 123
@@ -37,9 +37,9 @@
     },
     {
       "command": "uv run pytest services/api/tests/test_jobs_contract.py services/api/tests/test_sqlite_job_repository.py",
-      "duration_seconds": 9.487,
+      "duration_seconds": 9.389,
       "exit_code": 0,
-      "output_sha256": "899a51e398a35c690145f5325c77029e2aea3711ac35ea6c1bc27804cd1330c4",
+      "output_sha256": "09c7c52dd70cb1b58d6c6111646f8cf8206531811f21262eb2bd0cfb4fc2a687",
       "result": "passed",
       "test_counts": {
         "passed": 151
@@ -47,9 +47,9 @@
     },
     {
       "command": "uv run pytest services/api/tests/test_career_profile_product_api.py services/api/tests/test_career_profile_store.py",
-      "duration_seconds": 1.427,
+      "duration_seconds": 1.391,
       "exit_code": 0,
-      "output_sha256": "6862b3ea4c5fcd94f918570ea13f68b232ecfd954e60b74fe96a756b89875ca6",
+      "output_sha256": "580e033c78537793d6fdf6110b630f2be9045a8f970085a6a473718372189a6d",
       "result": "passed",
       "test_counts": {
         "passed": 33
@@ -57,9 +57,9 @@
     },
     {
       "command": "uv run pytest services/api/tests/test_browser_capability.py",
-      "duration_seconds": 1.479,
+      "duration_seconds": 1.501,
       "exit_code": 0,
-      "output_sha256": "d7072a351c3e42f5d282a9fc5bd2a942d21c83b7582ef3fb0eb745b4be8d3d6e",
+      "output_sha256": "827a47dd11a9124e3e8fe02f02b0a104d2aec3484aed2618f315a40b571b15de",
       "result": "passed",
       "test_counts": {
         "passed": 18
@@ -67,9 +67,9 @@
     },
     {
       "command": "uv run pytest services/api/tests/test_editable_documents.py services/api/tests/test_document_files.py",
-      "duration_seconds": 0.683,
+      "duration_seconds": 0.693,
       "exit_code": 0,
-      "output_sha256": "552b7e7a2e0da03b6871eecc4c65fd704047b0aecdda1aa9420d9d09c0422ef5",
+      "output_sha256": "bde957966517062c0cdf189b5fcc2b1893ff10af13fe9b9cd94c33788b492b77",
       "result": "passed",
       "test_counts": {
         "passed": 16
@@ -77,7 +77,7 @@
     },
     {
       "command": "uv run pytest services/api/tests/test_installation_profile_api.py services/api/tests/test_installation_profile_isolation.py",
-      "duration_seconds": 1.044,
+      "duration_seconds": 1.042,
       "exit_code": 0,
       "output_sha256": "6d5e3bb44e587deb63f7fc27d0bdcf7ab7b691854f1f6465c434cbf90567b997",
       "result": "passed",
@@ -87,9 +87,9 @@
     },
     {
       "command": "pnpm --filter @jobos/desktop test:macbook-update",
-      "duration_seconds": 0.266,
+      "duration_seconds": 0.259,
       "exit_code": 0,
-      "output_sha256": "e066373e11315f0bc28a84798c5e1a3c3f6cbb77c921dccb68c9caba6b799284",
+      "output_sha256": "78bdf40f892ce2fc770e881d6f796c341467690faeeea35969e7d0b7e6587757",
       "result": "passed",
       "test_counts": {
         "node_fail": 0,
@@ -98,9 +98,9 @@
     },
     {
       "command": "pnpm check",
-      "duration_seconds": 53.931,
+      "duration_seconds": 57.396,
       "exit_code": 0,
-      "output_sha256": "c11886278a34b4da959c9bcfc552b7be36faaf9ce6b00771ed8460bf98b2c1ef",
+      "output_sha256": "9e5a012771b5f90a0babafbec3d52003b0bf49971ea6bb7ffb18501a20534b37",
       "result": "passed",
       "test_counts": {
         "node_fail": 0,
@@ -111,17 +111,17 @@
     },
     {
       "command": "pnpm contracts:check",
-      "duration_seconds": 1.426,
+      "duration_seconds": 1.513,
       "exit_code": 0,
-      "output_sha256": "7c61547f8a07489d3af0b3ec5c63d8919f7a13b767e5f93da8f7699dc1f71649",
+      "output_sha256": "5919dfaa627558ae80d8d324db0d3d9e322535c00995590bd12abda8fb431b15",
       "result": "passed",
       "test_counts": {}
     },
     {
       "command": "pnpm public:smoke-clean-clone",
-      "duration_seconds": 43.913,
+      "duration_seconds": 38.858,
       "exit_code": 0,
-      "output_sha256": "17d2ae4a00b83f22f394ddf94d59295b86750645bdfb9c06322ef20be3b4a550",
+      "output_sha256": "ca5f3c08b5662821abf99ec3a2f748bc0650c05407a5bb9889cdd26322bc3c36",
       "result": "passed",
       "test_counts": {}
     }
@@ -134,7 +134,7 @@
     "python": "3.11.15",
     "uv": "uv 0.11.29 (Homebrew 2026-07-15 aarch64-apple-darwin)"
   },
-  "executed_at": "2026-08-24T13:46:18.775178Z",
+  "executed_at": "2026-08-24T14:01:33.159125Z",
   "installed_hermes_control": {
     "active_turn_count": 0,
     "agent_status": "online",
