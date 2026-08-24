@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "registry_revision": 7,
+  "active_profile_id": "jprof_11111111111111111111111111111111",
+  "profiles": [
+    {
+      "profile_id": "jprof_11111111111111111111111111111111",
+      "display_name": "(FAKE) Existing Profile",
+      "storage_mode": "anchored",
+      "created_at": "2026-08-01T12:00:00Z",
+      "updated_at": "2026-08-02T12:00:00Z",
+      "anchored_runtime": {
+        "job_provider": "sqlite",
+        "artifact_provider": "local",
+        "state_db_path": "/tmp/(FAKE)-jobos/profile/state.db",
+        "jobs_db_path": "/tmp/(FAKE)-jobos/profile/jobs.db",
+        "local_artifact_root": "/tmp/(FAKE)-jobos/profile/artifacts",
+        "job_hunter_db_path": null,
+        "facade_source_path": null,
+        "artifact_roots": []
+      }
+    }
+  ],
+  "pending_switch": null,
+  "last_switch": null,
+  "idempotency_replays": []
+}

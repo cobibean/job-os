@@ -1,0 +1,156 @@
+{
+  "acceptance_ids": [
+    "REG-01"
+  ],
+  "acceptance_phase": 0,
+  "all_passed": true,
+  "checkout": {
+    "code_snapshot_sha256": "3f5cf405edbb6529577c865576fbd5c7033ad614d975b5e7d84bd8610432d285",
+    "head_at_execution": "6ee5ffb79a646491aa7222e27d8ed7f4235259c3",
+    "head_tree_at_execution": "ae7bb9c8f847387372e20678824b4a380993ab4b",
+    "index_tree_at_execution": "ae7bb9c8f847387372e20678824b4a380993ab4b",
+    "snapshot_excludes": "docs/acceptance/connected-agents/phase-0/verification-results.json",
+    "staged_diff_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "untracked_paths": [],
+    "working_diff_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "commands": [
+    {
+      "command": "uv run pytest services/api/tests/test_hermes_adapter.py services/api/tests/test_agent_contract.py",
+      "duration_seconds": 3.261,
+      "exit_code": 0,
+      "output_sha256": "9103b7aca8585099e51fddfe836a31dfc77add4ad34d3ccf22af49d8cb049f0e",
+      "result": "passed",
+      "test_counts": {
+        "passed": 118
+      }
+    },
+    {
+      "command": "uv run pytest services/api/tests/test_state_store.py services/api/tests/test_activity.py",
+      "duration_seconds": 0.795,
+      "exit_code": 0,
+      "output_sha256": "eede1b98d2ce9f6e6726855a6e0bfb21b2d3e1e8c9058b40f6dd946fdafb9fb2",
+      "result": "passed",
+      "test_counts": {
+        "passed": 123
+      }
+    },
+    {
+      "command": "uv run pytest services/api/tests/test_jobs_contract.py services/api/tests/test_sqlite_job_repository.py",
+      "duration_seconds": 9.594,
+      "exit_code": 0,
+      "output_sha256": "b21784189a88be1ca341fd1f29a39bb22fc4a036099150faf49ff4c948b51a1d",
+      "result": "passed",
+      "test_counts": {
+        "passed": 151
+      }
+    },
+    {
+      "command": "uv run pytest services/api/tests/test_career_profile_product_api.py services/api/tests/test_career_profile_store.py",
+      "duration_seconds": 1.441,
+      "exit_code": 0,
+      "output_sha256": "c47af23c0af3c19c159e0b2f5ba137b9b0ff8f78e52fb955e74092a1f8ced476",
+      "result": "passed",
+      "test_counts": {
+        "passed": 33
+      }
+    },
+    {
+      "command": "uv run pytest services/api/tests/test_browser_capability.py",
+      "duration_seconds": 1.512,
+      "exit_code": 0,
+      "output_sha256": "d719422d108f9bb6cf879f8e454c65cb972fb3175b88dcccfea8ccbedf91ba2d",
+      "result": "passed",
+      "test_counts": {
+        "passed": 18
+      }
+    },
+    {
+      "command": "uv run pytest services/api/tests/test_editable_documents.py services/api/tests/test_document_files.py",
+      "duration_seconds": 0.699,
+      "exit_code": 0,
+      "output_sha256": "cbf7ec62962e1324d2c52527e1cdcd2aab2cbc8ccd307394568bf67633df5b74",
+      "result": "passed",
+      "test_counts": {
+        "passed": 16
+      }
+    },
+    {
+      "command": "uv run pytest services/api/tests/test_installation_profile_api.py services/api/tests/test_installation_profile_isolation.py",
+      "duration_seconds": 1.102,
+      "exit_code": 0,
+      "output_sha256": "a5443cec231c5d6977533b6d50b6644c0313d4f3a92507a6772598c46e92e3da",
+      "result": "passed",
+      "test_counts": {
+        "passed": 7
+      }
+    },
+    {
+      "command": "pnpm --filter @jobos/desktop test:macbook-update",
+      "duration_seconds": 0.272,
+      "exit_code": 0,
+      "output_sha256": "0898432917b315ea3b67485a1a265e649a342678b91f6804145b8f4a4ce2195c",
+      "result": "passed",
+      "test_counts": {
+        "node_fail": 0,
+        "node_pass": 10
+      }
+    },
+    {
+      "command": "pnpm check",
+      "duration_seconds": 56.491,
+      "exit_code": 0,
+      "output_sha256": "cc0e7567a462659e0361c7995e0b56e60c5aa954cf21f6f666fa381749ad5c1c",
+      "result": "passed",
+      "test_counts": {
+        "node_fail": 0,
+        "node_pass": 10,
+        "passed": 1532,
+        "skipped": 5
+      }
+    },
+    {
+      "command": "pnpm contracts:check",
+      "duration_seconds": 1.49,
+      "exit_code": 0,
+      "output_sha256": "c4ead87e96b85ee0da52601c16d78f2b1c0c84b3849af3c53c497c76e062a10f",
+      "result": "passed",
+      "test_counts": {}
+    },
+    {
+      "command": "pnpm public:smoke-clean-clone",
+      "duration_seconds": 39.665,
+      "exit_code": 0,
+      "output_sha256": "1a1a307cc83c2935fc2e5da6d81ce2ced689b217abc1c58cff6b76c60e45a49e",
+      "result": "passed",
+      "test_counts": {}
+    }
+  ],
+  "credentials_recorded": false,
+  "environment": {
+    "node": "v26.5.0",
+    "platform": "Darwin arm64",
+    "pnpm": "10.33.1",
+    "python": "3.11.15",
+    "uv": "uv 0.11.29 (Homebrew 2026-07-15 aarch64-apple-darwin)"
+  },
+  "executed_at": "2026-08-24T15:18:46.329634Z",
+  "installed_hermes_control": {
+    "active_turn_count": 0,
+    "agent_status": "online",
+    "all_recovery_ready": true,
+    "conversation_count": 2,
+    "conversations_status": 200,
+    "health_status": 200,
+    "installed_app_running": true,
+    "mode": "authenticated_read_only",
+    "mutation_performed": false,
+    "result": "passed",
+    "service_status": "ready",
+    "state_schema": 31,
+    "transport": "local-loopback"
+  },
+  "raw_command_output_recorded": false,
+  "schema_version": 1,
+  "source_baseline_commit": "ee664f0fc59d61d67c2ba567657af93047133049"
+}
