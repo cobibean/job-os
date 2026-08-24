@@ -7,7 +7,7 @@ import sqlite3
 import tempfile
 from pathlib import Path
 
-from jobos_api.state_store import SCHEMA_VERSION, JobOsStateStore
+from jobos_api import state_store
 
 PROFILE_ID = "jprof_11111111111111111111111111111111"
 FIXED_TIME = "2026-08-01T12:00:00Z"
@@ -36,11 +36,11 @@ def _foreign_key_safe_dump(connection: sqlite3.Connection) -> str:
 
 
 def build(output: Path) -> None:
-    if SCHEMA_VERSION != 31:
+    if state_store.SCHEMA_VERSION != 31:
         raise RuntimeError("the pre-feature fixture generator must remain pinned to schema v31")
     with tempfile.TemporaryDirectory(prefix="jobos-(FAKE)-profile-v31-") as temporary:
         database = Path(temporary) / "profile.db"
-        JobOsStateStore(database).initialize(
+        state_store.JobOsStateStore(database).initialize(
             owner_device_id="(FAKE)-authorized-macbook",
             installation_profile_id=PROFILE_ID,
         )

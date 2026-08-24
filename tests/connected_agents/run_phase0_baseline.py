@@ -33,17 +33,32 @@ def _git(*arguments: str) -> str:
     return result.stdout.strip()
 
 
-def code_snapshot_sha256(excluded: Path = DEFAULT_OUTPUT) -> str:
-    """Hash current tracked contents while excluding the self-referential receipt."""
+def code_snapshot_sha256(
+    excluded: Path = DEFAULT_OUTPUT, *, ref: str | None = None
+) -> str:
+    """Hash tracked contents at the live checkout or an immutable recorded ref."""
 
     excluded_relative = str(excluded.resolve().relative_to(ROOT))
-    tracked = _git("ls-files", "-z").split("\0")
+    tracked = (
+        _git("ls-files", "-z").split("\0")
+        if ref is None
+        else _git("ls-tree", "-r", "--name-only", "-z", ref).split("\0")
+    )
     digest = hashlib.sha256()
     for relative_path in sorted(path for path in tracked if path and path != excluded_relative):
-        path = ROOT / relative_path
         digest.update(relative_path.encode())
         digest.update(b"\0")
-        digest.update(path.read_bytes() if path.is_file() else b"(missing)")
+        if ref is None:
+            path = ROOT / relative_path
+            content = path.read_bytes() if path.is_file() else b"(missing)"
+        else:
+            content = subprocess.run(
+                ["git", "show", f"{ref}:{relative_path}"],
+                cwd=ROOT,
+                check=True,
+                capture_output=True,
+            ).stdout
+        digest.update(content)
         digest.update(b"\0")
     return digest.hexdigest()
 

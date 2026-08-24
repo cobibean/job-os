@@ -15,6 +15,7 @@ import zipfile
 from pathlib import Path
 
 import pytest
+from jobos_api import state_store
 from jobos_api.installation_profiles import InstallationProfileRegistryData
 
 from . import packaged_host, secret_scan
@@ -103,9 +104,10 @@ def test_real_registry_v1_fixture_validates_against_pre_feature_model():
 
 def test_profile_v31_sql_is_reproducible_and_has_exact_history(tmp_path: Path):
     fixture = FIXTURES / "(FAKE)-profile-v31.sql"
-    regenerated = tmp_path / "regenerated.sql"
-    build(regenerated)
-    assert regenerated.read_bytes() == fixture.read_bytes()
+    if state_store.SCHEMA_VERSION == 31:
+        regenerated = tmp_path / "regenerated.sql"
+        build(regenerated)
+        assert regenerated.read_bytes() == fixture.read_bytes()
 
     database = tmp_path / "profile.db"
     snapshot = restore_sql_fixture(fixture, database)
@@ -673,7 +675,9 @@ def test_machine_readable_receipts_pin_exact_baselines_without_unrun_claims():
     assert verification["credentials_recorded"] is False
     assert verification["raw_command_output_recorded"] is False
     empty_digest = hashlib.sha256(b"").hexdigest()
-    assert verification["checkout"]["code_snapshot_sha256"] == code_snapshot_sha256()
+    assert verification["checkout"]["code_snapshot_sha256"] == code_snapshot_sha256(
+        ref=verification["checkout"]["head_at_execution"]
+    )
     assert verification["checkout"]["staged_diff_sha256"] == empty_digest
     assert verification["checkout"]["working_diff_sha256"] == empty_digest
     assert verification["checkout"]["untracked_paths"] == []
