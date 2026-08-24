@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import gzip
 import hashlib
 import io
 import json
@@ -236,6 +237,37 @@ def test_event_trace_requires_one_terminal_and_isolates_source_ids():
         forbidden_payload_canaries=(first_binding.profile_id,),
     )
     assert_trace_isolation(((first, first_expected), (second, second_expected)))
+    reused_session = TraceExpectation(
+        profile_id=second_expected.profile_id,
+        chat_id=second_expected.chat_id,
+        turn_id=second_expected.turn_id,
+        agent_id=second_expected.agent_id,
+        session_id=first_expected.session_id,
+        payload_canary=second_expected.payload_canary,
+        forbidden_payload_canaries=second_expected.forbidden_payload_canaries,
+    )
+    reused_session_trace = EventTrace(
+        profile_id=second_binding.profile_id,
+        chat_id=second_binding.chat_id,
+        turn_id=second_binding.turn_id,
+    )
+    for event in second.events:
+        payload = dict(event.payload)
+        if event.kind == "turn_started":
+            payload["session_id"] = first_expected.session_id
+        reused_session_trace.append(
+            NormalizedEvent(
+                sequence=event.sequence,
+                source_event_id=f"{event.source_event_id}-shared-session",
+                profile_id=event.profile_id,
+                chat_id=event.chat_id,
+                turn_id=event.turn_id,
+                kind=event.kind,
+                payload=payload,
+            )
+        )
+    with pytest.raises(EventTraceViolation, match="cross_trace_session_reuse"):
+        assert_trace_isolation(((first, first_expected), (reused_session_trace, reused_session)))
     with pytest.raises(EventTraceViolation, match="cross_trace_binding_mismatch"):
         assert_trace_isolation(((first, second_expected), (second, first_expected)))
     leaked = provider.complete_turn(first_binding, text=f"leaked:{second_binding.profile_id}")
@@ -325,6 +357,15 @@ def test_secret_scanner_fails_closed_on_oversized_and_malformed_archives(tmp_pat
         "archive_member_too_large"
     }
 
+    oversized_gzip = tmp_path / "oversized.gz"
+    with gzip.open(oversized_gzip, "wb") as archive:
+        archive.write(b"x" * (MAX_ARCHIVE_TEST_BYTES + 1))
+    with pytest.raises(SecretScanIncomplete) as oversized_gzip_error:
+        scan_secret_canaries(oversized_gzip)
+    assert {issue.reason for issue in oversized_gzip_error.value.issues} == {
+        "archive_member_too_large"
+    }
+
     malformed = tmp_path / "malformed.zip"
     malformed.write_bytes(b"PK\x03\x04(FAKE)-truncated")
     with pytest.raises(SecretScanIncomplete) as malformed_error:
@@ -400,20 +441,25 @@ def test_packaged_host_environment_isolated_and_inherited_auth_stripped(
     assert result.listener_audit_seconds >= MIN_LISTENER_AUDIT_SECONDS
 
 
-@pytest.mark.skipif(shutil.which("lsof") is None, reason="macOS packaged-host audit needs lsof")
-def test_packaged_host_runner_detects_real_unexpected_listener(tmp_path: Path):
+@pytest.mark.skipif(
+    shutil.which("lsof") is None or shutil.which("sandbox-exec") is None,
+    reason="macOS packaged-host network confinement needs lsof and sandbox-exec",
+)
+def test_packaged_host_runner_continuously_blocks_transient_listener(tmp_path: Path):
     ready = tmp_path / "listener-ready"
     script = (
         "import pathlib,socket,time; "
         "listener=socket.socket(); "
-        "listener.bind(('127.0.0.1',0)); "
-        "listener.listen(); "
-        f"pathlib.Path({str(ready)!r}).write_text('ready'); "
-        "time.sleep(1)"
+        "status='escaped'; "
+        "\ntry: listener.bind(('127.0.0.1',0)); listener.listen()"
+        "\nexcept PermissionError: status='blocked'"
+        f"\npathlib.Path({str(ready)!r}).write_text(status); "
+        "time.sleep(0.1)"
     )
-    with pytest.raises(PackagedHostError, match="unexpected_listener_opened"):
-        run_packaged_host([sys.executable, "-c", script], root=tmp_path, timeout=2)
-    assert ready.read_text(encoding="utf-8") == "ready"
+    result = run_packaged_host([sys.executable, "-c", script], root=tmp_path, timeout=2)
+    assert ready.read_text(encoding="utf-8") == "blocked"
+    assert result.network_isolation == "sandbox-exec-deny-network"
+    assert result.listeners == ()
 
 
 @pytest.mark.skipif(shutil.which("lsof") is None, reason="macOS packaged-host audit needs lsof")

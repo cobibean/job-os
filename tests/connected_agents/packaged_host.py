@@ -7,6 +7,7 @@ import re
 import shutil
 import signal
 import subprocess
+import sys
 import time
 from contextlib import suppress
 from dataclasses import dataclass
@@ -33,6 +34,7 @@ class PackagedHostResult:
     listeners: tuple[str, ...]
     listener_audit_count: int
     listener_audit_seconds: float
+    network_isolation: str
 
 
 def isolated_host_environment(root: Path) -> dict[str, str]:
@@ -114,6 +116,18 @@ def _terminate_group(process: subprocess.Popen[str]) -> None:
         process.wait(timeout=2)
 
 
+def _network_confined_command(
+    command: list[str], *, allowed_listeners: tuple[str, ...]
+) -> tuple[list[str], str]:
+    """Continuously deny networking on macOS when the proof permits no listeners."""
+
+    sandbox_exec = shutil.which("sandbox-exec")
+    if sys.platform == "darwin" and sandbox_exec and not allowed_listeners:
+        profile = "(version 1) (allow default) (deny network*)"
+        return [sandbox_exec, "-p", profile, *command], "sandbox-exec-deny-network"
+    return command, "listener-audit-only"
+
+
 def run_packaged_host(
     command: list[str],
     *,
@@ -122,8 +136,11 @@ def run_packaged_host(
     allowed_listeners: tuple[str, ...] = (),
 ) -> PackagedHostResult:
     environment = isolated_host_environment(root)
+    confined_command, network_isolation = _network_confined_command(
+        command, allowed_listeners=allowed_listeners
+    )
     process = subprocess.Popen(
-        command,
+        confined_command,
         env=environment,
         stdin=subprocess.DEVNULL,
         stdout=subprocess.PIPE,
@@ -173,4 +190,5 @@ def run_packaged_host(
         listeners=tuple(sorted(observed)),
         listener_audit_count=listener_audit_count,
         listener_audit_seconds=listener_audit_seconds,
+        network_isolation=network_isolation,
     )

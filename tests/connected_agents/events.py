@@ -95,6 +95,7 @@ def assert_trace_isolation(
     """Prove bindings, payload canaries, and provider event IDs stay isolated."""
 
     seen_source_ids: set[str] = set()
+    session_owners: dict[str, tuple[str, str]] = {}
     for trace, expected in traces:
         trace.assert_complete()
         for event in trace.events:
@@ -109,6 +110,10 @@ def assert_trace_isolation(
             raise EventTraceViolation("cross_trace_agent_mismatch")
         if started.payload.get("session_id") != expected.session_id:
             raise EventTraceViolation("cross_trace_session_mismatch")
+        owner = (expected.profile_id, expected.chat_id)
+        existing_owner = session_owners.setdefault(expected.session_id, owner)
+        if existing_owner != owner:
+            raise EventTraceViolation("cross_trace_session_reuse")
         payload = json.dumps(
             [event.payload for event in trace.events], sort_keys=True, separators=(",", ":")
         )

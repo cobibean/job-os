@@ -205,7 +205,8 @@ def _scan_bytes(
                 issues.append(SecretScanIssue(display_path, "tar", "malformed_archive"))
                 return findings
         try:
-            expanded = gzip.decompress(data)
+            with gzip.GzipFile(fileobj=io.BytesIO(data), mode="rb") as archive:
+                expanded = archive.read(MAX_MEMBER_BYTES + 1)
         except (OSError, EOFError, gzip.BadGzipFile):
             issues.append(SecretScanIssue(display_path, "gzip", "malformed_archive"))
             return findings
