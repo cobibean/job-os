@@ -148,6 +148,10 @@ def settings_from_config(path: Path) -> Settings:
     registry_path = data_dir / "installation-profiles.json"
     registry = InstallationProfileRegistry(registry_path)
     registry_data = registry.load_or_bootstrap(base_runtime)
+    if registry_data.connected_agent_migration is not None:
+        registry_data = registry.resume_connected_agent_migration(
+            base_runtime, owner_device_id=str(config["deviceId"])
+        )
     active = next(
         profile
         for profile in registry_data.profiles

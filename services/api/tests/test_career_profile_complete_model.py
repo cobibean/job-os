@@ -1274,7 +1274,7 @@ def test_schema_migration_adds_complete_model_tables_without_activating_profile(
     database = tmp_path / "jobos.db"
     health = JobOsStateStore(database).initialize(owner_device_id="primary-device")
 
-    assert health.schema_version == SCHEMA_VERSION == 31
+    assert health.schema_version == SCHEMA_VERSION == 32
     with sqlite3.connect(database) as connection:
         tables = {
             row[0]

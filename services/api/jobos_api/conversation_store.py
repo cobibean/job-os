@@ -73,6 +73,58 @@ class ConversationStore:
         value = row["stored_session_id"]
         return str(value) if value else None
 
+    def binding(self) -> dict[str, object]:
+        with connect_sqlite(f"file:{self._path}?mode=ro", uri=True) as connection:
+            row = self._require_active(connection)
+        return {
+            "connected_agent_id": row["connected_agent_id"],
+            "provider": row["provider"],
+            "model_id": row["model_id"],
+            "reasoning_effort": row["reasoning_effort"],
+            "binding_state": row["binding_state"],
+            "provider_session_id": row["stored_session_id"],
+            "connection_account_fingerprint": row["connection_account_fingerprint"],
+            "creation_state": row["creation_state"],
+            "lock_reason": row["lock_reason"],
+        }
+
+    def seal_legacy_binding(
+        self,
+        *,
+        expected_connected_agent_id: str,
+        expected_provider_session_id: str,
+        model_id: str,
+        reasoning_effort: str,
+    ) -> bool:
+        if not model_id or len(model_id) > 256:
+            raise ValueError("model_id must contain between 1 and 256 characters")
+        if not reasoning_effort or len(reasoning_effort) > 64:
+            raise ValueError("reasoning_effort must contain between 1 and 64 characters")
+        with connect_sqlite(self._path) as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            cursor = connection.execute(
+                """
+                UPDATE conversations
+                SET model_id = ?, reasoning_effort = ?, binding_state = 'sealed',
+                    creation_state = 'ready', lock_reason = NULL,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE conversation_id = ? AND connected_agent_id = ?
+                  AND provider = 'hermes'
+                  AND stored_session_id = ?
+                  AND binding_state = 'legacy_awaiting_resolution'
+                  AND model_id IS NULL AND reasoning_effort IS NULL
+                """,
+                (
+                    model_id,
+                    reasoning_effort,
+                    self.conversation_id,
+                    expected_connected_agent_id,
+                    expected_provider_session_id,
+                ),
+            )
+            connection.commit()
+        return cursor.rowcount == 1
+
     def save_stored_session_id(self, value: str | None) -> None:
         with connect_sqlite(self._path) as connection:
             cursor = connection.execute(
@@ -191,7 +243,20 @@ class ConversationStore:
         target = f"conversation/{self.conversation_id}"
         with connect_sqlite(self._path) as connection:
             connection.execute("BEGIN IMMEDIATE")
-            self._require_active(connection)
+            conversation = self._require_active(connection)
+            is_legacy_compatibility_chat = (
+                conversation["connected_agent_id"] is None
+                and conversation["creation_state"] == "locked"
+                and conversation["lock_reason"] is None
+            )
+            if not is_legacy_compatibility_chat and (
+                conversation["creation_state"] != "ready"
+                or conversation["lock_reason"] is not None
+            ):
+                connection.rollback()
+                raise ConversationBusy(
+                    str(conversation["lock_reason"] or "Connected Agent provisioning is incomplete")
+                )
             prior = connection.execute(
                 "SELECT request_hash, result_json FROM job_events WHERE actor_id = ? AND target_resource = ? AND command_name = ? AND idempotency_key = ?",
                 (actor_id, target, command, idempotency_key),
@@ -254,12 +319,9 @@ class ConversationStore:
                     bound_snapshot = get_snapshot_in_connection(
                         connection, str(snapshot_id), principal=career_profile_principal
                     )
-                    if (
-                        bound_snapshot.profile_revision != int(revision)
-                        or not secrets.compare_digest(
-                            bound_snapshot.content_hash, str(content_hash)
-                        )
-                    ):
+                    if bound_snapshot.profile_revision != int(
+                        revision
+                    ) or not secrets.compare_digest(bound_snapshot.content_hash, str(content_hash)):
                         connection.rollback()
                         raise RuntimeError("Source turn Career Profile binding is invalid")
             bound_context_snapshot: CareerProfileContextSnapshot | None = None
@@ -297,33 +359,26 @@ class ConversationStore:
                         raise RuntimeError(
                             "Source turn has no valid Career Profile context binding"
                         )
-                    if not secrets.compare_digest(
-                        str(context_agent_id), career_profile_agent_id
-                    ):
+                    if not secrets.compare_digest(str(context_agent_id), career_profile_agent_id):
                         connection.rollback()
                         raise RuntimeError(
                             "Source turn Career Profile context belongs to another agent"
                         )
-                    bound_context_snapshot = (
-                        career_profile_context.get_snapshot_in_connection(
-                            connection,
-                            str(context_snapshot_id),
-                            agent_id=career_profile_agent_id,
-                        )
+                    bound_context_snapshot = career_profile_context.get_snapshot_in_connection(
+                        connection,
+                        str(context_snapshot_id),
+                        agent_id=career_profile_agent_id,
                     )
                     if (
                         bound_context_snapshot.profile_revision != int(context_revision)
-                        or bound_context_snapshot.authority_epoch
-                        != int(context_authority_epoch)
+                        or bound_context_snapshot.authority_epoch != int(context_authority_epoch)
                         or not secrets.compare_digest(
                             bound_context_snapshot.content_hash,
                             str(context_content_hash),
                         )
                     ):
                         connection.rollback()
-                        raise RuntimeError(
-                            "Source turn Career Profile context binding is invalid"
-                        )
+                        raise RuntimeError("Source turn Career Profile context binding is invalid")
             safe_context = redact_detail(context)
             safe_context.pop("redacted", None)
             public_context = dict(safe_context)
@@ -353,16 +408,8 @@ class ConversationStore:
                     bound_snapshot.content_hash if bound_snapshot else None,
                     bound_context_snapshot.snapshot_id if bound_context_snapshot else None,
                     bound_context_snapshot.agent_id if bound_context_snapshot else None,
-                    (
-                        bound_context_snapshot.profile_revision
-                        if bound_context_snapshot
-                        else None
-                    ),
-                    (
-                        bound_context_snapshot.authority_epoch
-                        if bound_context_snapshot
-                        else None
-                    ),
+                    (bound_context_snapshot.profile_revision if bound_context_snapshot else None),
+                    (bound_context_snapshot.authority_epoch if bound_context_snapshot else None),
                     bound_context_snapshot.content_hash if bound_context_snapshot else None,
                 ),
             )
@@ -536,9 +583,9 @@ class ConversationStore:
                 snapshot = get_snapshot_in_connection(
                     connection, str(legacy_binding[0]), principal=career_profile_principal
                 )
-                if snapshot.profile_revision != int(legacy_binding[1]) or not secrets.compare_digest(
-                    snapshot.content_hash, str(legacy_binding[2])
-                ):
+                if snapshot.profile_revision != int(
+                    legacy_binding[1]
+                ) or not secrets.compare_digest(snapshot.content_hash, str(legacy_binding[2])):
                     connection.rollback()
                     return False
             if career_profile_context is not None:
@@ -556,9 +603,7 @@ class ConversationStore:
                 if any(value is None for value in context_binding):
                     connection.rollback()
                     return False
-                if not secrets.compare_digest(
-                    str(context_binding[1]), career_profile_agent_id
-                ):
+                if not secrets.compare_digest(str(context_binding[1]), career_profile_agent_id):
                     connection.rollback()
                     return False
                 context_snapshot = career_profile_context.get_snapshot_in_connection(

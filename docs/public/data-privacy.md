@@ -27,18 +27,26 @@ The accepted public composition will store:
 
 ### Shared installation, isolated lives
 
-The installation-level JobOS Profile registry contains only opaque identifiers,
-display names, timestamps, active/switch status, and—in the one adopted profile—
-validated storage configuration needed to leave existing data in place. It never
-contains credentials, job content, documents, conversations, or Career Profile
-values. Managed JobOS Profiles have physically separate databases, artifacts,
-Evidence, browser/renderer partitions, and DOCX client state.
+The installation-level JobOS Profile registry contains opaque identifiers,
+display names, timestamps, active/switch status, non-secret Connected Agent
+metadata, opaque credential references, profile default-agent references, and—in
+the one adopted profile—validated storage configuration needed to leave existing
+data in place. It never contains raw credentials, job content, documents,
+conversations, provider session references, or Career Profile values. Managed
+JobOS Profiles have physically separate databases, artifacts, Evidence,
+browser/renderer partitions, and DOCX client state.
 
 Agent endpoint, credential, and identity setup is an installation-owned
 **agent connection**. Trust mode, grants, scopes, proposals, edit history, and
 stored sessions are profile-owned **agent access**. A new JobOS Profile begins in
 review mode without grants or a prior session. Removing access from one profile
 does not remove the installation connection or mutate another profile.
+
+Connected Agent credential references must use the bounded `vault_ref_…` pointer
+format. Tokens, device codes, passwords, cookies, authorization headers, and URL
+userinfo are rejected rather than serialized. Disconnect removes the connection
+configuration and credential reference while preserving the non-secret identity
+and readable chat history.
 
 JobOS can guarantee that it does not send, resume, or expose another JobOS
 Profile's data. It cannot guarantee that an external connected agent has forgotten

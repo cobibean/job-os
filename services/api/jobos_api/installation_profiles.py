@@ -13,16 +13,63 @@ from datetime import UTC, datetime
 from pathlib import Path
 from threading import Lock
 from typing import Literal
+from urllib.parse import urlsplit
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 from jobos_api.artifact_repository import ArtifactStorageError, open_directory_chain
 
 PROFILE_ID_PATTERN = re.compile(r"^jprof_[a-f0-9]{32}$")
+CONNECTED_AGENT_ID_PATTERN = re.compile(r"^jagent_[a-f0-9]{32}$")
+CONNECTED_AGENT_MIGRATION_ID_PATTERN = re.compile(r"^jagentmig_[a-f0-9]{32}$")
 SWITCH_ID_PATTERN = re.compile(r"^jpswitch_[a-f0-9]{32}$")
 MAX_PROFILES = 32
+MAX_CONNECTED_AGENTS = 64
 MAX_REGISTRY_BYTES = 1024 * 1024
 MAX_IDEMPOTENCY_REPLAYS = 256
+SECRET_MATERIAL_PATTERN = re.compile(
+    r"(?:oauth[-_ ]?(?:access|refresh)[-_ ]?token|api[-_ ]?key|client[-_ ]?secret|"
+    r"authorization|bearer\s+|password|cookie|device[-_ ]?code|"
+    r"(?:sk|ghp|github_pat|xox[baprs])[-_][A-Za-z0-9])",
+    re.IGNORECASE,
+)
+
+
+def legacy_connected_agent_id(anchored_profile_id: str) -> str:
+    return "jagent_" + hashlib.sha256(
+        f"jobos-legacy-hermes-v1\0{anchored_profile_id}".encode()
+    ).hexdigest()[:32]
+
+
+def connected_agent_migration_id(anchored_profile_id: str) -> str:
+    return "jagentmig_" + hashlib.sha256(
+        f"jobos-connected-agents-v1-to-v2\0{anchored_profile_id}".encode()
+    ).hexdigest()[:32]
+
+
+def codex_account_fingerprint(opaque_account_id: str) -> str:
+    if (
+        not opaque_account_id
+        or len(opaque_account_id) > 512
+        or any(unicodedata.category(character).startswith("C") for character in opaque_account_id)
+    ):
+        raise ValueError("Codex opaque account identifier is invalid")
+    return hashlib.sha256(f"codex-account-v1\0{opaque_account_id}".encode()).hexdigest()
+
+
+def _reject_secret_material(value: object) -> None:
+    if isinstance(value, str):
+        if SECRET_MATERIAL_PATTERN.search(value):
+            raise ValueError("Connected Agent registry contains secret-bearing data")
+        return
+    if isinstance(value, dict):
+        for key, item in value.items():
+            _reject_secret_material(key)
+            _reject_secret_material(item)
+        return
+    if isinstance(value, (list, tuple)):
+        for item in value:
+            _reject_secret_material(item)
 
 
 class InstallationProfileError(RuntimeError):
@@ -63,6 +110,10 @@ def new_profile_id() -> str:
 
 def new_switch_id() -> str:
     return f"jpswitch_{secrets.token_hex(16)}"
+
+
+def new_connected_agent_id() -> str:
+    return f"jagent_{secrets.token_hex(16)}"
 
 
 def validate_profile_id(value: str) -> str:
@@ -158,6 +209,7 @@ class InstallationProfileRecord(StrictModel):
     created_at: datetime
     updated_at: datetime
     anchored_runtime: AnchoredRuntime | None = None
+    default_connected_agent_id: str | None = Field(default=None, pattern=r"^jagent_[a-f0-9]{32}$")
 
     @model_validator(mode="after")
     def validate_record(self) -> InstallationProfileRecord:
@@ -197,7 +249,15 @@ class CompletedProfileSwitch(StrictModel):
 
 
 class PersistentIdempotencyReplay(StrictModel):
-    operation: Literal["create", "rename", "activate"]
+    operation: Literal[
+        "create",
+        "rename",
+        "activate",
+        "agent_create",
+        "agent_update",
+        "agent_disconnect",
+        "profile_default_agent",
+    ]
     key_hash: str = Field(pattern=r"^[a-f0-9]{64}$")
     request_hash: str = Field(pattern=r"^[a-f0-9]{64}$")
     response_json: str = Field(max_length=MAX_REGISTRY_BYTES)
@@ -207,11 +267,132 @@ class PersistentIdempotencyReplay(StrictModel):
     )
 
 
+class HermesConnectionConfiguration(StrictModel):
+    endpoint_url: str = Field(min_length=1, max_length=512)
+    runtime_profile: str | None = Field(default=None, pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
+
+    @model_validator(mode="after")
+    def validate_endpoint(self) -> HermesConnectionConfiguration:
+        parsed = urlsplit(self.endpoint_url)
+        if (
+            parsed.scheme not in {"http", "https"}
+            or not parsed.hostname
+            or parsed.username is not None
+            or parsed.password is not None
+            or parsed.path not in {"", "/"}
+            or parsed.query
+            or parsed.fragment
+        ):
+            raise ValueError("Hermes endpoint URL contains unsupported or secret-bearing data")
+        return self
+
+
+class CodexConnectionConfiguration(StrictModel):
+    runtime_namespace: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
+
+
+class ConnectedAgentRecord(StrictModel):
+    id: str = Field(pattern=r"^jagent_[a-f0-9]{32}$")
+    provider: Literal["hermes", "codex"]
+    display_name: str = Field(min_length=1, max_length=120)
+    avatar_id: str = Field(pattern=r"^[a-z][a-z0-9_-]{0,63}$")
+    default_model_id: str | None = Field(default=None, min_length=1, max_length=256)
+    default_reasoning_effort: str | None = Field(default=None, min_length=1, max_length=64)
+    lifecycle: Literal["connected", "disconnected"]
+    connection_config: HermesConnectionConfiguration | CodexConnectionConfiguration | None = None
+    credential_reference: str | None = Field(
+        default=None,
+        pattern=r"^vault_ref_[A-Za-z0-9._:-]{1,246}$",
+    )
+    account_summary: dict[str, str] | None = None
+    account_fingerprint: str | None = Field(default=None, pattern=r"^[a-f0-9]{64}$")
+    created_at: datetime
+    updated_at: datetime
+    disconnected_at: datetime | None = None
+
+    @model_validator(mode="after")
+    def validate_agent(self) -> ConnectedAgentRecord:
+        if not self.display_name.strip() or any(
+            unicodedata.category(character).startswith("C") for character in self.display_name
+        ):
+            raise ValueError("Connected Agent display name is invalid")
+        if self.connection_config is not None and (
+            (
+                self.provider == "hermes"
+                and not isinstance(self.connection_config, HermesConnectionConfiguration)
+            )
+            or (
+                self.provider == "codex"
+                and not isinstance(self.connection_config, CodexConnectionConfiguration)
+            )
+        ):
+            raise ValueError("Connected Agent provider configuration is inconsistent")
+        if (self.default_model_id is None) != (self.default_reasoning_effort is None):
+            raise ValueError("Connected Agent defaults require model and reasoning effort")
+        allowed_account_summary_keys = {"display_name", "plan_name", "account_hint"}
+        secret_markers = (
+            "token",
+            "secret",
+            "password",
+            "authorization",
+            "cookie",
+            "device-code",
+            "device_code",
+        )
+        for label, value, maximum in (("account summary", self.account_summary, 8),):
+            if value is not None and (
+                len(value) > maximum
+                or any(
+                    not key
+                    or key not in allowed_account_summary_keys
+                    or len(key) > 64
+                    or not item
+                    or len(item) > 512
+                    or any(character in item for character in "\r\n\0")
+                    or any(secret in key.casefold() for secret in secret_markers)
+                    or any(secret in item.casefold() for secret in secret_markers)
+                    for key, item in value.items()
+                )
+            ):
+                raise ValueError(f"Connected Agent {label} is invalid")
+        if self.credential_reference and any(
+            character in self.credential_reference for character in "\r\n\0"
+        ):
+            raise ValueError("Connected Agent credential reference is invalid")
+        if self.lifecycle == "disconnected":
+            if self.connection_config is not None or self.credential_reference is not None:
+                raise ValueError("Disconnected Connected Agent retains connection material")
+            if self.disconnected_at is None:
+                raise ValueError("Disconnected Connected Agent has no timestamp")
+        elif self.disconnected_at is not None:
+            raise ValueError("Connected Connected Agent has a disconnected timestamp")
+        if self.updated_at < self.created_at:
+            raise ValueError("Connected Agent timestamps are inconsistent")
+        return self
+
+
+class ConnectedAgentProfileMigration(StrictModel):
+    profile_id: str = Field(pattern=r"^jprof_[a-f0-9]{32}$")
+    status: Literal["pending", "sqlite_complete", "complete"]
+
+
+class ConnectedAgentMigrationJournal(StrictModel):
+    migration_id: str = Field(pattern=r"^jagentmig_[a-f0-9]{32}$")
+    connected_agent_id: str = Field(pattern=r"^jagent_[a-f0-9]{32}$")
+    profiles: tuple[ConnectedAgentProfileMigration, ...]
+    created_at: datetime
+    updated_at: datetime
+
+
 class InstallationProfileRegistryData(StrictModel):
-    schema_version: Literal[1] = 1
+    # Version 1 remains parseable so the offline upgrade can validate it before
+    # atomically writing version 2. New/bootstrap data always uses version 2.
+    schema_version: Literal[1, 2] = 2
     registry_revision: int = Field(ge=1)
     active_profile_id: str = Field(pattern=r"^jprof_[a-f0-9]{32}$")
     profiles: tuple[InstallationProfileRecord, ...]
+    connected_agents: tuple[ConnectedAgentRecord, ...] = ()
+    connected_agent_migration: ConnectedAgentMigrationJournal | None = None
     pending_switch: PendingProfileSwitch | None = None
     last_switch: CompletedProfileSwitch | None = None
     idempotency_replays: tuple[PersistentIdempotencyReplay, ...] = ()
@@ -229,11 +410,59 @@ class InstallationProfileRegistryData(StrictModel):
         anchored = [profile for profile in self.profiles if profile.storage_mode == "anchored"]
         if len(anchored) != 1:
             raise ValueError("registry must contain exactly one anchored JobOS Profile")
+        if len(self.connected_agents) > MAX_CONNECTED_AGENTS:
+            raise ValueError("registry contains too many Connected Agents")
+        agent_ids = [agent.id for agent in self.connected_agents]
+        if len(agent_ids) != len(set(agent_ids)):
+            raise ValueError("registry Connected Agent identifiers are inconsistent")
+        for agent in self.connected_agents:
+            _reject_secret_material(agent.model_dump(mode="json"))
+        for replay in self.idempotency_replays:
+            if replay.operation.startswith("agent_"):
+                _reject_secret_material(replay.response_json)
+        if sum(agent.provider == "codex" for agent in self.connected_agents) > 1:
+            raise ValueError("registry may contain only one durable Codex identity")
+        if any(
+            profile.default_connected_agent_id is not None
+            and profile.default_connected_agent_id not in agent_ids
+            for profile in self.profiles
+        ):
+            raise ValueError("registry profile default Connected Agent is missing")
+        if self.schema_version == 1 and (
+            self.connected_agents
+            or self.connected_agent_migration is not None
+            or any(profile.default_connected_agent_id is not None for profile in self.profiles)
+        ):
+            raise ValueError("registry v1 contains Connected Agent data")
+        if self.connected_agent_migration is not None:
+            journal = self.connected_agent_migration
+            anchored_profile_id = anchored[0].profile_id
+            expected_agent_id = legacy_connected_agent_id(anchored_profile_id)
+            expected_migration_id = connected_agent_migration_id(anchored_profile_id)
+            migration_agent = next(
+                (
+                    agent
+                    for agent in self.connected_agents
+                    if agent.id == journal.connected_agent_id
+                ),
+                None,
+            )
+            if (
+                journal.connected_agent_id != expected_agent_id
+                or journal.migration_id != expected_migration_id
+                or migration_agent is None
+                or migration_agent.provider != "hermes"
+            ):
+                raise ValueError("registry migration Connected Agent identity is inconsistent")
+            migration_profile_ids = [item.profile_id for item in journal.profiles]
+            journal_complete = all(item.status == "complete" for item in journal.profiles)
+            if len(migration_profile_ids) != len(set(migration_profile_ids)) or (
+                not journal_complete and set(migration_profile_ids) != set(ids)
+            ):
+                raise ValueError("registry Connected Agent migration profiles are inconsistent")
         if len(self.idempotency_replays) > MAX_IDEMPOTENCY_REPLAYS:
             raise ValueError("registry contains too many idempotency records")
-        replay_keys = [
-            (replay.operation, replay.key_hash) for replay in self.idempotency_replays
-        ]
+        replay_keys = [(replay.operation, replay.key_hash) for replay in self.idempotency_replays]
         if len(replay_keys) != len(set(replay_keys)):
             raise ValueError("registry idempotency records are inconsistent")
         if self.pending_switch is not None:
@@ -365,7 +594,7 @@ def _assert_safe_managed_root(installation_root: Path, profile_id: str) -> Path:
     for part in ("profiles", profile_id):
         current /= part
         # Profile IDs are fixed-format single segments and every ancestor is checked here.
-        #codeql[py/path-injection]
+        # codeql[py/path-injection]
         if current.exists() and stat.S_ISLNK(current.lstat().st_mode):
             raise InstallationProfileStorageError("Managed JobOS Profile root is unavailable")
     return root
@@ -541,7 +770,11 @@ class InstallationProfileRegistry:
     ) -> InstallationProfileRegistryData:
         with self.locked():
             if self.path.exists():
-                return self.load()
+                existing = self.load()
+                if existing.schema_version == 1:
+                    existing = self._upgrade_v1_unlocked(existing, now=now)
+                    self._write_unlocked(existing)
+                return existing
             timestamp = now or utc_now()
             profile_id = new_profile_id()
             data = InstallationProfileRegistryData(
@@ -561,7 +794,307 @@ class InstallationProfileRegistry:
             self._write_unlocked(data)
             return data
 
+    def _upgrade_v1_unlocked(
+        self,
+        data: InstallationProfileRegistryData,
+        *,
+        now: datetime | None = None,
+    ) -> InstallationProfileRegistryData:
+        """Journal the deterministic, provider-offline v1 -> v2 registry stage."""
+        if data.schema_version != 1:
+            return data
+        anchored_id = next(
+            profile.profile_id for profile in data.profiles if profile.storage_mode == "anchored"
+        )
+        agent_id = legacy_connected_agent_id(anchored_id)
+        migration_id = connected_agent_migration_id(anchored_id)
+        timestamp = now or utc_now()
+        migrated = ConnectedAgentRecord(
+            id=agent_id,
+            provider="hermes",
+            display_name="Hermes",
+            avatar_id="hermes",
+            default_model_id=None,
+            default_reasoning_effort=None,
+            lifecycle="disconnected",
+            connection_config=None,
+            credential_reference=None,
+            account_summary=None,
+            account_fingerprint=None,
+            created_at=timestamp,
+            updated_at=timestamp,
+            disconnected_at=timestamp,
+        )
+        profiles = tuple(
+            profile.model_copy(update={"default_connected_agent_id": agent_id})
+            for profile in data.profiles
+        )
+        journal = ConnectedAgentMigrationJournal(
+            migration_id=migration_id,
+            connected_agent_id=agent_id,
+            profiles=tuple(
+                ConnectedAgentProfileMigration(profile_id=profile.profile_id, status="pending")
+                for profile in profiles
+            ),
+            created_at=timestamp,
+            updated_at=timestamp,
+        )
+        return data.model_copy(
+            update={
+                "schema_version": 2,
+                "registry_revision": data.registry_revision + 1,
+                "profiles": profiles,
+                "connected_agents": (migrated,),
+                "connected_agent_migration": journal,
+            }
+        )
+
+    def migration_for_profile(
+        self, profile_id: str
+    ) -> tuple[str, str, Literal["pending", "sqlite_complete", "complete"]] | None:
+        validate_profile_id(profile_id)
+        with self.locked():
+            data = self.load()
+            journal = data.connected_agent_migration
+            if journal is None:
+                return None
+            profile = next(
+                (item for item in journal.profiles if item.profile_id == profile_id), None
+            )
+            if profile is None:
+                raise InstallationProfileRegistryError(
+                    "Connected Agent migration profile is missing"
+                )
+            return journal.migration_id, journal.connected_agent_id, profile.status
+
+    def apply_legacy_hermes_configuration(
+        self,
+        *,
+        endpoint_url: str,
+        display_name: str = "Hermes",
+        avatar_id: str = "hermes",
+        default_model_id: str | None = None,
+        default_reasoning_effort: str | None = None,
+        now: datetime | None = None,
+    ) -> ConnectedAgentRecord:
+        if (default_model_id is None) != (default_reasoning_effort is None):
+            raise ValueError("Legacy Hermes defaults require model and reasoning effort")
+        configuration = HermesConnectionConfiguration(endpoint_url=endpoint_url)
+        with self.locked():
+            data = self.load()
+            journal = data.connected_agent_migration
+            if journal is None:
+                raise InstallationProfileConflict("No legacy Hermes migration is active")
+            if all(item.status == "complete" for item in journal.profiles):
+                raise InstallationProfileConflict("Legacy Hermes migration is already complete")
+            target = next(
+                item for item in data.connected_agents if item.id == journal.connected_agent_id
+            )
+            if target.provider != "hermes":
+                raise InstallationProfileRegistryError(
+                    "Legacy Connected Agent provider is inconsistent"
+                )
+            if (
+                target.display_name == display_name
+                and target.avatar_id == avatar_id
+                and target.default_model_id == default_model_id
+                and target.default_reasoning_effort == default_reasoning_effort
+                and target.lifecycle == "connected"
+                and target.connection_config == configuration
+                and target.disconnected_at is None
+            ):
+                return target
+            timestamp = now or utc_now()
+            changed = target.model_copy(
+                update={
+                    "display_name": display_name,
+                    "avatar_id": avatar_id,
+                    "default_model_id": default_model_id,
+                    "default_reasoning_effort": default_reasoning_effort,
+                    "lifecycle": "connected",
+                    "connection_config": configuration,
+                    "updated_at": timestamp,
+                    "disconnected_at": None,
+                }
+            )
+            if changed == target:
+                return target
+            updated = data.model_copy(
+                update={
+                    "registry_revision": data.registry_revision + 1,
+                    "connected_agents": tuple(
+                        changed if item.id == target.id else item for item in data.connected_agents
+                    ),
+                }
+            )
+            self._write_unlocked(updated)
+            return changed
+
+    def mark_profile_migration(
+        self,
+        profile_id: str,
+        migration_id: str,
+        status: Literal["sqlite_complete", "complete"],
+        *,
+        now: datetime | None = None,
+    ) -> InstallationProfileRegistryData:
+        validate_profile_id(profile_id)
+        if not CONNECTED_AGENT_MIGRATION_ID_PATTERN.fullmatch(migration_id):
+            raise ValueError("Connected Agent migration identifier is invalid")
+        with self.locked():
+            data = self.load()
+            journal = data.connected_agent_migration
+            if journal is None or journal.migration_id != migration_id:
+                raise InstallationProfileConflict("Connected Agent migration changed")
+            current = next(
+                (item for item in journal.profiles if item.profile_id == profile_id), None
+            )
+            if current is None:
+                raise InstallationProfileRegistryError(
+                    "Connected Agent migration profile is missing"
+                )
+            if status == current.status:
+                return data
+            required_current = {
+                "sqlite_complete": "pending",
+                "complete": "sqlite_complete",
+            }[status]
+            if current.status != required_current:
+                raise InstallationProfileConflict("Connected Agent migration transition is invalid")
+            if status == "complete" and any(item.status == "pending" for item in journal.profiles):
+                raise InstallationProfileConflict(
+                    "Connected Agent migration profiles are not all SQLite-complete"
+                )
+            timestamp = now or utc_now()
+            profiles = tuple(
+                item.model_copy(update={"status": status})
+                if item.profile_id == profile_id
+                else item
+                for item in journal.profiles
+            )
+            updated = data.model_copy(
+                update={
+                    "registry_revision": data.registry_revision + 1,
+                    "connected_agent_migration": journal.model_copy(
+                        update={"profiles": profiles, "updated_at": timestamp}
+                    ),
+                }
+            )
+            self._write_unlocked(updated)
+            return updated
+
+    def resume_connected_agent_migration(
+        self,
+        base_runtime: object,
+        *,
+        owner_device_id: str = "primary-device",
+    ) -> InstallationProfileRegistryData:
+        """Resume the journaled registry/profile upgrade without provider access."""
+        from .state_store import IncompatibleSchemaError, JobOsStateStore
+
+        data = self.load()
+        journal = data.connected_agent_migration
+        if journal is None:
+            return data
+        migrated_agent = next(
+            (item for item in data.connected_agents if item.id == journal.connected_agent_id), None
+        )
+        anchored_profile_id = next(
+            item.profile_id for item in data.profiles if item.storage_mode == "anchored"
+        )
+        if (
+            journal.connected_agent_id != legacy_connected_agent_id(anchored_profile_id)
+            or journal.migration_id != connected_agent_migration_id(anchored_profile_id)
+            or migrated_agent is None
+            or migrated_agent.provider != "hermes"
+        ):
+            raise InstallationProfileRegistryError(
+                "Migrated Connected Agent identity is inconsistent"
+            )
+        # An installation-wide default is not authoritative evidence for an
+        # historical chat. Stage A therefore leaves every legacy chat unresolved;
+        # Stage B seals each exact provider session independently.
+        stores: dict[str, JobOsStateStore] = {}
+        for migration_profile in journal.profiles:
+            profile = next(
+                item for item in data.profiles if item.profile_id == migration_profile.profile_id
+            )
+            runtime = effective_profile_runtime(base_runtime, profile, self.installation_root)
+            state_path = runtime["state_db_path"]
+            if not isinstance(state_path, (str, Path)):
+                raise InstallationProfileRegistryError("Profile state database path is invalid")
+            store = JobOsStateStore(Path(state_path))
+            stores[profile.profile_id] = store
+            current = self.migration_for_profile(profile.profile_id)
+            assert current is not None
+            if current[2] == "pending":
+                store.initialize(
+                    owner_device_id=owner_device_id,
+                    installation_profile_id=profile.profile_id,
+                    connected_agent_migration_id=journal.migration_id,
+                    legacy_connected_agent_id=journal.connected_agent_id,
+                    legacy_model_id=None,
+                    legacy_reasoning_effort=None,
+                )
+            else:
+                store.initialize(
+                    owner_device_id=owner_device_id,
+                    installation_profile_id=profile.profile_id,
+                )
+            sqlite_status = store.connected_agent_migration_status(journal.migration_id)
+            if sqlite_status not in {"sqlite_complete", "complete"}:
+                raise InstallationProfileRegistryError(
+                    "Profile Connected Agent migration receipt is incomplete"
+                )
+            if current[2] == "complete" and sqlite_status != "complete":
+                raise InstallationProfileRegistryError(
+                    "Completed Connected Agent migration receipt is inconsistent"
+                )
+            if current[2] == "pending":
+                self.mark_profile_migration(
+                    profile.profile_id, journal.migration_id, "sqlite_complete"
+                )
+
+        # No registry profile may become complete until every profile store has
+        # independently read back the exact migration ID above.
+        data = self.load()
+        refreshed = data.connected_agent_migration
+        assert refreshed is not None
+        if any(item.status == "pending" for item in refreshed.profiles):
+            raise InstallationProfileRegistryError(
+                "Connected Agent migration did not reach SQLite-complete"
+            )
+        for migration_profile in refreshed.profiles:
+            store = stores[migration_profile.profile_id]
+            try:
+                store.complete_connected_agent_migration(
+                    refreshed.migration_id, refreshed.connected_agent_id
+                )
+            except IncompatibleSchemaError as error:
+                raise InstallationProfileRegistryError(str(error)) from error
+            if store.connected_agent_migration_status(refreshed.migration_id) != "complete":
+                raise InstallationProfileRegistryError(
+                    "Profile Connected Agent migration did not finalize"
+                )
+            current = self.migration_for_profile(migration_profile.profile_id)
+            assert current is not None
+            if current[2] == "sqlite_complete":
+                self.mark_profile_migration(
+                    migration_profile.profile_id,
+                    refreshed.migration_id,
+                    "complete",
+                )
+        return self.load()
+
     def _write_unlocked(self, data: InstallationProfileRegistryData) -> None:
+        # model_copy(update=...) does not re-run Pydantic validators. Re-validate
+        # the complete cross-reference graph at the one durable write boundary.
+        try:
+            data = InstallationProfileRegistryData.model_validate(data.model_dump())
+        except ValidationError as error:
+            raise InstallationProfileRegistryError(
+                "JobOS Profile registry update is invalid"
+            ) from error
         payload = data.model_dump_json(indent=2).encode("utf-8") + b"\n"
         if len(payload) > MAX_REGISTRY_BYTES:
             raise InstallationProfileRegistryError("JobOS Profile registry is too large")
@@ -605,6 +1138,360 @@ class InstallationProfileRegistry:
     @staticmethod
     def _key_hash(key: str) -> str:
         return hashlib.sha256(key.encode("utf-8")).hexdigest()
+
+    def _registry_mutation_replayed(
+        self,
+        data: InstallationProfileRegistryData,
+        operation: Literal[
+            "agent_create", "agent_update", "agent_disconnect", "profile_default_agent"
+        ],
+        key: str,
+        request_hash: str,
+    ) -> bool:
+        record = next(
+            (
+                item
+                for item in data.idempotency_replays
+                if item.operation == operation and item.key_hash == self._key_hash(key)
+            ),
+            None,
+        )
+        if record is None:
+            return False
+        if record.request_hash != request_hash:
+            raise InstallationProfileConflict("Idempotency key was already used")
+        return True
+
+    def _registry_mutation_replay(
+        self,
+        data: InstallationProfileRegistryData,
+        operation: Literal[
+            "agent_create", "agent_update", "agent_disconnect", "profile_default_agent"
+        ],
+        key: str,
+        request_hash: str,
+    ) -> PersistentIdempotencyReplay | None:
+        if not self._registry_mutation_replayed(data, operation, key, request_hash):
+            return None
+        return next(
+            item
+            for item in data.idempotency_replays
+            if item.operation == operation and item.key_hash == self._key_hash(key)
+        )
+
+    def _with_registry_mutation_replay(
+        self,
+        data: InstallationProfileRegistryData,
+        operation: Literal[
+            "agent_create", "agent_update", "agent_disconnect", "profile_default_agent"
+        ],
+        key: str,
+        request_hash: str,
+        *,
+        response_json: str = "{}",
+    ) -> InstallationProfileRegistryData:
+        replay = PersistentIdempotencyReplay(
+            operation=operation,
+            key_hash=self._key_hash(key),
+            request_hash=request_hash,
+            response_json=response_json,
+        )
+        retained = tuple(
+            item
+            for item in data.idempotency_replays
+            if (item.operation, item.key_hash) != (replay.operation, replay.key_hash)
+        )[-(MAX_IDEMPOTENCY_REPLAYS - 1) :]
+        return data.model_copy(update={"idempotency_replays": (*retained, replay)})
+
+    def create_connected_agent(
+        self,
+        *,
+        provider: Literal["hermes", "codex"],
+        display_name: str,
+        avatar_id: str,
+        default_model_id: str | None,
+        default_reasoning_effort: str | None,
+        connection_config: dict[str, str] | None,
+        credential_reference: str | None,
+        expected_registry_revision: int,
+        idempotency_key: str,
+        now: datetime | None = None,
+        agent_id: str | None = None,
+    ) -> ConnectedAgentRecord:
+        identifier = agent_id or new_connected_agent_id()
+        normalized_config = (
+            HermesConnectionConfiguration.model_validate(connection_config)
+            if provider == "hermes" and connection_config is not None
+            else CodexConnectionConfiguration.model_validate(connection_config)
+            if provider == "codex" and connection_config is not None
+            else None
+        )
+        payload = {
+            "provider": provider,
+            "display_name": display_name,
+            "avatar_id": avatar_id,
+            "default_model_id": default_model_id,
+            "default_reasoning_effort": default_reasoning_effort,
+            "connection_config": (
+                normalized_config.model_dump(mode="json") if normalized_config else None
+            ),
+            "credential_reference": credential_reference,
+            "expected_registry_revision": expected_registry_revision,
+            # Store-generated identities are results, not part of an identical request.
+            "agent_id": agent_id,
+        }
+        request_hash = self._request_hash(payload)
+        with self.locked():
+            data = self.load()
+            replay = self._registry_mutation_replay(
+                data, "agent_create", idempotency_key, request_hash
+            )
+            if replay is not None:
+                try:
+                    return ConnectedAgentRecord.model_validate_json(replay.response_json)
+                except ValidationError as error:
+                    raise InstallationProfileRegistryError(
+                        "Connected Agent creation replay is invalid"
+                    ) from error
+            if data.schema_version != 2:
+                raise InstallationProfileRegistryError("Connected Agent registry is not upgraded")
+            if data.registry_revision != expected_registry_revision:
+                raise InstallationProfileConflict("JobOS Profile registry changed")
+            if not CONNECTED_AGENT_ID_PATTERN.fullmatch(identifier):
+                raise ValueError("Connected Agent identifier is invalid")
+            if any(item.id == identifier for item in data.connected_agents):
+                raise InstallationProfileConflict("Connected Agent identifier already exists")
+            if provider == "codex" and any(
+                item.provider == "codex" for item in data.connected_agents
+            ):
+                raise InstallationProfileConflict(
+                    "This installation already has a durable Codex identity"
+                )
+            timestamp = now or utc_now()
+            record = ConnectedAgentRecord(
+                id=identifier,
+                provider=provider,
+                display_name=display_name,
+                avatar_id=avatar_id,
+                default_model_id=default_model_id,
+                default_reasoning_effort=default_reasoning_effort,
+                lifecycle="connected",
+                connection_config=normalized_config,
+                credential_reference=credential_reference,
+                account_summary=None,
+                account_fingerprint=None,
+                created_at=timestamp,
+                updated_at=timestamp,
+                disconnected_at=None,
+            )
+            result = record.model_copy(
+                update={"connection_config": None, "credential_reference": None}
+            )
+            updated = data.model_copy(
+                update={
+                    "registry_revision": data.registry_revision + 1,
+                    "connected_agents": (*data.connected_agents, record),
+                }
+            )
+            updated = self._with_registry_mutation_replay(
+                updated,
+                "agent_create",
+                idempotency_key,
+                request_hash,
+                response_json=result.model_dump_json(),
+            )
+            self._write_unlocked(updated)
+            return result
+
+    def update_connected_agent(
+        self,
+        agent_id: str,
+        *,
+        display_name: str,
+        avatar_id: str,
+        default_model_id: str | None,
+        default_reasoning_effort: str | None,
+        expected_registry_revision: int,
+        idempotency_key: str,
+        now: datetime | None = None,
+    ) -> ConnectedAgentRecord:
+        if not CONNECTED_AGENT_ID_PATTERN.fullmatch(agent_id):
+            raise ValueError("Connected Agent identifier is invalid")
+        request_hash = self._request_hash(
+            {
+                "agent_id": agent_id,
+                "display_name": display_name,
+                "avatar_id": avatar_id,
+                "default_model_id": default_model_id,
+                "default_reasoning_effort": default_reasoning_effort,
+                "expected_registry_revision": expected_registry_revision,
+            }
+        )
+        with self.locked():
+            data = self.load()
+            target = next((item for item in data.connected_agents if item.id == agent_id), None)
+            replay = self._registry_mutation_replay(
+                data, "agent_update", idempotency_key, request_hash
+            )
+            if replay is not None:
+                try:
+                    return ConnectedAgentRecord.model_validate_json(replay.response_json)
+                except ValidationError as error:
+                    raise InstallationProfileRegistryError(
+                        "Connected Agent update replay is invalid"
+                    ) from error
+            if data.registry_revision != expected_registry_revision:
+                raise InstallationProfileConflict("JobOS Profile registry changed")
+            if target is None:
+                raise InstallationProfileNotFound("Connected Agent was not found")
+            changed = target.model_copy(
+                update={
+                    "display_name": display_name,
+                    "avatar_id": avatar_id,
+                    "default_model_id": default_model_id,
+                    "default_reasoning_effort": default_reasoning_effort,
+                    "updated_at": now or utc_now(),
+                }
+            )
+            result = changed.model_copy(
+                update={"connection_config": None, "credential_reference": None}
+            )
+            updated = data.model_copy(
+                update={
+                    "registry_revision": data.registry_revision + 1,
+                    "connected_agents": tuple(
+                        changed if item.id == agent_id else item for item in data.connected_agents
+                    ),
+                }
+            )
+            updated = self._with_registry_mutation_replay(
+                updated,
+                "agent_update",
+                idempotency_key,
+                request_hash,
+                response_json=result.model_dump_json(),
+            )
+            self._write_unlocked(updated)
+            return result
+
+    def disconnect_connected_agent(
+        self,
+        agent_id: str,
+        *,
+        expected_registry_revision: int,
+        idempotency_key: str,
+        now: datetime | None = None,
+    ) -> ConnectedAgentRecord:
+        if not CONNECTED_AGENT_ID_PATTERN.fullmatch(agent_id):
+            raise ValueError("Connected Agent identifier is invalid")
+        request_hash = self._request_hash(
+            {"agent_id": agent_id, "expected_registry_revision": expected_registry_revision}
+        )
+        with self.locked():
+            data = self.load()
+            target = next((item for item in data.connected_agents if item.id == agent_id), None)
+            replay = self._registry_mutation_replay(
+                data, "agent_disconnect", idempotency_key, request_hash
+            )
+            if replay is not None:
+                try:
+                    return ConnectedAgentRecord.model_validate_json(replay.response_json)
+                except ValidationError as error:
+                    raise InstallationProfileRegistryError(
+                        "Connected Agent disconnect replay is invalid"
+                    ) from error
+            if data.registry_revision != expected_registry_revision:
+                raise InstallationProfileConflict("JobOS Profile registry changed")
+            if target is None:
+                raise InstallationProfileNotFound("Connected Agent was not found")
+            timestamp = now or utc_now()
+            changed = target.model_copy(
+                update={
+                    "lifecycle": "disconnected",
+                    "connection_config": None,
+                    "credential_reference": None,
+                    "updated_at": timestamp,
+                    "disconnected_at": timestamp,
+                }
+            )
+            updated = data.model_copy(
+                update={
+                    "registry_revision": data.registry_revision + 1,
+                    "connected_agents": tuple(
+                        changed if item.id == agent_id else item for item in data.connected_agents
+                    ),
+                }
+            )
+            updated = self._with_registry_mutation_replay(
+                updated,
+                "agent_disconnect",
+                idempotency_key,
+                request_hash,
+                response_json=changed.model_dump_json(),
+            )
+            self._write_unlocked(updated)
+            return changed
+
+    def set_profile_default_connected_agent(
+        self,
+        profile_id: str,
+        agent_id: str | None,
+        *,
+        expected_registry_revision: int,
+        idempotency_key: str,
+        now: datetime | None = None,
+    ) -> InstallationProfileRecord:
+        validate_profile_id(profile_id)
+        if agent_id is not None and not CONNECTED_AGENT_ID_PATTERN.fullmatch(agent_id):
+            raise ValueError("Connected Agent identifier is invalid")
+        request_hash = self._request_hash(
+            {
+                "profile_id": profile_id,
+                "agent_id": agent_id,
+                "expected_registry_revision": expected_registry_revision,
+            }
+        )
+        with self.locked():
+            data = self.load()
+            target = next((item for item in data.profiles if item.profile_id == profile_id), None)
+            replay = self._registry_mutation_replay(
+                data, "profile_default_agent", idempotency_key, request_hash
+            )
+            if replay is not None:
+                try:
+                    return InstallationProfileRecord.model_validate_json(replay.response_json)
+                except ValidationError as error:
+                    raise InstallationProfileRegistryError(
+                        "Profile default replay is invalid"
+                    ) from error
+            if data.registry_revision != expected_registry_revision:
+                raise InstallationProfileConflict("JobOS Profile registry changed")
+            if target is None:
+                raise InstallationProfileNotFound("JobOS Profile was not found")
+            if agent_id is not None and not any(
+                item.id == agent_id for item in data.connected_agents
+            ):
+                raise InstallationProfileNotFound("Connected Agent was not found")
+            changed = target.model_copy(
+                update={"default_connected_agent_id": agent_id, "updated_at": now or utc_now()}
+            )
+            updated = data.model_copy(
+                update={
+                    "registry_revision": data.registry_revision + 1,
+                    "profiles": tuple(
+                        changed if item.profile_id == profile_id else item for item in data.profiles
+                    ),
+                }
+            )
+            updated = self._with_registry_mutation_replay(
+                updated,
+                "profile_default_agent",
+                idempotency_key,
+                request_hash,
+                response_json=changed.model_dump_json(),
+            )
+            self._write_unlocked(updated)
+            return changed
 
     def _replay(
         self,
@@ -694,12 +1581,8 @@ class InstallationProfileRegistry:
                     for item in data.idempotency_replays
                     if item.operation == "create" and item.key_hash == key_hash
                 )
-                if (
-                    record.result_profile_id is None
-                    or not any(
-                        item.profile_id == record.result_profile_id
-                        for item in replay.profiles
-                    )
+                if record.result_profile_id is None or not any(
+                    item.profile_id == record.result_profile_id for item in replay.profiles
                 ):
                     raise InstallationProfileRegistryError(
                         "JobOS Profile registry create replay is invalid"
@@ -791,9 +1674,7 @@ class InstallationProfileRegistry:
                 }
             )
             result = public_profile_list(updated)
-            updated = self._with_replay(
-                updated, "rename", idempotency_key, request_hash, result
-            )
+            updated = self._with_replay(updated, "rename", idempotency_key, request_hash, result)
             self._write_unlocked(updated)
         return result
 

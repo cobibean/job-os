@@ -41,6 +41,23 @@ installation. Profile-owned SQLite stores also bind once to that ID. MCP follows
 the one currently active profile and cannot resume a conversation ID from another
 profile because conversation records live in the isolated state database.
 
+### Connected Agent persistence
+
+The versioned installation registry owns durable Connected Agent identities,
+non-secret connection metadata, lifecycle, model defaults, and each profile's
+default-agent reference. Profile SQLite owns chat history and the immutable
+agent/provider/model/effort binding captured for each conversation. Provider
+session references remain opaque profile data; raw credentials never enter either
+store.
+
+Legacy installations upgrade through a persistent cross-store journal. Existing
+Hermes chats remain readable offline and retain their IDs, transcript, timestamps,
+and recovery/session references. A chat's model and reasoning effort are sealed
+only from authoritative session evidence; unresolved history stays visibly locked
+rather than inheriting or guessing a current default. The five-active-chat limit is
+transactional per profile across all authorized devices and agents, and locked
+active chats count until archived.
+
 ## Repository boundaries
 
 - `apps/desktop/` owns the Electron process, React renderer, native desktop
