@@ -35,6 +35,7 @@
     "media:verify": "node docs/media/source/verify-media.mjs",
     "public:check": "uv run python scripts/public-release/verify-public-tree.py && uv run python scripts/public-release/verify-fixture-manifest.py",
     "public:smoke-clean-clone": "python scripts/public-release/smoke-clean-clone.py --source . --ref HEAD",
+    "prototype:connected-agents": "pnpm --filter @jobos/desktop prototype:connected-agents",
     "lint": "pnpm --filter @jobos/contracts lint && pnpm --filter @jobos/desktop lint && uv run ruff check services scripts",
     "test": "pnpm --filter @jobos/desktop test && uv run pytest",
     "test:updater": "pnpm --filter @jobos/desktop test:macbook-update",

@@ -19,8 +19,16 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import type { DocxOpenResult } from '../shared/docxDocuments'
 import type { SetupSnapshot } from '../shared/contracts'
 import { OnboardingScreen } from './onboarding/OnboardingScreen'
+import { ConnectedAgentsPrototype } from './prototypes/ConnectedAgentsPrototype'
 
 export function App() {
+  if (new URLSearchParams(window.location.search).get('prototype') === 'connected-agents') {
+    return <ConnectedAgentsPrototype />
+  }
+  return <ConfiguredApp />
+}
+
+function ConfiguredApp() {
   const [setup, setSetup] = useState<SetupSnapshot | null>(
     window.jobos?.setup ? null : { state: 'ready', message: 'JobOS is configured' }
   )

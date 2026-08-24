@@ -25,6 +25,7 @@
     "lint": "oxlint src vite.config.ts",
     "package:mac": "pnpm build:keychain-helper && pnpm build && electron-builder --mac dir --arm64 && node scripts/sign-and-zip-mac.mjs",
     "package:macbook-update": "node scripts/create-macbook-update.mjs",
+    "prototype:connected-agents": "vite build && vite preview --host 127.0.0.1 --port 4176",
     "start": "electron dist/main/main.js",
     "test": "pnpm build:electron && NODE_OPTIONS=--no-experimental-webstorage vitest run && pnpm test:macbook-update",
     "test:macbook-update": "node --test scripts/create-macbook-update.test.mjs",
