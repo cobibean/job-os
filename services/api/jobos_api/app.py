@@ -14,7 +14,7 @@ from functools import wraps
 from pathlib import Path
 from threading import Lock
 from typing import Annotated, Any, Literal, ParamSpec, TypeVar, cast
-from urllib.parse import quote, unquote
+from urllib.parse import quote, unquote, urlsplit, urlunsplit
 from uuid import uuid4
 
 from fastapi import (
@@ -307,6 +307,14 @@ from jobos_api.state_store import (
 )
 from jobos_api.synthetic_demo import DEMO_JOB_ID
 from jobos_api.workspace import WorkspaceSnapshotCommand, WorkspaceSnapshotResponse
+
+
+def _hermes_registry_endpoint(dashboard_url: str) -> str:
+    """Persist only the non-secret dashboard origin, never its WebSocket path."""
+    parsed = urlsplit(dashboard_url)
+    scheme = {"ws": "http", "wss": "https"}.get(parsed.scheme, parsed.scheme)
+    return urlunsplit((scheme, parsed.netloc, "", "", ""))
+
 
 ConversationId = Annotated[
     str, PathParameter(pattern=r"^conv_[A-Za-z0-9_-]{1,128}$", max_length=133)
@@ -693,16 +701,17 @@ def create_app(
         }
         if (
             registry_data.connected_agent_migration is not None
-            and any(
-                item.status != "complete"
-                for item in registry_data.connected_agent_migration.profiles
-            )
+            and installation_profiles.legacy_hermes_configuration_required()
             and settings.hermes_dashboard_url
             and settings.hermes_dashboard_token
             and settings.hermes_job_hunter_cwd
+            and settings.hermes_default_model_id
+            and settings.hermes_default_reasoning_effort
         ):
             installation_profiles.apply_legacy_hermes_configuration(
-                endpoint_url=settings.hermes_dashboard_url
+                endpoint_url=_hermes_registry_endpoint(settings.hermes_dashboard_url),
+                default_model_id=settings.hermes_default_model_id,
+                default_reasoning_effort=settings.hermes_default_reasoning_effort,
             )
         installation_profiles.resume_connected_agent_migration(
             migration_runtime, owner_device_id=settings.device_id

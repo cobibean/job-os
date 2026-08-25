@@ -55,6 +55,8 @@ _CONFIG_FIELDS = {
     "artifact_roots",
     "hermes_dashboard_url",
     "hermes_job_hunter_cwd",
+    "hermes_default_model_id",
+    "hermes_default_reasoning_effort",
     "keychain_helper_path",
     "keychain_helper_sha256",
     "codex_app_server_path",
@@ -130,6 +132,8 @@ class RuntimeServiceConfig:
     artifact_roots: tuple[Path, ...]
     hermes_dashboard_url: str | None
     hermes_job_hunter_cwd: Path | None
+    hermes_default_model_id: str | None
+    hermes_default_reasoning_effort: str | None
     keychain_helper_path: Path | None
     keychain_helper_sha256: str | None
     codex_app_server_path: Path | None
@@ -220,6 +224,22 @@ class RuntimeServiceConfig:
             value.get("job_hunter_db_path"), "job_hunter_db_path"
         )
         hermes_cwd = value.get("hermes_job_hunter_cwd")
+        hermes_default_model_id = value.get("hermes_default_model_id")
+        hermes_default_reasoning_effort = value.get("hermes_default_reasoning_effort")
+        if (hermes_default_model_id is None) != (hermes_default_reasoning_effort is None):
+            raise ValueError("Hermes defaults require model and reasoning effort")
+        if hermes_default_model_id is not None and (
+            not isinstance(hermes_default_model_id, str)
+            or not 1 <= len(hermes_default_model_id) <= 256
+            or any(char in hermes_default_model_id for char in "\r\n\0")
+        ):
+            raise ValueError("Hermes default model is invalid")
+        if hermes_default_reasoning_effort is not None and (
+            not isinstance(hermes_default_reasoning_effort, str)
+            or not 1 <= len(hermes_default_reasoning_effort) <= 64
+            or any(char in hermes_default_reasoning_effort for char in "\r\n\0")
+        ):
+            raise ValueError("Hermes default reasoning effort is invalid")
         if (job_provider == "job-hunter" or artifact_provider == "gateway") and (
             facade_source is None or job_hunter_db is None
         ):
@@ -268,6 +288,8 @@ class RuntimeServiceConfig:
                 if hermes_cwd is not None
                 else None
             ),
+            hermes_default_model_id=hermes_default_model_id,
+            hermes_default_reasoning_effort=hermes_default_reasoning_effort,
             keychain_helper_path=keychain_helper,
             keychain_helper_sha256=keychain_helper_sha256,
             codex_app_server_path=codex_app_server,
@@ -383,6 +405,11 @@ def build_service_environment(
         environment["JOBOS_HERMES_DASHBOARD_TOKEN"] = hermes_dashboard_token
     if config.hermes_job_hunter_cwd:
         environment["JOBOS_HERMES_JOB_HUNTER_CWD"] = str(config.hermes_job_hunter_cwd)
+    if config.hermes_default_model_id and config.hermes_default_reasoning_effort:
+        environment["JOBOS_HERMES_DEFAULT_MODEL_ID"] = config.hermes_default_model_id
+        environment["JOBOS_HERMES_DEFAULT_REASONING_EFFORT"] = (
+            config.hermes_default_reasoning_effort
+        )
     if config.codex_app_server_path:
         if service_config_path is None:
             raise ValueError("installed Codex runtime requires the service config path")
@@ -581,6 +608,8 @@ def build_local_runtime_config(
             "artifact_roots": [],
             "hermes_dashboard_url": None,
             "hermes_job_hunter_cwd": None,
+            "hermes_default_model_id": None,
+            "hermes_default_reasoning_effort": None,
             "keychain_helper_path": codex_paths.get("keychain_helper_path"),
             "keychain_helper_sha256": codex_paths.get("keychain_helper_sha256"),
             "codex_app_server_path": codex_paths.get("codex_app_server_path"),

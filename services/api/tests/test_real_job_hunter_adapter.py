@@ -20,6 +20,43 @@ from job_hunter.facade import JobHunterFacade
 from job_hunter.storage import JobStorage
 
 
+class ActiveTurnGateway:
+    connection_state = "online"
+
+    async def start(self):
+        return None
+
+    async def create_or_resume_conversation(self, stored_session_id):
+        return "stored-real-adapter-test", "live-real-adapter-test"
+
+    async def submit_turn(self, text, context):
+        return None
+
+    async def detach_conversation(self):
+        return None
+
+    async def stream_events(self):
+        if False:
+            yield None
+
+    async def interrupt_turn(self, turn_id):
+        return None
+
+    async def respond_to_review(self, turn_id, approval_id, *, approved):
+        return None
+
+    async def recover_active_turn(self, stored_session_id, turn_id):
+        return None
+
+    async def close(self):
+        return None
+
+
+class ActiveTurnGatewayFactory:
+    def create(self, conversation_id):
+        return ActiveTurnGateway()
+
+
 def test_real_job_hunter_adapter_reports_ready_while_jobos_owns_publication(tmp_path):
     workspace = tmp_path / "job-hunter"
     workspace.mkdir()
@@ -66,11 +103,26 @@ def test_real_job_hunter_adapter_reports_ready_while_jobos_owns_publication(tmp_
         "idempotency_key": "real-adapter-publish",
     }
 
-    with TestClient(create_app(configured)) as client:
+    with TestClient(
+        create_app(configured, agent_gateway_factory=ActiveTurnGatewayFactory())
+    ) as client:
         health = client.get("/v1/health")
+        created_conversation = client.post(
+            "/v1/conversations",
+            headers=owner_headers,
+            json={"selected_job_id": job_id},
+        )
+        conversation_id = created_conversation.json()["conversation_id"]
+        started = client.post(
+            f"/v1/conversations/{conversation_id}/messages",
+            headers=owner_headers,
+            json={"text": "Keep publication correlation active", "idempotency_key": "publish-turn"},
+        )
+        turn_id = started.json()["turn_id"]
         published = client.post(
             f"/v1/jobs/{job_id}/artifacts/publish",
             headers=mcp_headers,
+            params={"conversation_id": conversation_id, "turn_id": turn_id},
             json=payload,
         )
         listed = client.get(
@@ -85,6 +137,7 @@ def test_real_job_hunter_adapter_reports_ready_while_jobos_owns_publication(tmp_
 
     assert health.status_code == 200
     assert health.json()["artifact_gateway"] == "available"
+    assert started.status_code == 201
     assert published.status_code == 200
     assert listed.status_code == 200
     assert downloaded.status_code == 200

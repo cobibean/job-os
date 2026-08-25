@@ -9,7 +9,7 @@ import secrets
 import stat
 import unicodedata
 from contextlib import contextmanager
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from threading import Lock
 from typing import Literal
@@ -890,8 +890,7 @@ class InstallationProfileRegistry:
             journal = data.connected_agent_migration
             if journal is None:
                 raise InstallationProfileConflict("No legacy Hermes migration is active")
-            if all(item.status == "complete" for item in journal.profiles):
-                raise InstallationProfileConflict("Legacy Hermes migration is already complete")
+            migration_complete = all(item.status == "complete" for item in journal.profiles)
             target = next(
                 item for item in data.connected_agents if item.id == journal.connected_agent_id
             )
@@ -909,6 +908,13 @@ class InstallationProfileRegistry:
                 and target.disconnected_at is None
             ):
                 return target
+            if not self._legacy_hermes_configuration_required(data, target):
+                message = (
+                    "Legacy Hermes migration is already complete"
+                    if migration_complete
+                    else "Legacy Hermes migration target was modified"
+                )
+                raise InstallationProfileConflict(message)
             timestamp = now or utc_now()
             changed = target.model_copy(
                 update={
@@ -934,6 +940,50 @@ class InstallationProfileRegistry:
             )
             self._write_unlocked(updated)
             return changed
+
+    @staticmethod
+    def _legacy_hermes_configuration_required(
+        data: InstallationProfileRegistryData,
+        target: ConnectedAgentRecord,
+    ) -> bool:
+        """Recognize only the untouched provider-offline migration placeholder."""
+        if (
+            target.lifecycle != "disconnected"
+            or target.connection_config is not None
+            or target.credential_reference is not None
+            or target.default_model_id is not None
+            or target.default_reasoning_effort is not None
+            or target.account_summary is not None
+            or target.account_fingerprint is not None
+            or target.disconnected_at is None
+            or target.created_at != target.updated_at
+            or target.updated_at != target.disconnected_at
+        ):
+            return False
+        for replay in data.idempotency_replays:
+            if replay.operation != "agent_disconnect":
+                continue
+            try:
+                disconnected = ConnectedAgentRecord.model_validate_json(replay.response_json)
+            except ValidationError as error:
+                raise InstallationProfileRegistryError(
+                    "Connected Agent disconnect replay is invalid"
+                ) from error
+            if disconnected.id == target.id:
+                return False
+        return True
+
+    def legacy_hermes_configuration_required(self) -> bool:
+        """Allow late runtime hydration without overriding a user disconnect."""
+        with self.locked():
+            data = self.load()
+            journal = data.connected_agent_migration
+            if journal is None:
+                return False
+            target = next(
+                item for item in data.connected_agents if item.id == journal.connected_agent_id
+            )
+            return self._legacy_hermes_configuration_required(data, target)
 
     def mark_profile_migration(
         self,
@@ -1433,6 +1483,8 @@ class InstallationProfileRegistry:
             if target is None:
                 raise InstallationProfileNotFound("Connected Agent was not found")
             timestamp = now or utc_now()
+            if timestamp <= target.updated_at:
+                timestamp = target.updated_at + timedelta(microseconds=1)
             changed = target.model_copy(
                 update={
                     "lifecycle": "disconnected",

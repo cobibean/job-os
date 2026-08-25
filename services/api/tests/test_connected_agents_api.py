@@ -289,6 +289,82 @@ def test_provider_runtime_routes_hermes_to_its_fixed_profile_model(tmp_path):
     }
 
 
+def test_app_startup_repairs_completed_offline_hermes_migration_for_new_chat(tmp_path):
+    registry_path = tmp_path / "installation-profiles.json"
+    state_path = (tmp_path / "state" / "jobos.db").absolute()
+    runtime = AnchoredRuntime(
+        job_provider="sqlite",
+        artifact_provider="local",
+        state_db_path=state_path,
+        jobs_db_path=(tmp_path / "jobs" / "jobs.db").absolute(),
+        local_artifact_root=(tmp_path / "artifacts").absolute(),
+    )
+    JobOsStateStore(state_path).initialize(installation_profile_id=PROFILE_ID)
+    registry = InstallationProfileRegistry(registry_path)
+    registry.write(
+        InstallationProfileRegistryData(
+            schema_version=1,
+            registry_revision=1,
+            active_profile_id=PROFILE_ID,
+            profiles=(
+                InstallationProfileRecord(
+                    profile_id=PROFILE_ID,
+                    display_name="(FAKE) Personal",
+                    storage_mode="anchored",
+                    created_at=NOW,
+                    updated_at=NOW,
+                    anchored_runtime=runtime,
+                ),
+            ),
+        )
+    )
+    registry.load_or_bootstrap(runtime, now=NOW)
+    registry.resume_connected_agent_migration(runtime)
+    assert registry.load().connected_agents[0].lifecycle == "disconnected"
+
+    app = create_app(
+        Settings(
+            device_token=TOKEN,
+            mcp_token="(FAKE)-mcp-token",
+            device_id="primary-device",
+            state_db_path=state_path,
+            jobs_db_path=runtime.jobs_db_path,
+            local_artifact_root=runtime.local_artifact_root,
+            installation_registry_path=registry_path,
+            installation_profile_id=PROFILE_ID,
+            installation_profile_name="(FAKE) Personal",
+            hermes_dashboard_url="ws://127.0.0.1:9120/api/ws",
+            hermes_dashboard_token="(FAKE)-hermes-dashboard-token",
+            hermes_job_hunter_cwd=tmp_path,
+            hermes_default_model_id="gpt-5.6-sol-900k",
+            hermes_default_reasoning_effort="medium",
+        ),
+        agent_gateway_factory=ReadyGatewayFactory(),  # type: ignore[arg-type]
+    )
+
+    with TestClient(app) as client:
+        response = client.get("/v1/connected-agents", headers=auth())
+        assert response.status_code == 200
+        hermes = response.json()["agents"][0]
+        assert hermes["provider"] == "hermes"
+        assert hermes["lifecycle"] == "connected"
+        assert hermes["default_model_id"] == "gpt-5.6-sol-900k"
+        assert hermes["default_reasoning_effort"] == "medium"
+        assert hermes["health"]["provider_available"] is True
+        models = client.get(f"/v1/connected-agents/{hermes['id']}/models", headers=auth())
+        assert models.status_code == 200
+        assert models.json() == {
+            "live": True,
+            "models": [
+                {
+                    "model_id": "gpt-5.6-sol-900k",
+                    "display_name": "gpt-5.6-sol-900k",
+                    "reasoning_efforts": ["medium"],
+                }
+            ],
+        }
+
+
 def test_connected_agent_api_resolves_default_and_provisions_immutable_chat(tmp_path):
     app, registry, state_store, gateway_factory, _ = setup_app(tmp_path)
 
