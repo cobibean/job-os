@@ -279,6 +279,7 @@ class CodexAppServerProcess:
                     stdin=asyncio.subprocess.PIPE,
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.PIPE,
+                    limit=MAX_PROTOCOL_LINE_BYTES,
                     cwd=str(self.codex_home.expanduser().resolve()),
                     env=environment,
                 )

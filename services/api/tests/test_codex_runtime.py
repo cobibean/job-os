@@ -191,6 +191,41 @@ for line in sys.stdin:
 
 
 @pytest.mark.anyio
+async def test_stdio_supervisor_accepts_large_protocol_responses(tmp_path: Path) -> None:
+    server = tmp_path / "fake-codex-app-server"
+    server.write_text(
+        """#!/usr/bin/env python3
+import json
+import sys
+for line in sys.stdin:
+    message = json.loads(line)
+    if "id" not in message:
+        continue
+    if message["method"] == "initialize":
+        result = {"serverInfo": {"name": "fake"}}
+    else:
+        result = {"data": "x" * (128 * 1024)}
+    print(json.dumps({"id": message["id"], "result": result}), flush=True)
+""",
+        encoding="utf-8",
+    )
+    server.chmod(0o700)
+    client = CodexAppServerProcess(
+        server,
+        tmp_path / "codex-home",
+        request_timeout=2,
+        verify_binary=lambda _: None,
+    )
+    try:
+        await client.start()
+        result = await client.request("mcpServerStatus/list", {"detail": "full"})
+        assert result == {"data": "x" * (128 * 1024)}
+        assert await client.request("model/list") == {"data": "x" * (128 * 1024)}
+    finally:
+        await client.close()
+
+
+@pytest.mark.anyio
 async def test_stdio_supervisor_maps_rpc_rejection_without_leaking_message(tmp_path: Path) -> None:
     server = tmp_path / "fake-codex-app-server"
     server.write_text(
