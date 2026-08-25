@@ -644,10 +644,6 @@ def create_app(
             mcp_command=settings.codex_mcp_command,
             mcp_args=settings.codex_mcp_args,
         )
-        if selected_connected_agent_runtime is None:
-            selected_connected_agent_runtime = CodexConnectedAgentRuntime(
-                codex_client, codex_vault
-            )
 
     if selected_connected_agent_runtime is None:
         provider_controls: dict[str, ConnectedAgentRuntimeControl] = {
