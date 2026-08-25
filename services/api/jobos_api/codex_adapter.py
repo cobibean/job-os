@@ -10,7 +10,12 @@ from collections.abc import AsyncIterator, Awaitable, Callable
 from pathlib import Path
 
 from .agent_gateway import AgentContext, ConnectionState, GatewayEvent
-from .codex_runtime import CodexRpcClient, CodexRuntimeError, jobos_mcp_ready
+from .codex_runtime import (
+    CodexRpcClient,
+    CodexRpcError,
+    CodexRuntimeError,
+    jobos_mcp_ready,
+)
 from .hermes_adapter import _prompt_with_context
 from .redaction import redact_detail, sanitize_assistant_text, sanitize_text
 
@@ -204,14 +209,33 @@ class CodexAppServerGateway:
         else:
             method = "thread/resume"
             params["threadId"] = stored_session_id
-        result = await self._client.request(method, params)
+        replaced_missing_rollout = False
+        try:
+            result = await self._client.request(method, params)
+        except CodexRpcError as error:
+            missing_rollout_message = (
+                f"no rollout found for thread id {stored_session_id}"
+            )
+            if (
+                stored_session_id is None
+                or error.rpc_code != -32600
+                or error.safe_message != missing_rollout_message
+            ):
+                raise
+            replaced_missing_rollout = True
+            params.pop("threadId", None)
+            result = await self._client.request("thread/start", params)
         thread = result.get("thread") if isinstance(result, dict) else None
         thread_id = thread.get("id") if isinstance(thread, dict) else None
         if not isinstance(thread_id, str) or not thread_id:
             raise CodexRuntimeError(
                 "AGENT_PROVIDER_UNAVAILABLE", "Codex conversation lifecycle failed"
             )
-        if stored_session_id is not None and thread_id != stored_session_id:
+        if (
+            stored_session_id is not None
+            and not replaced_missing_rollout
+            and thread_id != stored_session_id
+        ):
             raise CodexRuntimeError(
                 "AGENT_PROVIDER_UNAVAILABLE", "Codex resumed the wrong conversation"
             )

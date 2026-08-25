@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 from jobos_api.agent_gateway import AgentContext
 from jobos_api.codex_adapter import CodexGatewayFactory
-from jobos_api.codex_runtime import CodexRuntimeError
+from jobos_api.codex_runtime import CodexRpcError, CodexRuntimeError
 
 
 @pytest.fixture
@@ -26,6 +26,7 @@ class FakeCodexClient:
         self.rate_limits: dict[str, object] = {}
         self.interrupt_error = False
         self.complete_before_interrupt_response = False
+        self.resume_error: CodexRpcError | None = None
         self.server_request_handler: Callable[[str, object], Awaitable[object]] | None = None
 
     @property
@@ -40,6 +41,8 @@ class FakeCodexClient:
         if method == "thread/start":
             return {"thread": {"id": "thread-a", "turns": []}}
         if method == "thread/resume":
+            if self.resume_error is not None:
+                raise self.resume_error
             assert isinstance(params, dict)
             return {"thread": {"id": params["threadId"], "turns": self.turns}}
         if method == "mcpServerStatus/list":
@@ -177,6 +180,38 @@ async def test_codex_attachment_is_idempotent_for_the_current_live_thread(
     assert await gateway.create_or_resume_conversation(stored_id) == (stored_id, stored_id)
 
     assert [method for method, _ in client.requests] == ["thread/start"]
+
+
+@pytest.mark.anyio
+async def test_codex_replaces_a_missing_pre_turn_rollout(tmp_path: Path) -> None:
+    client = FakeCodexClient()
+    client.resume_error = CodexRpcError(
+        -32600, "no rollout found for thread id thread-missing"
+    )
+    gateway = CodexGatewayFactory(client, cwd=tmp_path).create("conv_alpha")
+
+    assert await gateway.create_or_resume_conversation("thread-missing") == (
+        "thread-a",
+        "thread-a",
+    )
+    assert [method for method, _ in client.requests] == [
+        "thread/resume",
+        "thread/start",
+    ]
+
+
+@pytest.mark.anyio
+async def test_codex_does_not_replace_a_thread_for_unrelated_resume_errors(
+    tmp_path: Path,
+) -> None:
+    client = FakeCodexClient()
+    client.resume_error = CodexRpcError(-32600, "another request was rejected")
+    gateway = CodexGatewayFactory(client, cwd=tmp_path).create("conv_alpha")
+
+    with pytest.raises(CodexRpcError, match="Codex App Server rejected"):
+        await gateway.create_or_resume_conversation("thread-missing")
+
+    assert [method for method, _ in client.requests] == ["thread/resume"]
 
 
 @pytest.mark.anyio
