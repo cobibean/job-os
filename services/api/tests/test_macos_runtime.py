@@ -350,6 +350,23 @@ def test_service_environment_and_uvicorn_command_are_fixed_and_loopback_only(tmp
     )
 
 
+def test_service_environment_adds_installed_tool_paths_to_launchd_path(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setenv("PATH", "/usr/bin:/bin:/usr/sbin:/sbin")
+
+    environment = build_service_environment(
+        RuntimeServiceConfig.from_mapping(runtime_mapping(tmp_path)),
+        device_token="device-secret-value",
+        mcp_token="mcp-secret-value",
+        hermes_dashboard_token=None,
+    )
+
+    assert environment["PATH"] == (
+        "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+    )
+
+
 def test_local_service_environment_has_no_private_provider_inputs(tmp_path):
     config = RuntimeServiceConfig.from_mapping(local_runtime_mapping(tmp_path))
     environment = build_service_environment(
