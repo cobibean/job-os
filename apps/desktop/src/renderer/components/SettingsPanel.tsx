@@ -6,13 +6,17 @@ import { AgentAvatar } from '../agent-avatar/AgentAvatar'
 import { AGENT_AVATARS, type AgentAvatarId } from '../agent-avatar/agentAvatars'
 import { THEMES, type ThemeMode } from '../theme/themes'
 import { DiagnosticsPanel } from '../diagnostics/DiagnosticsPanel'
+import type { useConnectedAgents } from '../hooks/useConnectedAgents'
+import { ConnectedAgentsSettings } from './ConnectedAgentsSettings'
 
 interface SettingsPanelProps {
   activeAgentAvatarId: AgentAvatarId
   activeThemeId: string
   careerProfileBridge?: CareerProfileBridge | null
+  connectedAgentsState?: ReturnType<typeof useConnectedAgents>
   mode: ThemeMode
   onClose: () => void
+  onConnectedAgentsChanged?: () => Promise<void>
   onSelectAgentAvatar: (avatarId: AgentAvatarId) => void
   onSelectTheme: (themeId: string) => void
 }
@@ -23,8 +27,10 @@ export function SettingsPanel({
   activeAgentAvatarId,
   activeThemeId,
   careerProfileBridge = null,
+  connectedAgentsState,
   mode,
   onClose,
+  onConnectedAgentsChanged,
   onSelectAgentAvatar,
   onSelectTheme
 }: SettingsPanelProps) {
@@ -140,6 +146,8 @@ export function SettingsPanel({
             })}
           </div>
         </section>
+
+        {connectedAgentsState ? <ConnectedAgentsSettings onAgentsChanged={onConnectedAgentsChanged} state={connectedAgentsState} /> : null}
 
         {careerProfileBridge ? (
           <section aria-labelledby="settings-agent-editing-heading" className="settings-section settings-section-divided">

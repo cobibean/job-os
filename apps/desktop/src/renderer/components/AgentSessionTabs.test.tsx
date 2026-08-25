@@ -13,6 +13,8 @@ function session(position: number, status?: 'running' | 'waiting'): AgentSession
     summary: {
       conversationId: `conv_${position}`, position, title: `Session ${position}`, createdAt: '', activeTurn: null,
       connection: 'online', recoveryState: 'ready', latestEventId: 0,
+      binding: { connectedAgentId: 'agent-hermes', provider: 'hermes', modelId: 'default', reasoningEffort: 'medium' },
+      availability: { state: 'ready', reason: null },
       jobContext: { selectedJobId: null, activeArtifactId: null, activeArtifactPage: 1, activeArtifactZoom: 1 }
     },
     conversation: {
@@ -36,7 +38,7 @@ function controller(count = 3): AgentSessionsController {
     atMaximum: count === 5,
     select: vi.fn(() => true), selectByIndex: vi.fn(() => true), create: vi.fn(async () => true),
     createJobless: vi.fn(async () => 'conv_save'),
-    archive: vi.fn(async () => true), updateJobContext: vi.fn(), setDraft: vi.fn(), send: vi.fn(), stop: vi.fn(), retry: vi.fn(), saveScroll: vi.fn()
+    archive: vi.fn(async () => true), updateJobContext: vi.fn(), setDraft: vi.fn(), send: vi.fn(), stop: vi.fn(), retry: vi.fn(), refreshAvailability: vi.fn(), saveScroll: vi.fn()
   }
 }
 
@@ -51,12 +53,12 @@ test('arrow, Home, and End navigation selects and focuses tabs', () => {
   expect(value.select).toHaveBeenCalledWith('conv_3')
 })
 
-test('five-session cap disables add with an exact label and close constraints are explicit', () => {
+test('five-session cap keeps New Chat available for the archive recovery flow', () => {
   const value = controller(5)
   value.activeId = 'conv_2'
   value.sessions.conv_2 = session(2, 'running')
   render(<AgentSessionTabs controller={value} />)
-  expect((screen.getByRole('button', { name: 'New agent session' }) as HTMLButtonElement).disabled).toBe(true)
+  expect((screen.getByRole('button', { name: 'New agent session' }) as HTMLButtonElement).disabled).toBe(false)
   expect(screen.getByRole('button', { name: 'New agent session' }).getAttribute('title')).toBe('Maximum 5 sessions')
   const close = screen.getByRole('button', { name: 'Close Session 2' }) as HTMLButtonElement
   expect(close.disabled).toBe(true)

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -11,6 +12,10 @@ from jobos_api.agent_gateway import (
 )
 from jobos_api.app import create_app
 from jobos_api.connected_agent_auth import SafeAuthTransaction
+from jobos_api.connected_agents import (
+    HermesConnectedAgentRuntime,
+    ProviderConnectedAgentRuntime,
+)
 from jobos_api.conversation_store import ConversationStore
 from jobos_api.installation_profiles import (
     AnchoredRuntime,
@@ -217,6 +222,7 @@ def setup_app(
         now=NOW,
     )
     state_store = JobOsStateStore(state_path)
+
     gateway_factory = ReadyGatewayFactory(gateway_type)
     settings = Settings(
         device_token=TOKEN,
@@ -259,12 +265,38 @@ def chat_payload(revision: int, key: str, **overrides):
     }
 
 
+def test_provider_runtime_routes_hermes_to_its_fixed_profile_model(tmp_path):
+    _, registry, _, _, _ = setup_app(tmp_path)
+    record = registry.load().connected_agents[0]
+    runtime = ProviderConnectedAgentRuntime(
+        {"hermes": HermesConnectedAgentRuntime(configured=True)}
+    )
+
+    health = asyncio.run(runtime.inspect_connection(record))
+    models = asyncio.run(runtime.list_models(record))
+
+    assert health["provider_available"] is True
+    assert health["tools_available"] is True
+    assert models == {
+        "live": True,
+        "models": [
+            {
+                "model_id": "(FAKE)-model-stable",
+                "display_name": "(FAKE)-model-stable",
+                "reasoning_efforts": ["medium"],
+            }
+        ],
+    }
+
+
 def test_connected_agent_api_resolves_default_and_provisions_immutable_chat(tmp_path):
     app, registry, state_store, gateway_factory, _ = setup_app(tmp_path)
 
     with TestClient(app) as client:
         agents = client.get("/v1/connected-agents", headers=auth())
         assert agents.status_code == 200
+        assert agents.json()["profile_id"] == PROFILE_ID
+        assert agents.json()["default_connected_agent_id"] == AGENT_ID
         assert agents.json()["agents"][0]["id"] == AGENT_ID
         assert agents.json()["agents"][0]["health"]["state"] == "connected"
 
@@ -282,6 +314,15 @@ def test_connected_agent_api_resolves_default_and_provisions_immutable_chat(tmp_
         }
         assert body["availability"]["state"] == "ready"
         assert body["agent"]["display_name"] == "(FAKE) Hermes"
+        summaries = client.get("/v1/conversations", headers=auth())
+        assert summaries.status_code == 200
+        summary = next(
+            item
+            for item in summaries.json()["conversations"]
+            if item["conversation_id"] == body["conversation_id"]
+        )
+        assert summary["binding"] == body["binding"]
+        assert summary["availability"] == body["availability"]
         assert state_store.conversation_store(body["conversation_id"]).binding() == {
             "connected_agent_id": AGENT_ID,
             "provider": "hermes",
@@ -440,12 +481,55 @@ def test_profile_wide_five_chat_limit_and_archive_release(tmp_path):
     assert replacement.status_code == 201
 
 
+def test_account_replacement_durably_locks_prior_agent_chats(tmp_path):
+    app, registry, state_store, _, _ = setup_app(tmp_path)
+    with TestClient(app) as client:
+        created = client.post(
+            "/v1/conversations",
+            headers=auth(),
+            json=chat_payload(
+                registry.load().registry_revision,
+                "(FAKE)-account-replacement-chat",
+            ),
+        )
+        assert created.status_code == 201, created.text
+        assert state_store.lock_connected_agent_chats(
+            AGENT_ID, "AUTH_ACCOUNT_REPLACEMENT_REQUIRED"
+        ) == 1
+        summaries = client.get("/v1/conversations", headers=auth())
+
+    locked = next(
+        item
+        for item in summaries.json()["conversations"]
+        if item["conversation_id"] == created.json()["conversation_id"]
+    )
+    assert locked["availability"] == {
+        "state": "locked",
+        "reason": "AUTH_ACCOUNT_REPLACEMENT_REQUIRED",
+    }
+
+
 def test_agent_api_update_models_impact_default_and_disconnect(tmp_path):
     app, registry, _, _, _ = setup_app(tmp_path)
     with TestClient(app) as client:
         models = client.get(f"/v1/connected-agents/{AGENT_ID}/models", headers=auth())
         impact = client.get(f"/v1/connected-agents/{AGENT_ID}/disconnect-impact", headers=auth())
         revision = registry.load().registry_revision
+        created = client.post(
+            "/v1/conversations",
+            headers=auth(),
+            json=chat_payload(revision, "(FAKE)-disconnect-chat"),
+        )
+        assert created.status_code == 201, created.text
+        delivered = client.post(
+            f"/v1/conversations/{created.json()['conversation_id']}/messages",
+            headers=auth(),
+            json={
+                "text": "(FAKE) ambiguous delivery",
+                "idempotency_key": "(FAKE)-ambiguous-send",
+            },
+        )
+        assert delivered.status_code == 201, delivered.text
         updated = client.patch(
             f"/v1/connected-agents/{AGENT_ID}",
             headers=auth(),
@@ -479,6 +563,23 @@ def test_agent_api_update_models_impact_default_and_disconnect(tmp_path):
                 "idempotency_key": "(FAKE)-disconnect-agent",
             },
         )
+        summaries = client.get("/v1/conversations", headers=auth())
+        replayed = client.post(
+            f"/v1/conversations/{created.json()['conversation_id']}/messages",
+            headers=auth(),
+            json={
+                "text": "(FAKE) ambiguous delivery",
+                "idempotency_key": "(FAKE)-ambiguous-send",
+            },
+        )
+        blocked_send = client.post(
+            f"/v1/conversations/{created.json()['conversation_id']}/messages",
+            headers=auth(),
+            json={
+                "text": "This must stay read-only",
+                "idempotency_key": "(FAKE)-locked-chat-send",
+            },
+        )
 
     assert models.status_code == 200
     assert models.json()["models"][0]["model_id"] == "(FAKE)-model-stable"
@@ -486,6 +587,19 @@ def test_agent_api_update_models_impact_default_and_disconnect(tmp_path):
     assert updated.json()["display_name"] == "(FAKE) Renamed Hermes"
     assert cleared.json()["default_connected_agent_id"] is None
     assert disconnected.json()["lifecycle"] == "disconnected"
+    assert replayed.status_code == 201
+    assert replayed.json() == {**delivered.json(), "created": False}
+    disconnected_chat = next(
+        item
+        for item in summaries.json()["conversations"]
+        if item["conversation_id"] == created.json()["conversation_id"]
+    )
+    assert disconnected_chat["availability"] == {
+        "state": "locked",
+        "reason": "AGENT_DISCONNECTED",
+    }
+    assert blocked_send.status_code == 409
+    assert blocked_send.json()["code"] == "AGENT_DISCONNECTED"
     persisted = next(item for item in registry.load().connected_agents if item.id == AGENT_ID)
     assert persisted.connection_config is None
     assert persisted.credential_reference is None

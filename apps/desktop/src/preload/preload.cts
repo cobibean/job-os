@@ -4,7 +4,9 @@ import type { IpcRendererEvent } from 'electron'
 import type { DocxExternalChangeEvent, SaveDocxRequest } from '../shared/docxDocuments.js'
 
 import type {
+  AgentChatSelection,
   AgentSessionStreamUpdate,
+  ConnectedAgentSummary,
   BrowserBounds,
   BrowserJobExtraction,
   BrowserRestoreState,
@@ -166,7 +168,7 @@ const bridge: JobOsRendererBridge = Object.freeze({
   }),
   agent: Object.freeze({
     list: () => ipcRenderer.invoke('jobos:agent:list'),
-    create: (initialSelectedJobId?: string | null) => ipcRenderer.invoke('jobos:agent:create', initialSelectedJobId),
+    create: (selection?: AgentChatSelection) => ipcRenderer.invoke('jobos:agent:create', selection),
     get: (conversationId: string) => ipcRenderer.invoke('jobos:agent:get', conversationId),
     archive: (conversationId: string) => ipcRenderer.invoke('jobos:agent:archive', conversationId),
     send: (conversationId: string, text: string, idempotencyKey: string) => ipcRenderer.invoke('jobos:agent:send', conversationId, text, idempotencyKey),
@@ -177,6 +179,19 @@ const bridge: JobOsRendererBridge = Object.freeze({
       ipcRenderer.on('jobos:agent:event', wrapped)
       return () => ipcRenderer.removeListener('jobos:agent:event', wrapped)
     }
+  }),
+  connectedAgents: Object.freeze({
+    list: () => ipcRenderer.invoke('jobos:connected-agents:list'),
+    models: (agentId: string) => ipcRenderer.invoke('jobos:connected-agents:models', agentId),
+    test: (agentId: string) => ipcRenderer.invoke('jobos:connected-agents:test', agentId),
+    createCodex: (displayName: string, avatarId: string, expectedRevision: number, idempotencyKey: string) => ipcRenderer.invoke('jobos:connected-agents:create-codex', displayName, avatarId, expectedRevision, idempotencyKey),
+    update: (agent: ConnectedAgentSummary, modelId: string | null, reasoningEffort: string | null, expectedRevision: number, idempotencyKey: string) => ipcRenderer.invoke('jobos:connected-agents:update', agent, modelId, reasoningEffort, expectedRevision, idempotencyKey),
+    setDefault: (profileId: string, agentId: string | null, expectedRevision: number, idempotencyKey: string) => ipcRenderer.invoke('jobos:connected-agents:set-default', profileId, agentId, expectedRevision, idempotencyKey),
+    impact: (agentId: string) => ipcRenderer.invoke('jobos:connected-agents:impact', agentId),
+    disconnect: (agentId: string, expectedRevision: number, idempotencyKey: string) => ipcRenderer.invoke('jobos:connected-agents:disconnect', agentId, expectedRevision, idempotencyKey),
+    startAuth: (agentId: string, mode: 'connect' | 'reconnect' | 'replace', expectedAccountFingerprint: string | null) => ipcRenderer.invoke('jobos:connected-agents:auth:start', agentId, mode, expectedAccountFingerprint),
+    readAuth: (transactionId: string) => ipcRenderer.invoke('jobos:connected-agents:auth:read', transactionId),
+    cancelAuth: (transactionId: string) => ipcRenderer.invoke('jobos:connected-agents:auth:cancel', transactionId)
   }),
   jobs: Object.freeze({
     getState: () => ipcRenderer.invoke('jobos:jobs:get-state'),

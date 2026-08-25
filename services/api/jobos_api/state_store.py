@@ -2263,6 +2263,9 @@ class JobOsStateStore:
     def connected_agent_chat_impact(self, agent_id: str) -> dict[str, int]:
         return self.connected_agent_chat_impact_at(self._path, agent_id)
 
+    def lock_connected_agent_chats(self, agent_id: str, reason: str) -> int:
+        return self.lock_connected_agent_chats_at(self._path, agent_id, reason)
+
     @staticmethod
     def connected_agent_chat_impact_at(path: Path, agent_id: str) -> dict[str, int]:
         if not path.exists():
@@ -2285,6 +2288,29 @@ class JobOsStateStore:
                 raise
             return {"active_chats": 0, "locked_chats": 0}
         return {"active_chats": int(row[0]), "locked_chats": int(row[1] or 0)}
+
+    @staticmethod
+    def lock_connected_agent_chats_at(path: Path, agent_id: str, reason: str) -> int:
+        if not path.exists():
+            return 0
+        try:
+            with connect_sqlite(path) as connection:
+                cursor = connection.execute(
+                    """
+                    UPDATE conversations
+                    SET creation_state = 'locked', lock_reason = ?,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE archived_at IS NULL AND connected_agent_id = ?
+                      AND binding_state = 'sealed'
+                    """,
+                    (reason, agent_id),
+                )
+                connection.commit()
+        except sqlite3.OperationalError as error:
+            if "no such table" not in str(error) and "no such column" not in str(error):
+                raise
+            return 0
+        return cursor.rowcount
 
     def create_conversation(
         self,

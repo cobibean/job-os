@@ -40,10 +40,12 @@ function AgentElapsedTime({ startedAt }: { startedAt: number }) {
 }
 
 interface AgentPanelProps {
+  agentLabel?: string
   avatarId: AgentAvatarId
   contextLabel: string
   apiState?: ConnectivityState
   onArtifactRendered?: () => void
+  onNewChat?: () => void
   sessions: AgentSessionsController
 }
 
@@ -60,7 +62,7 @@ function ConnectionNotice({ apiState, connection }: { apiState: ConnectivityStat
   return null
 }
 
-export function AgentPanel({ avatarId, contextLabel, apiState = 'connected', onArtifactRendered, sessions }: AgentPanelProps) {
+export function AgentPanel({ agentLabel, avatarId, contextLabel, apiState = 'connected', onArtifactRendered, onNewChat, sessions }: AgentPanelProps) {
   const conversation = sessions.activeConversation ?? {
     ...initialAgentConversationState,
     items: [],
@@ -68,6 +70,7 @@ export function AgentPanel({ avatarId, contextLabel, apiState = 'connected', onA
     operationPending: false
   }
   const activeId = sessions.activeId
+  const activeSummary = sessions.activeSession?.summary
   const panelRefs = useRef(new Map<string, HTMLDivElement>())
   const lastScrollTops = useRef(new Map<string, number>())
   const pinnedToBottom = useRef(true)
@@ -80,6 +83,7 @@ export function AgentPanel({ avatarId, contextLabel, apiState = 'connected', onA
     && !conversation.restoring
     && !conversation.operationPending
     && apiState === 'connected'
+    && activeSummary?.availability?.state !== 'locked'
   )
 
 
@@ -189,7 +193,17 @@ export function AgentPanel({ avatarId, contextLabel, apiState = 'connected', onA
       <div className="agent-context">
         <span title={contextLabel}><BriefcaseBusiness aria-hidden="true" size={16} strokeWidth={1.5} /> <span>{contextLabel}</span></span>
       </div>
-      <AgentSessionTabs controller={sessions} />
+      <AgentSessionTabs controller={sessions} onNewChat={onNewChat} />
+      {activeSummary?.binding ? (
+        <div className="agent-binding" role="status">
+          <strong>{agentLabel ?? (activeSummary.binding.provider === 'codex' ? 'ChatGPT · Codex' : 'Hermes')}</strong>
+          <span>{activeSummary.binding.modelId} · {activeSummary.binding.reasoningEffort}</span>
+          <small>Locked for this chat</small>
+        </div>
+      ) : null}
+      {activeSummary?.availability?.state === 'locked' ? (
+        <div className="agent-connection offline" role="status"><WifiOff aria-hidden="true" size={14} /> This chat is read-only · {activeSummary.availability.reason ?? 'Reconnect its agent to continue'}</div>
+      ) : null}
 
       {(sessions.order.length ? sessions.order : ['']).map(panelId => {
         const selected = !panelId || panelId === activeId
@@ -260,7 +274,7 @@ export function AgentPanel({ avatarId, contextLabel, apiState = 'connected', onA
                       <article className={`agent-notice ${terminal.kind} ${waiting ? 'waiting' : terminal.state}`}>
                         <strong><CircleAlert aria-hidden="true" size={14} /> {waiting ? 'Waiting for you' : terminal.state === 'waiting' ? 'Turn paused' : terminal.state === 'interrupted' ? 'Turn interrupted' : 'Turn failed'}</strong>
                         <p>{terminal.label}</p>
-                        {terminal.retryable && !conversation.activeTurn && (
+                        {terminal.retryable && !conversation.activeTurn && activeSummary?.availability?.state !== 'locked' && (
                           <button aria-label="Retry turn" className="retry-button" onClick={() => { if (activeId) void sessions.retry(activeId, item.turnId) }} type="button">
                             <RotateCcw aria-hidden="true" size={13} /> Retry
                           </button>
@@ -285,7 +299,7 @@ export function AgentPanel({ avatarId, contextLabel, apiState = 'connected', onA
                 <article className={`agent-notice ${item.kind} ${item.state}`} key={item.id}>
                   <strong><CircleAlert aria-hidden="true" size={14} /> {noticeLabel}</strong>
                   <p>{item.label}</p>
-                  {item.retryable && !conversation.activeTurn && (
+                  {item.retryable && !conversation.activeTurn && activeSummary?.availability?.state !== 'locked' && (
                     <button aria-label="Retry turn" className="retry-button" onClick={() => { if (activeId) void sessions.retry(activeId, item.turnId ?? '') }} type="button">
                       <RotateCcw aria-hidden="true" size={13} /> Retry
                     </button>

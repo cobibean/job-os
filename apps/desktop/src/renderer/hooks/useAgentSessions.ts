@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import type {
+  AgentChatSelection,
   AgentConversationSnapshot,
   AgentSessionJobContext,
   AgentSessionStreamUpdate,
@@ -38,7 +39,9 @@ interface AgentSessionsState {
 const unavailableSummary: AgentSessionSummary = {
   conversationId: 'conv_unavailable', position: 1, title: 'Session 1', createdAt: '',
   activeTurn: null, connection: 'offline', recoveryState: 'ready', latestEventId: 0,
-  jobContext: { selectedJobId: null, activeArtifactId: null, activeArtifactPage: 1, activeArtifactZoom: 1 }
+  jobContext: { selectedJobId: null, activeArtifactId: null, activeArtifactPage: 1, activeArtifactZoom: 1 },
+  binding: null,
+  availability: { state: 'locked', reason: 'Agent unavailable' }
 }
 
 function identifier(prefix: string): string {
@@ -78,7 +81,9 @@ function summaryFromSnapshot(snapshot: AgentConversationSnapshot): AgentSessionS
     connection: snapshot.connection,
     recoveryState: snapshot.recoveryState ?? 'ready',
     latestEventId: snapshot.latestEventId,
-    jobContext: snapshot.jobContext
+    jobContext: snapshot.jobContext,
+    binding: snapshot.binding,
+    availability: snapshot.availability
   }
 }
 
@@ -201,8 +206,16 @@ export function useAgentSessions() {
       if (activeId) window.localStorage.setItem(ACTIVE_CONVERSATION_KEY, activeId)
       await Promise.all(sorted.map(async summary => {
         try {
-          const snapshot = await bridge.get(summary.conversationId)
-          if (!mounted || snapshot.conversationId !== summary.conversationId) return
+          const response = await bridge.get(summary.conversationId)
+          if (!mounted || response.conversationId !== summary.conversationId) return
+          // The detail endpoint predates Connected Agent presentation metadata.
+          // Preserve the authoritative sealed binding from the list response while
+          // the conversation body hydrates instead of briefly relabelling it legacy.
+          const snapshot = {
+            ...response,
+            binding: response.binding ?? summary.binding,
+            availability: response.binding ? response.availability : summary.availability
+          }
           updateState(current => {
             const session = current.sessions[summary.conversationId]
             if (!session) return current
@@ -270,7 +283,7 @@ export function useAgentSessions() {
     return id ? select(id) : false
   }, [select])
 
-  const createSession = useCallback((initialSelectedJobId?: string | null): Promise<{
+  const createSession = useCallback((selection?: AgentChatSelection, initialSelectedJobId?: string | null): Promise<{
     handled: boolean
     conversationId: string | null
   }> => {
@@ -286,7 +299,7 @@ export function useAgentSessions() {
         const inheritedJobId = initialSelectedJobId === undefined
           ? stateRef.current.sessions[stateRef.current.activeId ?? '']?.summary.jobContext.selectedJobId ?? null
           : initialSelectedJobId
-        const snapshot = await bridge.create(inheritedJobId)
+        const snapshot = await bridge.create(selection ? { ...selection, initialSelectedJobId: inheritedJobId } : undefined)
         let session: AgentSessionViewState = {
           ...sessionFromSummary(summaryFromSnapshot(snapshot)),
           conversation: agentConversationReducer(initialAgentConversationState, { type: 'hydrate', snapshot })
@@ -315,12 +328,12 @@ export function useAgentSessions() {
     return task
   }, [updateState])
 
-  const create = useCallback(async (initialSelectedJobId?: string | null): Promise<boolean> => (
-    await createSession(initialSelectedJobId)
+  const create = useCallback(async (selection?: AgentChatSelection): Promise<boolean> => (
+    await createSession(selection)
   ).handled, [createSession])
 
-  const createJobless = useCallback(async (): Promise<string | null> => (
-    await createSession(null)
+  const createJobless = useCallback(async (selection: AgentChatSelection): Promise<string | null> => (
+    await createSession(selection, null)
   ).conversationId, [createSession])
 
   const setDraft = useCallback((conversationId: string, draft: string) => {
@@ -461,6 +474,20 @@ export function useAgentSessions() {
     })
   }, [updateState])
 
+  const refreshAvailability = useCallback(async () => {
+    const bridge = window.jobos?.agent
+    if (!bridge) return
+    const summaries = await bridge.list()
+    const byId = new Map(summaries.map(summary => [summary.conversationId, summary]))
+    updateState(current => ({
+      ...current,
+      sessions: Object.fromEntries(Object.entries(current.sessions).map(([id, session]) => {
+        const summary = byId.get(id)
+        return [id, summary ? { ...session, summary: { ...session.summary, ...summary } } : session]
+      }))
+    }))
+  }, [updateState])
+
   const activeSession = state.activeId ? state.sessions[state.activeId] ?? null : null
   const activeConversation = useMemo(() => activeSession ? {
     ...activeSession.conversation,
@@ -486,6 +513,7 @@ export function useAgentSessions() {
     send,
     stop,
     retry,
+    refreshAvailability,
     saveScroll,
     updateJobContext
   }

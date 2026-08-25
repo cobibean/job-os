@@ -13,12 +13,20 @@ import { DocxDocumentEditorShell } from './document-editor/DocxDocumentEditorShe
 import { useConnectivity } from './hooks/useConnectivity'
 import { useJobs } from './hooks/useJobs'
 import { useAgentSessions } from './hooks/useAgentSessions'
+import { useConnectedAgents } from './hooks/useConnectedAgents'
 import { useWorkspace } from './hooks/useWorkspace'
 import { useTheme } from './theme/useTheme'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { DocxOpenResult } from '../shared/docxDocuments'
-import type { SetupSnapshot } from '../shared/contracts'
+import type {
+  AgentChatSelection,
+  ConnectedAgentModelsSnapshot,
+  ConnectedAgentSummary,
+  ConnectedAgentsSnapshot,
+  SetupSnapshot
+} from '../shared/contracts'
 import { OnboardingScreen } from './onboarding/OnboardingScreen'
+import { NewAgentChatDialog } from './components/NewAgentChatDialog'
 
 export function App() {
   const [setup, setSetup] = useState<SetupSnapshot | null>(
@@ -39,9 +47,58 @@ export function App() {
   return <WorkbenchApp />
 }
 
+export function requireDefaultConnectedAgent(snapshot: ConnectedAgentsSnapshot): ConnectedAgentSummary {
+  const agent = snapshot.defaultConnectedAgentId
+    ? snapshot.agents.find(item => item.id === snapshot.defaultConnectedAgentId)
+    : undefined
+  if (
+    !agent ||
+    agent.lifecycle !== 'connected' ||
+    !agent.health.providerAvailable ||
+    !agent.health.toolsAvailable
+  ) {
+    throw new Error('Default Connected Agent is unavailable. Choose a ready default in Settings.')
+  }
+  return agent
+}
+
+export function requireDefaultAgentModel(
+  agent: ConnectedAgentSummary,
+  catalog: ConnectedAgentModelsSnapshot
+): { modelId: string; reasoningEffort: string } {
+  if (!catalog.live || !agent.defaultModelId) {
+    throw new Error('Default model is unavailable. Choose a live model in Connected Agents settings.')
+  }
+  const model = catalog.models.find(item => item.modelId === agent.defaultModelId)
+  if (!model) {
+    throw new Error('Default model is unavailable. Choose a live model in Connected Agents settings.')
+  }
+  if (!agent.defaultReasoningEffort || !model.reasoningEfforts.includes(agent.defaultReasoningEffort)) {
+    throw new Error('Default reasoning effort is unavailable. Update the agent defaults in Settings.')
+  }
+  return { modelId: model.modelId, reasoningEffort: agent.defaultReasoningEffort }
+}
+
 function WorkbenchApp() {
   const connectivity = useConnectivity()
   const agentSessions = useAgentSessions()
+  const connectedAgents = useConnectedAgents()
+  const createJoblessSession = useCallback(async () => {
+    const snapshot = connectedAgents.snapshot ?? await connectedAgents.refresh()
+    if (!snapshot) return null
+    const agent = requireDefaultConnectedAgent(snapshot)
+    const catalog = await connectedAgents.loadModels(agent.id, true)
+    const model = requireDefaultAgentModel(agent, catalog)
+    const selection: AgentChatSelection = {
+      connectedAgentId: agent.id,
+      modelId: model.modelId,
+      reasoningEffort: model.reasoningEffort,
+      expectedProfileRevision: snapshot.registryRevision,
+      expectedAgentRegistryRevision: snapshot.registryRevision,
+      idempotencyKey: `desktop-save-chat-${crypto.randomUUID()}`
+    }
+    return agentSessions.createJobless(selection)
+  }, [agentSessions.createJobless, connectedAgents])
   const activeJobContext = agentSessions.activeSession?.summary.jobContext ?? null
   const jobState = useJobs(
     agentSessions.activeId,
@@ -56,6 +113,7 @@ function WorkbenchApp() {
   const theme = useTheme()
   const agentAvatar = useAgentAvatarPreference()
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [newChatOpen, setNewChatOpen] = useState(false)
   const [settingsPreparing, setSettingsPreparing] = useState(false)
   const [careerProfileEnabled, setCareerProfileEnabled] = useState(false)
   const [careerProfileOpen, setCareerProfileOpen] = useState(false)
@@ -81,7 +139,7 @@ function WorkbenchApp() {
   const activeLayout = layoutState.workspace.layouts[activePreset]
   const browseVisible = activeTopLevelWorkspace === 'browse' && browseDetachState === 'ready'
   const browserTransitionPending = browseDetachState === 'preparing'
-  const nativeBrowserVisible = layoutState.hydrated && activeTopLevelWorkspace !== 'browse' && !careerProfileOpen && !browserTransitionPending && !activeLayout.collapsed.includes('center') && !settingsOpen && !settingsPreparing && !profileOverlayActive
+  const nativeBrowserVisible = layoutState.hydrated && activeTopLevelWorkspace !== 'browse' && !careerProfileOpen && !browserTransitionPending && !activeLayout.collapsed.includes('center') && !settingsOpen && !settingsPreparing && !newChatOpen && !profileOverlayActive
 
   useEffect(() => {
     const bridge = window.jobos?.careerProfile
@@ -149,9 +207,7 @@ function WorkbenchApp() {
       }
       if (key === 'n') {
         event.preventDefault()
-        void agentSessions.create().then(handled => {
-          if (handled) requestAnimationFrame(() => document.querySelector<HTMLTextAreaElement>('#agent-message')?.focus())
-        })
+        setNewChatOpen(true)
         return
       }
       const index = Number(event.key) - 1
@@ -162,7 +218,7 @@ function WorkbenchApp() {
     }
     window.addEventListener('keydown', handleAgentShortcut)
     return () => window.removeEventListener('keydown', handleAgentShortcut)
-  }, [agentSessions.create, agentSessions.order, agentSessions.selectByIndex, settingsOpen, settingsPreparing])
+  }, [agentSessions.order, agentSessions.selectByIndex, settingsOpen, settingsPreparing])
 
   const showPublishedDocument = useCallback(() => {
     setDocumentMutationGeneration(generation => generation + 1)
@@ -337,10 +393,12 @@ function WorkbenchApp() {
       ) : (
       <WorkbenchLayout
         agent={<AgentPanel
+          agentLabel={connectedAgents.snapshot?.agents.find(agent => agent.id === agentSessions.activeSession?.summary.binding?.connectedAgentId)?.displayName}
           avatarId={agentAvatar.avatarId}
           apiState={connectivity.state}
           contextLabel={jobState.selectedJob ? `${jobState.selectedJob.company} · ${jobState.selectedJob.title}` : 'No active job'}
           onArtifactRendered={showPublishedDocument}
+          onNewChat={() => setNewChatOpen(true)}
           sessions={agentSessions}
         />}
         center={<CenterWorkspace
@@ -356,7 +414,7 @@ function WorkbenchApp() {
           browserRepaired={Boolean(layoutState.workspace.repairedBrowser)}
           browserRepairReasons={layoutState.workspace.browserRepairReasons ?? []}
           browserVisible={nativeBrowserVisible && !panelReorderActive}
-          onCreateSaveSession={agentSessions.createJobless}
+          onCreateSaveSession={createJoblessSession}
           documentMutationGeneration={documentMutationGeneration}
           documentPreviewMode={documentPreviewMode}
           jobListingRequest={jobListingRequest}
@@ -441,10 +499,25 @@ function WorkbenchApp() {
           activeAgentAvatarId={agentAvatar.avatarId}
           activeThemeId={theme.themeId}
           careerProfileBridge={window.jobos.careerProfile}
+          connectedAgentsState={connectedAgents}
+          onConnectedAgentsChanged={agentSessions.refreshAvailability}
           mode={theme.mode}
           onClose={() => setSettingsOpen(false)}
           onSelectAgentAvatar={agentAvatar.selectAvatar}
           onSelectTheme={theme.selectTheme}
+        />
+      ) : null}
+      {newChatOpen ? (
+        <NewAgentChatDialog
+          atMaximum={agentSessions.atMaximum}
+          connectedAgents={connectedAgents}
+          onArchiveCurrent={() => {
+            if (agentSessions.activeId) void agentSessions.archive(agentSessions.activeId).then(archived => {
+              if (archived) setNewChatOpen(false)
+            })
+          }}
+          onClose={() => setNewChatOpen(false)}
+          onCreate={agentSessions.create}
         />
       ) : null}
     </div>

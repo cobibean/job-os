@@ -24,6 +24,8 @@ const event = (eventId: number, overrides: Partial<ConversationEvent> = {}): Con
 const snapshot = (entries: ConversationEvent[] = []): AgentConversationSnapshot => ({
   conversationId: 'conv-current', position: 1, title: 'Session 1', createdAt: '', entries, activeTurn: null,
   connection: 'online', recoveryState: 'ready', latestEventId: entries.at(-1)?.eventId ?? 0,
+  binding: { connectedAgentId: 'agent-hermes', provider: 'hermes', modelId: 'default', reasoningEffort: 'medium' },
+  availability: { state: 'ready', reason: null },
   jobContext: { selectedJobId: null, activeArtifactId: null, activeArtifactPage: 1, activeArtifactZoom: 1 }
 })
 

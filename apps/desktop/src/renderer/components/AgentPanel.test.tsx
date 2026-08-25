@@ -10,6 +10,8 @@ afterEach(() => { cleanup(); window.localStorage.clear(); vi.restoreAllMocks() }
 const summary = (position: number, activeTurn: AgentSessionSummary['activeTurn'] = null): AgentSessionSummary => ({
   conversationId: `conv_${position}`, position, title: `Session ${position}`, createdAt: '2026-08-16T10:00:00Z',
   activeTurn, connection: 'online', recoveryState: 'ready', latestEventId: 0,
+  binding: { connectedAgentId: 'agent-hermes', provider: 'hermes', modelId: 'default', reasoningEffort: 'medium' },
+  availability: { state: 'ready', reason: null },
   jobContext: { selectedJobId: null, activeArtifactId: null, activeArtifactPage: 1, activeArtifactZoom: 1 }
 })
 const snapshot = (position: number, entries: ConversationEvent[] = [], activeTurn: AgentSessionSummary['activeTurn'] = null): AgentConversationSnapshot => ({
@@ -37,9 +39,9 @@ function install(summaries = [summary(1)], snapshots = summaries.map(item => sna
   return { agent, emit: (update: AgentSessionStreamUpdate) => listener(update) }
 }
 
-function Harness() {
+function Harness({ onNewChat }: { onNewChat?: () => void } = {}) {
   const sessions = useAgentSessions()
-  return <AgentPanel avatarId="ninja" apiState="connected" contextLabel="Northstar · Staff PM" sessions={sessions} />
+  return <AgentPanel avatarId="ninja" apiState="connected" contextLabel="Northstar · Staff PM" onNewChat={onNewChat} sessions={sessions} />
 }
 
 function deferred<T>() {
@@ -65,16 +67,16 @@ function installClock(isoTime: string) {
   }
 }
 
-test('renders accessible tabs and creates a fresh additive session without a reset modal', async () => {
+test('renders accessible tabs and routes additive creation through the New Chat picker', async () => {
   const { agent } = install()
-  render(<Harness />)
+  const onNewChat = vi.fn()
+  render(<Harness onNewChat={onNewChat} />)
   expect(await screen.findByRole('tab', { name: 'Session 1, Idle' })).not.toBeNull()
   expect(screen.getByRole('tablist', { name: 'Agent sessions' })).not.toBeNull()
   fireEvent.click(screen.getByRole('button', { name: 'New agent session' }))
-  expect(await screen.findByRole('tab', { name: 'Session 2, Idle' })).not.toBeNull()
-  expect(agent.create).toHaveBeenCalledOnce()
+  expect(onNewChat).toHaveBeenCalledOnce()
+  expect(agent.create).not.toHaveBeenCalled()
   expect(screen.queryByRole('alertdialog')).toBeNull()
-  expect(screen.getByRole('tab', { name: 'Session 2, Idle' }).getAttribute('aria-selected')).toBe('true')
 })
 
 test('every session tab controls a persistent panel while only the selected panel is visible', async () => {
@@ -222,8 +224,10 @@ test('close stays disabled across the pending send response gap', async () => {
   const { agent } = install([summary(1), summary(2)])
   agent.send.mockReturnValue(response.promise)
   render(<Harness />)
-  const composer = await screen.findByRole('textbox', { name: 'Message the agent' })
+  await waitFor(() => expect(agent.get).toHaveBeenCalledTimes(2))
+  const composer = screen.getByRole('textbox', { name: 'Message the agent' })
   fireEvent.change(composer, { target: { value: 'Pending message' } })
+  await waitFor(() => expect((screen.getByRole('button', { name: 'Send message' }) as HTMLButtonElement).disabled).toBe(false))
   fireEvent.click(screen.getByRole('button', { name: 'Send message' }))
   await waitFor(() => expect(agent.send).toHaveBeenCalledOnce())
   expect((screen.getByRole('button', { name: 'Close Session 1' }) as HTMLButtonElement).disabled).toBe(true)
@@ -240,6 +244,18 @@ test('close stays disabled across the pending retry response gap', async () => {
   await waitFor(() => expect(agent.retry).toHaveBeenCalledOnce())
   expect((screen.getByRole('button', { name: 'Close Session 1' }) as HTMLButtonElement).disabled).toBe(true)
   await act(async () => response.resolve({ turnId: 'turn-retry', status: 'running' }))
+})
+
+test('locked chat keeps retryable history readable without exposing retry mutation', async () => {
+  const failed = event(1, { type: 'error', state: 'failed', summary: 'Try again', detail: { retry: true } })
+  const locked = {
+    ...snapshot(1, [failed]),
+    availability: { state: 'locked' as const, reason: 'AGENT_DISCONNECTED' }
+  }
+  install([{ ...summary(1), availability: locked.availability }], [locked])
+  render(<Harness />)
+  expect(await screen.findByText('Try again')).not.toBeNull()
+  expect(screen.queryByRole('button', { name: 'Retry turn' })).toBeNull()
 })
 
 test('runtime transport quarantine updates the tab and close gate until ready streams', async () => {

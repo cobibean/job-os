@@ -178,12 +178,14 @@ class AgentRuntimeRouter:
             if isinstance(raw_sequences, dict)
             else {}
         )
-        provider = binding.provider or self._compatibility_provider
+        provider = cast(
+            ConnectedAgentProvider, binding.provider or self._compatibility_provider
+        )
         factory = (
             self._adapters.get((provider, binding.connected_agent_id))
             if binding.connected_agent_id is not None
-            else self._adapters.get(provider)
-        )
+            else None
+        ) or self._adapters.get(provider)
         if factory is None:
             raise ConnectionError("Connected Agent provider is unavailable")
         return _RoutedAgentGateway(
