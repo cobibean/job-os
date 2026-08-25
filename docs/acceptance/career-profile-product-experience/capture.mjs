@@ -506,8 +506,7 @@ async function bundleManifest(bundleRoot) {
       const absolute = path.join(directory, entry.name)
       const relative = path.relative(bundleRoot, absolute)
       if (entry.isDirectory()) {
-        const metadata = await stat(absolute)
-        entries.push({ path: `${relative}/`, mode: metadata.mode & 0o777 })
+        entries.push({ path: `${relative}/`, type: 'directory' })
         await walk(absolute)
       } else if (entry.isSymbolicLink()) {
         entries.push({ path: relative, link: await readlink(absolute) })
@@ -604,6 +603,7 @@ async function acceptanceOutputManifest() {
 }
 
 async function artifactIdentity() {
+  await markStage('starting', 'source-cleanliness')
   const unstaged = execFileSync('/usr/bin/git', ['diff', '--name-only'], { cwd: root, encoding: 'utf8' }).trim()
   const staged = execFileSync('/usr/bin/git', ['diff', '--cached', '--name-only'], { cwd: root, encoding: 'utf8' }).trim()
   const unexpectedUnstaged = unstaged.split('\n').filter(Boolean).filter(relativePath =>
@@ -619,14 +619,17 @@ async function artifactIdentity() {
     assert(stagedFixture.equals(workingFixture), 'Synthetic fixture manifest has unstaged non-acceptance changes')
   }
   const head = execFileSync('/usr/bin/git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim()
+  await markStage('starting', 'bundle-manifest')
   const appPath = path.join(root, 'release/desktop/mac-arm64/JobOS.app')
   const zipPath = path.join(root, 'release/desktop/JobOS-0.1.0-arm64.zip')
   const app = await bundleManifest(appPath)
+  await markStage('starting', 'zip-equivalence')
   const extractedRoot = path.join(runtime, 'zip-extracted')
   await mkdir(extractedRoot, { mode: 0o700 })
   execFileSync('/usr/bin/ditto', ['-x', '-k', zipPath, extractedRoot])
   const zippedApp = await bundleManifest(path.join(extractedRoot, 'JobOS.app'))
   assert(app.sha256 === zippedApp.sha256 && JSON.stringify(app.entries) === JSON.stringify(zippedApp.entries), 'ZIP app bundle differs from exercised app bundle')
+  await markStage('starting', 'evidence-manifest')
   return {
     head,
     sourceState: staged.length === 0 ? 'clean-commit' : 'staged-source',
