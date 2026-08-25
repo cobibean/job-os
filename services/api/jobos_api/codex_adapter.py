@@ -191,6 +191,8 @@ class CodexAppServerGateway:
         self, stored_session_id: str | None
     ) -> tuple[str, str]:
         await self.start()
+        if stored_session_id is not None and stored_session_id == self._thread_id:
+            return stored_session_id, stored_session_id
         params: dict[str, object] = {
             "cwd": str(self._cwd),
             "approvalPolicy": "never",
