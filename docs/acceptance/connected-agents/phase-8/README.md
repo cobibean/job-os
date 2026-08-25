@@ -8,7 +8,7 @@ Phase 8 packages the final Connected Agents candidate and records installed-prod
 - `package:mac` builds workspace contracts in a clean checkout before building the desktop package and then runs `verify-phase8-package.mjs` against the extracted `.app` and ZIP.
 - The launchd runtime config can bind the installed package's app-server and Keychain helper to one JobOS-owned Codex home.
 - The Codex-launched JobOS MCP process reads its device and MCP credentials from macOS Keychain at process launch. No credentials file, token argument, or token-bearing Codex app-server environment is used.
-- `evidence-index.json` contains all 62 acceptance IDs exactly once and binds final human/install approval to this exact accepted candidate.
+- `evidence-index.json` contains all 62 acceptance IDs exactly once and binds final human/install approval to the exact accepted historical candidate named in each entry. A later commit requires a fresh current-commit smoke or acceptance receipt; historical evidence is never silently promoted.
 
 ## Automated proof
 

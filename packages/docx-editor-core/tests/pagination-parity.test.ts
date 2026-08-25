@@ -12,11 +12,11 @@
  * How to run:
  *   npx vitest run tests/pagination-parity.test.ts
  *
- * CI policy: skipIf when no baseline; runnable in any environment.
+ * CI policy: the approved synthetic baseline is tracked and parity regressions fail closed.
  */
 
 import { describe, expect, it, beforeAll } from 'vitest'
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs'
+import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { parseDocx } from '@jobos/docx-engine'
@@ -35,7 +35,7 @@ import type { ParsedDoc, DocGrid, ParaFormat, StyleDisplay } from '@jobos/docx-e
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = dirname(__filename)
-const CORPUS_DIR = join(__dirname, 'pagination-corpus/docx')
+const CORPUS_DIR = join(__dirname, '../../docx-engine/tests/fixtures')
 const BASELINE_FILE = join(__dirname, 'pagination-corpus/baseline-lo.json')
 const BASELINE_WORD_FILE = join(__dirname, 'pagination-corpus/baseline-word.json')
 const REPO_ROOT = join(__dirname, '../../..')
@@ -818,11 +818,21 @@ describe('pagination parity (F2: line-level pagination + page-break constraints)
     }
   })
 
-  it.skipIf(!existsSync(BASELINE_FILE))('baseline-lo.json exists', () => {
-    expect(Object.keys(baseline).length).toBeGreaterThan(0)
+  it('has a tracked baseline and every referenced synthetic fixture', () => {
+    expect(existsSync(BASELINE_FILE)).toBe(true)
+    const baselineStems = Object.keys(baseline).sort()
+    const fixtureStems = readdirSync(CORPUS_DIR)
+      .filter((name) => name.startsWith('(FAKE)-') && name.endsWith('.docx'))
+      .map((name) => name.slice(0, -'.docx'.length))
+      .sort()
+    expect(baselineStems.length).toBeGreaterThan(0)
+    expect(baselineStems).toEqual(fixtureStems)
+    for (const stem of baselineStems) {
+      expect(existsSync(join(CORPUS_DIR, `${stem}.docx`)), stem).toBe(true)
+    }
   })
 
-  it.skipIf(!existsSync(BASELINE_FILE))(
+  it(
     'generates the F2 pagination parity report',
     async () => {
       const stems = Object.keys(baseline).sort()
@@ -872,22 +882,14 @@ describe('pagination parity (F2: line-level pagination + page-break constraints)
       const word = wordResults.length > 0 ? summarize(wordResults, 'F2 vs Word') : null
 
       const primary = word ?? lo
-      if (primary.rate < 0.85) {
-        console.warn(
-          `⚠️  parity below 85% (currently ${(primary.rate * 100).toFixed(1)}%), see the report for details`,
-        )
-        primary.valid
-          .filter((r) => r.matchRate < 0.5)
-          .sort((a, b) => a.matchRate - b.matchRate)
-          .slice(0, 5)
-          .forEach((r) =>
-            console.warn(
-              `  ${r.stem}: ${(r.matchRate * 100).toFixed(0)}% (baseline=${r.loPages}, ours=${r.ourPages})`,
-            ),
-          )
-      }
-
       expect(results.length).toBeGreaterThan(0)
+      expect(results.filter((result) => result.error)).toEqual([])
+      expect(primary.valid.length).toBeGreaterThan(0)
+      expect(
+        primary.valid.filter((result) => result.pageDiff !== 0),
+        'pagination page counts must match the approved baseline',
+      ).toEqual([])
+      expect(primary.rate, 'pagination page-start parity must remain at or above 85%').toBeGreaterThanOrEqual(0.85)
     },
     120_000,
   )

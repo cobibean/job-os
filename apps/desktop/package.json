@@ -27,6 +27,7 @@
     "package:mac": "pnpm prepare:codex-runtime && pnpm build:keychain-helper && pnpm --filter @jobos/contracts build && pnpm build && electron-builder --mac dir --arm64 && node scripts/sign-and-zip-mac.mjs && node scripts/verify-phase8-package.mjs",
     "package:macbook-update": "node scripts/create-macbook-update.mjs",
     "start": "electron dist/main/main.js",
+    "pretest": "pnpm --workspace-root contracts:generate && pnpm --filter @jobos/contracts build",
     "test": "pnpm build:electron && NODE_OPTIONS=--no-experimental-webstorage vitest run && pnpm test:macbook-update",
     "test:macbook-update": "node --test scripts/create-macbook-update.test.mjs",
     "typecheck": "pnpm --filter @jobos/docx-engine build && pnpm --filter @jobos/docx-editor-core build && tsc -p tsconfig.json --noEmit && tsc -p tsconfig.electron.json --noEmit"

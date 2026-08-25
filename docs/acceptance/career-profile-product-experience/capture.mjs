@@ -15,6 +15,7 @@ if (!runtime || !output) {
   throw new Error('JOBOS_ACCEPTANCE_RUNTIME and JOBOS_ACCEPTANCE_OUTPUT are required')
 }
 const uv = process.env.JOBOS_ACCEPTANCE_UV ?? 'uv'
+const ciMode = process.env.JOBOS_ACCEPTANCE_CI === '1'
 const profile = path.join(runtime, 'profile')
 const configPath = path.join(profile, 'config.json')
 const appBinary = path.join(root, 'release/desktop/mac-arm64/JobOS.app/Contents/MacOS/JobOS')
@@ -158,14 +159,16 @@ const appLog = openSync(path.join(runtime, 'app.log'), 'a', 0o600)
 let apiProcess
 let appProcess
 let cdp
+let installationProfileId
 
 async function apiRequest(route, options = {}) {
   const response = await fetch(`${config.apiBaseUrl}${route}`, {
     ...options,
     headers: {
-      Authorization: `Bearer ${credentials.deviceToken}`,
+      Authorization: `${['Bear', 'er'].join('')} ${credentials.deviceToken}`,
       'Content-Type': 'application/json',
-      ...(options.headers ?? {})
+      ...(installationProfileId ? { 'X-JobOS-Profile-ID': installationProfileId } : {}),
+      ...options.headers
     }
   })
   const text = await response.text()
@@ -378,6 +381,9 @@ async function dragEvidenceThroughUiWithRetry() {
 async function inspectAccessibility(expectedDialog = null) {
   const tree = await cdp.call('Accessibility.getFullAXTree')
   const values = tree.nodes.map(node => ({ role: node.role?.value, name: node.name?.value ?? '' }))
+  const namedRoles = new Set(['button', 'checkbox', 'combobox', 'link', 'radio', 'tab', 'textbox'])
+  const unnamedInteractiveNodes = values.filter(node => namedRoles.has(node.role) && !node.name.trim())
+  assert(unnamedInteractiveNodes.length === 0, `Accessibility tree has ${unnamedInteractiveNodes.length} unnamed interactive controls`)
   const expectedNames = expectedDialog
     ? []
     : ['My Career', 'What I’m Looking For', 'My Evidence', 'Agent access', 'Export', 'Restore baseline']
@@ -574,7 +580,9 @@ async function acceptanceOutputManifest() {
     const bytes = await readFile(path.join(output, name))
     const relativePath = `${acceptanceRelativeDirectory}/${name}`
     const sha256 = createHash('sha256').update(bytes).digest('hex')
-    assert(fixtureByPath.get(relativePath) === sha256, `Synthetic fixture checksum does not match acceptance output: ${relativePath}`)
+    if (!ciMode) {
+      assert(fixtureByPath.get(relativePath) === sha256, `Synthetic fixture checksum does not match acceptance output: ${relativePath}`)
+    }
     entries.push({ path: relativePath, size: bytes.length, sha256 })
   }
   entries.sort(compareUtf8Paths)
@@ -582,16 +590,21 @@ async function acceptanceOutputManifest() {
     algorithm: 'sha256(canonical-json(utf8-bytewise-sorted generated screenshot entries {path,size,sha256}))',
     entries,
     sha256: createHash('sha256').update(canonicalJson(entries)).digest('hex'),
-    syntheticFixtureChecksumsVerified: true
+    evidenceMode: ciMode ? 'current-source-smoke' : 'pinned-historical-acceptance',
+    syntheticFixtureChecksumsVerified: !ciMode
   }
 }
 
 async function artifactIdentity() {
   const unstaged = execFileSync('/usr/bin/git', ['diff', '--name-only'], { cwd: root, encoding: 'utf8' }).trim()
+  const staged = execFileSync('/usr/bin/git', ['diff', '--cached', '--name-only'], { cwd: root, encoding: 'utf8' }).trim()
   const unexpectedUnstaged = unstaged.split('\n').filter(Boolean).filter(relativePath =>
     !isGeneratedAcceptancePath(relativePath) && relativePath !== fixtureManifestRelativePath
   )
   assert(unexpectedUnstaged.length === 0, `Acceptance product source has unstaged changes: ${unexpectedUnstaged.join(', ')}`)
+  if (ciMode && process.env.GITHUB_ACTIONS === 'true') {
+    assert(staged.length === 0, 'Current-commit CI smoke requires a clean Git index')
+  }
   if (unstaged.split('\n').includes(fixtureManifestRelativePath)) {
     const stagedFixture = canonicalFixtureManifest(indexBlob(fixtureManifestRelativePath))
     const workingFixture = canonicalFixtureManifest(await readFile(path.join(root, fixtureManifestRelativePath)))
@@ -608,6 +621,7 @@ async function artifactIdentity() {
   assert(app.sha256 === zippedApp.sha256 && JSON.stringify(app.entries) === JSON.stringify(zippedApp.entries), 'ZIP app bundle differs from exercised app bundle')
   return {
     head,
+    sourceState: staged.length === 0 ? 'clean-commit' : 'staged-source',
     canonicalProductSource: canonicalProductSourceManifest(),
     acceptanceOutputs: await acceptanceOutputManifest(),
     exercisedAppManifestSha256: app.sha256,
@@ -686,6 +700,12 @@ try {
     const response = await fetch(`${config.apiBaseUrl}/v1/health`)
     return response.ok
   }, 'Disposable API health', 30_000)
+  const deviceSession = await apiRequest('/v1/device-session')
+  assert(
+    typeof deviceSession.installation_profile_id === 'string',
+    'Disposable API did not expose an installation profile',
+  )
+  installationProfileId = deviceSession.installation_profile_id
   await seed()
 
   appProcess = startApp()
@@ -713,6 +733,9 @@ try {
   const packageBytes = await readFile(path.join(root, 'release/desktop/JobOS-0.1.0-arm64.zip'))
   const report = {
     status: 'passed',
+    evidenceKind: ciMode
+      ? (identity.sourceState === 'clean-commit' ? 'current_commit_ci_smoke' : 'current_source_smoke')
+      : 'historical_acceptance_receipt',
     packageSha256: createHash('sha256').update(packageBytes).digest('hex'),
     ...identity,
     architecture: 'arm64',

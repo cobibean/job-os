@@ -1,5 +1,7 @@
 {
   "status": "passed",
+  "evidenceKind": "historical_acceptance_receipt",
+  "sourceState": "accepted-source-commit",
   "packageSha256": "9ffc8fb85d652d602fd36e838a4c904c8063a3fa02068d9d2ec77d0c04468b31",
   "head": "43c82a10c962107304328cee725af8a780d1588c",
   "canonicalProductSource": {

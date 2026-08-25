@@ -1,9 +1,13 @@
 from __future__ import annotations
 
 import json
+import re
+import subprocess
 from pathlib import Path
 
-INDEX = Path(__file__).resolve().parents[2] / "docs/acceptance/connected-agents/evidence-index.json"
+ROOT = Path(__file__).resolve().parents[2]
+INDEX = ROOT / "docs/acceptance/connected-agents/evidence-index.json"
+GITHUB_PR = re.compile(r"https://github\.com/cobibean/job-os/pull/[1-9][0-9]*$")
 
 
 def expected_ids() -> set[str]:
@@ -44,6 +48,8 @@ def test_connected_agents_evidence_index_is_complete_unique_and_honest():
 
     assert value["schema_version"] == 1
     assert value["acceptance_count"] == 62
+    assert value["evidence_scope"] == "historical_phase_acceptance"
+    assert "Each entry proves only its source_commit" in value["current_commit_policy"]
     assert len(identifiers) == len(set(identifiers)) == 62
     assert set(identifiers) == expected_ids()
 
@@ -55,6 +61,23 @@ def test_connected_agents_evidence_index_is_complete_unique_and_honest():
             assert len(entry["source_commit"]) == 40
             assert entry["proof_refs"]
             assert entry["remaining_proof"] is None
+            commit = subprocess.run(
+                ["git", "cat-file", "-e", f'{entry["source_commit"]}^{{commit}}'],
+                cwd=ROOT,
+                capture_output=True,
+                check=False,
+            )
+            assert commit.returncode == 0, f'{entry["id"]} references an unreachable commit'
+            for proof_ref in entry["proof_refs"]:
+                if proof_ref.startswith("https://"):
+                    assert GITHUB_PR.fullmatch(proof_ref), (
+                        f'{entry["id"]} has an unsupported proof URL'
+                    )
+                else:
+                    proof_path = proof_ref.split("::", 1)[0]
+                    assert (ROOT / proof_path).is_file(), (
+                        f'{entry["id"]} references a missing proof file'
+                    )
         else:
             assert entry["remaining_proof"]
 

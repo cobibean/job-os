@@ -1,0 +1,48 @@
+{
+  "(FAKE)-cover-letter": {
+    "source": "LibreOffice headless from approved synthetic JobOS fixture",
+    "version": "LibreOffice 26.2.5.2 cd7284b4cbbfeb507e630c1aac019f4157393acb",
+    "pages": 1,
+    "pageStarts": [
+      "(FAKE) Alex Morgan — Cover Letter"
+    ],
+    "pageEnds": [
+      "(FAKE) Alex Morgan"
+    ]
+  },
+  "(FAKE)-polished-resume": {
+    "source": "LibreOffice headless from approved synthetic JobOS fixture",
+    "version": "LibreOffice 26.2.5.2 cd7284b4cbbfeb507e630c1aac019f4157393acb",
+    "pages": 2,
+    "pageStarts": [
+      "(FAKE) Alex Morgan · alex@example.com · (555) 010-2000",
+      "Education"
+    ],
+    "pageEnds": [
+      "Expert",
+      "Security review"
+    ]
+  },
+  "(FAKE)-protected-constructs": {
+    "source": "LibreOffice headless from approved synthetic JobOS fixture",
+    "version": "LibreOffice 26.2.5.2 cd7284b4cbbfeb507e630c1aac019f4157393acb",
+    "pages": 1,
+    "pageStarts": [
+      "(FAKE) Alex Morgan · alex@example.com · (555) 010-2000"
+    ],
+    "pageEnds": [
+      "Embedded spreadsheet preview"
+    ]
+  },
+  "(FAKE)-references": {
+    "source": "LibreOffice headless from approved synthetic JobOS fixture",
+    "version": "LibreOffice 26.2.5.2 cd7284b4cbbfeb507e630c1aac019f4157393acb",
+    "pages": 1,
+    "pageStarts": [
+      "(FAKE) Alex Morgan · alex@example.com · (555) 010-2000"
+    ],
+    "pageEnds": [
+      "Director of Product, (FAKE) Example Co. · taylor@example.com"
+    ]
+  }
+}

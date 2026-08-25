@@ -1,6 +1,8 @@
 {
   "schema_version": 1,
   "acceptance_count": 62,
+  "evidence_scope": "historical_phase_acceptance",
+  "current_commit_policy": "Each entry proves only its source_commit. Current HEAD requires a fresh current-commit smoke or acceptance receipt.",
   "entries": [
     {
       "id": "DOM-01",
