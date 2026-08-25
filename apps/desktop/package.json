@@ -32,9 +32,9 @@
     "typecheck": "pnpm --filter @jobos/docx-engine build && pnpm --filter @jobos/docx-editor-core build && tsc -p tsconfig.json --noEmit && tsc -p tsconfig.electron.json --noEmit"
   },
   "dependencies": {
+    "@jobos/contracts": "workspace:*",
     "@jobos/docx-editor-core": "workspace:*",
     "@jobos/docx-engine": "workspace:*",
-    "@jobos/contracts": "workspace:*",
     "@tiptap/core": "3.29.2",
     "@tiptap/extension-highlight": "3.29.2",
     "@tiptap/extension-image": "3.29.2",
@@ -63,6 +63,7 @@
     "tiptap-pagination-plus": "3.1.0"
   },
   "devDependencies": {
+    "@electron/asar": "3.4.1",
     "@testing-library/react": "16.3.2",
     "@types/node": "26.1.1",
     "@types/react": "19.2.17",

@@ -384,6 +384,11 @@ def test_installed_app_runtime_wires_codex_and_keychain_without_persisting_secre
         encoding="utf-8",
     )
     monkeypatch.setattr(macos_runtime, "CODEX_APP_SERVER_SHA256", digest)
+    monkeypatch.setattr(
+        macos_runtime,
+        "KEYCHAIN_HELPER_SHA256",
+        hashlib.sha256(keychain_helper.read_bytes()).hexdigest(),
+    )
     data_dir = tmp_path / "data"
     config = build_local_runtime_config(
         jobos_root=tmp_path / "release",
@@ -436,6 +441,35 @@ def test_installed_app_runtime_rejects_tampered_binary(tmp_path, monkeypatch):
     monkeypatch.setattr(macos_runtime, "CODEX_APP_SERVER_SHA256", "f" * 64)
 
     with pytest.raises(ValueError, match="integrity"):
+        build_local_runtime_config(
+            jobos_root=tmp_path / "release",
+            python_path=tmp_path / "python",
+            data_dir=tmp_path / "data",
+            device_id="mini-device",
+            port=8766,
+            jobos_app=app,
+        )
+
+
+def test_installed_app_runtime_rejects_untrusted_keychain_helper(tmp_path, monkeypatch):
+    app = tmp_path / "Applications/JobOS.app"
+    resources = app / "Contents/Resources"
+    app_server = resources / "codex-runtime/bin/codex-app-server"
+    keychain_helper = resources / "jobos-keychain"
+    app_server.parent.mkdir(parents=True)
+    app_server.write_bytes(b"synthetic installed app server")
+    app_server.chmod(0o755)
+    keychain_helper.write_bytes(b"untrusted helper")
+    keychain_helper.chmod(0o755)
+    digest = hashlib.sha256(app_server.read_bytes()).hexdigest()
+    (resources / "codex-runtime/JOBOS_CODEX_RUNTIME_RECEIPT.json").write_text(
+        json.dumps({"app_server_binary": {"sha256": digest}}),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(macos_runtime, "CODEX_APP_SERVER_SHA256", digest)
+    monkeypatch.setattr(macos_runtime, "KEYCHAIN_HELPER_SHA256", "f" * 64)
+
+    with pytest.raises(ValueError, match="Keychain helper failed integrity"):
         build_local_runtime_config(
             jobos_root=tmp_path / "release",
             python_path=tmp_path / "python",

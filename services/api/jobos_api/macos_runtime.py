@@ -37,6 +37,7 @@ from jobos_api.macos_keychain import (
 )
 
 SERVICE_LABEL = "com.cobibean.jobos.api"
+KEYCHAIN_HELPER_SHA256 = "76d0159bddbb28b2a9d9839eaca9fa85e77f0797e4d792c3a6506109302daff3"
 DEVICE_TOKEN_SERVICE = "com.cobibean.jobos.device-token"
 MCP_TOKEN_SERVICE = "com.cobibean.jobos.mcp-token"
 HERMES_TOKEN_SERVICE = "com.cobibean.jobos.hermes-dashboard-token"
@@ -514,9 +515,12 @@ def installed_codex_paths(jobos_app: Path, data_dir: Path) -> dict[str, str]:
         raise ValueError("installed JobOS Codex runtime receipt is invalid") from error
     if receipt_hash != CODEX_APP_SERVER_SHA256 or _sha256(app_server) != CODEX_APP_SERVER_SHA256:
         raise ValueError("installed JobOS Codex runtime failed integrity verification")
+    helper_hash = _sha256(keychain_helper)
+    if helper_hash != KEYCHAIN_HELPER_SHA256:
+        raise ValueError("installed JobOS Keychain helper failed integrity verification")
     return {
         "keychain_helper_path": str(keychain_helper),
-        "keychain_helper_sha256": _sha256(keychain_helper),
+        "keychain_helper_sha256": helper_hash,
         "codex_app_server_path": str(app_server),
         "codex_home_path": str(data_dir / "codex"),
     }

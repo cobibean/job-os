@@ -1,3 +1,4 @@
+import { extractAll } from '@electron/asar'
 import { createHash } from 'node:crypto'
 import { execFileSync } from 'node:child_process'
 import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync } from 'node:fs'
@@ -21,6 +22,7 @@ const packagedReceiptPath = path.join(
   resources,
   'codex-runtime/JOBOS_CODEX_RUNTIME_RECEIPT.json'
 )
+const keychainHelperSha256 = '76d0159bddbb28b2a9d9839eaca9fa85e77f0797e4d792c3a6506109302daff3'
 
 function sha256(file) {
   return createHash('sha256').update(readFileSync(file)).digest('hex')
@@ -54,10 +56,7 @@ function scanPackagedApplication(asar) {
   const extractionRoot = mkdtempSync(path.join(tmpdir(), 'jobos-phase8-asar-'))
   const textExtensions = new Set(['.css', '.html', '.js', '.json', '.map', '.mjs', '.txt'])
   try {
-    execFileSync('pnpm', ['exec', 'asar', 'extract', asar, extractionRoot], {
-      cwd: repositoryRoot,
-      stdio: 'ignore',
-    })
+    extractAll(asar, extractionRoot)
     const pending = [path.join(extractionRoot, 'dist')]
     const manifest = path.join(extractionRoot, 'package.json')
     if (existsSync(manifest)) pending.push(manifest)
@@ -108,6 +107,9 @@ function main() {
     'app.asar',
   ]) {
     requireFile(resource)
+  }
+  if (sha256(requireFile('jobos-keychain')) !== keychainHelperSha256) {
+    throw new Error('Packaged JobOS Keychain helper hash is incorrect')
   }
   if (sha256(requireFile('licenses/codex/LICENSE')) !== receipt.redistribution.license.sha256) {
     throw new Error('Packaged Codex LICENSE hash is incorrect')
