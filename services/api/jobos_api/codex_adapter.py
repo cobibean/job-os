@@ -140,6 +140,8 @@ class CodexAppServerGateway:
         self._event_namespace = secrets.token_hex(8)
         self._event_sequence = 0
         self._assistant_pending = ""
+        self._assistant_streamed_text = ""
+        self._assistant_completed_text = ""
         self._rate_limit_snapshot = dict(rate_limit_snapshot)
         self._refresh_rate_limits = refresh_rate_limits
         self._rate_limit_settling: set[str] = set()
@@ -248,6 +250,8 @@ class CodexAppServerGateway:
         self._jobos_turn_id = None
         self._provider_turn_id = None
         self._assistant_pending = ""
+        self._assistant_streamed_text = ""
+        self._assistant_completed_text = ""
 
     async def _require_jobos_mcp(self) -> None:
         if self._thread_id is None:
@@ -279,6 +283,8 @@ class CodexAppServerGateway:
         self._jobos_turn_id = None
         self._provider_turn_id = None
         self._assistant_pending = ""
+        self._assistant_streamed_text = ""
+        self._assistant_completed_text = ""
 
     async def submit_turn(self, text: str, context: AgentContext) -> None:
         if self._thread_id is None:
@@ -317,6 +323,8 @@ class CodexAppServerGateway:
         self._jobos_turn_id = context.turn_id
         self._provider_turn_id = provider_turn_id
         self._assistant_pending = ""
+        self._assistant_streamed_text = ""
+        self._assistant_completed_text = ""
 
     def stream_events(self) -> AsyncIterator[GatewayEvent]:
         return self._stream_events()
@@ -518,6 +526,8 @@ class CodexAppServerGateway:
             self._jobos_turn_id = None
             self._provider_turn_id = None
             self._assistant_pending = ""
+            self._assistant_streamed_text = ""
+            self._assistant_completed_text = ""
 
     async def _settle_provider_rate_limit_retry(
         self,
@@ -590,6 +600,8 @@ class CodexAppServerGateway:
             self._jobos_turn_id = None
             self._provider_turn_id = None
             self._assistant_pending = ""
+            self._assistant_streamed_text = ""
+            self._assistant_completed_text = ""
 
     def _normalize(self, method: str, params: dict[str, object]) -> GatewayEvent | None:
         turn_id = self._jobos_turn_id
@@ -601,7 +613,9 @@ class CodexAppServerGateway:
             f"codex:{self._event_namespace}:{provider_turn_id}:{self._event_sequence}"
         )
         if method == "item/agentMessage/delta":
-            combined = self._assistant_pending + str(params.get("delta") or "")
+            raw_delta = str(params.get("delta") or "")
+            self._assistant_streamed_text += raw_delta
+            combined = self._assistant_pending + raw_delta
             trailing = _STREAM_TOKEN_TAIL.search(combined)
             if trailing is None:
                 safe_prefix = combined
@@ -617,6 +631,15 @@ class CodexAppServerGateway:
             )
         if method in {"item/started", "item/completed", "item/mcpToolCall/progress"}:
             item = params.get("item")
+            item_type = item.get("type") if isinstance(item, dict) else None
+            if item_type == "agentMessage":
+                if method == "item/completed":
+                    text = item.get("text") if isinstance(item, dict) else None
+                    if isinstance(text, str) and text:
+                        self._assistant_completed_text = sanitize_assistant_text(text)
+                return None
+            if item_type == "userMessage":
+                return None
             detail = redact_detail(item if isinstance(item, dict) else params)
             state = "completed" if method == "item/completed" else "working"
             summary = sanitize_text(str(detail.get("name") or "Codex tool activity"))[:500]
@@ -664,8 +687,30 @@ class CodexAppServerGateway:
             if status not in _TERMINAL_STATUSES:
                 return None
             state = "interrupted" if status == "interrupted" else status
-            summary = "Codex turn completed" if state == "completed" else "Codex turn ended"
-            return GatewayEvent("assistant_message", state, summary, {}, turn_id, source_id)
+            if state == "completed":
+                text = self._assistant_completed_text or sanitize_assistant_text(
+                    self._assistant_streamed_text
+                )
+                if text:
+                    return GatewayEvent(
+                        "assistant_message",
+                        state,
+                        text[:1000],
+                        {"type": "message.complete", "text": text},
+                        turn_id,
+                        source_id,
+                    )
+                return GatewayEvent(
+                    "assistant_message",
+                    state,
+                    "Codex turn completed",
+                    {},
+                    turn_id,
+                    source_id,
+                )
+            return GatewayEvent(
+                "assistant_message", state, "Codex turn ended", {}, turn_id, source_id
+            )
         return None
 
     async def close(self) -> None:

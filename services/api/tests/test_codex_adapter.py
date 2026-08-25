@@ -286,6 +286,26 @@ async def test_codex_events_are_isolated_lossless_and_terminal(tmp_path: Path) -
     assert retrying.detail == {"reason": "provider_retry"}
 
     await client.emit(
+        "item/started",
+        {
+            "threadId": "thread-a",
+            "turnId": "provider-turn-a",
+            "item": {"id": "user-message-a", "type": "userMessage", "text": "Do work"},
+        },
+    )
+    await client.emit(
+        "item/completed",
+        {
+            "threadId": "thread-a",
+            "turnId": "provider-turn-a",
+            "item": {
+                "id": "assistant-message-a",
+                "type": "agentMessage",
+                "text": "Hello Hello",
+            },
+        },
+    )
+    await client.emit(
         "turn/completed",
         {
             "threadId": "thread-a",
@@ -296,6 +316,8 @@ async def test_codex_events_are_isolated_lossless_and_terminal(tmp_path: Path) -
     assert terminal.event_type == "assistant_message"
     assert terminal.state == "completed"
     assert terminal.turn_id == "turn_12345678"
+    assert terminal.summary == "Hello Hello"
+    assert terminal.detail == {"type": "message.complete", "text": "Hello Hello"}
 
 
 @pytest.mark.anyio
