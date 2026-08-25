@@ -59,10 +59,4 @@ def test_connected_agents_evidence_index_is_complete_unique_and_honest():
             assert entry["remaining_proof"]
 
     unresolved = {entry["id"] for entry in entries if entry["status"] != "verified"}
-    assert unresolved == {
-        "CAP-04",
-        "A11Y-01",
-        "VIS-01",
-        "INST-02",
-        "REG-01",
-    }
+    assert not unresolved

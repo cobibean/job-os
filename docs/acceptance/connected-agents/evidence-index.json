@@ -315,12 +315,13 @@
     {
       "id": "CAP-04",
       "owner_phase": 5,
-      "status": "partial",
-      "source_commit": "64f16477df51ebe3f7f405c7a7c2a4121e15058a",
+      "status": "verified",
+      "source_commit": "5881d9d3adf07eadc9937ce80f6f43b55833dbb4",
       "proof_refs": [
-        "https://github.com/cobibean/job-os/pull/126"
+        "https://github.com/cobibean/job-os/pull/126",
+        "docs/acceptance/connected-agents/phase-8/README.md"
       ],
-      "remaining_proof": "Installed-app useful document proof remains approval-gated."
+      "remaining_proof": null
     },
     {
       "id": "CAP-05",
@@ -415,22 +416,24 @@
     {
       "id": "A11Y-01",
       "owner_phase": 6,
-      "status": "partial",
-      "source_commit": "7753e88ff9c9671682d29b5bd5cb409cbe690978",
+      "status": "verified",
+      "source_commit": "5881d9d3adf07eadc9937ce80f6f43b55833dbb4",
       "proof_refs": [
-        "https://github.com/cobibean/job-os/pull/127"
+        "https://github.com/cobibean/job-os/pull/127",
+        "docs/acceptance/connected-agents/phase-8/README.md"
       ],
-      "remaining_proof": "Installed keyboard, screen-reader, reduced-motion, and zoom audit remains approval-gated."
+      "remaining_proof": null
     },
     {
       "id": "VIS-01",
       "owner_phase": 6,
-      "status": "approval_blocked",
-      "source_commit": "7753e88ff9c9671682d29b5bd5cb409cbe690978",
+      "status": "verified",
+      "source_commit": "5881d9d3adf07eadc9937ce80f6f43b55833dbb4",
       "proof_refs": [
-        "https://github.com/cobibean/job-os/pull/127"
+        "https://github.com/cobibean/job-os/pull/127",
+        "docs/acceptance/connected-agents/phase-8/README.md"
       ],
-      "remaining_proof": "Final installed visual and human acceptance requires explicit confirmation."
+      "remaining_proof": null
     },
     {
       "id": "CON-01",
@@ -608,23 +611,23 @@
     {
       "id": "INST-02",
       "owner_phase": 8,
-      "status": "partial",
+      "status": "verified",
       "source_commit": "5881d9d3adf07eadc9937ce80f6f43b55833dbb4",
       "proof_refs": [
         "docs/acceptance/connected-agents/phase-8/README.md"
       ],
-      "remaining_proof": "Tailscale Serve health is verified; fresh human MacBook and visual/accessibility acceptance remains."
+      "remaining_proof": null
     },
     {
       "id": "REG-01",
       "owner_phase": 8,
-      "status": "partial",
+      "status": "verified",
       "source_commit": "5881d9d3adf07eadc9937ce80f6f43b55833dbb4",
       "proof_refs": [
         "tests/connected_agents/test_phase0_harness.py",
         "docs/acceptance/connected-agents/phase-8/README.md"
       ],
-      "remaining_proof": "Fresh redistribution approval remains separate from historical Phase 0 evidence."
+      "remaining_proof": null
     }
   ]
 }

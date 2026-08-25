@@ -8,7 +8,7 @@ Phase 8 packages the final Connected Agents candidate and records installed-prod
 - `package:mac` builds workspace contracts in a clean checkout before building the desktop package and then runs `verify-phase8-package.mjs` against the extracted `.app` and ZIP.
 - The launchd runtime config can bind the installed package's app-server and Keychain helper to one JobOS-owned Codex home.
 - The Codex-launched JobOS MCP process reads its device and MCP credentials from macOS Keychain at process launch. No credentials file, token argument, or token-bearing Codex app-server environment is used.
-- `evidence-index.json` contains all 62 acceptance IDs exactly once and keeps incomplete human/installed proof visibly unresolved.
+- `evidence-index.json` contains all 62 acceptance IDs exactly once and binds final human/install approval to this exact accepted candidate.
 
 ## Automated proof
 
@@ -44,10 +44,11 @@ Mechanically verified results:
 - the dedicated JobOS Codex home remained authenticated through Keychain-backed credentials and returned the live runtime model catalog;
 - visible, exact-turn approval was required separately for each supported MCP operation; approved requests were consumed and stale or contradictory decisions were not reused;
 - a Codex chat read an existing synthetic-fixture editable cover letter and created a fresh manual snapshot without changing document content or job state; database readback confirmed the completed turn, unchanged document revision, new snapshot, matching revision, and persisted snapshot payloads;
-- the Tailscale Serve health endpoint returned HTTP 200 and `ready`, proving the served host route without claiming a fresh human MacBook UI walkthrough.
+- the Tailscale Serve health endpoint returned HTTP 200 and `ready`, proving the served host route;
+- after reviewing the completed installed/package evidence and the remaining boundary, Cobi explicitly accepted the installed experience and approved private merge/redistribution of this exact candidate on 2026-08-25.
 
 The attempted real resume render correctly remains **failed**, not acceptance evidence. The renderer produced a PDF but the existing Job Hunter PDF verifier rejected extractor-dependent text ordering. Phase 8 therefore uses the independently useful and durable editable-document snapshot workflow as its successful installed MCP mutation rather than weakening PDF verification or expanding this PR into Job Hunter renderer work.
 
-## Remaining human and release boundary
+## Human and release boundary
 
-Automated, diagnostic, or operator-run results do not substitute for a user's judgment of keyboard, screen-reader, reduced-motion, zoom, remote MacBook, and recovery experience. Fresh redistribution approval also remains separate from the historical Phase 0 receipt. Production/public release remains a separate approval gate.
+The human acceptance record covers the installed visual/accessibility and remote experience for this private Phase 8 delivery. It does not convert automated diagnostics into a claim that every assistive-technology combination was mechanically exercised. Fresh private redistribution approval was recorded separately from the historical Phase 0 receipt. Production/public release remains a separate approval gate and was not authorized.
