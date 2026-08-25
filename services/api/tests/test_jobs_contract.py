@@ -4,6 +4,7 @@ import json
 import sqlite3
 import threading
 from concurrent.futures import ThreadPoolExecutor
+from datetime import UTC, datetime
 from hashlib import sha256
 from pathlib import Path
 
@@ -12,8 +13,15 @@ import pytest
 from conftest import build_minimal_pdf
 from fastapi.testclient import TestClient
 from jobos_api.app import create_app
+from jobos_api.conversation_store import ConversationStore
 from jobos_api.documents import ArtifactPublishRequest
 from jobos_api.editable_documents import blank_content, default_settings
+from jobos_api.installation_profiles import (
+    AnchoredRuntime,
+    InstallationProfileRecord,
+    InstallationProfileRegistry,
+    InstallationProfileRegistryData,
+)
 from jobos_api.private_adapters.job_hunter import adapt_job_hunter_facade
 from jobos_api.settings import DeviceCredential, Settings
 from jobos_api.state_store import JobOsStateStore, mutation_activity_source_id
@@ -307,7 +315,7 @@ def start_active_turn(client, conversation_id, *, headers=None, key="mcp-scope-a
         headers=headers or auth_headers(),
         json={"text": "Keep MCP scope active", "idempotency_key": key},
     )
-    assert response.status_code == 201
+    assert response.status_code == 201, response.text
     return response.json()["turn_id"]
 
 
@@ -1023,6 +1031,200 @@ def test_trusted_local_mcp_scopes_publication_to_a_remote_device_conversation(
     assert missing.json()["code"] == "conversation_not_found"
     assert remote_mcp_attempt.status_code == 403
     assert remote_mcp_attempt.json()["code"] == "mcp_local_device_required"
+
+
+@pytest.mark.parametrize("provider", ["hermes", "codex"])
+def test_provider_bound_mcp_publication_records_exactly_once_turn_attribution(
+    tmp_path, minimal_docx, monkeypatch, provider
+):
+    facade = FakeJobHunterFacade()
+    facade.jobs = facade.jobs[:1]
+    state_path = tmp_path / "jobos.db"
+    registry_path = tmp_path / "installation-profiles.json"
+    profile_id = f"jprof_{'b' * 32}"
+    agent_id = f"jagent_{('a' if provider == 'codex' else 'c') * 32}"
+    now = datetime(2026, 8, 25, tzinfo=UTC)
+    registry = InstallationProfileRegistry(registry_path)
+    registry.write(
+        InstallationProfileRegistryData(
+            registry_revision=1,
+            active_profile_id=profile_id,
+            profiles=(
+                InstallationProfileRecord(
+                    profile_id=profile_id,
+                    display_name=f"(FAKE) {provider.title()} profile",
+                    storage_mode="anchored",
+                    created_at=now,
+                    updated_at=now,
+                    anchored_runtime=AnchoredRuntime(
+                        job_provider="sqlite",
+                        artifact_provider="local",
+                        state_db_path=state_path.absolute(),
+                        jobs_db_path=(tmp_path / "jobs.db").absolute(),
+                        local_artifact_root=(tmp_path / "artifacts").absolute(),
+                    ),
+                ),
+            ),
+        )
+    )
+    registry.create_connected_agent(
+        provider=provider,
+        display_name=f"(FAKE) {provider.title()}",
+        avatar_id=provider,
+        default_model_id=f"(FAKE)-{provider}-model",
+        default_reasoning_effort="medium",
+        connection_config=(
+            {"runtime_namespace": "FAKE-jobos-test"}
+            if provider == "codex"
+            else {"endpoint_url": "http://127.0.0.1:9220"}
+        ),
+        credential_reference=("vault_ref_provider_attribution" if provider == "codex" else None),
+        expected_registry_revision=1,
+        idempotency_key="(FAKE)-create-codex-attribution-agent",
+        agent_id=agent_id,
+        now=now,
+    )
+    state_store = JobOsStateStore(state_path)
+    state_store.initialize(owner_device_id="primary-device")
+    conversation = state_store.create_conversation(
+        actor_id="primary-device",
+        selected_job_id="job-0",
+        connected_agent_id=agent_id,
+        provider=provider,
+        model_id=f"(FAKE)-{provider}-model",
+        reasoning_effort="medium",
+    )
+    conversation_id = str(conversation["conversation_id"])
+    ConversationStore(state_path, conversation_id).complete_provisioning(
+        f"(FAKE)-{provider}-thread-attribution"
+    )
+    monkeypatch.setattr(
+        "jobos_api.app.CodexGatewayFactory",
+        lambda *_args, **_kwargs: PendingGatewayFactory(),
+    )
+    repository, artifact_gateway = adapt_job_hunter_facade(facade)
+    app = create_app(
+        Settings(
+            device_token="test-device-token",
+            mcp_token="test-mcp-trusted-token",
+            state_db_path=state_path,
+            artifact_roots=(tmp_path,),
+            hermes_job_hunter_cwd=tmp_path,
+            codex_app_server_path=tmp_path / "(FAKE)-codex-app-server",
+            codex_home_path=tmp_path / "(FAKE)-codex-home",
+            installation_registry_path=registry_path,
+            installation_profile_id=profile_id,
+            installation_profile_name=f"(FAKE) {provider.title()} profile",
+        ),
+        job_repository=repository,
+        artifact_gateway=artifact_gateway,
+        state_store=state_store,
+        agent_gateway_factory=PendingGatewayFactory(),
+    )
+    payload = {
+        "document_key": "resume",
+        "document_label": "Resume",
+        "source_filename": "resume.md",
+        "source_base64": base64.b64encode(f"# (FAKE) {provider.title()} resume".encode()).decode(
+            "ascii"
+        ),
+        "artifact_filename": "resume.docx",
+        "artifact_base64": base64.b64encode(
+            minimal_docx(f"(FAKE) {provider.title()} resume")
+        ).decode("ascii"),
+        "origin": "mcp",
+        "idempotency_key": f"{provider}-attributed-publication",
+    }
+
+    with TestClient(app) as client:
+        profile_headers = {
+            **auth_headers(),
+            "X-JobOS-Profile-ID": profile_id,
+        }
+        turn_id = start_active_turn(
+            client,
+            conversation_id,
+            headers=profile_headers,
+            key=f"{provider}-attribution-active-turn",
+        )
+        params = {"conversation_id": conversation_id, "turn_id": turn_id}
+        published = client.post(
+            "/v1/jobs/job-0/artifacts/publish",
+            headers=mcp_auth_headers(),
+            params=params,
+            json=payload,
+        )
+        replay = client.post(
+            "/v1/jobs/job-0/artifacts/publish",
+            headers=mcp_auth_headers(),
+            params=params,
+            json=payload,
+        )
+        activity = client.post(
+            "/v1/activity",
+            headers=mcp_auth_headers(),
+            params=params,
+            json={
+                "label": f"(FAKE) {provider.title()} activity",
+                "state": "completed",
+                "detail": {"proof": "direct-audit-write"},
+                "origin": "mcp",
+                "idempotency_key": f"{provider}-attributed-activity",
+            },
+        )
+
+    assert published.status_code == 200
+    assert replay.status_code == 200
+    assert activity.status_code == 200
+    assert replay.json() == published.json()
+    with sqlite3.connect(state_path) as connection:
+        rows = connection.execute(
+            """
+            SELECT payload_json FROM job_events
+            WHERE command_name = 'document.publish' AND idempotency_key = ?
+            """,
+            (payload["idempotency_key"],),
+        ).fetchall()
+        activity_rows = connection.execute(
+            """
+            SELECT payload_json FROM job_events
+            WHERE command_name = 'activity.report' AND idempotency_key = ?
+            """,
+            (f"{provider}-attributed-activity",),
+        ).fetchall()
+    assert len(rows) == 1
+    attribution = json.loads(rows[0][0])
+    assert attribution == {
+        "artifact_id": published.json()["artifacts"][0]["artifact_id"],
+        "connected_agent_id": agent_id,
+        "conversation_id": conversation_id,
+        "document_key": "resume",
+        "label": "Published Resume DOCX",
+        "origin": "mcp",
+        "outcome": "completed",
+        "profile_id": profile_id,
+        "provider": provider,
+        "state": "completed",
+        "turn_id": turn_id,
+    }
+    assert len(activity_rows) == 1
+    activity_attribution = json.loads(activity_rows[0][0])
+    assert {
+        key: activity_attribution[key]
+        for key in (
+            "profile_id",
+            "conversation_id",
+            "turn_id",
+            "connected_agent_id",
+            "provider",
+        )
+    } == {
+        "profile_id": profile_id,
+        "conversation_id": conversation_id,
+        "turn_id": turn_id,
+        "connected_agent_id": agent_id,
+        "provider": provider,
+    }
 
 
 def test_inspect_and_history_expose_normalized_facade_records(tmp_path):

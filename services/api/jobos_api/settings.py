@@ -44,6 +44,18 @@ def parse_device_ids(raw: str | None) -> tuple[str, ...]:
         raise ValueError("device identifier list is invalid") from None
 
 
+def parse_command_args(raw: str | None) -> tuple[str, ...]:
+    if not raw:
+        return ()
+    try:
+        value = json.loads(raw)
+        if not isinstance(value, list) or any(not isinstance(item, str) for item in value):
+            raise ValueError
+        return tuple(value)
+    except (json.JSONDecodeError, ValueError):
+        raise ValueError("command arguments are invalid") from None
+
+
 class Settings(BaseModel):
     """Runtime inputs for the API process.
 
@@ -72,6 +84,8 @@ class Settings(BaseModel):
     codex_app_server_path: Path | None = None
     codex_home_path: Path | None = None
     codex_request_timeout: float = Field(default=15.0, gt=0, le=60)
+    codex_mcp_command: Path | None = None
+    codex_mcp_args: tuple[str, ...] = ()
     career_profile_enabled: bool = False
     career_profile_owner_device_ids: tuple[str, ...] = ()
     career_profile_agent_id: str = Field(

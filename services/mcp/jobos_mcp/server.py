@@ -19,15 +19,15 @@ ConversationId = Annotated[str, Field(pattern=r"^conv_[A-Za-z0-9_-]{1,128}$", ma
 TurnId = Annotated[str, Field(pattern=r"^turn_[A-Za-z0-9_-]{8,200}$", max_length=205)]
 
 
-def local_mcp_token() -> str:
-    configured = os.environ.get("JOBOS_MCP_TOKEN", "")
+def _local_keychain_token(environment_name: str, service: str) -> str:
+    configured = os.environ.get(environment_name, "")
     if configured:
         return configured
     if sys.platform == "darwin":
         account = os.environ.get("JOBOS_DEVICE_ID", "primary-device")
         for arguments in (
-            ["-s", "com.cobibean.jobos.mcp-token", "-a", account],
-            ["-s", "com.cobibean.jobos.mcp-token"],
+            ["-s", service, "-a", account],
+            ["-s", service],
         ):
             result = subprocess.run(
                 ["security", "find-generic-password", "-w", *arguments],
@@ -39,7 +39,15 @@ def local_mcp_token() -> str:
             token = result.stdout.strip()
             if result.returncode == 0 and token:
                 return token
-    raise RuntimeError("JOBOS_MCP_TOKEN is required")
+    raise RuntimeError(f"{environment_name} is required")
+
+
+def local_mcp_token() -> str:
+    return _local_keychain_token("JOBOS_MCP_TOKEN", "com.cobibean.jobos.mcp-token")
+
+
+def local_device_token() -> str:
+    return _local_keychain_token("JOBOS_DEVICE_TOKEN", "com.cobibean.jobos.device-token")
 
 
 def _local_config_path() -> Path:
@@ -1100,9 +1108,7 @@ def create_server(client: JobOsMcpClient, *, artifact_root: Path | None = None) 
 
 def main() -> None:
     base_url = os.environ.get("JOBOS_API_BASE_URL", "http://127.0.0.1:8766")
-    device_token = os.environ.get("JOBOS_DEVICE_TOKEN", "")
-    if not device_token:
-        raise RuntimeError("JOBOS_DEVICE_TOKEN is required")
+    device_token = local_device_token()
     mcp_token = local_mcp_token()
     client = JobOsMcpClient(
         base_url=base_url,

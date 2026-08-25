@@ -2,6 +2,7 @@ import base64
 import json
 import os
 import re
+import subprocess
 from pathlib import Path
 
 import httpx
@@ -18,6 +19,26 @@ from jobos_mcp.server import (
     create_server,
 )
 from mcp.server.fastmcp.exceptions import ToolError  # type: ignore[import-not-found]
+
+
+def test_local_mcp_credentials_load_from_device_scoped_keychain(monkeypatch):
+    calls = []
+
+    def find_password(arguments, **kwargs):
+        calls.append((arguments, kwargs))
+        service = arguments[arguments.index("-s") + 1]
+        value = "(FAKE)-device-token" if service.endswith("device-token") else "(FAKE)-mcp-token"
+        return subprocess.CompletedProcess(arguments, 0, stdout=value, stderr="")
+
+    monkeypatch.delenv("JOBOS_DEVICE_TOKEN", raising=False)
+    monkeypatch.delenv("JOBOS_MCP_TOKEN", raising=False)
+    monkeypatch.setenv("JOBOS_DEVICE_ID", "(FAKE)-device")
+    monkeypatch.setattr(server_module.sys, "platform", "darwin")
+    monkeypatch.setattr(server_module.subprocess, "run", find_password)
+
+    assert server_module.local_device_token() == "(FAKE)-device-token"
+    assert server_module.local_mcp_token() == "(FAKE)-mcp-token"
+    assert all("(FAKE)-device" in arguments for arguments, _kwargs in calls)
 
 
 @pytest.mark.parametrize("value", ["../job", "job/other", "job\\other", "job\nother", ""])
