@@ -24,7 +24,7 @@
     "prepare:codex-runtime": "node scripts/prepare-codex-runtime.mjs",
     "dev": "pnpm build:electron && concurrently --kill-others --success first \"vite --host 127.0.0.1\" \"wait-on http://127.0.0.1:5173 && VITE_DEV_SERVER_URL=http://127.0.0.1:5173 electron dist/main/main.js\"",
     "lint": "oxlint src vite.config.ts",
-    "package:mac": "pnpm prepare:codex-runtime && pnpm build:keychain-helper && pnpm build && electron-builder --mac dir --arm64 && node scripts/sign-and-zip-mac.mjs",
+    "package:mac": "pnpm prepare:codex-runtime && pnpm build:keychain-helper && pnpm --filter @jobos/contracts build && pnpm build && electron-builder --mac dir --arm64 && node scripts/sign-and-zip-mac.mjs && node scripts/verify-phase8-package.mjs",
     "package:macbook-update": "node scripts/create-macbook-update.mjs",
     "start": "electron dist/main/main.js",
     "test": "pnpm build:electron && NODE_OPTIONS=--no-experimental-webstorage vitest run && pnpm test:macbook-update",
@@ -88,6 +88,8 @@
     },
     "files": [
       "dist/**/*",
+      "!dist/**/*.test.*",
+      "!dist/**/*.spec.*",
       "package.json"
     ],
     "extraResources": [

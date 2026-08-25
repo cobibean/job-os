@@ -1,0 +1,622 @@
+{
+  "schema_version": 1,
+  "acceptance_count": 62,
+  "entries": [
+    {
+      "id": "DOM-01",
+      "owner_phase": 1,
+      "status": "verified",
+      "source_commit": "beb7dcd68e462da23f3f376d626ae25fc859d087",
+      "proof_refs": [
+        "https://github.com/cobibean/job-os/pull/122"
+      ],
+      "remaining_proof": null
+    },
+    {
+      "id": "DOM-02",
+      "owner_phase": 1,
+      "status": "verified",
+      "source_commit": "beb7dcd68e462da23f3f376d626ae25fc859d087",
+      "proof_refs": [
+        "https://github.com/cobibean/job-os/pull/122"
+      ],
+      "remaining_proof": null
+    },
+    {
+      "id": "DOM-03",
+      "owner_phase": 1,
+      "status": "verified",
+      "source_commit": "beb7dcd68e462da23f3f376d626ae25fc859d087",
+      "proof_refs": [
+        "https://github.com/cobibean/job-os/pull/122"
+      ],
+      "remaining_proof": null
+    },
+    {
+      "id": "DOM-04",
+      "owner_phase": 1,
+      "status": "verified",
+      "source_commit": "beb7dcd68e462da23f3f376d626ae25fc859d087",
+      "proof_refs": [
+        "https://github.com/cobibean/job-os/pull/122"
+      ],
+      "remaining_proof": null
+    },
+    {
+      "id": "DOM-05",
+      "owner_phase": 1,
+      "status": "verified",
+      "source_commit": "beb7dcd68e462da23f3f376d626ae25fc859d087",
+      "proof_refs": [
+        "https://github.com/cobibean/job-os/pull/122"
+      ],
+      "remaining_proof": null
+    },
+    {
+      "id": "MIG-01",
+      "owner_phase": 1,
+      "status": "verified",
+      "source_commit": "beb7dcd68e462da23f3f376d626ae25fc859d087",
+      "proof_refs": [
+        "https://github.com/cobibean/job-os/pull/122"
+      ],
+      "remaining_proof": null
+    },
+    {
+      "id": "MIG-02",
+      "owner_phase": 1,
+      "status": "verified",
+      "source_commit": "beb7dcd68e462da23f3f376d626ae25fc859d087",
+      "proof_refs": [
+        "https://github.com/cobibean/job-os/pull/122"
+      ],
+      "remaining_proof": null
+    },
+    {
+      "id": "MIG-03",
+      "owner_phase": 1,
+      "status": "verified",
+      "source_commit": "beb7dcd68e462da23f3f376d626ae25fc859d087",
+      "proof_refs": [
+        "https://github.com/cobibean/job-os/pull/122"
+      ],
+      "remaining_proof": null
+    },
+    {
+      "id": "MIG-04",
+      "owner_phase": 1,
+      "status": "verified",
+      "source_commit": "beb7dcd68e462da23f3f376d626ae25fc859d087",
+      "proof_refs": [
+        "https://github.com/cobibean/job-os/pull/122"
+      ],
+      "remaining_proof": null
+    },
+    {
+      "id": "API-01",
+      "owner_phase": 3,
+      "status": "verified",
+      "source_commit": "bc801b7a65635214e25d7e0fd08786f62cee4058",
+      "proof_refs": [
+        "https://github.com/cobibean/job-os/pull/124"
+      ],
+      "remaining_proof": null
+    },
+    {
+      "id": "API-02",
+      "owner_phase": 3,
+      "status": "verified",
+      "source_commit": "bc801b7a65635214e25d7e0fd08786f62cee4058",
+      "proof_refs": [
+        "https://github.com/cobibean/job-os/pull/124"
+      ],
+      "remaining_proof": null
+    },
+    {
+      "id": "API-03",
+      "owner_phase": 3,
+      "status": "verified",
+      "source_commit": "bc801b7a65635214e25d7e0fd08786f62cee4058",
+      "proof_refs": [
+        "https://github.com/cobibean/job-os/pull/124"
+      ],
+      "remaining_proof": null
+    },
+    {
+      "id": "API-04",
+      "owner_phase": 3,
+      "status": "verified",
+      "source_commit": "bc801b7a65635214e25d7e0fd08786f62cee4058",
+      "proof_refs": [
+        "https://github.com/cobibean/job-os/pull/124"
+      ],
+      "remaining_proof": null
+    },
+    {
+      "id": "RTR-01",
+      "owner_phase": 2,
+      "status": "verified",
+      "source_commit": "d0bd64a8a29ed1336aaa9cc53dec58365de97790",
+      "proof_refs": [
+        "https://github.com/cobibean/job-os/pull/123"
+      ],
+      "remaining_proof": null
+    },
+    {
+      "id": "RTR-02",
+      "owner_phase": 2,
+      "status": "verified",
+      "source_commit": "d0bd64a8a29ed1336aaa9cc53dec58365de97790",
+      "proof_refs": [
+        "https://github.com/cobibean/job-os/pull/123"
+      ],
+      "remaining_proof": null
+    },
+    {
+      "id": "RTR-03",
+      "owner_phase": 2,
+      "status": "verified",
+      "source_commit": "d0bd64a8a29ed1336aaa9cc53dec58365de97790",
+      "proof_refs": [
+        "https://github.com/cobibean/job-os/pull/123"
+      ],
+      "remaining_proof": null
+    },
+    {
+      "id": "EVT-01",
+      "owner_phase": 2,
+      "status": "verified",
+      "source_commit": "d0bd64a8a29ed1336aaa9cc53dec58365de97790",
+      "proof_refs": [
+        "https://github.com/cobibean/job-os/pull/123"
+      ],
+      "remaining_proof": null
+    },
+    {
+      "id": "EVT-02",
+      "owner_phase": 2,
+      "status": "verified",
+      "source_commit": "d0bd64a8a29ed1336aaa9cc53dec58365de97790",
+      "proof_refs": [
+        "https://github.com/cobibean/job-os/pull/123"
+      ],
+      "remaining_proof": null
+    },
+    {
+      "id": "EVT-03",
+      "owner_phase": 2,
+      "status": "verified",
+      "source_commit": "d0bd64a8a29ed1336aaa9cc53dec58365de97790",
+      "proof_refs": [
+        "https://github.com/cobibean/job-os/pull/123"
+      ],
+      "remaining_proof": null
+    },
+    {
+      "id": "CDX-01",
+      "owner_phase": 4,
+      "status": "verified",
+      "source_commit": "8416f0b40a5432e4f2459874b213ae06a3b461fc",
+      "proof_refs": [
+        "https://github.com/cobibean/job-os/pull/125"
+      ],
+      "remaining_proof": null
+    },
+    {
+      "id": "AUTH-01",
+      "owner_phase": 4,
+      "status": "verified",
+      "source_commit": "8416f0b40a5432e4f2459874b213ae06a3b461fc",
+      "proof_refs": [
+        "https://github.com/cobibean/job-os/pull/125"
+      ],
+      "remaining_proof": null
+    },
+    {
+      "id": "AUTH-02",
+      "owner_phase": 4,
+      "status": "verified",
+      "source_commit": "8416f0b40a5432e4f2459874b213ae06a3b461fc",
+      "proof_refs": [
+        "https://github.com/cobibean/job-os/pull/125"
+      ],
+      "remaining_proof": null
+    },
+    {
+      "id": "AUTH-03",
+      "owner_phase": 4,
+      "status": "verified",
+      "source_commit": "8416f0b40a5432e4f2459874b213ae06a3b461fc",
+      "proof_refs": [
+        "https://github.com/cobibean/job-os/pull/125"
+      ],
+      "remaining_proof": null
+    },
+    {
+      "id": "AUTH-04",
+      "owner_phase": 4,
+      "status": "verified",
+      "source_commit": "8416f0b40a5432e4f2459874b213ae06a3b461fc",
+      "proof_refs": [
+        "https://github.com/cobibean/job-os/pull/125"
+      ],
+      "remaining_proof": null
+    },
+    {
+      "id": "AUTH-05",
+      "owner_phase": 4,
+      "status": "verified",
+      "source_commit": "8416f0b40a5432e4f2459874b213ae06a3b461fc",
+      "proof_refs": [
+        "https://github.com/cobibean/job-os/pull/125"
+      ],
+      "remaining_proof": null
+    },
+    {
+      "id": "MOD-01",
+      "owner_phase": 4,
+      "status": "verified",
+      "source_commit": "8416f0b40a5432e4f2459874b213ae06a3b461fc",
+      "proof_refs": [
+        "https://github.com/cobibean/job-os/pull/125"
+      ],
+      "remaining_proof": null
+    },
+    {
+      "id": "MOD-02",
+      "owner_phase": 4,
+      "status": "verified",
+      "source_commit": "8416f0b40a5432e4f2459874b213ae06a3b461fc",
+      "proof_refs": [
+        "https://github.com/cobibean/job-os/pull/125"
+      ],
+      "remaining_proof": null
+    },
+    {
+      "id": "HOST-01",
+      "owner_phase": 4,
+      "status": "verified",
+      "source_commit": "8416f0b40a5432e4f2459874b213ae06a3b461fc",
+      "proof_refs": [
+        "https://github.com/cobibean/job-os/pull/125"
+      ],
+      "remaining_proof": null
+    },
+    {
+      "id": "CAP-01",
+      "owner_phase": 5,
+      "status": "verified",
+      "source_commit": "64f16477df51ebe3f7f405c7a7c2a4121e15058a",
+      "proof_refs": [
+        "https://github.com/cobibean/job-os/pull/126"
+      ],
+      "remaining_proof": null
+    },
+    {
+      "id": "CAP-02",
+      "owner_phase": 5,
+      "status": "verified",
+      "source_commit": "64f16477df51ebe3f7f405c7a7c2a4121e15058a",
+      "proof_refs": [
+        "https://github.com/cobibean/job-os/pull/126"
+      ],
+      "remaining_proof": null
+    },
+    {
+      "id": "CAP-03",
+      "owner_phase": 5,
+      "status": "verified",
+      "source_commit": "64f16477df51ebe3f7f405c7a7c2a4121e15058a",
+      "proof_refs": [
+        "https://github.com/cobibean/job-os/pull/126"
+      ],
+      "remaining_proof": null
+    },
+    {
+      "id": "CAP-04",
+      "owner_phase": 5,
+      "status": "partial",
+      "source_commit": "64f16477df51ebe3f7f405c7a7c2a4121e15058a",
+      "proof_refs": [
+        "https://github.com/cobibean/job-os/pull/126"
+      ],
+      "remaining_proof": "Installed-app useful document proof remains approval-gated."
+    },
+    {
+      "id": "CAP-05",
+      "owner_phase": 5,
+      "status": "verified",
+      "source_commit": "64f16477df51ebe3f7f405c7a7c2a4121e15058a",
+      "proof_refs": [
+        "https://github.com/cobibean/job-os/pull/126"
+      ],
+      "remaining_proof": null
+    },
+    {
+      "id": "UX-01",
+      "owner_phase": 6,
+      "status": "verified",
+      "source_commit": "7753e88ff9c9671682d29b5bd5cb409cbe690978",
+      "proof_refs": [
+        "https://github.com/cobibean/job-os/pull/127"
+      ],
+      "remaining_proof": null
+    },
+    {
+      "id": "UX-02",
+      "owner_phase": 6,
+      "status": "verified",
+      "source_commit": "7753e88ff9c9671682d29b5bd5cb409cbe690978",
+      "proof_refs": [
+        "https://github.com/cobibean/job-os/pull/127"
+      ],
+      "remaining_proof": null
+    },
+    {
+      "id": "UX-03",
+      "owner_phase": 6,
+      "status": "verified",
+      "source_commit": "7753e88ff9c9671682d29b5bd5cb409cbe690978",
+      "proof_refs": [
+        "https://github.com/cobibean/job-os/pull/127"
+      ],
+      "remaining_proof": null
+    },
+    {
+      "id": "UX-04",
+      "owner_phase": 6,
+      "status": "verified",
+      "source_commit": "7753e88ff9c9671682d29b5bd5cb409cbe690978",
+      "proof_refs": [
+        "https://github.com/cobibean/job-os/pull/127"
+      ],
+      "remaining_proof": null
+    },
+    {
+      "id": "UX-05",
+      "owner_phase": 6,
+      "status": "verified",
+      "source_commit": "7753e88ff9c9671682d29b5bd5cb409cbe690978",
+      "proof_refs": [
+        "https://github.com/cobibean/job-os/pull/127"
+      ],
+      "remaining_proof": null
+    },
+    {
+      "id": "UX-06",
+      "owner_phase": 6,
+      "status": "verified",
+      "source_commit": "7753e88ff9c9671682d29b5bd5cb409cbe690978",
+      "proof_refs": [
+        "https://github.com/cobibean/job-os/pull/127"
+      ],
+      "remaining_proof": null
+    },
+    {
+      "id": "UX-07",
+      "owner_phase": 6,
+      "status": "verified",
+      "source_commit": "7753e88ff9c9671682d29b5bd5cb409cbe690978",
+      "proof_refs": [
+        "https://github.com/cobibean/job-os/pull/127"
+      ],
+      "remaining_proof": null
+    },
+    {
+      "id": "UX-08",
+      "owner_phase": 6,
+      "status": "verified",
+      "source_commit": "7753e88ff9c9671682d29b5bd5cb409cbe690978",
+      "proof_refs": [
+        "https://github.com/cobibean/job-os/pull/127"
+      ],
+      "remaining_proof": null
+    },
+    {
+      "id": "A11Y-01",
+      "owner_phase": 6,
+      "status": "partial",
+      "source_commit": "7753e88ff9c9671682d29b5bd5cb409cbe690978",
+      "proof_refs": [
+        "https://github.com/cobibean/job-os/pull/127"
+      ],
+      "remaining_proof": "Installed keyboard, screen-reader, reduced-motion, and zoom audit remains approval-gated."
+    },
+    {
+      "id": "VIS-01",
+      "owner_phase": 6,
+      "status": "approval_blocked",
+      "source_commit": "7753e88ff9c9671682d29b5bd5cb409cbe690978",
+      "proof_refs": [
+        "https://github.com/cobibean/job-os/pull/127"
+      ],
+      "remaining_proof": "Final installed visual and human acceptance requires explicit confirmation."
+    },
+    {
+      "id": "CON-01",
+      "owner_phase": 7,
+      "status": "verified",
+      "source_commit": "5ef9730c12b41c0e03bac6533aaaf92192c9f893",
+      "proof_refs": [
+        "https://github.com/cobibean/job-os/pull/128"
+      ],
+      "remaining_proof": null
+    },
+    {
+      "id": "CON-02",
+      "owner_phase": 7,
+      "status": "verified",
+      "source_commit": "5ef9730c12b41c0e03bac6533aaaf92192c9f893",
+      "proof_refs": [
+        "https://github.com/cobibean/job-os/pull/128"
+      ],
+      "remaining_proof": null
+    },
+    {
+      "id": "ISO-01",
+      "owner_phase": 7,
+      "status": "verified",
+      "source_commit": "5ef9730c12b41c0e03bac6533aaaf92192c9f893",
+      "proof_refs": [
+        "https://github.com/cobibean/job-os/pull/128"
+      ],
+      "remaining_proof": null
+    },
+    {
+      "id": "ISO-02",
+      "owner_phase": 7,
+      "status": "verified",
+      "source_commit": "5ef9730c12b41c0e03bac6533aaaf92192c9f893",
+      "proof_refs": [
+        "https://github.com/cobibean/job-os/pull/128"
+      ],
+      "remaining_proof": null
+    },
+    {
+      "id": "REC-01",
+      "owner_phase": 7,
+      "status": "verified",
+      "source_commit": "5ef9730c12b41c0e03bac6533aaaf92192c9f893",
+      "proof_refs": [
+        "https://github.com/cobibean/job-os/pull/128"
+      ],
+      "remaining_proof": null
+    },
+    {
+      "id": "REC-02",
+      "owner_phase": 7,
+      "status": "verified",
+      "source_commit": "5ef9730c12b41c0e03bac6533aaaf92192c9f893",
+      "proof_refs": [
+        "https://github.com/cobibean/job-os/pull/128"
+      ],
+      "remaining_proof": null
+    },
+    {
+      "id": "REC-03",
+      "owner_phase": 7,
+      "status": "verified",
+      "source_commit": "5ef9730c12b41c0e03bac6533aaaf92192c9f893",
+      "proof_refs": [
+        "https://github.com/cobibean/job-os/pull/128"
+      ],
+      "remaining_proof": null
+    },
+    {
+      "id": "SEC-01",
+      "owner_phase": 7,
+      "status": "verified",
+      "source_commit": "5ef9730c12b41c0e03bac6533aaaf92192c9f893",
+      "proof_refs": [
+        "https://github.com/cobibean/job-os/pull/128"
+      ],
+      "remaining_proof": null
+    },
+    {
+      "id": "SEC-02",
+      "owner_phase": 7,
+      "status": "verified",
+      "source_commit": "5ef9730c12b41c0e03bac6533aaaf92192c9f893",
+      "proof_refs": [
+        "https://github.com/cobibean/job-os/pull/128"
+      ],
+      "remaining_proof": null
+    },
+    {
+      "id": "SEC-03",
+      "owner_phase": 7,
+      "status": "verified",
+      "source_commit": "5ef9730c12b41c0e03bac6533aaaf92192c9f893",
+      "proof_refs": [
+        "https://github.com/cobibean/job-os/pull/128"
+      ],
+      "remaining_proof": null
+    },
+    {
+      "id": "RATE-01",
+      "owner_phase": 7,
+      "status": "verified",
+      "source_commit": "5ef9730c12b41c0e03bac6533aaaf92192c9f893",
+      "proof_refs": [
+        "https://github.com/cobibean/job-os/pull/128"
+      ],
+      "remaining_proof": null
+    },
+    {
+      "id": "PKG-01",
+      "owner_phase": 8,
+      "status": "partial",
+      "source_commit": null,
+      "proof_refs": [
+        "apps/desktop/scripts/verify-phase8-package.mjs"
+      ],
+      "remaining_proof": "Final exact-commit Phase 8 package or regression receipt must be attached before closeout."
+    },
+    {
+      "id": "PKG-02",
+      "owner_phase": 8,
+      "status": "approval_blocked",
+      "source_commit": null,
+      "proof_refs": [
+        "apps/desktop/scripts/verify-phase8-package.mjs"
+      ],
+      "remaining_proof": "Fresh installed golden-path run requires approval."
+    },
+    {
+      "id": "PKG-03",
+      "owner_phase": 8,
+      "status": "approval_blocked",
+      "source_commit": null,
+      "proof_refs": [
+        "apps/desktop/scripts/verify-phase8-package.mjs"
+      ],
+      "remaining_proof": "Real-data upgrade requires fresh approval."
+    },
+    {
+      "id": "PKG-04",
+      "owner_phase": 8,
+      "status": "partial",
+      "source_commit": null,
+      "proof_refs": [
+        "apps/desktop/scripts/verify-phase8-package.mjs"
+      ],
+      "remaining_proof": "Final exact-commit Phase 8 package or regression receipt must be attached before closeout."
+    },
+    {
+      "id": "PKG-05",
+      "owner_phase": 8,
+      "status": "partial",
+      "source_commit": null,
+      "proof_refs": [
+        "apps/desktop/scripts/verify-phase8-package.mjs"
+      ],
+      "remaining_proof": "Final exact-commit Phase 8 package or regression receipt must be attached before closeout."
+    },
+    {
+      "id": "INST-01",
+      "owner_phase": 8,
+      "status": "approval_blocked",
+      "source_commit": null,
+      "proof_refs": [],
+      "remaining_proof": "Real installed host/data/tool proof requires fresh approval."
+    },
+    {
+      "id": "INST-02",
+      "owner_phase": 8,
+      "status": "approval_blocked",
+      "source_commit": null,
+      "proof_refs": [],
+      "remaining_proof": "Authorized MacBook/Tailscale proof requires fresh approval."
+    },
+    {
+      "id": "REG-01",
+      "owner_phase": 8,
+      "status": "partial",
+      "source_commit": null,
+      "proof_refs": [
+        "tests/connected_agents/test_phase0_harness.py"
+      ],
+      "remaining_proof": "Final exact-commit Phase 8 package or regression receipt must be attached before closeout."
+    }
+  ]
+}

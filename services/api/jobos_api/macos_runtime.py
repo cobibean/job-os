@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import hmac
 import json
 import os
@@ -13,12 +14,14 @@ import time
 from collections.abc import Callable
 from contextlib import suppress
 from dataclasses import asdict, dataclass, replace
+from functools import partial
 from pathlib import Path
 from typing import Any, Literal
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
 from urllib.request import Request, urlopen
 
+from jobos_api.codex_runtime import CODEX_APP_SERVER_SHA256
 from jobos_api.installation_profiles import (
     InstallationProfileRecord,
     InstallationProfileRegistry,
@@ -52,6 +55,10 @@ _CONFIG_FIELDS = {
     "artifact_roots",
     "hermes_dashboard_url",
     "hermes_job_hunter_cwd",
+    "keychain_helper_path",
+    "keychain_helper_sha256",
+    "codex_app_server_path",
+    "codex_home_path",
     "device_id",
     "remote_device_ids",
     "career_profile_owner_device_ids",
@@ -123,6 +130,10 @@ class RuntimeServiceConfig:
     artifact_roots: tuple[Path, ...]
     hermes_dashboard_url: str | None
     hermes_job_hunter_cwd: Path | None
+    keychain_helper_path: Path | None
+    keychain_helper_sha256: str | None
+    codex_app_server_path: Path | None
+    codex_home_path: Path | None
     device_id: str
     remote_device_ids: tuple[str, ...]
     career_profile_owner_device_ids: tuple[str, ...]
@@ -215,6 +226,29 @@ class RuntimeServiceConfig:
             raise ValueError("private providers require facade and JobHunter paths")
         if artifact_provider == "gateway" and not roots:
             raise ValueError("the gateway provider requires artifact roots")
+        keychain_helper = _optional_absolute_path(
+            value.get("keychain_helper_path"), "keychain_helper_path"
+        )
+        keychain_helper_sha256 = value.get("keychain_helper_sha256")
+        if keychain_helper_sha256 is not None and (
+            not isinstance(keychain_helper_sha256, str)
+            or not re.fullmatch(r"[0-9a-f]{64}", keychain_helper_sha256)
+        ):
+            raise ValueError("installed Keychain helper hash is invalid")
+        codex_app_server = _optional_absolute_path(
+            value.get("codex_app_server_path"), "codex_app_server_path"
+        )
+        codex_home = _optional_absolute_path(value.get("codex_home_path"), "codex_home_path")
+        codex_fields = (
+            keychain_helper,
+            keychain_helper_sha256,
+            codex_app_server,
+            codex_home,
+        )
+        if any(item is not None for item in codex_fields) and any(
+            item is None for item in codex_fields
+        ):
+            raise ValueError("installed Codex runtime fields must be configured together")
         return cls(
             schema_version=1,
             label=SERVICE_LABEL,
@@ -234,6 +268,10 @@ class RuntimeServiceConfig:
                 if hermes_cwd is not None
                 else None
             ),
+            keychain_helper_path=keychain_helper,
+            keychain_helper_sha256=keychain_helper_sha256,
+            codex_app_server_path=codex_app_server,
+            codex_home_path=codex_home,
             device_id=device_id,
             remote_device_ids=tuple(remote_device_ids),
             career_profile_owner_device_ids=tuple(career_profile_owner_device_ids),
@@ -259,6 +297,9 @@ class RuntimeServiceConfig:
             "local_artifact_root",
             "job_hunter_db_path",
             "hermes_job_hunter_cwd",
+            "keychain_helper_path",
+            "codex_app_server_path",
+            "codex_home_path",
         ):
             if value[field] is not None:
                 value[field] = str(value[field])
@@ -283,6 +324,7 @@ def build_service_environment(
     installation_registry_path: Path | None = None,
     profile_registry_revision: int = 1,
     profile_switch_driver: Literal["launchd", "desktop"] = "launchd",
+    service_config_path: Path | None = None,
 ) -> dict[str, str]:
     if not 16 <= len(device_token) <= 4096 or any(char in device_token for char in "\r\n\0"):
         raise ValueError("device credential is invalid")
@@ -329,6 +371,24 @@ def build_service_environment(
         environment["JOBOS_HERMES_DASHBOARD_TOKEN"] = hermes_dashboard_token
     if config.hermes_job_hunter_cwd:
         environment["JOBOS_HERMES_JOB_HUNTER_CWD"] = str(config.hermes_job_hunter_cwd)
+    if config.codex_app_server_path:
+        if service_config_path is None:
+            raise ValueError("installed Codex runtime requires the service config path")
+        environment.update(
+            {
+                "JOBOS_KEYCHAIN_HELPER_PATH": str(config.keychain_helper_path),
+                "JOBOS_CODEX_APP_SERVER_PATH": str(config.codex_app_server_path),
+                "JOBOS_CODEX_HOME": str(config.codex_home_path),
+                "JOBOS_CODEX_MCP_COMMAND": str(config.python_path),
+                "JOBOS_CODEX_MCP_ARGS_JSON": json.dumps(
+                    [
+                        str(config.jobos_root / "scripts/macos/jobos_mcp_runtime.py"),
+                        str(service_config_path),
+                    ],
+                    separators=(",", ":"),
+                ),
+            }
+        )
     if remote_device_tokens:
         environment["JOBOS_DEVICE_CREDENTIALS_JSON"] = json.dumps(
             remote_device_tokens,
@@ -410,6 +470,58 @@ def build_uvicorn_arguments(config: RuntimeServiceConfig) -> list[str]:
     ]
 
 
+def _sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def installed_codex_paths(jobos_app: Path, data_dir: Path) -> dict[str, str]:
+    if not jobos_app.is_absolute() or jobos_app.is_symlink() or not jobos_app.is_dir():
+        raise ValueError("JobOS app must be an absolute installed application")
+    app_root = jobos_app.resolve(strict=True)
+
+    def installed_resource(relative_path: Path) -> Path:
+        candidate = jobos_app
+        for part in relative_path.parts:
+            candidate /= part
+            if candidate.is_symlink():
+                raise ValueError("installed JobOS Codex runtime contains a symlink")
+        try:
+            candidate.resolve(strict=True).relative_to(app_root)
+        except (FileNotFoundError, ValueError) as error:
+            raise ValueError("installed JobOS Codex runtime is incomplete") from error
+        return candidate
+
+    app_server = installed_resource(
+        Path("Contents/Resources/codex-runtime/bin/codex-app-server")
+    )
+    receipt_path = installed_resource(
+        Path("Contents/Resources/codex-runtime/JOBOS_CODEX_RUNTIME_RECEIPT.json")
+    )
+    keychain_helper = installed_resource(Path("Contents/Resources/jobos-keychain"))
+    for path in (app_server, receipt_path, keychain_helper):
+        if path.is_symlink() or not path.is_file():
+            raise ValueError("installed JobOS Codex runtime is incomplete")
+    if not os.access(app_server, os.X_OK) or not os.access(keychain_helper, os.X_OK):
+        raise ValueError("installed JobOS Codex runtime is not executable")
+    try:
+        receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+        receipt_hash = receipt["app_server_binary"]["sha256"]
+    except (OSError, KeyError, TypeError, json.JSONDecodeError) as error:
+        raise ValueError("installed JobOS Codex runtime receipt is invalid") from error
+    if receipt_hash != CODEX_APP_SERVER_SHA256 or _sha256(app_server) != CODEX_APP_SERVER_SHA256:
+        raise ValueError("installed JobOS Codex runtime failed integrity verification")
+    return {
+        "keychain_helper_path": str(keychain_helper),
+        "keychain_helper_sha256": _sha256(keychain_helper),
+        "codex_app_server_path": str(app_server),
+        "codex_home_path": str(data_dir / "codex"),
+    }
+
+
 def build_local_runtime_config(
     *,
     jobos_root: Path,
@@ -417,7 +529,9 @@ def build_local_runtime_config(
     data_dir: Path,
     device_id: str,
     port: int,
+    jobos_app: Path | None = None,
 ) -> RuntimeServiceConfig:
+    codex_paths = installed_codex_paths(jobos_app, data_dir) if jobos_app else {}
     return RuntimeServiceConfig.from_mapping(
         {
             "schema_version": 1,
@@ -434,6 +548,10 @@ def build_local_runtime_config(
             "artifact_roots": [],
             "hermes_dashboard_url": None,
             "hermes_job_hunter_cwd": None,
+            "keychain_helper_path": codex_paths.get("keychain_helper_path"),
+            "keychain_helper_sha256": codex_paths.get("keychain_helper_sha256"),
+            "codex_app_server_path": codex_paths.get("codex_app_server_path"),
+            "codex_home_path": codex_paths.get("codex_home_path"),
             "device_id": device_id,
             "remote_device_ids": [],
             "host": "127.0.0.1",
@@ -685,6 +803,7 @@ def run_profile_switch(
     device_token: str | None = None
     try:
         base_config = RuntimeServiceConfig.load(config_path)
+        read_secret = _configured_read_secret(base_config, read_secret)
         restart = [
             "/bin/launchctl",
             "kickstart",
@@ -781,6 +900,33 @@ def _restore_secret(
         store_secret(service, account, previous)
 
 
+def _configured_store_secret(
+    config: RuntimeServiceConfig,
+    callback: Callable[[str, str, str], None],
+) -> Callable[[str, str, str], None]:
+    if config.keychain_helper_path is not None and callback is store_keychain_secret:
+        return partial(store_keychain_secret, helper_path=config.keychain_helper_path)
+    return callback
+
+
+def _configured_read_secret(
+    config: RuntimeServiceConfig,
+    callback: Callable[[str, str], str | None],
+) -> Callable[[str, str], str | None]:
+    if config.keychain_helper_path is not None and callback is read_keychain_secret:
+        return partial(read_keychain_secret, helper_path=config.keychain_helper_path)
+    return callback
+
+
+def _configured_delete_secret(
+    config: RuntimeServiceConfig,
+    callback: Callable[[str, str], None],
+) -> Callable[[str, str], None]:
+    if config.keychain_helper_path is not None and callback is delete_keychain_secret:
+        return partial(delete_keychain_secret, helper_path=config.keychain_helper_path)
+    return callback
+
+
 def install_runtime(
     config: RuntimeServiceConfig,
     *,
@@ -803,17 +949,21 @@ def install_runtime(
     validate_runtime_paths(config)
     if not launcher_path.is_absolute() or not launcher_path.is_file():
         raise RuntimeError("JobOS runtime launcher is unavailable")
+    paths = _installation_paths(home, config.label)
+    store_secret = _configured_store_secret(config, store_secret)
+    read_secret = _configured_read_secret(config, read_secret)
+    delete_secret = _configured_delete_secret(config, delete_secret)
     build_service_environment(
         config,
         device_token=device_token,
         mcp_token=mcp_token,
         hermes_dashboard_token=hermes_dashboard_token,
         base_environment={},
+        service_config_path=paths.service_config_path,
     )
     if config.hermes_dashboard_url and not hermes_dashboard_token:
         raise ValueError("Hermes credential is required for the configured dashboard")
 
-    paths = _installation_paths(home, config.label)
     service_config = (json.dumps(config.to_mapping(), indent=2, sort_keys=True) + "\n").encode()
     desktop_config = (
         json.dumps(render_desktop_runtime(config), indent=2, sort_keys=True) + "\n"
@@ -925,6 +1075,9 @@ def authorize_remote_device(
     ),
 ) -> RuntimeServiceConfig:
     config = RuntimeServiceConfig.load(config_path)
+    store_secret = _configured_store_secret(config, store_secret)
+    read_secret = _configured_read_secret(config, read_secret)
+    delete_secret = _configured_delete_secret(config, delete_secret)
     if (
         not _DEVICE_PATTERN.fullmatch(device_id)
         or device_id == config.device_id
@@ -982,6 +1135,7 @@ def runtime_status(
     ),
 ) -> dict[str, object]:
     config = RuntimeServiceConfig.load(config_path)
+    read_secret = _configured_read_secret(config, read_secret)
     loaded = is_loaded(uid, config.label)
     authenticated = False
     if loaded:
@@ -1011,6 +1165,7 @@ def uninstall_runtime(
     delete_secret: Callable[[str, str], None] = delete_keychain_secret,
 ) -> None:
     config = RuntimeServiceConfig.load(config_path)
+    delete_secret = _configured_delete_secret(config, delete_secret)
     paths = _installation_paths(home, config.label)
     service = f"gui/{uid}/{config.label}"
     run(["/bin/launchctl", "bootout", service], True)
@@ -1033,8 +1188,8 @@ def uninstall_runtime(
         path.unlink(missing_ok=True)
 
 
-def _read_keychain(service: str, account: str) -> str:
-    value = read_keychain_secret(service, account)
+def _read_keychain(service: str, account: str, *, helper_path: Path | None = None) -> str:
+    value = read_keychain_secret(service, account, helper_path=helper_path)
     if value is None:
         raise RuntimeError("required JobOS Keychain credential is unavailable")
     return value
@@ -1050,14 +1205,37 @@ def validate_runtime_paths(config: RuntimeServiceConfig) -> None:
     required_directories += config.artifact_roots
     if config.hermes_job_hunter_cwd:
         required_directories += (config.hermes_job_hunter_cwd,)
+    if config.codex_app_server_path:
+        assert config.keychain_helper_path is not None
+        assert config.keychain_helper_sha256 is not None
+        required_files += (
+            config.codex_app_server_path,
+            config.keychain_helper_path,
+            config.jobos_root / "scripts/macos/jobos_mcp_runtime.py",
+        )
+        if not os.access(config.codex_app_server_path, os.X_OK) or not os.access(
+            config.keychain_helper_path, os.X_OK
+        ):
+            raise RuntimeError("installed JobOS Codex runtime is not executable")
     if any(not path.is_file() for path in required_files):
         raise RuntimeError("required JobOS runtime file is unavailable")
     if any(not path.is_dir() for path in required_directories):
         raise RuntimeError("required JobOS runtime directory is unavailable")
+    if (
+        config.codex_app_server_path
+        and _sha256(config.codex_app_server_path) != CODEX_APP_SERVER_SHA256
+    ):
+        raise RuntimeError("installed JobOS Codex runtime failed integrity verification")
+    if (
+        config.keychain_helper_path
+        and _sha256(config.keychain_helper_path) != config.keychain_helper_sha256
+    ):
+        raise RuntimeError("installed JobOS Keychain helper failed integrity verification")
     for directory in {
         config.state_db_path.parent,
         config.jobs_db_path.parent,
         config.local_artifact_root,
+        *([config.codex_home_path] if config.codex_home_path else []),
     }:
         directory.mkdir(parents=True, exist_ok=True, mode=0o700)
 
@@ -1067,17 +1245,26 @@ def run_service(config_path: Path) -> None:
     registry_path = installation_registry_path_for_runtime(config_path)
     config, registry_data, profile = resolve_runtime_profile(base_config, registry_path)
     validate_runtime_paths(config)
-    device_token = _read_keychain(DEVICE_TOKEN_SERVICE, config.device_id)
-    mcp_token = read_keychain_secret(MCP_TOKEN_SERVICE, config.device_id)
+    helper_path = config.keychain_helper_path
+    device_token = _read_keychain(
+        DEVICE_TOKEN_SERVICE, config.device_id, helper_path=helper_path
+    )
+    mcp_token = read_keychain_secret(
+        MCP_TOKEN_SERVICE, config.device_id, helper_path=helper_path
+    )
     if mcp_token is None:
         mcp_token = secrets.token_urlsafe(48)
-        store_keychain_secret(MCP_TOKEN_SERVICE, config.device_id, mcp_token)
+        store_keychain_secret(
+            MCP_TOKEN_SERVICE, config.device_id, mcp_token, helper_path=helper_path
+        )
     remote_device_tokens = {
-        device_id: _read_keychain(DEVICE_TOKEN_SERVICE, device_id)
+        device_id: _read_keychain(
+            DEVICE_TOKEN_SERVICE, device_id, helper_path=helper_path
+        )
         for device_id in config.remote_device_ids
     }
     hermes_token = (
-        _read_keychain(HERMES_TOKEN_SERVICE, config.device_id)
+        _read_keychain(HERMES_TOKEN_SERVICE, config.device_id, helper_path=helper_path)
         if config.hermes_dashboard_url
         else None
     )
@@ -1092,6 +1279,7 @@ def run_service(config_path: Path) -> None:
         installation_registry_path=registry_path,
         profile_registry_revision=registry_data.registry_revision,
         profile_switch_driver="launchd",
+        service_config_path=config_path,
     )
     arguments = build_uvicorn_arguments(config)
     os.execve(arguments[0], arguments, environment)
@@ -1114,6 +1302,7 @@ def parse_arguments(arguments: list[str]) -> argparse.Namespace:
     install_local.add_argument("--port", type=int, default=8766)
     install_local.add_argument("--home", type=Path, default=Path.home())
     install_local.add_argument("--launcher", type=Path, required=True)
+    install_local.add_argument("--jobos-app", type=Path)
     authorize = subparsers.add_parser(
         "authorize-remote",
         help="authorize one remote desktop device",
@@ -1159,6 +1348,7 @@ def main(arguments: list[str] | None = None) -> int:
                     data_dir=options.data_dir,
                     device_id=options.device_id,
                     port=options.port,
+                    jobos_app=options.jobos_app,
                 )
             )
             install_runtime(
