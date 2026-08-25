@@ -63,6 +63,17 @@ def mutation_activity_source_id(
 def _conversation_detail(event_type: str, detail: dict[str, object] | None) -> dict[str, object]:
     raw_detail = detail or {}
     safe_detail = redact_detail(raw_detail)
+    approval_id = raw_detail.get("approval_id")
+    if (
+        event_type == "status"
+        and raw_detail.get("actionable") is True
+        and isinstance(approval_id, str)
+        and re.fullmatch(r"approval_[A-Za-z0-9_-]{16,80}", approval_id)
+    ):
+        # This bounded, one-time review handle is not a provider credential. The
+        # renderer needs the exact value to answer the active turn; all malformed
+        # values and unrelated opaque strings still pass through normal redaction.
+        safe_detail["approval_id"] = approval_id
     assistant_text = raw_detail.get("text")
     if (
         event_type == "assistant_message"

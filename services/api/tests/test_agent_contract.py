@@ -232,7 +232,7 @@ class ToolReviewGateway(FakeGateway):
 
     async def submit_turn(self, text, context):
         await super().submit_turn(text, context)
-        approval_id = "approval_abcdefghijklmnop"
+        approval_id = "approval_aB3dE5gH7jK9mN2pQ4rS6tUv"
         self.pending = (context.turn_id, approval_id)
         await self.events.put(
             GatewayEvent(
@@ -581,9 +581,21 @@ def test_tool_review_endpoint_is_authenticated_and_scoped_to_exact_waiting_turn(
         else:
             pytest.fail("turn did not enter the waiting review state")
 
+        current = client.get(
+            f"/v1/conversations/{conversation_id}", headers=headers()
+        ).json()
+        waiting_event = next(
+            entry
+            for entry in reversed(current["entries"])
+            if entry["type"] == "status" and entry["state"] == "waiting"
+        )
+        assert waiting_event["detail"]["approval_id"] == (
+            "approval_aB3dE5gH7jK9mN2pQ4rS6tUv"
+        )
+
         unauthorized = client.post(
             review_url,
-            json={"approval_id": "approval_abcdefghijklmnop", "approved": True},
+            json={"approval_id": "approval_aB3dE5gH7jK9mN2pQ4rS6tUv", "approved": True},
         )
         wrong_request = client.post(
             review_url,
@@ -593,12 +605,12 @@ def test_tool_review_endpoint_is_authenticated_and_scoped_to_exact_waiting_turn(
         accepted = client.post(
             review_url,
             headers=headers(),
-            json={"approval_id": "approval_abcdefghijklmnop", "approved": True},
+            json={"approval_id": "approval_aB3dE5gH7jK9mN2pQ4rS6tUv", "approved": True},
         )
         stale = client.post(
             review_url,
             headers=headers(),
-            json={"approval_id": "approval_abcdefghijklmnop", "approved": False},
+            json={"approval_id": "approval_aB3dE5gH7jK9mN2pQ4rS6tUv", "approved": False},
         )
 
     assert unauthorized.status_code == 401
@@ -607,7 +619,7 @@ def test_tool_review_endpoint_is_authenticated_and_scoped_to_exact_waiting_turn(
     assert accepted.json()["turn_id"] == turn_id
     assert accepted.json()["status"] == "waiting"
     assert stale.status_code == 409
-    assert gateway.reviews == [(turn_id, "approval_abcdefghijklmnop", True)]
+    assert gateway.reviews == [(turn_id, "approval_aB3dE5gH7jK9mN2pQ4rS6tUv", True)]
 
 
 def test_cancel_is_idempotent_and_retry_appends_linked_turn(tmp_path):
