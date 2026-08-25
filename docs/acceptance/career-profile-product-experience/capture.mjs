@@ -743,9 +743,11 @@ try {
   cdp.socket.close()
   await terminate(appProcess)
 
-  await markStage('starting', 'protocol-and-identity')
+  await markStage('starting', 'protocol-lifecycle')
   const protocol = verifyProtocolLifecycle()
+  await markStage('starting', 'artifact-identity')
   const identity = await artifactIdentity()
+  await markStage('starting', 'acceptance-report')
   const packageBytes = await readFile(path.join(root, 'release/desktop/JobOS-0.1.0-arm64.zip'))
   const report = {
     status: 'passed',
