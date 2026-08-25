@@ -320,9 +320,22 @@ async def test_codex_redacts_credentials_split_across_stream_deltas(tmp_path: Pa
             "threadId": "thread-a",
             "turnId": "provider-turn-a",
             "itemId": "message-secret",
-            "delta": "ijklmnopqrstuvwx done ",
+            "delta": "ijklmnopqrstuvwx done tail",
         },
     )
     redacted = await anext(events)
     assert redacted.summary == "[redacted] done "
     assert "sk-proj" not in prefix.summary + redacted.summary
+
+    await client.emit(
+        "turn/completed",
+        {
+            "threadId": "thread-a",
+            "turn": {"id": "provider-turn-a", "status": "completed"},
+        },
+    )
+    tail = await anext(events)
+    terminal = await anext(events)
+    assert tail.summary == "tail"
+    assert terminal.state == "completed"
+    assert "sk-proj" not in tail.summary

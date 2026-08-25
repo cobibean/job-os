@@ -41,6 +41,21 @@ def test_local_mcp_credentials_load_from_device_scoped_keychain(monkeypatch):
     assert all("(FAKE)-device" in arguments for arguments, _kwargs in calls)
 
 
+@pytest.mark.parametrize("error", [FileNotFoundError(), subprocess.TimeoutExpired("security", 5)])
+def test_local_mcp_credentials_use_stable_error_when_keychain_is_unavailable(monkeypatch, error):
+    monkeypatch.delenv("JOBOS_MCP_TOKEN", raising=False)
+    monkeypatch.setenv("JOBOS_DEVICE_ID", "(FAKE)-device")
+    monkeypatch.setattr(server_module.sys, "platform", "darwin")
+
+    def fail_lookup(*_args, **_kwargs):
+        raise error
+
+    monkeypatch.setattr(server_module.subprocess, "run", fail_lookup)
+
+    with pytest.raises(RuntimeError, match="JOBOS_MCP_TOKEN is required"):
+        server_module.local_mcp_token()
+
+
 @pytest.mark.parametrize("value", ["../job", "job/other", "job\\other", "job\nother", ""])
 def test_mcp_path_segments_reject_traversal_and_control_characters(value):
     with pytest.raises(ValueError, match="Invalid job ID"):

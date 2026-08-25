@@ -25,17 +25,25 @@ def _local_keychain_token(environment_name: str, service: str) -> str:
         return configured
     if sys.platform == "darwin":
         account = os.environ.get("JOBOS_DEVICE_ID", "primary-device")
-        for arguments in (
-            ["-s", service, "-a", account],
-            ["-s", service],
-        ):
+        try:
             result = subprocess.run(
-                ["security", "find-generic-password", "-w", *arguments],
+                [
+                    "security",
+                    "find-generic-password",
+                    "-w",
+                    "-s",
+                    service,
+                    "-a",
+                    account,
+                ],
                 check=False,
                 capture_output=True,
                 text=True,
                 timeout=5,
             )
+        except (OSError, subprocess.SubprocessError):
+            result = None
+        if result is not None:
             token = result.stdout.strip()
             if result.returncode == 0 and token:
                 return token

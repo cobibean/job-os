@@ -4,9 +4,8 @@ import asyncio
 import os
 import re
 import secrets
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from pathlib import Path
-from typing import cast
 
 from .agent_gateway import AgentContext, ConnectionState, GatewayEvent
 from .codex_runtime import CodexRpcClient, CodexRuntimeError, jobos_mcp_ready
@@ -68,12 +67,12 @@ class CodexAppServerGateway:
         client: CodexRpcClient,
         cwd: Path,
         conversation_id: str,
-        unregister: object,
+        unregister: Callable[[str, CodexAppServerGateway], None],
     ) -> None:
         self._client = client
         self._cwd = cwd
         self._conversation_id = conversation_id
-        self._unregister = cast(object, unregister)
+        self._unregister = unregister
         self._thread_id: str | None = None
         self._jobos_turn_id: str | None = None
         self._provider_turn_id: str | None = None
@@ -386,7 +385,5 @@ class CodexAppServerGateway:
         self._thread_id = None
         self._jobos_turn_id = None
         self._provider_turn_id = None
-        unregister = self._unregister
-        if callable(unregister):
-            unregister(self._conversation_id, self)
+        self._unregister(self._conversation_id, self)
         await self._events.put(None)

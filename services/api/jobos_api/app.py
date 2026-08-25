@@ -1374,7 +1374,11 @@ def create_app(
         conversation_id = request.query_params.get("conversation_id")
         turn_id = request.query_params.get("turn_id")
         if conversation_id is None and turn_id is None:
-            if path != "/v1/browser/commands":
+            # Career Profile collaboration uses its own connected-agent token and
+            # revisioned audit model; it is not a conversation-turn capability.
+            if path == "/v1/career-profile/consumer-projection" or path.startswith(
+                "/v1/career-profile/agent-"
+            ):
                 return await call_next(request)
             return error_response(
                 request,
@@ -5202,7 +5206,9 @@ def create_app(
     def report_activity(
         command: ActivityReportRequest,
         identity: Annotated[DeviceIdentity, Depends(authenticated_device)],
+        mcp_token: Annotated[str | None, Header(alias="X-JobOS-MCP-Token")] = None,
     ) -> ActivityReportResponse:
+        require_trusted_mcp(identity, command.origin, mcp_token)
         request_hash = mutation_hash(
             "activity.report",
             {
