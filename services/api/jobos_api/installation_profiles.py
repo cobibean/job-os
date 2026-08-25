@@ -84,6 +84,10 @@ class InstallationProfileConflict(InstallationProfileError):
     code = "profile_registry_conflict"
 
 
+class ConnectedAgentCardinalityConflict(InstallationProfileConflict):
+    code = "connected_agent_cardinality_conflict"
+
+
 class InstallationProfileNotFound(InstallationProfileError):
     code = "installation_profile_not_found"
 
@@ -1264,7 +1268,7 @@ class InstallationProfileRegistry:
             if provider == "codex" and any(
                 item.provider == "codex" for item in data.connected_agents
             ):
-                raise InstallationProfileConflict(
+                raise ConnectedAgentCardinalityConflict(
                     "This installation already has a durable Codex identity"
                 )
             timestamp = now or utc_now()
@@ -1313,6 +1317,7 @@ class InstallationProfileRegistry:
         default_reasoning_effort: str | None,
         expected_registry_revision: int,
         idempotency_key: str,
+        connection_config: dict[str, str] | None = None,
         now: datetime | None = None,
     ) -> ConnectedAgentRecord:
         if not CONNECTED_AGENT_ID_PATTERN.fullmatch(agent_id):
@@ -1324,6 +1329,7 @@ class InstallationProfileRegistry:
                 "avatar_id": avatar_id,
                 "default_model_id": default_model_id,
                 "default_reasoning_effort": default_reasoning_effort,
+                "connection_config": connection_config,
                 "expected_registry_revision": expected_registry_revision,
             }
         )
@@ -1344,12 +1350,20 @@ class InstallationProfileRegistry:
                 raise InstallationProfileConflict("JobOS Profile registry changed")
             if target is None:
                 raise InstallationProfileNotFound("Connected Agent was not found")
+            normalized_config = (
+                HermesConnectionConfiguration.model_validate(connection_config)
+                if target.provider == "hermes" and connection_config is not None
+                else CodexConnectionConfiguration.model_validate(connection_config)
+                if target.provider == "codex" and connection_config is not None
+                else target.connection_config
+            )
             changed = target.model_copy(
                 update={
                     "display_name": display_name,
                     "avatar_id": avatar_id,
                     "default_model_id": default_model_id,
                     "default_reasoning_effort": default_reasoning_effort,
+                    "connection_config": normalized_config,
                     "updated_at": now or utc_now(),
                 }
             )

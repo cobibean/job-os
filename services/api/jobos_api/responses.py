@@ -9,7 +9,7 @@ class ApiResponse(BaseModel):
 
 class ApiErrorResponse(ApiResponse):
     error_schema: Literal["jobos-error-v1"]
-    code: str = Field(min_length=1, max_length=64, pattern=r"^[a-z][a-z0-9_]*$")
+    code: str = Field(min_length=1, max_length=64, pattern=r"^[A-Za-z][A-Za-z0-9_]*$")
     message: str = Field(min_length=1, max_length=500)
     retryable: bool
     correlation_id: str = Field(min_length=8, max_length=64, pattern=r"^[A-Za-z0-9_-]+$")

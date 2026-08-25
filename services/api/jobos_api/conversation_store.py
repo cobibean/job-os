@@ -161,6 +161,37 @@ class ConversationStore:
         if cursor.rowcount != 1:
             raise ConversationNotFound("Conversation not found")
 
+    def complete_provisioning(self, provider_session_id: str) -> None:
+        if not provider_session_id or len(provider_session_id) > 256:
+            raise ValueError("Provider session identifier is invalid")
+        with connect_sqlite(self._path) as connection:
+            cursor = connection.execute(
+                """
+                UPDATE conversations
+                SET stored_session_id = ?, creation_state = 'ready', lock_reason = NULL,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE conversation_id = ? AND archived_at IS NULL
+                  AND creation_state = 'provisioning' AND binding_state = 'sealed'
+                """,
+                (provider_session_id, self.conversation_id),
+            )
+        if cursor.rowcount != 1:
+            raise ConversationBusy("Conversation provisioning state changed")
+
+    def lock_provisioning(self, reason: str = "RECOVERY_REQUIRED") -> None:
+        with connect_sqlite(self._path) as connection:
+            cursor = connection.execute(
+                """
+                UPDATE conversations SET creation_state = 'locked', lock_reason = ?,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE conversation_id = ? AND archived_at IS NULL
+                  AND creation_state = 'provisioning'
+                """,
+                (reason[:128], self.conversation_id),
+            )
+        if cursor.rowcount != 1:
+            raise ConversationBusy("Conversation provisioning state changed")
+
     def save_stored_session_id_if_current(self, expected: str | None, value: str | None) -> bool:
         with connect_sqlite(self._path) as connection:
             cursor = connection.execute(

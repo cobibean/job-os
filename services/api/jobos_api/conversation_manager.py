@@ -1,18 +1,31 @@
 import asyncio
+import logging
 from typing import Literal
 
 from pydantic import Field
 
-from .agent_gateway import AgentGatewayFactory, AgentRuntimeRouter
+from .agent_gateway import (
+    AgentGatewayFactory,
+    AgentRuntimeRouter,
+    AmbiguousDeliveryError,
+    DefinitiveSessionCreationError,
+)
 from .career_profile_context import CareerProfileContextStore
 from .conversations import (
+    BoundConversationResponse,
     ConnectionResponse,
     ConversationJobContext,
     ConversationModel,
     ConversationResponse,
     ConversationService,
 )
-from .state_store import ConversationNotFound, JobOsStateStore
+from .state_store import (
+    ConversationNotFound,
+    ConversationProvisioningFailed,
+    JobOsStateStore,
+)
+
+logger = logging.getLogger(__name__)
 
 
 class ConversationSummary(ConversationModel):
@@ -164,13 +177,129 @@ class ConversationManager:
                 service = self._make_service(conversation_id)
                 self._services[conversation_id] = service
                 await service.start()
-            except BaseException:
+            except Exception:
                 self._services.pop(conversation_id, None)
                 if service is not None:
                     await asyncio.gather(service.close(), return_exceptions=True)
                 self.store.discard_failed_conversation(conversation_id, actor_id=actor_id)
                 raise
         return service.snapshot()
+
+    async def create_bound(
+        self,
+        *,
+        actor_id: str,
+        selected_job_id: str | None,
+        connected_agent_id: str,
+        provider: str,
+        model_id: str,
+        reasoning_effort: str,
+        connection_account_fingerprint: str | None,
+        idempotency_key: str,
+        client_request_hash: str,
+        agent_summary: dict[str, object],
+    ) -> tuple[BoundConversationResponse, bool]:
+        async with self._lifecycle_lock:
+            summary = self.store.create_conversation(
+                actor_id=actor_id,
+                selected_job_id=selected_job_id,
+                connected_agent_id=connected_agent_id,
+                provider=provider,
+                model_id=model_id,
+                reasoning_effort=reasoning_effort,
+                connection_account_fingerprint=connection_account_fingerprint,
+                idempotency_key=idempotency_key,
+                client_request_hash=client_request_hash,
+            )
+            conversation_id = str(summary["conversation_id"])
+            created = summary["created"] is True
+            service = self._services.get(conversation_id)
+            if not created:
+                if service is None:
+                    service = self._make_service(conversation_id)
+                    self._services[conversation_id] = service
+                    await service.start()
+                return self._bound_snapshot(service, agent_summary), False
+            try:
+                service = self._make_service(conversation_id)
+                self._services[conversation_id] = service
+                await service.start()
+                provider_session_id, _ = await service.gateway.create_or_resume_conversation(None)
+                service.store.complete_provisioning(provider_session_id)
+            except AmbiguousDeliveryError:
+                if service is None:
+                    raise
+                service.store.lock_provisioning()
+            except DefinitiveSessionCreationError as error:
+                self._services.pop(conversation_id, None)
+                if service is not None:
+                    await asyncio.gather(service.close(), return_exceptions=True)
+                self.store.discard_provisioning_conversation(
+                    conversation_id,
+                    actor_id=actor_id,
+                    idempotency_key=idempotency_key,
+                    failure_code="AGENT_PROVIDER_UNAVAILABLE",
+                )
+                raise ConversationProvisioningFailed("AGENT_PROVIDER_UNAVAILABLE") from error
+            except asyncio.CancelledError:
+                if service is not None:
+                    service.store.lock_provisioning()
+                raise
+            except Exception as error:
+                if service is None:
+                    raise
+                service.store.lock_provisioning()
+                logger.exception(
+                    "Connected Agent conversation provisioning requires recovery",
+                    exc_info=error,
+                )
+        return self._bound_snapshot(service, agent_summary), True
+
+    async def replay_bound(
+        self,
+        *,
+        conversation_id: str,
+        actor_id: str,
+        agent_summary: dict[str, object],
+    ) -> BoundConversationResponse:
+        async with self._lifecycle_lock:
+            if not any(
+                item["conversation_id"] == conversation_id
+                for item in self.store.list_active_conversations(owner_device_id=actor_id)
+            ):
+                raise ConversationNotFound("Conversation not found")
+            service = self._services.get(conversation_id)
+            if service is None:
+                service = self._make_service(conversation_id)
+                self._services[conversation_id] = service
+                await service.start()
+        return self._bound_snapshot(service, agent_summary)
+
+    @staticmethod
+    def _bound_snapshot(
+        service: ConversationService, agent_summary: dict[str, object]
+    ) -> BoundConversationResponse:
+        binding = service.store.binding()
+        return BoundConversationResponse.model_validate(
+            {
+                **service.snapshot().model_dump(),
+                "binding": {
+                    key: binding[key]
+                    for key in (
+                        "connected_agent_id",
+                        "provider",
+                        "model_id",
+                        "reasoning_effort",
+                        "binding_state",
+                    )
+                },
+                "availability": {
+                    "state": "ready" if binding["creation_state"] == "ready" else "locked",
+                    "reason": binding["lock_reason"],
+                },
+                "agent": agent_summary,
+            }
+        )
 
     async def archive(self, conversation_id: str, *, actor_id: str) -> None:
         async with self._lifecycle_lock:

@@ -12,7 +12,13 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 import websockets
 
 from .activity import ActivityNormalizer
-from .agent_gateway import AgentContext, AmbiguousDeliveryError, ConnectionState, GatewayEvent
+from .agent_gateway import (
+    AgentContext,
+    AmbiguousDeliveryError,
+    ConnectionState,
+    DefinitiveSessionCreationError,
+    GatewayEvent,
+)
 from .browser_policy import browser_title_contains_credentials
 from .career_profile_context import CareerProfileContextSnapshot
 from .redaction import (
@@ -462,15 +468,18 @@ class HermesWebSocketGateway:
             raise RuntimeError("Hermes session isolation could not be verified") from None
 
     async def _create_session(self) -> dict[str, Any]:
-        return await self._request(
-            "session.create",
-            {
-                "profile": self._profile,
-                "source": "jobos",
-                "cwd": str(self._cwd),
-                "close_on_disconnect": False,
-            },
-        )
+        try:
+            return await self._request(
+                "session.create",
+                {
+                    "profile": self._profile,
+                    "source": "jobos",
+                    "cwd": str(self._cwd),
+                    "close_on_disconnect": False,
+                },
+            )
+        except _HermesRpcError as error:
+            raise DefinitiveSessionCreationError("Hermes rejected session creation") from error
 
     @staticmethod
     def _unsafe_session_response() -> RuntimeError:

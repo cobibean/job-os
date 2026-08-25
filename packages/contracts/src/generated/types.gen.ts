@@ -553,6 +553,53 @@ export type ArtifactRegistrationRequest = {
 };
 
 /**
+ * BoundConversationResponse
+ */
+export type BoundConversationResponse = {
+    /**
+     * Active Turn
+     */
+    active_turn: {
+        [key: string]: unknown;
+    } | null;
+    agent: ConversationAgentPresentation;
+    availability: ConversationAvailabilityResponse;
+    binding: ConversationBindingResponse;
+    connection: ConnectionResponse;
+    /**
+     * Conversation Id
+     */
+    conversation_id: string;
+    /**
+     * Created At
+     */
+    created_at: string;
+    /**
+     * Entries
+     */
+    entries: Array<{
+        [key: string]: unknown;
+    }>;
+    job_context: ConversationJobContext;
+    /**
+     * Latest Event Id
+     */
+    latest_event_id: number;
+    /**
+     * Position
+     */
+    position: number;
+    /**
+     * Recovery State
+     */
+    recovery_state: 'ready' | 'recovering' | 'quarantined';
+    /**
+     * Title
+     */
+    title: string;
+};
+
+/**
  * BrowserCommandError
  */
 export type BrowserCommandError = {
@@ -1230,6 +1277,54 @@ export type ConnectedAgent = {
 };
 
 /**
+ * ConnectedAgentHealth
+ */
+export type ConnectedAgentHealth = {
+    /**
+     * Label
+     */
+    label: string;
+    /**
+     * Provider Available
+     */
+    provider_available: boolean;
+    /**
+     * Retry After Seconds
+     */
+    retry_after_seconds?: number | null;
+    /**
+     * State
+     */
+    state: string;
+    /**
+     * Tools Available
+     */
+    tools_available: boolean;
+};
+
+/**
+ * ConnectedAgentImpactResponse
+ */
+export type ConnectedAgentImpactResponse = {
+    /**
+     * Active Chats
+     */
+    active_chats: number;
+    /**
+     * Agent Id
+     */
+    agent_id: string;
+    /**
+     * Default Profile Ids
+     */
+    default_profile_ids: Array<string>;
+    /**
+     * Locked Chats
+     */
+    locked_chats: number;
+};
+
+/**
  * ConnectedAgentList
  */
 export type ConnectedAgentList = {
@@ -1240,6 +1335,115 @@ export type ConnectedAgentList = {
 };
 
 /**
+ * ConnectedAgentListResponse
+ */
+export type ConnectedAgentListResponse = {
+    /**
+     * Agents
+     */
+    agents: Array<ConnectedAgentPublic>;
+    /**
+     * Registry Revision
+     */
+    registry_revision: number;
+};
+
+/**
+ * ConnectedAgentModelOption
+ */
+export type ConnectedAgentModelOption = {
+    /**
+     * Display Name
+     */
+    display_name: string;
+    /**
+     * Model Id
+     */
+    model_id: string;
+    /**
+     * Reasoning Efforts
+     */
+    reasoning_efforts: Array<string>;
+};
+
+/**
+ * ConnectedAgentModelsResponse
+ */
+export type ConnectedAgentModelsResponse = {
+    /**
+     * Live
+     */
+    live: boolean;
+    /**
+     * Models
+     */
+    models: Array<ConnectedAgentModelOption>;
+};
+
+/**
+ * ConnectedAgentPublic
+ */
+export type ConnectedAgentPublic = {
+    /**
+     * Account Fingerprint
+     */
+    account_fingerprint: string | null;
+    /**
+     * Account Summary
+     */
+    account_summary: {
+        [key: string]: string;
+    } | null;
+    /**
+     * Avatar Id
+     */
+    avatar_id: string;
+    /**
+     * Created At
+     */
+    created_at: string;
+    /**
+     * Default Model Id
+     */
+    default_model_id: string | null;
+    /**
+     * Default Reasoning Effort
+     */
+    default_reasoning_effort: string | null;
+    /**
+     * Disconnected At
+     */
+    disconnected_at: string | null;
+    /**
+     * Display Name
+     */
+    display_name: string;
+    health: ConnectedAgentHealth;
+    /**
+     * Id
+     */
+    id: string;
+    /**
+     * Impact
+     */
+    impact: {
+        [key: string]: unknown;
+    };
+    /**
+     * Lifecycle
+     */
+    lifecycle: 'connected' | 'disconnected';
+    /**
+     * Provider
+     */
+    provider: 'hermes' | 'codex';
+    /**
+     * Updated At
+     */
+    updated_at: string;
+};
+
+/**
  * ConnectionResponse
  */
 export type ConnectionResponse = {
@@ -1247,6 +1451,68 @@ export type ConnectionResponse = {
      * State
      */
     state: 'online' | 'connecting' | 'offline';
+};
+
+/**
+ * ConversationAgentPresentation
+ */
+export type ConversationAgentPresentation = {
+    /**
+     * Avatar Id
+     */
+    avatar_id: string;
+    /**
+     * Display Name
+     */
+    display_name: string;
+    /**
+     * Id
+     */
+    id: string;
+    /**
+     * Provider
+     */
+    provider: 'hermes' | 'codex';
+};
+
+/**
+ * ConversationAvailabilityResponse
+ */
+export type ConversationAvailabilityResponse = {
+    /**
+     * Reason
+     */
+    reason?: string | null;
+    /**
+     * State
+     */
+    state: 'ready' | 'locked';
+};
+
+/**
+ * ConversationBindingResponse
+ */
+export type ConversationBindingResponse = {
+    /**
+     * Binding State
+     */
+    binding_state: 'sealed';
+    /**
+     * Connected Agent Id
+     */
+    connected_agent_id: string;
+    /**
+     * Model Id
+     */
+    model_id: string;
+    /**
+     * Provider
+     */
+    provider: 'hermes' | 'codex';
+    /**
+     * Reasoning Effort
+     */
+    reasoning_effort: string;
 };
 
 /**
@@ -1419,9 +1685,73 @@ export type CreateBlankRequest = {
 };
 
 /**
+ * CreateConnectedAgentRequest
+ */
+export type CreateConnectedAgentRequest = {
+    /**
+     * Avatar Id
+     */
+    avatar_id: string;
+    /**
+     * Connection Config
+     */
+    connection_config?: {
+        [key: string]: string;
+    } | null;
+    /**
+     * Default Model Id
+     */
+    default_model_id?: string | null;
+    /**
+     * Default Reasoning Effort
+     */
+    default_reasoning_effort?: string | null;
+    /**
+     * Display Name
+     */
+    display_name: string;
+    /**
+     * Expected Registry Revision
+     */
+    expected_registry_revision: number;
+    /**
+     * Idempotency Key
+     */
+    idempotency_key: string;
+    /**
+     * Provider
+     */
+    provider: 'hermes' | 'codex';
+};
+
+/**
  * CreateConversationRequest
  */
 export type CreateConversationRequest = {
+    /**
+     * Connected Agent Id
+     */
+    connected_agent_id?: string | null;
+    /**
+     * Expected Agent Registry Revision
+     */
+    expected_agent_registry_revision?: number | null;
+    /**
+     * Expected Profile Revision
+     */
+    expected_profile_revision?: number | null;
+    /**
+     * Idempotency Key
+     */
+    idempotency_key?: string | null;
+    /**
+     * Model Id
+     */
+    model_id?: string | null;
+    /**
+     * Reasoning Effort
+     */
+    reasoning_effort?: string | null;
     /**
      * Selected Job Id
      */
@@ -1654,6 +1984,24 @@ export type DeviceSessionResponse = {
      * Transport
      */
     transport: 'local-loopback' | 'private-remote';
+};
+
+/**
+ * DisconnectConnectedAgentRequest
+ */
+export type DisconnectConnectedAgentRequest = {
+    /**
+     * Confirmation Token
+     */
+    confirmation_token: string;
+    /**
+     * Expected Registry Revision
+     */
+    expected_registry_revision: number;
+    /**
+     * Idempotency Key
+     */
+    idempotency_key: string;
 };
 
 /**
@@ -3639,6 +3987,46 @@ export type SetBlockRole = {
 };
 
 /**
+ * SetDefaultConnectedAgentRequest
+ */
+export type SetDefaultConnectedAgentRequest = {
+    /**
+     * Connected Agent Id
+     */
+    connected_agent_id?: string | null;
+    /**
+     * Expected Agent Registry Revision
+     */
+    expected_agent_registry_revision: number;
+    /**
+     * Expected Profile Revision
+     */
+    expected_profile_revision: number;
+    /**
+     * Idempotency Key
+     */
+    idempotency_key: string;
+};
+
+/**
+ * SetDefaultConnectedAgentResponse
+ */
+export type SetDefaultConnectedAgentResponse = {
+    /**
+     * Default Connected Agent Id
+     */
+    default_connected_agent_id: string | null;
+    /**
+     * Profile Id
+     */
+    profile_id: string;
+    /**
+     * Registry Revision
+     */
+    registry_revision: number;
+};
+
+/**
  * SkillValue
  */
 export type SkillValue = {
@@ -3778,6 +4166,42 @@ export type TurnMutationResponse = {
      * Turn Id
      */
     turn_id: string;
+};
+
+/**
+ * UpdateConnectedAgentRequest
+ */
+export type UpdateConnectedAgentRequest = {
+    /**
+     * Avatar Id
+     */
+    avatar_id: string;
+    /**
+     * Connection Config
+     */
+    connection_config?: {
+        [key: string]: string;
+    } | null;
+    /**
+     * Default Model Id
+     */
+    default_model_id?: string | null;
+    /**
+     * Default Reasoning Effort
+     */
+    default_reasoning_effort?: string | null;
+    /**
+     * Display Name
+     */
+    display_name: string;
+    /**
+     * Expected Registry Revision
+     */
+    expected_registry_revision: number;
+    /**
+     * Idempotency Key
+     */
+    idempotency_key: string;
 };
 
 /**
@@ -6382,6 +6806,372 @@ export type CareerProfileWorkArrangementRestoreV1CareerProfileWorkArrangementRes
 
 export type CareerProfileWorkArrangementRestoreV1CareerProfileWorkArrangementRestorePostResponse = CareerProfileWorkArrangementRestoreV1CareerProfileWorkArrangementRestorePostResponses[keyof CareerProfileWorkArrangementRestoreV1CareerProfileWorkArrangementRestorePostResponses];
 
+export type ConnectedAgentsListV1ConnectedAgentsGetData = {
+    body?: never;
+    headers?: {
+        /**
+         * X-Jobos-Mcp-Token
+         */
+        'X-JobOS-MCP-Token'?: string | null;
+    };
+    path?: never;
+    query?: never;
+    url: '/v1/connected-agents';
+};
+
+export type ConnectedAgentsListV1ConnectedAgentsGetErrors = {
+    /**
+     * Device authentication required
+     */
+    401: ApiErrorResponse;
+    /**
+     * Request validation failed
+     */
+    422: ApiErrorResponse;
+    /**
+     * Internal server error
+     */
+    500: ApiErrorResponse;
+};
+
+export type ConnectedAgentsListV1ConnectedAgentsGetError = ConnectedAgentsListV1ConnectedAgentsGetErrors[keyof ConnectedAgentsListV1ConnectedAgentsGetErrors];
+
+export type ConnectedAgentsListV1ConnectedAgentsGetResponses = {
+    /**
+     * Successful Response
+     */
+    200: ConnectedAgentListResponse;
+};
+
+export type ConnectedAgentsListV1ConnectedAgentsGetResponse = ConnectedAgentsListV1ConnectedAgentsGetResponses[keyof ConnectedAgentsListV1ConnectedAgentsGetResponses];
+
+export type ConnectedAgentCreateV1ConnectedAgentsPostData = {
+    body: CreateConnectedAgentRequest;
+    headers?: {
+        /**
+         * X-Jobos-Agent-Id
+         */
+        'X-JobOS-Agent-Id'?: string | null;
+        /**
+         * X-Jobos-Agent-Token
+         */
+        'X-JobOS-Agent-Token'?: string | null;
+        /**
+         * X-Jobos-Mcp-Token
+         */
+        'X-JobOS-MCP-Token'?: string | null;
+    };
+    path?: never;
+    query?: never;
+    url: '/v1/connected-agents';
+};
+
+export type ConnectedAgentCreateV1ConnectedAgentsPostErrors = {
+    /**
+     * Device authentication required
+     */
+    401: ApiErrorResponse;
+    /**
+     * Request validation failed
+     */
+    422: ApiErrorResponse;
+    /**
+     * Internal server error
+     */
+    500: ApiErrorResponse;
+};
+
+export type ConnectedAgentCreateV1ConnectedAgentsPostError = ConnectedAgentCreateV1ConnectedAgentsPostErrors[keyof ConnectedAgentCreateV1ConnectedAgentsPostErrors];
+
+export type ConnectedAgentCreateV1ConnectedAgentsPostResponses = {
+    /**
+     * Successful Response
+     */
+    201: ConnectedAgentPublic;
+};
+
+export type ConnectedAgentCreateV1ConnectedAgentsPostResponse = ConnectedAgentCreateV1ConnectedAgentsPostResponses[keyof ConnectedAgentCreateV1ConnectedAgentsPostResponses];
+
+export type ConnectedAgentGetV1ConnectedAgentsAgentIdGetData = {
+    body?: never;
+    headers?: {
+        /**
+         * X-Jobos-Mcp-Token
+         */
+        'X-JobOS-MCP-Token'?: string | null;
+    };
+    path: {
+        /**
+         * Agent Id
+         */
+        agent_id: string;
+    };
+    query?: never;
+    url: '/v1/connected-agents/{agent_id}';
+};
+
+export type ConnectedAgentGetV1ConnectedAgentsAgentIdGetErrors = {
+    /**
+     * Device authentication required
+     */
+    401: ApiErrorResponse;
+    /**
+     * Request validation failed
+     */
+    422: ApiErrorResponse;
+    /**
+     * Internal server error
+     */
+    500: ApiErrorResponse;
+};
+
+export type ConnectedAgentGetV1ConnectedAgentsAgentIdGetError = ConnectedAgentGetV1ConnectedAgentsAgentIdGetErrors[keyof ConnectedAgentGetV1ConnectedAgentsAgentIdGetErrors];
+
+export type ConnectedAgentGetV1ConnectedAgentsAgentIdGetResponses = {
+    /**
+     * Successful Response
+     */
+    200: ConnectedAgentPublic;
+};
+
+export type ConnectedAgentGetV1ConnectedAgentsAgentIdGetResponse = ConnectedAgentGetV1ConnectedAgentsAgentIdGetResponses[keyof ConnectedAgentGetV1ConnectedAgentsAgentIdGetResponses];
+
+export type ConnectedAgentUpdateV1ConnectedAgentsAgentIdPatchData = {
+    body: UpdateConnectedAgentRequest;
+    headers?: {
+        /**
+         * X-Jobos-Agent-Id
+         */
+        'X-JobOS-Agent-Id'?: string | null;
+        /**
+         * X-Jobos-Agent-Token
+         */
+        'X-JobOS-Agent-Token'?: string | null;
+        /**
+         * X-Jobos-Mcp-Token
+         */
+        'X-JobOS-MCP-Token'?: string | null;
+    };
+    path: {
+        /**
+         * Agent Id
+         */
+        agent_id: string;
+    };
+    query?: never;
+    url: '/v1/connected-agents/{agent_id}';
+};
+
+export type ConnectedAgentUpdateV1ConnectedAgentsAgentIdPatchErrors = {
+    /**
+     * Device authentication required
+     */
+    401: ApiErrorResponse;
+    /**
+     * Request validation failed
+     */
+    422: ApiErrorResponse;
+    /**
+     * Internal server error
+     */
+    500: ApiErrorResponse;
+};
+
+export type ConnectedAgentUpdateV1ConnectedAgentsAgentIdPatchError = ConnectedAgentUpdateV1ConnectedAgentsAgentIdPatchErrors[keyof ConnectedAgentUpdateV1ConnectedAgentsAgentIdPatchErrors];
+
+export type ConnectedAgentUpdateV1ConnectedAgentsAgentIdPatchResponses = {
+    /**
+     * Successful Response
+     */
+    200: ConnectedAgentPublic;
+};
+
+export type ConnectedAgentUpdateV1ConnectedAgentsAgentIdPatchResponse = ConnectedAgentUpdateV1ConnectedAgentsAgentIdPatchResponses[keyof ConnectedAgentUpdateV1ConnectedAgentsAgentIdPatchResponses];
+
+export type ConnectedAgentDisconnectV1ConnectedAgentsAgentIdDisconnectPostData = {
+    body: DisconnectConnectedAgentRequest;
+    headers?: {
+        /**
+         * X-Jobos-Agent-Id
+         */
+        'X-JobOS-Agent-Id'?: string | null;
+        /**
+         * X-Jobos-Agent-Token
+         */
+        'X-JobOS-Agent-Token'?: string | null;
+        /**
+         * X-Jobos-Mcp-Token
+         */
+        'X-JobOS-MCP-Token'?: string | null;
+    };
+    path: {
+        /**
+         * Agent Id
+         */
+        agent_id: string;
+    };
+    query?: never;
+    url: '/v1/connected-agents/{agent_id}/disconnect';
+};
+
+export type ConnectedAgentDisconnectV1ConnectedAgentsAgentIdDisconnectPostErrors = {
+    /**
+     * Device authentication required
+     */
+    401: ApiErrorResponse;
+    /**
+     * Request validation failed
+     */
+    422: ApiErrorResponse;
+    /**
+     * Internal server error
+     */
+    500: ApiErrorResponse;
+};
+
+export type ConnectedAgentDisconnectV1ConnectedAgentsAgentIdDisconnectPostError = ConnectedAgentDisconnectV1ConnectedAgentsAgentIdDisconnectPostErrors[keyof ConnectedAgentDisconnectV1ConnectedAgentsAgentIdDisconnectPostErrors];
+
+export type ConnectedAgentDisconnectV1ConnectedAgentsAgentIdDisconnectPostResponses = {
+    /**
+     * Successful Response
+     */
+    200: ConnectedAgentPublic;
+};
+
+export type ConnectedAgentDisconnectV1ConnectedAgentsAgentIdDisconnectPostResponse = ConnectedAgentDisconnectV1ConnectedAgentsAgentIdDisconnectPostResponses[keyof ConnectedAgentDisconnectV1ConnectedAgentsAgentIdDisconnectPostResponses];
+
+export type ConnectedAgentDisconnectImpactV1ConnectedAgentsAgentIdDisconnectImpactGetData = {
+    body?: never;
+    headers?: {
+        /**
+         * X-Jobos-Mcp-Token
+         */
+        'X-JobOS-MCP-Token'?: string | null;
+    };
+    path: {
+        /**
+         * Agent Id
+         */
+        agent_id: string;
+    };
+    query?: never;
+    url: '/v1/connected-agents/{agent_id}/disconnect-impact';
+};
+
+export type ConnectedAgentDisconnectImpactV1ConnectedAgentsAgentIdDisconnectImpactGetErrors = {
+    /**
+     * Device authentication required
+     */
+    401: ApiErrorResponse;
+    /**
+     * Request validation failed
+     */
+    422: ApiErrorResponse;
+    /**
+     * Internal server error
+     */
+    500: ApiErrorResponse;
+};
+
+export type ConnectedAgentDisconnectImpactV1ConnectedAgentsAgentIdDisconnectImpactGetError = ConnectedAgentDisconnectImpactV1ConnectedAgentsAgentIdDisconnectImpactGetErrors[keyof ConnectedAgentDisconnectImpactV1ConnectedAgentsAgentIdDisconnectImpactGetErrors];
+
+export type ConnectedAgentDisconnectImpactV1ConnectedAgentsAgentIdDisconnectImpactGetResponses = {
+    /**
+     * Successful Response
+     */
+    200: ConnectedAgentImpactResponse;
+};
+
+export type ConnectedAgentDisconnectImpactV1ConnectedAgentsAgentIdDisconnectImpactGetResponse = ConnectedAgentDisconnectImpactV1ConnectedAgentsAgentIdDisconnectImpactGetResponses[keyof ConnectedAgentDisconnectImpactV1ConnectedAgentsAgentIdDisconnectImpactGetResponses];
+
+export type ConnectedAgentModelsV1ConnectedAgentsAgentIdModelsGetData = {
+    body?: never;
+    headers?: {
+        /**
+         * X-Jobos-Mcp-Token
+         */
+        'X-JobOS-MCP-Token'?: string | null;
+    };
+    path: {
+        /**
+         * Agent Id
+         */
+        agent_id: string;
+    };
+    query?: never;
+    url: '/v1/connected-agents/{agent_id}/models';
+};
+
+export type ConnectedAgentModelsV1ConnectedAgentsAgentIdModelsGetErrors = {
+    /**
+     * Device authentication required
+     */
+    401: ApiErrorResponse;
+    /**
+     * Request validation failed
+     */
+    422: ApiErrorResponse;
+    /**
+     * Internal server error
+     */
+    500: ApiErrorResponse;
+};
+
+export type ConnectedAgentModelsV1ConnectedAgentsAgentIdModelsGetError = ConnectedAgentModelsV1ConnectedAgentsAgentIdModelsGetErrors[keyof ConnectedAgentModelsV1ConnectedAgentsAgentIdModelsGetErrors];
+
+export type ConnectedAgentModelsV1ConnectedAgentsAgentIdModelsGetResponses = {
+    /**
+     * Successful Response
+     */
+    200: ConnectedAgentModelsResponse;
+};
+
+export type ConnectedAgentModelsV1ConnectedAgentsAgentIdModelsGetResponse = ConnectedAgentModelsV1ConnectedAgentsAgentIdModelsGetResponses[keyof ConnectedAgentModelsV1ConnectedAgentsAgentIdModelsGetResponses];
+
+export type ConnectedAgentTestV1ConnectedAgentsAgentIdTestPostData = {
+    body?: never;
+    headers?: {
+        /**
+         * X-Jobos-Mcp-Token
+         */
+        'X-JobOS-MCP-Token'?: string | null;
+    };
+    path: {
+        /**
+         * Agent Id
+         */
+        agent_id: string;
+    };
+    query?: never;
+    url: '/v1/connected-agents/{agent_id}/test';
+};
+
+export type ConnectedAgentTestV1ConnectedAgentsAgentIdTestPostErrors = {
+    /**
+     * Device authentication required
+     */
+    401: ApiErrorResponse;
+    /**
+     * Request validation failed
+     */
+    422: ApiErrorResponse;
+    /**
+     * Internal server error
+     */
+    500: ApiErrorResponse;
+};
+
+export type ConnectedAgentTestV1ConnectedAgentsAgentIdTestPostError = ConnectedAgentTestV1ConnectedAgentsAgentIdTestPostErrors[keyof ConnectedAgentTestV1ConnectedAgentsAgentIdTestPostErrors];
+
+export type ConnectedAgentTestV1ConnectedAgentsAgentIdTestPostResponses = {
+    /**
+     * Successful Response
+     */
+    200: ConnectedAgentPublic;
+};
+
+export type ConnectedAgentTestV1ConnectedAgentsAgentIdTestPostResponse = ConnectedAgentTestV1ConnectedAgentsAgentIdTestPostResponses[keyof ConnectedAgentTestV1ConnectedAgentsAgentIdTestPostResponses];
+
 export type ConversationsListV1ConversationsGetData = {
     body?: never;
     headers?: {
@@ -6460,9 +7250,11 @@ export type ConversationCreateV1ConversationsPostError = ConversationCreateV1Con
 
 export type ConversationCreateV1ConversationsPostResponses = {
     /**
+     * Response Conversation Create V1 Conversations Post
+     *
      * Successful Response
      */
-    201: ConversationResponse;
+    201: ConversationResponse | BoundConversationResponse;
 };
 
 export type ConversationCreateV1ConversationsPostResponse = ConversationCreateV1ConversationsPostResponses[keyof ConversationCreateV1ConversationsPostResponses];
@@ -7820,6 +8612,58 @@ export type InstallationProfileActivateV1InstallationProfilesProfileIdActivatePo
 };
 
 export type InstallationProfileActivateV1InstallationProfilesProfileIdActivatePostResponse = InstallationProfileActivateV1InstallationProfilesProfileIdActivatePostResponses[keyof InstallationProfileActivateV1InstallationProfilesProfileIdActivatePostResponses];
+
+export type InstallationProfileDefaultAgentV1InstallationProfilesProfileIdDefaultAgentPutData = {
+    body: SetDefaultConnectedAgentRequest;
+    headers?: {
+        /**
+         * X-Jobos-Agent-Id
+         */
+        'X-JobOS-Agent-Id'?: string | null;
+        /**
+         * X-Jobos-Agent-Token
+         */
+        'X-JobOS-Agent-Token'?: string | null;
+        /**
+         * X-Jobos-Mcp-Token
+         */
+        'X-JobOS-MCP-Token'?: string | null;
+    };
+    path: {
+        /**
+         * Profile Id
+         */
+        profile_id: string;
+    };
+    query?: never;
+    url: '/v1/installation-profiles/{profile_id}/default-agent';
+};
+
+export type InstallationProfileDefaultAgentV1InstallationProfilesProfileIdDefaultAgentPutErrors = {
+    /**
+     * Device authentication required
+     */
+    401: ApiErrorResponse;
+    /**
+     * Request validation failed
+     */
+    422: ApiErrorResponse;
+    /**
+     * Internal server error
+     */
+    500: ApiErrorResponse;
+};
+
+export type InstallationProfileDefaultAgentV1InstallationProfilesProfileIdDefaultAgentPutError = InstallationProfileDefaultAgentV1InstallationProfilesProfileIdDefaultAgentPutErrors[keyof InstallationProfileDefaultAgentV1InstallationProfilesProfileIdDefaultAgentPutErrors];
+
+export type InstallationProfileDefaultAgentV1InstallationProfilesProfileIdDefaultAgentPutResponses = {
+    /**
+     * Successful Response
+     */
+    200: SetDefaultConnectedAgentResponse;
+};
+
+export type InstallationProfileDefaultAgentV1InstallationProfilesProfileIdDefaultAgentPutResponse = InstallationProfileDefaultAgentV1InstallationProfilesProfileIdDefaultAgentPutResponses[keyof InstallationProfileDefaultAgentV1InstallationProfilesProfileIdDefaultAgentPutResponses];
 
 export type JobsListV1JobsGetData = {
     body?: never;

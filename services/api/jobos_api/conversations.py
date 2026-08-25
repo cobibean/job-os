@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import asyncio
 import json
 import logging
@@ -7,7 +9,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager, suppress
 from typing import Literal, Protocol, cast
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from .agent_gateway import (
     AgentContext,
@@ -68,6 +70,29 @@ class ConversationJobContext(ConversationModel):
 
 class CreateConversationRequest(ConversationModel):
     selected_job_id: str | None = Field(default=None, max_length=512)
+    connected_agent_id: str | None = Field(
+        default=None, pattern=r"^jagent_[a-f0-9]{32}$"
+    )
+    model_id: str | None = Field(default=None, min_length=1, max_length=256)
+    reasoning_effort: str | None = Field(default=None, min_length=1, max_length=64)
+    idempotency_key: str | None = Field(default=None, min_length=8, max_length=200)
+    expected_profile_revision: int | None = Field(default=None, ge=1)
+    expected_agent_registry_revision: int | None = Field(default=None, ge=1)
+
+    @model_validator(mode="after")
+    def validate_coordination(self) -> CreateConversationRequest:
+        values = (
+            self.idempotency_key,
+            self.expected_profile_revision,
+            self.expected_agent_registry_revision,
+        )
+        if any(value is not None for value in values) and any(value is None for value in values):
+            raise ValueError("Coordinated chat creation requires revisions and idempotency key")
+        return self
+
+    @property
+    def coordinated(self) -> bool:
+        return self.idempotency_key is not None
 
 
 class ConversationDocumentViewRequest(ConversationModel):
@@ -94,6 +119,32 @@ class ConversationResponse(ConversationModel):
     recovery_state: Literal["ready", "recovering", "quarantined"]
     latest_event_id: int
     job_context: ConversationJobContext
+
+
+class ConversationBindingResponse(ConversationModel):
+    connected_agent_id: str
+    provider: Literal["hermes", "codex"]
+    model_id: str
+    reasoning_effort: str
+    binding_state: Literal["sealed"]
+
+
+class ConversationAvailabilityResponse(ConversationModel):
+    state: Literal["ready", "locked"]
+    reason: str | None = None
+
+
+class ConversationAgentPresentation(ConversationModel):
+    id: str
+    provider: Literal["hermes", "codex"]
+    display_name: str
+    avatar_id: str
+
+
+class BoundConversationResponse(ConversationResponse):
+    binding: ConversationBindingResponse
+    availability: ConversationAvailabilityResponse
+    agent: ConversationAgentPresentation
 
 
 class ConversationService:
