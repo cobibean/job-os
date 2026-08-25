@@ -88,13 +88,26 @@ test('switching agents ignores a stale model response from the previous agent', 
   await waitFor(() => expect(onCreate).toHaveBeenCalledWith(expect.objectContaining({ connectedAgentId: secondId, modelId: 'hermes-live' })))
 })
 
-test('the five-chat state offers archive recovery instead of hiding New Chat', () => {
+test('the five-chat state offers archive recovery instead of hiding New Chat', async () => {
   const onArchiveCurrent = vi.fn()
   render(<NewAgentChatDialog atMaximum connectedAgents={connectedAgents()} onArchiveCurrent={onArchiveCurrent} onClose={vi.fn()} onCreate={vi.fn()} />)
 
   expect(screen.getByText('Five chats are already open')).toBeTruthy()
+  await waitFor(() => expect(document.activeElement).toBe(screen.getByRole('dialog')))
   fireEvent.click(screen.getByRole('button', { name: 'Archive current chat' }))
   expect(onArchiveCurrent).toHaveBeenCalledOnce()
+})
+
+test('a rejected chat creation stays open and explains the failure', async () => {
+  const onClose = vi.fn()
+  render(<NewAgentChatDialog atMaximum={false} connectedAgents={connectedAgents()} onArchiveCurrent={vi.fn()} onClose={onClose} onCreate={vi.fn().mockRejectedValue(new Error('Provider is restarting'))} />)
+
+  await screen.findByText('GPT Live')
+  fireEvent.click(screen.getByRole('button', { name: 'Start chat' }))
+
+  expect((await screen.findByRole('alert')).textContent).toContain('Provider is restarting')
+  expect(onClose).not.toHaveBeenCalled()
+  expect((screen.getByRole('button', { name: 'Start chat' }) as HTMLButtonElement).disabled).toBe(false)
 })
 
 test('Escape closes and Tab remains trapped in the dialog', () => {

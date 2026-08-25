@@ -31,7 +31,7 @@ export function NewAgentChatDialog({ connectedAgents, atMaximum, onArchiveCurren
       ? snapshot.defaultConnectedAgentId
       : agents[0]?.id ?? ''
     setAgentId(initial)
-    requestAnimationFrame(() => firstControl.current?.focus())
+    requestAnimationFrame(() => (firstControl.current ?? dialog.current)?.focus())
   }, [snapshot?.registryRevision])
 
   useEffect(() => {
@@ -64,6 +64,8 @@ export function NewAgentChatDialog({ connectedAgents, atMaximum, onArchiveCurren
       })
       if (handled) onClose()
       else setError('New chat could not be started. Refresh the agent and try again.')
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'New chat could not be started. Refresh the agent and try again.')
     } finally { setSubmitting(false) }
   }
 
@@ -78,7 +80,7 @@ export function NewAgentChatDialog({ connectedAgents, atMaximum, onArchiveCurren
         const last = controls.at(-1)!
         if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus() }
         else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus() }
-      }} ref={dialog} role="dialog">
+      }} ref={dialog} role="dialog" tabIndex={-1}>
         <header><div><span className="settings-eyebrow">New Chat</span><h2 id="new-chat-title">Pick the agent for this chat</h2><p>This choice stays locked so the conversation never silently changes brains.</p></div><button aria-label="Close New Chat" onClick={onClose} type="button"><X aria-hidden="true" size={16} /></button></header>
         {atMaximum ? <div className="new-chat-limit" role="status"><CircleAlert aria-hidden="true" size={18} /><div><strong>Five chats are already open</strong><p>Archive the current chat first. Its history stays saved.</p><button onClick={onArchiveCurrent} type="button">Archive current chat</button></div></div> : (
           <>

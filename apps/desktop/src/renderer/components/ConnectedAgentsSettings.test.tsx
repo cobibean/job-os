@@ -95,10 +95,28 @@ test('disconnect requires impact disclosure and promises readable history', asyn
   render(<ConnectedAgentsSettings state={value} />)
   fireEvent.click(screen.getByRole('button', { name: /Disconnect/ }))
   const dialog = await screen.findByRole('alertdialog')
+  await waitFor(() => expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Keep connected' })))
   expect(dialog.textContent).toContain('2 active chats will become read-only')
   expect(dialog.textContent).toContain('Chat history stays visible')
   expect(dialog.textContent).toContain('New Chat default for 1 profile: default')
   fireEvent.click(screen.getByRole('button', { name: 'Keep connected' }))
+  await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull())
+})
+
+test('disconnect disclosure pluralizes singular impact and traps keyboard focus', async () => {
+  const value = state()
+  value.bridge!.impact = vi.fn().mockResolvedValue({ activeChats: 1, lockedChats: 1, defaultProfileIds: [] })
+  render(<ConnectedAgentsSettings state={value} />)
+  fireEvent.click(screen.getByRole('button', { name: /Disconnect/ }))
+
+  const dialog = await screen.findByRole('alertdialog')
+  expect(dialog.textContent).toContain('1 active chat will become read-only. 1 is already locked.')
+  const keep = screen.getByRole('button', { name: 'Keep connected' })
+  const disconnect = screen.getByRole('button', { name: 'Disconnect agent' })
+  disconnect.focus()
+  fireEvent.keyDown(disconnect, { key: 'Tab' })
+  expect(document.activeElement).toBe(keep)
+  fireEvent.keyDown(keep, { key: 'Escape' })
   await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull())
 })
 

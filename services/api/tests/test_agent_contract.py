@@ -1573,6 +1573,54 @@ def test_manager_list_deduplicates_and_parallelizes_binding_health_probes(tmp_pa
     asyncio.run(scenario())
 
 
+def test_manager_list_isolates_failed_health_probe_and_keeps_unbound_chat_ready(tmp_path):
+    async def scenario():
+        store = JobOsStateStore(tmp_path / "manager-list-probe-failure.db")
+        store.initialize(owner_device_id="device-a")
+        bound = store.create_conversation(
+            actor_id="device-a",
+            connected_agent_id=f"jagent_{'c' * 32}",
+            provider="codex",
+            model_id="(FAKE)-model",
+            reasoning_effort="medium",
+        )
+        store.conversation_store(str(bound["conversation_id"])).complete_provisioning(
+            "(FAKE)-session-bound"
+        )
+
+        async def probe(*_args):
+            raise RuntimeError("controlled provider probe failure")
+
+        class Factory:
+            def create(self, conversation_id):
+                del conversation_id
+                return FakeGateway()
+
+        manager = ConversationManager(
+            store,
+            Factory(),
+            connected_agent_binding_unavailability=probe,
+        )
+        unbound = await manager.create(actor_id="device-a")
+        summaries = (await manager.list(owner_device_id="device-a")).conversations
+        assert len(summaries) == 3
+        unbound_summary = next(
+            item for item in summaries if item.conversation_id == unbound.conversation_id
+        )
+        bound_summary = next(
+            item
+            for item in summaries
+            if item.conversation_id == str(bound["conversation_id"])
+        )
+        assert unbound_summary.binding is None
+        assert unbound_summary.availability.state == "ready"
+        assert unbound_summary.availability.reason is None
+        assert bound_summary.availability.state == "locked"
+        assert bound_summary.availability.reason == "AGENT_PROVIDER_UNAVAILABLE"
+
+    asyncio.run(scenario())
+
+
 def test_replay_uses_transaction_flag_when_other_conversation_advances_cursor(tmp_path):
     async def scenario():
         store = JobOsStateStore(tmp_path / "explicit-replay.db")

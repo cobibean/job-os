@@ -235,12 +235,16 @@ class ConversationManager:
         probe_keys = list(probe_inputs)
         probe_reasons = (
             await asyncio.gather(
-                *(self.connected_agent_binding_unavailability(*key) for key in probe_keys)
+                *(self.connected_agent_binding_unavailability(*key) for key in probe_keys),
+                return_exceptions=True,
             )
             if probe_keys and self.connected_agent_binding_unavailability is not None
             else []
         )
-        reason_by_binding = dict(zip(probe_keys, probe_reasons, strict=True))
+        reason_by_binding = {
+            key: "AGENT_PROVIDER_UNAVAILABLE" if isinstance(reason, BaseException) else reason
+            for key, reason in zip(probe_keys, probe_reasons, strict=True)
+        }
 
         for value, scoped, durable_binding in prepared:
             conversation_id = str(value["conversation_id"])
@@ -274,24 +278,18 @@ class ConversationManager:
                 else None
             )
             live_reason = reason_by_binding.get(binding_key) if sealed else None
+            creation_ready = durable_binding["creation_state"] == "ready"
+            availability_ready = creation_ready and (not sealed or live_reason is None)
             availability = ConversationAvailabilityResponse(
-                state=(
-                    "ready"
-                    if (
-                        sealed
-                        and durable_binding["creation_state"] == "ready"
-                        and live_reason is None
-                    )
-                    else "locked"
-                ),
+                state="ready" if availability_ready else "locked",
                 reason=(
-                    live_reason
+                    None
+                    if availability_ready
+                    else live_reason
                     if sealed and live_reason is not None
                     else
                     str(durable_binding["lock_reason"])
                     if durable_binding["lock_reason"] is not None
-                    else None
-                    if sealed
                     else "LEGACY_BINDING_UNAVAILABLE"
                 ),
             )

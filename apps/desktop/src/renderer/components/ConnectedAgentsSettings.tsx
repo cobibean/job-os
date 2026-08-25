@@ -31,6 +31,8 @@ export function ConnectedAgentsSettings({ state, onAgentsChanged }: ConnectedAge
   const [effort, setEffort] = useState('')
   const [auth, setAuth] = useState<{ transactionId: string; status: string; userCode: string | null; verificationUrl: string | null; errorCode?: string | null } | null>(null)
   const pendingAuthRef = useRef<string | null>(null)
+  const disconnectDialog = useRef<HTMLDivElement>(null)
+  const disconnectCancel = useRef<HTMLButtonElement>(null)
   const [disconnecting, setDisconnecting] = useState<{ agent: ConnectedAgentSummary; activeChats: number; lockedChats: number; defaultProfileIds: string[] } | null>(null)
   const selected = useMemo(() => snapshot?.agents.find(item => item.id === selectedId) ?? snapshot?.agents[0] ?? null, [selectedId, snapshot])
   const catalog = selected ? models[selected.id] : undefined
@@ -66,6 +68,11 @@ export function ConnectedAgentsSettings({ state, onAgentsChanged }: ConnectedAge
   useEffect(() => () => {
     if (pendingAuthRef.current && bridge) void bridge.cancelAuth(pendingAuthRef.current)
   }, [bridge])
+
+  useEffect(() => {
+    if (!disconnecting) return
+    requestAnimationFrame(() => disconnectCancel.current?.focus())
+  }, [disconnecting])
 
   const run = async (label: string, action: () => Promise<void>) => {
     setBusy(label)
@@ -133,13 +140,15 @@ export function ConnectedAgentsSettings({ state, onAgentsChanged }: ConnectedAge
         <div className="connected-agents-layout">
           <div aria-label="Connected Agent roster" className="connected-agent-roster" role="list">
             {snapshot.agents.map(item => (
-              <button aria-current={item.id === selected?.id ? 'true' : undefined} className={item.id === selected?.id ? 'selected' : ''} key={item.id} onClick={() => setSelectedId(item.id)} type="button">
-                <span className={`connected-agent-dot ${item.health.providerAvailable && item.health.toolsAvailable ? 'ready' : 'warning'}`} />
-                <span><strong>{item.displayName}</strong><small>{item.provider === 'codex' ? 'ChatGPT · Codex' : 'Hermes'} · {item.health.label}</small></span>
-                {snapshot.defaultConnectedAgentId === item.id ? <span className="connected-agent-default"><Check aria-hidden="true" size={12} /> Default</span> : null}
-              </button>
+              <div key={item.id} role="listitem">
+                <button aria-current={item.id === selected?.id ? 'true' : undefined} className={item.id === selected?.id ? 'selected' : ''} onClick={() => setSelectedId(item.id)} type="button">
+                  <span className={`connected-agent-dot ${item.health.providerAvailable && item.health.toolsAvailable ? 'ready' : 'warning'}`} />
+                  <span><strong>{item.displayName}</strong><small>{item.provider === 'codex' ? 'ChatGPT · Codex' : 'Hermes'} · {item.health.label}</small></span>
+                  {snapshot.defaultConnectedAgentId === item.id ? <span className="connected-agent-default"><Check aria-hidden="true" size={12} /> Default</span> : null}
+                </button>
+              </div>
             ))}
-            {!snapshot.agents.some(item => item.provider === 'codex') ? <button className="connected-agent-add" disabled={busy !== null} onClick={connectCodex} type="button"><Plug aria-hidden="true" size={15} /> Connect ChatGPT</button> : null}
+            {!snapshot.agents.some(item => item.provider === 'codex') ? <div role="listitem"><button className="connected-agent-add" disabled={busy !== null} onClick={connectCodex} type="button"><Plug aria-hidden="true" size={15} /> Connect ChatGPT</button></div> : null}
           </div>
 
           {selected ? (
@@ -174,7 +183,16 @@ export function ConnectedAgentsSettings({ state, onAgentsChanged }: ConnectedAge
       ) : null}
       {notice ? <p aria-live="polite" className="settings-callout">{notice}</p> : null}
       {disconnecting ? (
-        <div aria-labelledby="disconnect-agent-title" aria-modal="true" className="settings-dialog-backdrop" role="alertdialog"><div className="settings-dialog"><h4 id="disconnect-agent-title">Disconnect {disconnecting.agent.displayName}?</h4><p>{disconnecting.activeChats} active chats will become read-only. {disconnecting.lockedChats} are already locked. Chat history stays visible.</p>{disconnecting.defaultProfileIds.length > 0 ? <p>This agent is still the New Chat default for {disconnecting.defaultProfileIds.length} profile{disconnecting.defaultProfileIds.length === 1 ? '' : 's'}: {disconnecting.defaultProfileIds.join(', ')}.</p> : null}<div><button onClick={() => setDisconnecting(null)} type="button">Keep connected</button><button className="danger" onClick={() => void run('disconnect', async () => { if (!bridge || !snapshot) return; await bridge.disconnect(disconnecting.agent.id, snapshot.registryRevision, operationKey('disconnect-agent')); setDisconnecting(null); await refresh(); await onAgentsChanged?.() })} type="button">Disconnect agent</button></div></div></div>
+        <div aria-labelledby="disconnect-agent-title" aria-modal="true" className="settings-dialog-backdrop" onKeyDown={event => {
+          if (event.key === 'Escape') { setDisconnecting(null); return }
+          if (event.key !== 'Tab') return
+          const controls = [...(disconnectDialog.current?.querySelectorAll<HTMLElement>('button:not(:disabled), select:not(:disabled), [tabindex]:not([tabindex="-1"])') ?? [])]
+          if (!controls.length) return
+          const first = controls[0]!
+          const last = controls.at(-1)!
+          if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus() }
+          else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus() }
+        }} ref={disconnectDialog} role="alertdialog"><div className="settings-dialog"><h4 id="disconnect-agent-title">Disconnect {disconnecting.agent.displayName}?</h4><p>{disconnecting.activeChats} active {disconnecting.activeChats === 1 ? 'chat' : 'chats'} will become read-only. {disconnecting.lockedChats} {disconnecting.lockedChats === 1 ? 'is' : 'are'} already locked. Chat history stays visible.</p>{disconnecting.defaultProfileIds.length > 0 ? <p>This agent is still the New Chat default for {disconnecting.defaultProfileIds.length} profile{disconnecting.defaultProfileIds.length === 1 ? '' : 's'}: {disconnecting.defaultProfileIds.join(', ')}.</p> : null}<div><button onClick={() => setDisconnecting(null)} ref={disconnectCancel} type="button">Keep connected</button><button className="danger" onClick={() => void run('disconnect', async () => { if (!bridge || !snapshot) return; await bridge.disconnect(disconnecting.agent.id, snapshot.registryRevision, operationKey('disconnect-agent')); setDisconnecting(null); await refresh(); await onAgentsChanged?.() })} type="button">Disconnect agent</button></div></div></div>
       ) : null}
     </section>
   )
