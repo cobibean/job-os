@@ -109,6 +109,16 @@ def test_router_fails_closed_for_unregistered_provider_and_incomplete_binding():
         )
 
 
+def test_router_uses_provider_factory_for_agent_created_after_startup():
+    factory = QueueFactory()
+    router = AgentRuntimeRouter({"codex": factory}, profile_id=PROFILE_ID)
+
+    routed = router.create("conv_new_codex", sealed_binding(provider="codex"))
+
+    assert routed is not None
+    assert "conv_new_codex" in factory.gateways
+
+
 def test_router_rejects_cross_chat_session_reuse_and_wrong_turn_envelope():
     async def scenario() -> None:
         factory = QueueFactory(shared_session="(FAKE)-shared-session")

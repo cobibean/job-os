@@ -1,8 +1,13 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, expect, test, vi } from 'vitest'
 
-import type { AgentSessionStreamUpdate, JobListItem } from '../shared/contracts'
-import { App } from './App'
+import type {
+  AgentSessionStreamUpdate,
+  ConnectedAgentSummary,
+  ConnectedAgentsSnapshot,
+  JobListItem
+} from '../shared/contracts'
+import { App, requireDefaultAgentModel, requireDefaultConnectedAgent } from './App'
 import { isExpectedSaveNavigation, parseAgentJobSaveError } from './components/CenterWorkspace'
 
 afterEach(() => { cleanup(); window.localStorage.clear() })
@@ -13,6 +18,58 @@ const emptyJobContext = {
   activeArtifactPage: 1,
   activeArtifactZoom: 1
 }
+
+const readyDefaultAgent: ConnectedAgentSummary = {
+  id: 'agent-codex',
+  provider: 'codex',
+  displayName: 'Codex',
+  avatarId: 'codex',
+  defaultModelId: 'gpt-live',
+  defaultReasoningEffort: 'medium',
+  lifecycle: 'connected',
+  accountSummary: null,
+  accountFingerprint: null,
+  health: {
+    state: 'ready',
+    label: 'Ready',
+    providerAvailable: true,
+    toolsAvailable: true,
+    retryAfterSeconds: null
+  },
+  activeChats: 0,
+  lockedChats: 0
+}
+
+const connectedAgentsSnapshot: ConnectedAgentsSnapshot = {
+  registryRevision: 2,
+  profileId: 'profile-1',
+  defaultConnectedAgentId: readyDefaultAgent.id,
+  agents: [readyDefaultAgent]
+}
+
+test('browser save requires the exact configured default agent without silent fallback', () => {
+  expect(requireDefaultConnectedAgent(connectedAgentsSnapshot)).toBe(readyDefaultAgent)
+  expect(() => requireDefaultConnectedAgent({
+    ...connectedAgentsSnapshot,
+    defaultConnectedAgentId: 'missing-agent',
+    agents: [readyDefaultAgent, { ...readyDefaultAgent, id: 'other-ready-agent' }]
+  })).toThrow('Default Connected Agent is unavailable')
+})
+
+test('browser save requires the exact live default model and reasoning effort', () => {
+  expect(requireDefaultAgentModel(readyDefaultAgent, {
+    live: true,
+    models: [{ modelId: 'gpt-live', displayName: 'GPT Live', reasoningEfforts: ['low', 'medium'] }]
+  })).toEqual({ modelId: 'gpt-live', reasoningEffort: 'medium' })
+  expect(() => requireDefaultAgentModel(readyDefaultAgent, {
+    live: true,
+    models: [{ modelId: 'different-model', displayName: 'Different', reasoningEfforts: ['medium'] }]
+  })).toThrow('Default model is unavailable')
+  expect(() => requireDefaultAgentModel({ ...readyDefaultAgent, defaultReasoningEffort: 'high' }, {
+    live: true,
+    models: [{ modelId: 'gpt-live', displayName: 'GPT Live', reasoningEfforts: ['medium'] }]
+  })).toThrow('Default reasoning effort is unavailable')
+})
 
 test('missing configuration opens setup without starting workbench services', async () => {
   const getConnectivity = vi.fn()
@@ -198,8 +255,9 @@ test('exact Command shortcuts create and select sessions from the composer witho
   const createEvent = new KeyboardEvent('keydown', { bubbles: true, cancelable: true, key: 'n', metaKey: true })
   composer.dispatchEvent(createEvent)
   expect(createEvent.defaultPrevented).toBe(true)
-  expect(await screen.findByRole('tab', { name: 'Session 2, Idle' })).not.toBeNull()
-  expect(create).toHaveBeenCalledOnce()
+  expect(await screen.findByRole('dialog', { name: 'Pick the agent for this chat' })).not.toBeNull()
+  expect(create).not.toHaveBeenCalled()
+  fireEvent.click(screen.getByRole('button', { name: 'Close New Chat' }))
 
   const missing = new KeyboardEvent('keydown', { bubbles: true, cancelable: true, key: '5', metaKey: true })
   composer.dispatchEvent(missing)
@@ -209,7 +267,7 @@ test('exact Command shortcuts create and select sessions from the composer witho
   expect(select.defaultPrevented).toBe(true)
   expect(screen.getByRole('tab', { name: 'Session 1, Idle' }).getAttribute('aria-selected')).toBe('true')
   expect((screen.getByRole('textbox', { name: 'Message the agent' }) as HTMLTextAreaElement).value).toBe('keep this draft')
-  expect(create).toHaveBeenCalledOnce()
+  expect(create).not.toHaveBeenCalled()
 })
 
 test('Command 1 through Command 5 map to visible positions and Command N announces the five-session cap', async () => {
@@ -235,7 +293,7 @@ test('Command 1 through Command 5 map to visible positions and Command N announc
   const capped = new KeyboardEvent('keydown', { bubbles: true, cancelable: true, key: 'n', metaKey: true })
   act(() => { composer.dispatchEvent(capped) })
   expect(capped.defaultPrevented).toBe(true)
-  expect(await screen.findByText('Maximum 5 sessions.')).not.toBeNull()
+  expect(await screen.findByText('Five chats are already open')).not.toBeNull()
   expect(create).not.toHaveBeenCalled()
 })
 
@@ -433,6 +491,7 @@ test('saving dispatches job-hunter and reconciles a failure emitted before send 
     ...emptyJobContext,
     selectedJobId: jobId
   }))
+  const connectedAgentModels = vi.fn().mockResolvedValue({ live: true, models: [{ modelId: '(FAKE)-model-stable', displayName: '(FAKE) Stable', reasoningEfforts: ['medium'] }] })
   const workspace = {
     revision: 1,
     selectedPreset: 'research' as const,
@@ -456,6 +515,20 @@ test('saving dispatches job-hunter and reconciles a failure emitted before send 
       get: getConversation,
       send, cancel, retry: vi.fn(),
       subscribe: vi.fn(listener => { agentListeners.push(listener); return () => undefined })
+    },
+    connectedAgents: {
+      list: vi.fn().mockResolvedValue({
+        registryRevision: 3,
+        profileId: 'jprof_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+        defaultConnectedAgentId: 'agent_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+        agents: [{
+          id: 'agent_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', provider: 'hermes', displayName: 'Devonte', avatarId: 'default',
+          defaultModelId: '(FAKE)-model-stable', defaultReasoningEffort: 'medium', lifecycle: 'connected', accountSummary: null,
+          health: { state: 'ready', label: 'Ready', providerAvailable: true, toolsAvailable: true, retryAfterSeconds: null },
+          activeChats: 0, lockedChats: 0
+        }]
+      }),
+      models: connectedAgentModels
     },
     jobs: {
       getState: vi.fn().mockImplementation(async () => ({
@@ -483,7 +556,12 @@ test('saving dispatches job-hunter and reconciles a failure emitted before send 
   fireEvent.click(screen.getByRole('button', { name: 'Save this job to JobOS' }))
 
   await waitFor(() => expect(send).toHaveBeenCalledOnce())
-  expect(createSession).toHaveBeenLastCalledWith(null)
+  expect(createSession).toHaveBeenLastCalledWith(expect.objectContaining({
+    connectedAgentId: 'agent_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+    modelId: '(FAKE)-model-stable',
+    reasoningEffort: 'medium'
+  }))
+  expect(connectedAgentModels).toHaveBeenCalledWith('agent_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa')
   expect(send.mock.calls[0]?.[0]).toBe('conv-1')
   expect(send.mock.calls[0]?.[1]).toContain('job-tab')
   expect(send.mock.calls[0]?.[1]).toContain(listing.canonicalUrl)
@@ -614,7 +692,11 @@ test('saving dispatches job-hunter and reconciles a failure emitted before send 
   expect(saveFromBrowser).not.toHaveBeenCalled()
   expect(createBrowserTab).not.toHaveBeenCalled()
   expect(createSession).toHaveBeenCalledTimes(5)
-  expect(createSession.mock.calls.every(call => call[0] === null)).toBe(true)
+  expect(createSession.mock.calls.every(call => (
+    call[0]?.connectedAgentId === 'agent_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+    && call[0]?.modelId === '(FAKE)-model-stable'
+    && call[0]?.reasoningEffort === 'medium'
+  ))).toBe(true)
   expect(selectJob).toHaveBeenCalledWith('conv-5', 'job-saved-by-turn')
   expect(await screen.findByText(`Saved to JobOS: Northstar Labs · ${listing.title}`)).not.toBeNull()
   expect(await screen.findByRole('button', {
@@ -1191,10 +1273,9 @@ test('creating an additive session leaves the active native browser surface atta
   setBounds.mockClear()
 
   fireEvent.click(screen.getByRole('button', { name: 'New agent session' }))
-  await waitFor(() => expect(createSession).toHaveBeenCalledOnce())
-  expect(setBounds).not.toHaveBeenCalledWith(expect.objectContaining({ visible: false }))
-  expect(screen.queryByRole('alertdialog')).toBeNull()
-  expect(await screen.findByRole('tab', { name: 'Session 2, Idle' })).not.toBeNull()
+  expect(await screen.findByRole('dialog', { name: 'Pick the agent for this chat' })).not.toBeNull()
+  expect(createSession).not.toHaveBeenCalled()
+  await waitFor(() => expect(setBounds).toHaveBeenCalledWith(expect.objectContaining({ visible: false })))
   resolveDetach()
   rect.mockRestore()
 })

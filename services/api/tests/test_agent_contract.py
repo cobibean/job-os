@@ -1511,6 +1511,68 @@ def test_manager_starts_all_services_concurrently_with_a_barrier(tmp_path):
     asyncio.run(scenario())
 
 
+def test_manager_list_deduplicates_and_parallelizes_binding_health_probes(tmp_path):
+    async def scenario():
+        store = JobOsStateStore(tmp_path / "manager-list-probes.db")
+        store.initialize(owner_device_id="device-a")
+        first = store.create_conversation(
+            actor_id="device-a",
+            connected_agent_id=f"jagent_{'a' * 32}",
+            provider="hermes",
+            model_id="(FAKE)-shared-model",
+            reasoning_effort="medium",
+        )
+        duplicate = store.create_conversation(
+            actor_id="device-a",
+            connected_agent_id=f"jagent_{'a' * 32}",
+            provider="hermes",
+            model_id="(FAKE)-shared-model",
+            reasoning_effort="medium",
+        )
+        unique = store.create_conversation(
+            actor_id="device-a",
+            connected_agent_id=f"jagent_{'b' * 32}",
+            provider="codex",
+            model_id="(FAKE)-unique-model",
+            reasoning_effort="high",
+        )
+        for value in (first, duplicate, unique):
+            store.conversation_store(str(value["conversation_id"])).complete_provisioning(
+                f"(FAKE)-session-{value['conversation_id']}"
+            )
+
+        calls: list[tuple[str, str, str, str, str | None]] = []
+        both_entered = asyncio.Event()
+        release = asyncio.Event()
+
+        async def probe(agent_id, provider, model_id, effort, fingerprint):
+            calls.append((agent_id, provider, model_id, effort, fingerprint))
+            if len(calls) == 2:
+                both_entered.set()
+            await release.wait()
+            return None
+
+        class Factory:
+            def create(self, conversation_id):
+                del conversation_id
+                return FakeGateway()
+
+        manager = ConversationManager(
+            store,
+            Factory(),
+            connected_agent_binding_unavailability=probe,
+        )
+        listing = asyncio.create_task(manager.list(owner_device_id="device-a"))
+        await asyncio.wait_for(both_entered.wait(), timeout=1)
+        assert len(calls) == 2
+        release.set()
+        summaries = (await asyncio.wait_for(listing, timeout=1)).conversations
+        assert len(summaries) == 4
+        assert [item.availability.state for item in summaries[1:]] == ["ready"] * 3
+
+    asyncio.run(scenario())
+
+
 def test_replay_uses_transaction_flag_when_other_conversation_advances_cursor(tmp_path):
     async def scenario():
         store = JobOsStateStore(tmp_path / "explicit-replay.db")
@@ -1560,7 +1622,7 @@ def test_failed_gateway_construction_archives_row_and_releases_cap(tmp_path):
         assert len(store.list_active_conversations()) == 1
         recovered = await manager.create(actor_id="primary-device")
         assert recovered.position == 2
-        assert len(manager.list(owner_device_id="primary-device").conversations) == 2
+        assert len((await manager.list(owner_device_id="primary-device")).conversations) == 2
         await manager.close()
 
     asyncio.run(scenario())
@@ -1586,7 +1648,7 @@ def test_startup_factory_failure_preserves_durable_row_and_starts_sibling(tmp_pa
             for item in store.list_active_conversations(owner_device_id="device-a")
         ] == [broken_id, sibling_id]
         assert manager.get(sibling_id, owner_device_id="device-a").gateway.started is True
-        listed = manager.list(owner_device_id="device-a").conversations
+        listed = (await manager.list(owner_device_id="device-a")).conversations
         assert [item.conversation_id for item in listed] == [broken_id, sibling_id]
         assert listed[0].connection.state == "offline"
         assert listed[1].connection.state == "online"
@@ -1859,6 +1921,104 @@ def test_manager_runs_conversations_concurrently_and_shuts_each_gateway(tmp_path
 
     gateways = asyncio.run(scenario())
     assert all(gateway.closed for gateway in gateways)
+
+
+def test_manager_detaches_active_agent_turn_before_account_replacement(tmp_path):
+    async def scenario():
+        agent_id = f"jagent_{'d' * 32}"
+        store = JobOsStateStore(tmp_path / "manager-account-replacement.db")
+        store.initialize(owner_device_id="device-a")
+        created = store.create_conversation(
+            actor_id="device-a",
+            connected_agent_id=agent_id,
+            provider="codex",
+            model_id="(FAKE)-replacement-model",
+            reasoning_effort="medium",
+        )
+        conversation_id = str(created["conversation_id"])
+        scoped = store.conversation_store(conversation_id)
+        scoped.complete_provisioning("(FAKE)-replacement-provider-session")
+        class CancellationFailureFactory(RecordingGatewayFactory):
+            def create(self, conversation_id):
+                gateway = InterruptFailureGateway(
+                    session_scope=f"-{conversation_id}"
+                )
+                self.gateways[conversation_id] = gateway
+                return gateway
+
+        factory = CancellationFailureFactory()
+        manager = ConversationManager(store, factory)
+        await manager.start()
+        turn = scoped.create_turn(
+            text="Stop before replacing credentials",
+            context={},
+            idempotency_key="(FAKE)-replacement-active-turn",
+            actor_id="device-a",
+        )
+
+        original_gateway = factory.gateways[conversation_id]
+        assert store.lock_connected_agent_chats(
+            agent_id, "AUTH_ACCOUNT_REPLACEMENT_REQUIRED"
+        ) == 1
+        await manager.detach_connected_agent(agent_id)
+        replay = await manager.replay_bound(
+            conversation_id=conversation_id,
+            actor_id="device-a",
+            agent_summary={
+                "id": agent_id,
+                "provider": "codex",
+                "display_name": "Codex",
+                "avatar_id": "spark",
+            },
+        )
+
+        assert original_gateway.interruptions == [turn["turn_id"]]
+        assert original_gateway.closed is True
+        assert replay.availability.state == "locked"
+        assert manager.get(conversation_id).snapshot().conversation_id == conversation_id
+
+    asyncio.run(scenario())
+
+
+def test_manager_does_not_start_locked_provider_sessions_but_keeps_history_readable(tmp_path):
+    async def scenario():
+        store = JobOsStateStore(tmp_path / "manager-locked-recovery.db")
+        store.initialize(owner_device_id="device-a")
+        created = store.create_conversation(
+            actor_id="device-a",
+            connected_agent_id=f"jagent_{'c' * 32}",
+            provider="codex",
+            model_id="(FAKE)-locked-model",
+            reasoning_effort="medium",
+        )
+        conversation_id = str(created["conversation_id"])
+        scoped = store.conversation_store(conversation_id)
+        scoped.complete_provisioning("(FAKE)-locked-provider-session")
+        turn = scoped.create_turn(
+            text="Do not recover under replacement credentials",
+            context={},
+            idempotency_key="(FAKE)-locked-recovery-turn",
+            actor_id="device-a",
+        )
+        scoped.save_stored_session_id("(FAKE)-locked-provider-session")
+        assert store.lock_connected_agent_chats(
+            f"jagent_{'c' * 32}", "AUTH_ACCOUNT_REPLACEMENT_REQUIRED"
+        ) == 1
+
+        factory = RecordingGatewayFactory()
+        manager = ConversationManager(store, factory)
+        await manager.start()
+        try:
+            service = manager.get(conversation_id, owner_device_id="device-a")
+            active_turn = service.snapshot().active_turn
+            assert active_turn is not None
+            assert active_turn["turn_id"] == turn["turn_id"]
+            assert factory.gateways[conversation_id].started is False
+            assert factory.gateways[conversation_id].interruptions == []
+        finally:
+            await manager.close()
+
+    asyncio.run(scenario())
 
 
 def test_manager_recovers_each_persisted_active_turn_independently(tmp_path):

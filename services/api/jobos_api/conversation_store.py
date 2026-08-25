@@ -302,19 +302,6 @@ class ConversationStore:
         with connect_sqlite(self._path) as connection:
             connection.execute("BEGIN IMMEDIATE")
             conversation = self._require_active(connection)
-            is_legacy_compatibility_chat = (
-                conversation["connected_agent_id"] is None
-                and conversation["creation_state"] == "locked"
-                and conversation["lock_reason"] is None
-            )
-            if not is_legacy_compatibility_chat and (
-                conversation["creation_state"] != "ready"
-                or conversation["lock_reason"] is not None
-            ):
-                connection.rollback()
-                raise ConversationBusy(
-                    str(conversation["lock_reason"] or "Connected Agent provisioning is incomplete")
-                )
             prior = connection.execute(
                 "SELECT request_hash, result_json FROM job_events WHERE actor_id = ? AND target_resource = ? AND command_name = ? AND idempotency_key = ?",
                 (actor_id, target, command, idempotency_key),
@@ -328,6 +315,19 @@ class ConversationStore:
                 result = json.loads(str(prior[1]))
                 connection.rollback()
                 return {**result, "created": False}
+            is_legacy_compatibility_chat = (
+                conversation["connected_agent_id"] is None
+                and conversation["creation_state"] == "locked"
+                and conversation["lock_reason"] is None
+            )
+            if not is_legacy_compatibility_chat and (
+                conversation["creation_state"] != "ready"
+                or conversation["lock_reason"] is not None
+            ):
+                connection.rollback()
+                raise ConversationBusy(
+                    str(conversation["lock_reason"] or "Connected Agent provisioning is incomplete")
+                )
             source = None
             if source_turn_id:
                 source = connection.execute(
@@ -514,6 +514,21 @@ class ConversationStore:
         return {**result, "created": True}
 
     create_conversation_turn = create_turn
+
+    def has_turn_idempotency_record(
+        self, *, actor_id: str, command_name: str, idempotency_key: str
+    ) -> bool:
+        with connect_sqlite(f"file:{self._path}?mode=ro", uri=True) as connection:
+            row = connection.execute(
+                "SELECT 1 FROM job_events WHERE actor_id = ? AND target_resource = ? AND command_name = ? AND idempotency_key = ? LIMIT 1",
+                (
+                    actor_id,
+                    f"conversation/{self.conversation_id}",
+                    command_name,
+                    idempotency_key,
+                ),
+            ).fetchone()
+        return row is not None
 
     def bound_career_profile_snapshot(
         self, turn_id: str, *, principal: str

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Literal, Protocol
@@ -244,11 +244,13 @@ class CodexAuthFlowBroker:
         registry: InstallationProfileRegistry,
         *,
         now: Callable[[], datetime] = lambda: datetime.now(UTC),
+        on_account_replaced: Callable[[str], Awaitable[None] | None] | None = None,
     ) -> None:
         self.client = client
         self.vault = vault
         self.registry = registry
         self.now = now
+        self.on_account_replaced = on_account_replaced or (lambda _agent_id: None)
         self._transactions: dict[str, _PendingAuth] = {}
         self._lock = asyncio.Lock()
         self.client.subscribe(self._notification)
@@ -452,6 +454,10 @@ class CodexAuthFlowBroker:
                 status="failed",
                 error_code="AGENT_PROVIDER_UNAVAILABLE",
             )
+        if pending.mode == "replace":
+            replacement = self.on_account_replaced(pending.public.agent_id)
+            if replacement is not None:
+                await replacement
         plan_type = account.get("planType")
         summary = {
             "display_name": "ChatGPT",
@@ -463,7 +469,8 @@ class CodexAuthFlowBroker:
             runtime_namespace=pending.runtime_namespace,
             credential_reference=vault_ref,
             account_summary=summary,
-            # Codex v0.144.4 exposes no stable opaque account ID. Never fingerprint email.
+            # Codex exposes no stable opaque account ID. Persist null and keep
+            # replacement safety through explicit confirmation plus durable chat locks.
             account_fingerprint=None,
             idempotency_key=pending.public.transaction_id,
             now=self.now(),

@@ -604,6 +604,65 @@ export interface DiagnosticsSnapshot {
 
 export type AgentConnectionState = 'online' | 'connecting' | 'offline' | 'reconnecting'
 export type AgentRecoveryState = 'ready' | 'recovering' | 'quarantined'
+export type ConnectedAgentProvider = 'hermes' | 'codex'
+
+export interface ConnectedAgentHealth {
+  state: string
+  label: string
+  providerAvailable: boolean
+  toolsAvailable: boolean
+  retryAfterSeconds: number | null
+}
+
+export interface ConnectedAgentSummary {
+  id: string
+  provider: ConnectedAgentProvider
+  displayName: string
+  avatarId: string
+  defaultModelId: string | null
+  defaultReasoningEffort: string | null
+  lifecycle: 'connected' | 'disconnected'
+  accountSummary: Record<string, string> | null
+  accountFingerprint: string | null
+  health: ConnectedAgentHealth
+  activeChats: number
+  lockedChats: number
+}
+
+export interface ConnectedAgentsSnapshot {
+  registryRevision: number
+  profileId: string
+  defaultConnectedAgentId: string | null
+  agents: ConnectedAgentSummary[]
+}
+
+export interface ConnectedAgentModelOption {
+  modelId: string
+  displayName: string
+  reasoningEfforts: string[]
+}
+
+export interface ConnectedAgentModelsSnapshot {
+  live: boolean
+  models: ConnectedAgentModelOption[]
+}
+
+export interface AgentChatSelection {
+  connectedAgentId: string
+  modelId: string
+  reasoningEffort: string
+  expectedProfileRevision: number
+  expectedAgentRegistryRevision: number
+  idempotencyKey: string
+  initialSelectedJobId?: string | null
+}
+
+export interface AgentConversationBinding {
+  connectedAgentId: string
+  provider: ConnectedAgentProvider
+  modelId: string
+  reasoningEffort: string
+}
 export type ConversationEntryType = 'user_message' | 'turn' | 'activity' | 'assistant_message' | 'status' | 'error'
 export type ConversationEntryState = 'queued' | 'working' | 'waiting' | 'completed' | 'failed' | 'interrupted'
 
@@ -646,6 +705,8 @@ export interface AgentConversationSnapshot {
   recoveryState: AgentRecoveryState
   latestEventId: number
   jobContext: AgentSessionJobContext
+  binding: AgentConversationBinding | null
+  availability: { state: 'ready' | 'locked'; reason: string | null }
 }
 
 export interface AgentSessionSummary {
@@ -658,6 +719,8 @@ export interface AgentSessionSummary {
   recoveryState: AgentRecoveryState
   latestEventId: number
   jobContext: AgentSessionJobContext
+  binding: AgentConversationBinding | null
+  availability: { state: 'ready' | 'locked'; reason: string | null }
 }
 
 export interface AgentTurnMutation {
@@ -713,13 +776,26 @@ export interface JobOsRendererBridge {
   careerProfile: CareerProfileBridge
   agent: {
     list: () => Promise<AgentSessionSummary[]>
-    create: (initialSelectedJobId?: string | null) => Promise<AgentConversationSnapshot>
+    create: (selection?: AgentChatSelection) => Promise<AgentConversationSnapshot>
     get: (conversationId: string) => Promise<AgentConversationSnapshot>
     archive: (conversationId: string) => Promise<void>
     send: (conversationId: string, text: string, idempotencyKey: string) => Promise<AgentTurnMutation>
     cancel: (conversationId: string, turnId: string) => Promise<AgentTurnMutation>
     retry: (conversationId: string, turnId: string, idempotencyKey: string) => Promise<AgentTurnMutation>
     subscribe: (listener: (update: AgentSessionStreamUpdate) => void) => () => void
+  }
+  connectedAgents: {
+    list: () => Promise<ConnectedAgentsSnapshot>
+    models: (agentId: string) => Promise<ConnectedAgentModelsSnapshot>
+    test: (agentId: string) => Promise<ConnectedAgentSummary>
+    createCodex: (displayName: string, avatarId: string, expectedRegistryRevision: number, idempotencyKey: string) => Promise<ConnectedAgentSummary>
+    update: (agent: ConnectedAgentSummary, modelId: string | null, reasoningEffort: string | null, expectedRegistryRevision: number, idempotencyKey: string) => Promise<ConnectedAgentSummary>
+    setDefault: (profileId: string, agentId: string | null, expectedRevision: number, idempotencyKey: string) => Promise<number>
+    impact: (agentId: string) => Promise<{ activeChats: number; lockedChats: number; defaultProfileIds: string[] }>
+    disconnect: (agentId: string, expectedRegistryRevision: number, idempotencyKey: string) => Promise<ConnectedAgentSummary>
+    startAuth: (agentId: string, mode: 'connect' | 'reconnect' | 'replace', expectedAccountFingerprint: string | null) => Promise<{ transactionId: string; status: string; userCode: string | null; verificationUrl: string | null; expiresAt: string }>
+    readAuth: (transactionId: string) => Promise<{ transactionId: string; status: string; userCode: string | null; verificationUrl: string | null; expiresAt: string; errorCode: string | null }>
+    cancelAuth: (transactionId: string) => Promise<void>
   }
   jobs: {
     getState: () => Promise<JobWorkspaceSnapshot>

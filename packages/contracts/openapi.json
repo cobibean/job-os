@@ -2537,6 +2537,21 @@
             "title": "Agents",
             "type": "array"
           },
+          "default_connected_agent_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Connected Agent Id"
+          },
+          "profile_id": {
+            "title": "Profile Id",
+            "type": "string"
+          },
           "registry_revision": {
             "title": "Registry Revision",
             "type": "integer"
@@ -2544,6 +2559,8 @@
         },
         "required": [
           "registry_revision",
+          "profile_id",
+          "default_connected_agent_id",
           "agents"
         ],
         "title": "ConnectedAgentListResponse",
@@ -3069,6 +3086,19 @@
             ],
             "title": "Active Turn"
           },
+          "availability": {
+            "$ref": "#/components/schemas/ConversationAvailabilityResponse"
+          },
+          "binding": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ConversationBindingResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "connection": {
             "$ref": "#/components/schemas/ConnectionResponse"
           },
@@ -3114,7 +3144,9 @@
           "recovery_state",
           "latest_event_id",
           "created_at",
-          "job_context"
+          "job_context",
+          "binding",
+          "availability"
         ],
         "title": "ConversationSummary",
         "type": "object"

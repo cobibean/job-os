@@ -12,6 +12,8 @@ import {
 import type { ConversationResponse, ConversationSummary, TurnMutationResponse } from '@jobos/contracts'
 
 import type {
+  AgentChatSelection,
+  AgentConversationBinding,
   AgentConversationSnapshot,
   AgentConnectionState,
   AgentRecoveryState,
@@ -146,6 +148,30 @@ function normalizeJobContext(value: unknown): AgentSessionJobContext {
   }
 }
 
+function normalizeBinding(value: unknown): AgentConversationBinding | null {
+  if (value === null || value === undefined) return null
+  if (!isRecord(value)
+    || typeof value.connected_agent_id !== 'string'
+    || !['hermes', 'codex'].includes(String(value.provider))
+    || typeof value.model_id !== 'string'
+    || typeof value.reasoning_effort !== 'string') throw new Error('Conversation binding unavailable')
+  return {
+    connectedAgentId: value.connected_agent_id,
+    provider: value.provider as AgentConversationBinding['provider'],
+    modelId: value.model_id,
+    reasoningEffort: value.reasoning_effort
+  }
+}
+
+function normalizeAvailability(value: unknown): { state: 'ready' | 'locked'; reason: string | null } {
+  if (value === undefined) return { state: 'locked', reason: 'LEGACY_BINDING_UNAVAILABLE' }
+  if (!isRecord(value) || !['ready', 'locked'].includes(String(value.state))
+    || (value.reason !== null && value.reason !== undefined && typeof value.reason !== 'string')) {
+    throw new Error('Conversation availability unavailable')
+  }
+  return { state: value.state as 'ready' | 'locked', reason: typeof value.reason === 'string' ? value.reason : null }
+}
+
 function normalizeSummary(value: ConversationSummary): AgentSessionSummary {
   if (!isRecord(value) || !validConversationId(value.conversation_id)
     || !Number.isInteger(value.position) || Number(value.position) < 1 || Number(value.position) > 5
@@ -163,7 +189,9 @@ function normalizeSummary(value: ConversationSummary): AgentSessionSummary {
     connection: value.connection.state,
     recoveryState: normalizeRecoveryState(value.recovery_state),
     latestEventId: value.latest_event_id,
-    jobContext: normalizeJobContext(value.job_context)
+    jobContext: normalizeJobContext(value.job_context),
+    binding: normalizeBinding((value as unknown as Record<string, unknown>).binding),
+    availability: normalizeAvailability((value as unknown as Record<string, unknown>).availability)
   }
 }
 
@@ -186,7 +214,9 @@ function normalizeSnapshot(value: ConversationResponse): AgentConversationSnapsh
     connection: value.connection.state,
     recoveryState: normalizeRecoveryState(value.recovery_state),
     latestEventId: value.latest_event_id,
-    jobContext: normalizeJobContext(value.job_context)
+    jobContext: normalizeJobContext(value.job_context),
+    binding: normalizeBinding((value as unknown as Record<string, unknown>).binding),
+    availability: normalizeAvailability((value as unknown as Record<string, unknown>).availability)
   }
 }
 
@@ -280,12 +310,21 @@ export function createScopedMainAgentClient(config: AgentConfig, registry?: Agen
       if (!registry) return request()
       return registry.runExclusive(request, summaries => registry.replace(summaries.map(summary => summary.conversationId)))
     },
-    async create(initialSelectedJobId?: string | null): Promise<AgentConversationSnapshot> {
+    async create(selection?: AgentChatSelection): Promise<AgentConversationSnapshot> {
       const request = async () => {
         const result = await conversationCreateV1ConversationsPost({
-          client, body: { selected_job_id: initialSelectedJobId ?? null }
+          client,
+          body: selection ? {
+            connected_agent_id: selection.connectedAgentId,
+            model_id: selection.modelId,
+            reasoning_effort: selection.reasoningEffort,
+            expected_profile_revision: selection.expectedProfileRevision,
+            expected_agent_registry_revision: selection.expectedAgentRegistryRevision,
+            idempotency_key: selection.idempotencyKey,
+            selected_job_id: selection.initialSelectedJobId ?? null
+          } : null
         })
-        return normalizeSnapshot(unwrap(result, [201], 'New session could not be started'))
+        return normalizeSnapshot(unwrap(result, [200, 201], 'New session could not be started'))
       }
       if (!registry) return request()
       return registry.runExclusive(request, snapshot => registry.add(snapshot.conversationId))

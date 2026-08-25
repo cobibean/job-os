@@ -362,9 +362,10 @@ async def test_replace_waits_for_completion_and_cancel_preserves_existing_vault(
     )
     await client.complete_login()
     assert (await broker.read(initial.transaction_id)).status == "connected"
+    fingerprint = registry.load().connected_agents[0].account_fingerprint
 
     replacement = await broker.start_device_code(
-        AGENT_ID, "replace", None, allow_host_callback=False
+        AGENT_ID, "replace", fingerprint, allow_host_callback=False
     )
     model_calls_before_poll = sum(
         method == "model/list" for method, _params in client.calls
@@ -379,6 +380,45 @@ async def test_replace_waits_for_completion_and_cancel_preserves_existing_vault(
     assert cancelled.status == "cancelled"
     assert vault.removed is False
     assert registry.load().connected_agents[0].lifecycle == "connected"
+
+
+@pytest.mark.anyio
+async def test_successful_replacement_locks_prior_chats_without_fabricating_identity(
+    tmp_path: Path,
+) -> None:
+    registry = registry_with_codex_agent(tmp_path)
+    client = FakeCodexClient()
+    locked: list[str] = []
+    broker = CodexAuthFlowBroker(
+        client,
+        FakeVault(),
+        registry,
+        now=lambda: NOW,
+        on_account_replaced=locked.append,
+    )
+    initial = await broker.start_device_code(
+        AGENT_ID, "connect", None, allow_host_callback=False
+    )
+    await client.complete_login()
+    assert (await broker.read(initial.transaction_id)).status == "connected"
+
+    snapshot = registry.load()
+    registry.disconnect_connected_agent(
+        AGENT_ID,
+        expected_registry_revision=snapshot.registry_revision,
+        idempotency_key="(FAKE)-disconnect-before-replacement",
+        now=NOW,
+    )
+
+    replacement = await broker.start_device_code(
+        AGENT_ID, "replace", None, allow_host_callback=False
+    )
+    assert locked == []
+    await client.complete_login()
+    assert (await broker.read(replacement.transaction_id)).status == "connected"
+
+    assert locked == [AGENT_ID]
+    assert registry.load().connected_agents[0].account_fingerprint is None
 
 
 @pytest.mark.anyio
@@ -401,9 +441,10 @@ async def test_completed_replacement_cleanup_disconnects_and_auth_is_single_flig
 
     await client.complete_login()
     assert (await broker.read(initial.transaction_id)).status == "connected"
+    fingerprint = registry.load().connected_agents[0].account_fingerprint
 
     replacement = await broker.start_device_code(
-        AGENT_ID, "replace", None, allow_host_callback=False
+        AGENT_ID, "replace", fingerprint, allow_host_callback=False
     )
     await client.complete_login()
     vault.isolation_error = AuthFlowError(

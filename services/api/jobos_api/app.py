@@ -168,9 +168,10 @@ from jobos_api.connected_agents import (
     ConnectedAgentService,
     CreateConnectedAgentRequest,
     DisconnectConnectedAgentRequest,
+    HermesConnectedAgentRuntime,
+    ProviderConnectedAgentRuntime,
     SetDefaultConnectedAgentRequest,
     SetDefaultConnectedAgentResponse,
-    UnavailableConnectedAgentRuntime,
     UpdateConnectedAgentRequest,
 )
 from jobos_api.conversation_manager import ConversationListResponse, ConversationManager
@@ -616,6 +617,7 @@ def create_app(
     )
     installation_profiles = InstallationProfileRegistry(settings.installation_registry_path)
     codex_client: CodexAppServerProcess | None = None
+    codex_vault: CodexCredentialVault | None = None
     selected_connected_agent_runtime = connected_agent_runtime
     selected_auth_broker = connected_agent_auth_broker
     if settings.codex_app_server_path is not None:
@@ -637,13 +639,33 @@ def create_app(
             selected_connected_agent_runtime = CodexConnectedAgentRuntime(
                 codex_client, codex_vault
             )
-        if selected_auth_broker is None:
-            selected_auth_broker = CodexAuthFlowBroker(
-                codex_client, codex_vault, installation_profiles
+
+    if selected_connected_agent_runtime is None:
+        provider_controls: dict[str, ConnectedAgentRuntimeControl] = {
+            "hermes": HermesConnectedAgentRuntime(
+                configured=(
+                    agent_gateway is not None
+                    or agent_gateway_factory is not None
+                    or all(
+                        (
+                            settings.hermes_dashboard_url,
+                            settings.hermes_dashboard_token,
+                            settings.hermes_job_hunter_cwd,
+                        )
+                    )
+                )
             )
+        }
+        if codex_client is not None and codex_vault is not None:
+            provider_controls["codex"] = CodexConnectedAgentRuntime(
+                codex_client, codex_vault
+            )
+        selected_connected_agent_runtime = ProviderConnectedAgentRuntime(
+            cast(dict[Any, ConnectedAgentRuntimeControl], provider_controls)
+        )
     connected_agents = ConnectedAgentService(
         installation_profiles,
-        selected_connected_agent_runtime or UnavailableConnectedAgentRuntime(),
+        selected_connected_agent_runtime,
         profile_id=settings.installation_profile_id,
         state_store=state_store,
     )
@@ -752,6 +774,22 @@ def create_app(
         runtime_adapters,
         profile_id=settings.installation_profile_id,
     )
+
+    async def connected_agent_binding_unavailability(
+        agent_id: str,
+        provider: str,
+        model_id: str,
+        effort: str,
+        fingerprint: str | None,
+    ) -> str | None:
+        return await connected_agents.binding_unavailability_reason(
+            agent_id=agent_id,
+            provider=provider,
+            model_id=model_id,
+            reasoning_effort=effort,
+            account_fingerprint=fingerprint,
+        )
+
     conversation_manager = ConversationManager(
         state_store,
         runtime_router,
@@ -765,7 +803,19 @@ def create_app(
         career_profile_agent_id=(
             settings.career_profile_agent_id if settings.career_profile_enabled else None
         ),
+        connected_agent_binding_unavailability=connected_agent_binding_unavailability,
     )
+    if codex_client is not None and codex_vault is not None and selected_auth_broker is None:
+        async def lock_replaced_account_chats(agent_id: str) -> None:
+            connected_agents.lock_chats_for_account_replacement(agent_id)
+            await conversation_manager.detach_connected_agent(agent_id)
+
+        selected_auth_broker = CodexAuthFlowBroker(
+            codex_client,
+            codex_vault,
+            installation_profiles,
+            on_account_replaced=lock_replaced_account_chats,
+        )
     browser_capabilities = capability_broker or CapabilityBroker()
     browser_command_locks: dict[tuple[str, str], asyncio.Lock] = {}
     browser_command_lock_references: dict[tuple[str, str], int] = {}
@@ -2865,6 +2915,51 @@ def create_app(
         except ConversationNotFound as error:
             raise HTTPException(status_code=404, detail=str(error)) from error
 
+    async def ready_conversation_service(conversation_id: str, identity: DeviceIdentity):
+        service = conversation_service(conversation_id, identity)
+        binding = service.store.binding()
+        if binding["binding_state"] != "sealed":
+            return service
+        if binding["creation_state"] != "ready":
+            reason = str(binding["lock_reason"] or "AGENT_PROVIDER_UNAVAILABLE")
+            raise HTTPException(
+                status_code=409,
+                detail={"code": reason, "message": reason, "retryable": False},
+            )
+        reason = await connected_agents.binding_unavailability_reason(
+            agent_id=str(binding["connected_agent_id"]),
+            provider=str(binding["provider"]),
+            model_id=str(binding["model_id"]),
+            reasoning_effort=str(binding["reasoning_effort"]),
+            account_fingerprint=(
+                str(binding["connection_account_fingerprint"])
+                if binding["connection_account_fingerprint"] is not None
+                else None
+            ),
+        )
+        if reason is not None:
+            raise HTTPException(
+                status_code=409,
+                detail={"code": reason, "message": reason, "retryable": False},
+            )
+        return await conversation_manager.ensure_started(conversation_id)
+
+    async def mutation_ready_conversation_service(
+        conversation_id: str,
+        identity: DeviceIdentity,
+        *,
+        command_name: str,
+        idempotency_key: str,
+    ):
+        service = conversation_service(conversation_id, identity)
+        if service.store.has_turn_idempotency_record(
+            actor_id=identity.device_id,
+            command_name=command_name,
+            idempotency_key=idempotency_key,
+        ):
+            return service
+        return await ready_conversation_service(conversation_id, identity)
+
     def validated_turn_id(turn_id: str) -> str:
         if not re.fullmatch(r"turn_[A-Za-z0-9_-]{1,128}", turn_id):
             raise HTTPException(status_code=422, detail="Invalid turn ID")
@@ -3098,10 +3193,10 @@ def create_app(
             raise HTTPException(status_code=409, detail=str(error)) from error
 
     @app.get("/v1/conversations", tags=["agent"])
-    def conversations_list(
+    async def conversations_list(
         identity: Annotated[DeviceIdentity, Depends(authenticated_device)],
     ) -> ConversationListResponse:
-        return conversation_manager.list(owner_device_id=identity.device_id)
+        return await conversation_manager.list(owner_device_id=identity.device_id)
 
     @app.post("/v1/conversations", tags=["agent"], status_code=201)
     async def conversation_create(
@@ -3346,7 +3441,13 @@ def create_app(
         if settings.career_profile_enabled:
             require_career_profile_owner(identity)
         try:
-            return await conversation_service(conversation_id, identity).send(
+            service = await mutation_ready_conversation_service(
+                conversation_id,
+                identity,
+                command_name="conversation.message.submit",
+                idempotency_key=command.idempotency_key,
+            )
+            return await service.send(
                 command,
                 actor_id=identity.device_id,
                 context=conversation_context(conversation_id, identity),
@@ -3383,7 +3484,13 @@ def create_app(
         if settings.career_profile_enabled:
             require_career_profile_owner(identity)
         try:
-            result = await conversation_service(conversation_id, identity).retry(
+            service = await mutation_ready_conversation_service(
+                conversation_id,
+                identity,
+                command_name="conversation.turn.retry",
+                idempotency_key=command.idempotency_key,
+            )
+            result = await service.retry(
                 validated_turn_id(turn_id), command, actor_id=identity.device_id
             )
         except ConversationBusy as error:

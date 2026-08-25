@@ -31,9 +31,10 @@ const stateLabel = {
 
 interface AgentSessionTabsProps {
   controller: AgentSessionsController
+  onNewChat?: () => void
 }
 
-export function AgentSessionTabs({ controller }: AgentSessionTabsProps) {
+export function AgentSessionTabs({ controller, onNewChat }: AgentSessionTabsProps) {
   const tabRefs = useRef<Array<HTMLButtonElement | null>>([])
   const moveFocus = (index: number) => {
     const count = controller.order.length
@@ -123,8 +124,8 @@ export function AgentSessionTabs({ controller }: AgentSessionTabsProps) {
         <button
           aria-label="New agent session"
           className="agent-session-add"
-          disabled={!controller.available || controller.atMaximum || controller.creating}
-          onClick={() => { void controller.create() }}
+          disabled={!controller.available || controller.creating}
+          onClick={() => onNewChat?.()}
           title={controller.atMaximum ? 'Maximum 5 sessions' : 'New agent session (⌘N)'}
           type="button"
         ><Plus aria-hidden="true" size={17} /></button>

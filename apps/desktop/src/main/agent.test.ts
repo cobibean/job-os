@@ -15,6 +15,14 @@ const envelope = (conversationId: string, eventId: number, overrides: Record<str
 const apiSnapshot = (conversationId: string, position: number) => ({
   conversation_id: conversationId, position, title: `Session ${position}`, created_at: '2026-08-16T09:00:00Z',
   entries: [], active_turn: null, connection: { state: 'online' }, recovery_state: 'ready', latest_event_id: 0,
+  binding: {
+    connected_agent_id: `jagent_${'a'.repeat(32)}`,
+    provider: 'hermes',
+    model_id: '(FAKE)-model-stable',
+    reasoning_effort: 'medium',
+    binding_state: 'sealed'
+  },
+  availability: { state: 'ready', reason: null },
   job_context: {
     selected_job_id: null,
     active_artifact_id: null,

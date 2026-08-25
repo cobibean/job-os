@@ -1343,6 +1343,14 @@ export type ConnectedAgentListResponse = {
      */
     agents: Array<ConnectedAgentPublic>;
     /**
+     * Default Connected Agent Id
+     */
+    default_connected_agent_id: string | null;
+    /**
+     * Profile Id
+     */
+    profile_id: string;
+    /**
      * Registry Revision
      */
     registry_revision: number;
@@ -1638,6 +1646,8 @@ export type ConversationSummary = {
     active_turn: {
         [key: string]: unknown;
     } | null;
+    availability: ConversationAvailabilityResponse;
+    binding: ConversationBindingResponse | null;
     connection: ConnectionResponse;
     /**
      * Conversation Id

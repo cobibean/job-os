@@ -9,6 +9,8 @@ afterEach(() => { cleanup(); window.localStorage.clear() })
 const summary = (position: number): AgentSessionSummary => ({
   conversationId: `conv_${position}`, position, title: `Session ${position}`,
   createdAt: '2026-08-16T10:00:00Z', activeTurn: null, connection: 'online', recoveryState: 'ready', latestEventId: 0,
+  binding: { connectedAgentId: 'agent-hermes', provider: 'hermes', modelId: 'default', reasoningEffort: 'medium' },
+  availability: { state: 'ready', reason: null },
   jobContext: { selectedJobId: null, activeArtifactId: null, activeArtifactPage: 1, activeArtifactZoom: 1 }
 })
 const snapshot = (position: number, entries: ConversationEvent[] = []): AgentConversationSnapshot => ({
@@ -48,6 +50,20 @@ test('subscribes before hydration and reconciles early scoped events exactly onc
   await act(async () => pending.resolve(snapshot(1, [event(1), event(2, 'completed')])))
   await waitFor(() => expect(result.current.activeConversation?.restoring).toBe(false))
   expect(result.current.activeConversation?.entries.map(item => item.eventId)).toEqual([1, 2])
+})
+
+test('restore keeps the sealed list binding when detail omits presentation metadata', async () => {
+  const sealed = summary(1)
+  const legacyDetail = {
+    ...snapshot(1),
+    binding: null,
+    availability: { state: 'locked' as const, reason: 'LEGACY_BINDING_UNAVAILABLE' }
+  }
+  install([sealed], [legacyDetail])
+  const { result } = renderHook(() => useAgentSessions())
+  await waitFor(() => expect(result.current.activeConversation?.restoring).toBe(false))
+  expect(result.current.sessions.conv_1?.summary.binding).toEqual(sealed.binding)
+  expect(result.current.sessions.conv_1?.summary.availability).toEqual({ state: 'ready', reason: null })
 })
 
 test('interleaved events and drafts update only their owning sessions', async () => {
@@ -191,9 +207,13 @@ test('browser save creates a fresh session with explicitly empty job context', a
   await waitFor(() => expect(result.current.activeId).toBe('conv_1'))
 
   let createdId: string | null = null
-  await act(async () => { createdId = await result.current.createJobless() })
+  const selection = {
+    connectedAgentId: 'agent-hermes', modelId: 'default', reasoningEffort: 'medium',
+    expectedProfileRevision: 2, expectedAgentRegistryRevision: 2, idempotencyKey: 'desktop-save-chat-test'
+  }
+  await act(async () => { createdId = await result.current.createJobless(selection) })
 
-  expect(agent.create).toHaveBeenCalledWith(null)
+  expect(agent.create).toHaveBeenCalledWith({ ...selection, initialSelectedJobId: null })
   expect(createdId).toBe('conv_2')
   expect(result.current.activeId).toBe('conv_2')
   expect(result.current.sessions.conv_2?.summary.jobContext.selectedJobId).toBeNull()

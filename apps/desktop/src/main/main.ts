@@ -16,6 +16,8 @@ import type {
 } from '../shared/contracts.js'
 import { AgentConversationRegistry, createScopedMainAgentClient, startAgentEventStream } from './agent.js'
 import { registerAgentIpc } from './agentIpc.js'
+import { createMainConnectedAgentsClient } from './connectedAgents.js'
+import { registerConnectedAgentsIpc } from './connectedAgentsIpc.js'
 import { createApiLifecycle } from './apiLifecycle.js'
 import { BrowserManager, remoteBrowserViewOptions } from './browser.js'
 import { canonicalListingUrl, safeApplicationUrl, validatedBrowserJobExtraction } from './browserJobExtraction.js'
@@ -583,10 +585,16 @@ function registerCareerProfileInterface(): void {
 function registerAgentInterface(): void {
   const config = jobsConfig()
   const agent = config ? createScopedMainAgentClient(config, activeAgentConversationIds) : null
+  const connectedAgents = config ? createMainConnectedAgentsClient(config) : null
   registerAgentIpc(ipcMain, event => {
     assertTrustedRenderer(event)
     if (!agent) throw new Error('Device credential unavailable')
     return agent
+  })
+  registerConnectedAgentsIpc(ipcMain, event => {
+    assertTrustedRenderer(event)
+    if (!connectedAgents) throw new Error('Device credential unavailable')
+    return connectedAgents
   })
 }
 

@@ -45,6 +45,71 @@ class UnavailableConnectedAgentRuntime:
         return {"verified": False}
 
 
+class HermesConnectedAgentRuntime:
+    """Expose the fixed model owned by the configured Hermes profile."""
+
+    def __init__(self, *, configured: bool) -> None:
+        self.configured = configured
+
+    async def inspect_connection(self, agent: ConnectedAgentRecord) -> dict[str, object]:
+        available = (
+            self.configured
+            and agent.provider == "hermes"
+            and agent.connection_config is not None
+        )
+        return {
+            "state": "connected" if available else "unavailable",
+            "label": "Connected" if available else "Runtime unavailable",
+            "provider_available": available,
+            "tools_available": available,
+            "retry_after_seconds": None,
+        }
+
+    async def list_models(self, agent: ConnectedAgentRecord) -> dict[str, object]:
+        if (
+            not self.configured
+            or agent.provider != "hermes"
+            or agent.default_model_id is None
+            or agent.default_reasoning_effort is None
+        ):
+            return {"live": False, "models": []}
+        return {
+            "live": True,
+            "models": [
+                {
+                    "model_id": agent.default_model_id,
+                    "display_name": agent.default_model_id,
+                    "reasoning_efforts": [agent.default_reasoning_effort],
+                }
+            ],
+        }
+
+    async def disconnect(self, agent: ConnectedAgentRecord) -> dict[str, object]:
+        return {"verified": agent.provider == "hermes"}
+
+
+class ProviderConnectedAgentRuntime:
+    """Route agent health and model operations to the owning provider control."""
+
+    def __init__(
+        self,
+        controls: dict[Literal["hermes", "codex"], ConnectedAgentRuntimeControl],
+    ) -> None:
+        self.controls = dict(controls)
+
+    def _control(self, agent: ConnectedAgentRecord) -> ConnectedAgentRuntimeControl:
+        return self.controls.get(agent.provider, UnavailableConnectedAgentRuntime())
+
+    async def inspect_connection(self, agent: ConnectedAgentRecord) -> dict[str, object]:
+        return await self._control(agent).inspect_connection(agent)
+
+    async def list_models(self, agent: ConnectedAgentRecord) -> dict[str, object]:
+        return await self._control(agent).list_models(agent)
+
+    async def disconnect(self, agent: ConnectedAgentRecord) -> dict[str, object]:
+        return await self._control(agent).disconnect(agent)
+
+
 class ConnectedAgentModel(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -76,6 +141,8 @@ class ConnectedAgentPublic(ConnectedAgentModel):
 
 class ConnectedAgentListResponse(ConnectedAgentModel):
     registry_revision: int
+    profile_id: str
+    default_connected_agent_id: str | None
     agents: list[ConnectedAgentPublic]
 
 
@@ -213,8 +280,11 @@ class ConnectedAgentService:
 
     async def list(self) -> ConnectedAgentListResponse:
         data = self.registry.load()
+        profile = next(item for item in data.profiles if item.profile_id == self.profile_id)
         return ConnectedAgentListResponse(
             registry_revision=data.registry_revision,
+            profile_id=profile.profile_id,
+            default_connected_agent_id=profile.default_connected_agent_id,
             agents=[await self.public(record) for record in data.connected_agents],
         )
 
@@ -226,6 +296,48 @@ class ConnectedAgentService:
         if record.lifecycle == "disconnected":
             return ConnectedAgentModelsResponse(live=False, models=[])
         return ConnectedAgentModelsResponse.model_validate(await self.runtime.list_models(record))
+
+    async def binding_unavailability_reason(
+        self,
+        *,
+        agent_id: str,
+        provider: str,
+        model_id: str,
+        reasoning_effort: str,
+        account_fingerprint: str | None,
+    ) -> str | None:
+        """Fail closed when a sealed chat no longer matches its live agent binding."""
+        try:
+            record = self._record(agent_id)
+        except InstallationProfileNotFound:
+            return "AGENT_NOT_CONFIGURED"
+        if record.lifecycle != "connected":
+            return "AGENT_DISCONNECTED"
+        if record.provider != provider:
+            return "AGENT_PROVIDER_CHANGED"
+        if record.account_fingerprint != account_fingerprint:
+            return "AUTH_ACCOUNT_REPLACEMENT_REQUIRED"
+        try:
+            health = ConnectedAgentHealth.model_validate(
+                await self.runtime.inspect_connection(record)
+            )
+            if not health.provider_available:
+                return "AGENT_PROVIDER_UNAVAILABLE"
+            if not health.tools_available:
+                return "AGENT_TOOLS_UNAVAILABLE"
+            catalog = ConnectedAgentModelsResponse.model_validate(
+                await self.runtime.list_models(record)
+            )
+        except Exception:
+            return "AGENT_PROVIDER_UNAVAILABLE"
+        option = next((item for item in catalog.models if item.model_id == model_id), None)
+        if (
+            not catalog.live
+            or option is None
+            or reasoning_effort not in option.reasoning_efforts
+        ):
+            return "MODEL_UNAVAILABLE"
+        return None
 
     async def _validate_defaults(
         self,
@@ -345,6 +457,20 @@ class ConnectedAgentService:
             ],
             **totals,
         )
+
+    def lock_chats_for_account_replacement(self, agent_id: str) -> None:
+        data = self.registry.load()
+        for profile in data.profiles:
+            path = (
+                profile.anchored_runtime.state_db_path
+                if profile.anchored_runtime is not None
+                else managed_profile_paths(
+                    self.registry.installation_root, profile.profile_id
+                ).state_db_path
+            )
+            JobOsStateStore.lock_connected_agent_chats_at(
+                path, agent_id, "AUTH_ACCOUNT_REPLACEMENT_REQUIRED"
+            )
 
     async def disconnect(
         self, agent_id: str, command: DisconnectConnectedAgentRequest

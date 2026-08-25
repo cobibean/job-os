@@ -1,6 +1,8 @@
 import asyncio
 import logging
-from typing import Literal
+from collections.abc import Awaitable, Callable
+from contextlib import suppress
+from typing import Any, Literal
 
 from pydantic import Field
 
@@ -11,9 +13,12 @@ from .agent_gateway import (
     DefinitiveSessionCreationError,
 )
 from .career_profile_context import CareerProfileContextStore
+from .conversation_store import ConversationStore
 from .conversations import (
     BoundConversationResponse,
     ConnectionResponse,
+    ConversationAvailabilityResponse,
+    ConversationBindingResponse,
     ConversationJobContext,
     ConversationModel,
     ConversationResponse,
@@ -38,6 +43,8 @@ class ConversationSummary(ConversationModel):
     latest_event_id: int
     created_at: str
     job_context: ConversationJobContext
+    binding: ConversationBindingResponse | None
+    availability: ConversationAvailabilityResponse
 
 
 class ConversationListResponse(ConversationModel):
@@ -54,6 +61,10 @@ class ConversationManager:
         career_profile_principal: str | None = None,
         career_profile_context: CareerProfileContextStore | None = None,
         career_profile_agent_id: str | None = None,
+        connected_agent_binding_unavailability: Callable[
+            [str, str, str, str, str | None], Awaitable[str | None]
+        ]
+        | None = None,
     ) -> None:
         self.store = store
         self.gateway_factory = gateway_factory
@@ -61,12 +72,21 @@ class ConversationManager:
         self.career_profile_principal = career_profile_principal
         self.career_profile_context = career_profile_context
         self.career_profile_agent_id = career_profile_agent_id
+        self.connected_agent_binding_unavailability = connected_agent_binding_unavailability
         self._services: dict[str, ConversationService] = {}
+        self._started_services: set[str] = set()
         self._lifecycle_lock = asyncio.Lock()
 
     async def start(self) -> None:
         async with self._lifecycle_lock:
             pending: list[tuple[dict[str, object], ConversationService]] = []
+            availability_checks: list[
+                tuple[
+                    dict[str, object],
+                    ConversationService,
+                    tuple[str, str, str, str, str | None],
+                ]
+            ] = []
             for summary in self.store.list_active_conversations():
                 conversation_id = str(summary["conversation_id"])
                 try:
@@ -74,23 +94,64 @@ class ConversationManager:
                 except Exception:
                     continue
                 self._services[conversation_id] = service
+                binding = service.store.binding()
+                if binding["binding_state"] == "sealed":
+                    if binding["creation_state"] != "ready":
+                        continue
+                    if self.connected_agent_binding_unavailability is not None:
+                        availability_checks.append(
+                            (
+                                summary,
+                                service,
+                                (
+                                    str(binding["connected_agent_id"]),
+                                    str(binding["provider"]),
+                                    str(binding["model_id"]),
+                                    str(binding["reasoning_effort"]),
+                                    (
+                                        str(binding["connection_account_fingerprint"])
+                                        if binding["connection_account_fingerprint"] is not None
+                                        else None
+                                    ),
+                                ),
+                            )
+                        )
+                        continue
                 pending.append((summary, service))
+        if availability_checks and self.connected_agent_binding_unavailability is not None:
+            reasons = await asyncio.gather(
+                *(
+                    self.connected_agent_binding_unavailability(*arguments)
+                    for _, _, arguments in availability_checks
+                ),
+                return_exceptions=True,
+            )
+            pending.extend(
+                (summary, service)
+                for (summary, service, _), reason in zip(
+                    availability_checks, reasons, strict=True
+                )
+                if reason is None
+            )
         if pending:
             results = await asyncio.gather(
                 *(service.start() for _, service in pending), return_exceptions=True
             )
             async with self._lifecycle_lock:
                 for (summary, service), result in zip(pending, results, strict=True):
-                    if not isinstance(result, BaseException):
-                        continue
                     conversation_id = str(summary["conversation_id"])
+                    if not isinstance(result, BaseException):
+                        self._started_services.add(conversation_id)
+                        continue
                     self._services.pop(conversation_id, None)
+                    self._started_services.discard(conversation_id)
                     await asyncio.gather(service.close(), return_exceptions=True)
 
     async def close(self) -> None:
         async with self._lifecycle_lock:
             services = list(self._services.values())
             self._services.clear()
+            self._started_services.clear()
         if services:
             results = await asyncio.gather(
                 *(service.close() for service in services), return_exceptions=True
@@ -98,6 +159,34 @@ class ConversationManager:
             for result in results:
                 if isinstance(result, BaseException):
                     raise result
+
+    async def detach_connected_agent(self, agent_id: str) -> None:
+        """Stop active work and detach services before an account replacement."""
+        async with self._lifecycle_lock:
+            affected = [
+                (conversation_id, service)
+                for conversation_id, service in self._services.items()
+                if service.store.binding().get("connected_agent_id") == agent_id
+            ]
+            for conversation_id, _ in affected:
+                self._started_services.discard(conversation_id)
+        for _, service in affected:
+            active_turn = service.snapshot().active_turn
+            if active_turn is not None:
+                with suppress(Exception):
+                    await service.cancel(str(active_turn["turn_id"]))
+            with suppress(Exception):
+                await service.close()
+
+    async def ensure_started(self, conversation_id: str) -> ConversationService:
+        async with self._lifecycle_lock:
+            service = self._services.get(conversation_id)
+            if service is None:
+                raise ConversationNotFound("Conversation not found")
+            if conversation_id not in self._started_services:
+                await service.start()
+                self._started_services.add(conversation_id)
+            return service
 
     def _make_service(self, conversation_id: str) -> ConversationService:
         scoped_store = self.store.conversation_store(conversation_id)
@@ -118,13 +207,95 @@ class ConversationManager:
             career_profile_agent_id=self.career_profile_agent_id,
         )
 
-    def list(self, *, owner_device_id: str) -> ConversationListResponse:
+    async def list(self, *, owner_device_id: str) -> ConversationListResponse:
         conversations: list[ConversationSummary] = []
+        prepared: list[tuple[dict[str, Any], ConversationStore, dict[str, object]]] = []
+        probe_inputs: dict[tuple[str, str, str, str, str | None], None] = {}
         for value in self.store.list_active_conversations(owner_device_id=owner_device_id):
+            scoped = self.store.conversation_store(str(value["conversation_id"]))
+            durable_binding = scoped.binding()
+            prepared.append((value, scoped, durable_binding))
+            if (
+                durable_binding["binding_state"] == "sealed"
+                and self.connected_agent_binding_unavailability is not None
+            ):
+                probe_inputs[
+                    (
+                        str(durable_binding["connected_agent_id"]),
+                        str(durable_binding["provider"]),
+                        str(durable_binding["model_id"]),
+                        str(durable_binding["reasoning_effort"]),
+                        (
+                            str(durable_binding["connection_account_fingerprint"])
+                            if durable_binding["connection_account_fingerprint"] is not None
+                            else None
+                        ),
+                    )
+                ] = None
+        probe_keys = list(probe_inputs)
+        probe_reasons = (
+            await asyncio.gather(
+                *(self.connected_agent_binding_unavailability(*key) for key in probe_keys)
+            )
+            if probe_keys and self.connected_agent_binding_unavailability is not None
+            else []
+        )
+        reason_by_binding = dict(zip(probe_keys, probe_reasons, strict=True))
+
+        for value, scoped, durable_binding in prepared:
             conversation_id = str(value["conversation_id"])
             service = self._services.get(conversation_id)
+            sealed = durable_binding["binding_state"] == "sealed"
+            binding_key = (
+                str(durable_binding["connected_agent_id"]),
+                str(durable_binding["provider"]),
+                str(durable_binding["model_id"]),
+                str(durable_binding["reasoning_effort"]),
+                (
+                    str(durable_binding["connection_account_fingerprint"])
+                    if durable_binding["connection_account_fingerprint"] is not None
+                    else None
+                ),
+            )
+            binding = (
+                ConversationBindingResponse.model_validate(
+                    {
+                        key: durable_binding[key]
+                        for key in (
+                            "connected_agent_id",
+                            "provider",
+                            "model_id",
+                            "reasoning_effort",
+                            "binding_state",
+                        )
+                    }
+                )
+                if sealed
+                else None
+            )
+            live_reason = reason_by_binding.get(binding_key) if sealed else None
+            availability = ConversationAvailabilityResponse(
+                state=(
+                    "ready"
+                    if (
+                        sealed
+                        and durable_binding["creation_state"] == "ready"
+                        and live_reason is None
+                    )
+                    else "locked"
+                ),
+                reason=(
+                    live_reason
+                    if sealed and live_reason is not None
+                    else
+                    str(durable_binding["lock_reason"])
+                    if durable_binding["lock_reason"] is not None
+                    else None
+                    if sealed
+                    else "LEGACY_BINDING_UNAVAILABLE"
+                ),
+            )
             if service is None:
-                scoped = self.store.conversation_store(conversation_id)
                 durable = scoped.conversation_snapshot()
                 recovery_turn_id = scoped.recovery_turn_id()
                 active_turn = durable.get("active_turn")
@@ -145,6 +316,8 @@ class ConversationManager:
                         latest_event_id=int(durable["latest_event_id"]),
                         created_at=str(durable["created_at"]),
                         job_context=ConversationJobContext.model_validate(durable["job_context"]),
+                        binding=binding,
+                        availability=availability,
                     )
                 )
                 continue
@@ -160,6 +333,8 @@ class ConversationManager:
                     latest_event_id=snapshot.latest_event_id,
                     created_at=snapshot.created_at,
                     job_context=snapshot.job_context,
+                    binding=binding,
+                    availability=availability,
                 )
             )
         return ConversationListResponse(conversations=conversations)
@@ -177,8 +352,10 @@ class ConversationManager:
                 service = self._make_service(conversation_id)
                 self._services[conversation_id] = service
                 await service.start()
+                self._started_services.add(conversation_id)
             except Exception:
                 self._services.pop(conversation_id, None)
+                self._started_services.discard(conversation_id)
                 if service is not None:
                     await asyncio.gather(service.close(), return_exceptions=True)
                 self.store.discard_failed_conversation(conversation_id, actor_id=actor_id)
@@ -219,11 +396,13 @@ class ConversationManager:
                     service = self._make_service(conversation_id)
                     self._services[conversation_id] = service
                     await service.start()
+                    self._started_services.add(conversation_id)
                 return self._bound_snapshot(service, agent_summary), False
             try:
                 service = self._make_service(conversation_id)
                 self._services[conversation_id] = service
                 await service.start()
+                self._started_services.add(conversation_id)
                 provider_session_id, _ = await service.gateway.create_or_resume_conversation(None)
                 service.store.complete_provisioning(provider_session_id)
             except AmbiguousDeliveryError:
@@ -232,6 +411,7 @@ class ConversationManager:
                 service.store.lock_provisioning()
             except DefinitiveSessionCreationError as error:
                 self._services.pop(conversation_id, None)
+                self._started_services.discard(conversation_id)
                 if service is not None:
                     await asyncio.gather(service.close(), return_exceptions=True)
                 self.store.discard_provisioning_conversation(
@@ -271,8 +451,14 @@ class ConversationManager:
             service = self._services.get(conversation_id)
             if service is None:
                 service = self._make_service(conversation_id)
+                binding = service.store.binding()
+                if binding["creation_state"] != "ready":
+                    response = self._bound_snapshot(service, agent_summary)
+                    await service.close()
+                    return response
                 self._services[conversation_id] = service
                 await service.start()
+                self._started_services.add(conversation_id)
         return self._bound_snapshot(service, agent_summary)
 
     @staticmethod
@@ -306,6 +492,7 @@ class ConversationManager:
             service = self.get(conversation_id, owner_device_id=actor_id)
             self.store.archive_conversation(conversation_id, actor_id=actor_id)
             self._services.pop(conversation_id, None)
+            self._started_services.discard(conversation_id)
             await service.close()
 
     def get(

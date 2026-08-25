@@ -18,6 +18,7 @@ from jobos_api.documents import ArtifactPublishRequest
 from jobos_api.editable_documents import blank_content, default_settings
 from jobos_api.installation_profiles import (
     AnchoredRuntime,
+    ConnectedAgentRecord,
     InstallationProfileRecord,
     InstallationProfileRegistry,
     InstallationProfileRegistryData,
@@ -307,6 +308,34 @@ class PendingGateway:
 class PendingGatewayFactory:
     def create(self, conversation_id):
         return PendingGateway(conversation_id)
+
+
+class ReadyConnectedAgentRuntime:
+    async def inspect_connection(self, agent: ConnectedAgentRecord) -> dict[str, object]:
+        del agent
+        return {
+            "state": "connected",
+            "label": "Connected",
+            "provider_available": True,
+            "tools_available": True,
+            "retry_after_seconds": None,
+        }
+
+    async def list_models(self, agent: ConnectedAgentRecord) -> dict[str, object]:
+        return {
+            "live": True,
+            "models": [
+                {
+                    "model_id": agent.default_model_id,
+                    "display_name": agent.default_model_id,
+                    "reasoning_efforts": [agent.default_reasoning_effort],
+                }
+            ],
+        }
+
+    async def disconnect(self, agent: ConnectedAgentRecord) -> dict[str, object]:
+        del agent
+        return {"verified": True}
 
 
 def start_active_turn(client, conversation_id, *, headers=None, key="mcp-scope-active-turn"):
@@ -1120,6 +1149,7 @@ def test_provider_bound_mcp_publication_records_exactly_once_turn_attribution(
         artifact_gateway=artifact_gateway,
         state_store=state_store,
         agent_gateway_factory=PendingGatewayFactory(),
+        connected_agent_runtime=ReadyConnectedAgentRuntime(),
     )
     payload = {
         "document_key": "resume",
