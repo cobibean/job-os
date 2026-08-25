@@ -9,6 +9,7 @@ from jobos_api.connected_agent_auth import (
     AuthFlowError,
     CodexAuthFlowBroker,
     CodexConnectedAgentRuntime,
+    CodexCredentialVault,
     IsolationProof,
     RemovalProof,
     VaultStatus,
@@ -32,10 +33,15 @@ def anyio_backend() -> str:
 
 class FakeCodexClient:
     def __init__(
-        self, *, device_unavailable: bool = False, invalid_models: bool = False
+        self,
+        *,
+        device_unavailable: bool = False,
+        invalid_models: bool = False,
+        mcp_ready: bool = True,
     ) -> None:
         self.device_unavailable = device_unavailable
         self.invalid_models = invalid_models
+        self.mcp_ready = mcp_ready
         self.calls: list[tuple[str, object | None]] = []
         self.subscribers = []
         self.account: dict[str, object] | None = {
@@ -102,6 +108,14 @@ class FakeCodexClient:
                     },
                 ]
             }
+        if method == "mcpServerStatus/list":
+            resources = [{"uri": "jobos://capability-map"}] if self.mcp_ready else []
+            tools = (
+                {"jobos.test": {"name": "jobos.test", "inputSchema": {"type": "object"}}}
+                if self.mcp_ready
+                else {}
+            )
+            return {"data": [{"name": "jobos", "resources": resources, "tools": tools}]}
         raise AssertionError(f"unexpected method: {method}")
 
     async def complete_login(self, *, success: bool = True) -> None:
@@ -116,6 +130,10 @@ class FakeVault:
         self.removed = False
         self.isolation_error: AuthFlowError | None = None
         self.removal_error: AuthFlowError | None = None
+
+    @property
+    def tools_configured(self) -> bool:
+        return True
 
     async def inspect(self, vault_ref: str) -> VaultStatus:
         assert vault_ref.startswith("vault_ref_codex:")
@@ -307,6 +325,14 @@ async def test_runtime_models_are_live_and_disconnect_is_vault_verified(tmp_path
     agent = registry.load().connected_agents[0]
     runtime = CodexConnectedAgentRuntime(client, vault)
 
+    health = await runtime.inspect_connection(agent)
+    assert health["provider_available"] is True
+    assert health["tools_available"] is True
+    client.mcp_ready = False
+    unavailable_health = await runtime.inspect_connection(agent)
+    assert unavailable_health["provider_available"] is True
+    assert unavailable_health["tools_available"] is False
+    client.mcp_ready = True
     models = await runtime.list_models(agent)
     assert models == {
         "live": True,
@@ -409,3 +435,26 @@ async def test_invalid_model_catalog_after_login_cleans_up_credentials(tmp_path:
     assert failed.error_code == "AGENT_PROVIDER_UNAVAILABLE"
     assert vault.removed is True
     assert registry.load().connected_agents[0].lifecycle == "disconnected"
+
+
+@pytest.mark.anyio
+async def test_keyring_isolation_accepts_the_trusted_jobos_mcp_config(tmp_path: Path) -> None:
+    launcher = tmp_path / "jobos-mcp"
+    launcher.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    launcher.chmod(0o700)
+    vault = CodexCredentialVault(
+        FakeCodexClient(),
+        tmp_path / "codex-home",
+        mcp_command=launcher,
+        mcp_args=("--profile", "(FAKE)-profile"),
+    )
+
+    first = await vault.verify_isolation("vault_ref_codex:FAKE-jobos-test")
+    second = await vault.verify_isolation("vault_ref_codex:FAKE-jobos-test")
+
+    assert first.keyring_only is True
+    assert first.plaintext_credentials_absent is True
+    assert second == first
+    config = (tmp_path / "codex-home" / "config.toml").read_text(encoding="utf-8")
+    assert "[mcp_servers.jobos]" in config
+    assert str(launcher.resolve()) in config

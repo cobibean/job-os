@@ -810,6 +810,26 @@ def test_activity_report_is_idempotent_without_injecting_agent_chat_activity(tmp
     assert detail["label"] == "Reviewed listing"
 
 
+def test_mcp_audit_writes_require_trusted_active_turn_scope(tmp_path):
+    body = {
+        "label": "Uncorrelated activity",
+        "state": "completed",
+        "detail": {},
+        "origin": "mcp",
+        "idempotency_key": "uncorrelated-activity-1",
+    }
+    with TestClient(make_app(tmp_path)) as client:
+        uncorrelated = client.post("/v1/activity", headers=mcp_auth(), json=body)
+        untrusted = client.post("/v1/activity", headers=auth(), json=body)
+
+    assert uncorrelated.status_code == 422
+    assert uncorrelated.json()["code"] == "mcp_turn_required"
+    assert untrusted.status_code == 403
+    assert untrusted.json()["detail"] == (
+        "MCP operations require the trusted local MCP credential"
+    )
+
+
 @pytest.mark.parametrize(
     ("payload", "message"),
     [

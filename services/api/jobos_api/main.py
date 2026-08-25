@@ -14,7 +14,12 @@ from jobos_api.local_config import (
     settings_from_config,
 )
 from jobos_api.responses import ApiErrorResponse
-from jobos_api.settings import Settings, parse_device_credentials, parse_device_ids
+from jobos_api.settings import (
+    Settings,
+    parse_command_args,
+    parse_device_credentials,
+    parse_device_ids,
+)
 
 
 def settings_from_environment() -> Settings:
@@ -35,6 +40,10 @@ def settings_from_environment() -> Settings:
             updates["codex_home_path"] = Path(codex_home)
         if codex_timeout := os.environ.get("JOBOS_CODEX_REQUEST_TIMEOUT"):
             updates["codex_request_timeout"] = float(codex_timeout)
+        if codex_mcp_command := os.environ.get("JOBOS_CODEX_MCP_COMMAND"):
+            updates["codex_mcp_command"] = Path(codex_mcp_command)
+        if codex_mcp_args := os.environ.get("JOBOS_CODEX_MCP_ARGS_JSON"):
+            updates["codex_mcp_args"] = parse_command_args(codex_mcp_args)
         for environment_name, field_name in (
             ("JOBOS_CAREER_PROFILE_AGENT_ID", "career_profile_agent_id"),
             ("JOBOS_CAREER_PROFILE_AGENT_DISPLAY_NAME", "career_profile_agent_display_name"),
@@ -86,6 +95,10 @@ def settings_from_environment() -> Settings:
         ),
         codex_home_path=(Path(value) if (value := os.environ.get("JOBOS_CODEX_HOME")) else None),
         codex_request_timeout=float(os.environ.get("JOBOS_CODEX_REQUEST_TIMEOUT", "15")),
+        codex_mcp_command=(
+            Path(value) if (value := os.environ.get("JOBOS_CODEX_MCP_COMMAND")) else None
+        ),
+        codex_mcp_args=parse_command_args(os.environ.get("JOBOS_CODEX_MCP_ARGS_JSON")),
         career_profile_enabled=os.environ.get("JOBOS_CAREER_PROFILE_ENABLED") == "1",
         career_profile_owner_device_ids=parse_device_ids(
             os.environ.get("JOBOS_CAREER_PROFILE_OWNER_DEVICE_IDS_JSON")

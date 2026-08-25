@@ -7,6 +7,7 @@ import re
 import sqlite3
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager, contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from functools import wraps
@@ -145,6 +146,7 @@ from jobos_api.career_profile_portability import (
     CareerProfileRestoreRequest,
     CareerProfileRestoreResult,
 )
+from jobos_api.codex_adapter import CodexGatewayFactory
 from jobos_api.codex_runtime import CodexAppServerProcess, CodexRuntimeError
 from jobos_api.composition import create_job_services
 from jobos_api.connected_agent_auth import (
@@ -621,8 +623,16 @@ def create_app(
             settings.codex_app_server_path,
             settings.resolved_codex_home(),
             request_timeout=settings.codex_request_timeout,
+            mcp_command=settings.codex_mcp_command,
+            mcp_args=settings.codex_mcp_args,
+            mcp_device_id=settings.device_id,
         )
-        codex_vault = CodexCredentialVault(codex_client, settings.resolved_codex_home())
+        codex_vault = CodexCredentialVault(
+            codex_client,
+            settings.resolved_codex_home(),
+            mcp_command=settings.codex_mcp_command,
+            mcp_args=settings.codex_mcp_args,
+        )
         if selected_connected_agent_runtime is None:
             selected_connected_agent_runtime = CodexConnectedAgentRuntime(
                 codex_client, codex_vault
@@ -639,6 +649,7 @@ def create_app(
     )
     profile_fence_enabled = settings.installation_registry_path.is_file()
     hermes_agent_ids: set[str] = set()
+    codex_agent_ids: set[str] = set()
     if profile_fence_enabled:
         migration_runtime = {
             "job_provider": settings.job_provider,
@@ -653,6 +664,9 @@ def create_app(
         registry_data = installation_profiles.load_or_bootstrap(migration_runtime)
         hermes_agent_ids = {
             agent.id for agent in registry_data.connected_agents if agent.provider == "hermes"
+        }
+        codex_agent_ids = {
+            agent.id for agent in registry_data.connected_agents if agent.provider == "codex"
         }
         if (
             registry_data.connected_agent_migration is not None
@@ -715,11 +729,27 @@ def create_app(
         )
         configured_gateway = True
     selected_gateway_factory = gateway_factory or OfflineAgentGatewayFactory()
+    codex_gateway_factory = (
+        CodexGatewayFactory(
+            codex_client,
+            cwd=settings.resolved_codex_home() / "workspace",
+        )
+        if codex_client is not None
+        else None
+    )
+    if codex_gateway_factory is not None:
+        configured_gateway = True
+    runtime_adapters: dict[Any, AgentGatewayFactory] = {
+        "hermes": selected_gateway_factory,
+        **{("hermes", agent_id): selected_gateway_factory for agent_id in hermes_agent_ids},
+    }
+    if codex_gateway_factory is not None:
+        runtime_adapters["codex"] = codex_gateway_factory
+        runtime_adapters.update(
+            {("codex", agent_id): codex_gateway_factory for agent_id in codex_agent_ids}
+        )
     runtime_router = AgentRuntimeRouter(
-        {
-            "hermes": selected_gateway_factory,
-            **{("hermes", agent_id): selected_gateway_factory for agent_id in hermes_agent_ids},
-        },
+        runtime_adapters,
         profile_id=settings.installation_profile_id,
     )
     conversation_manager = ConversationManager(
@@ -1310,6 +1340,10 @@ def create_app(
         except ConnectedAgentAuthorizationError as error:
             raise HTTPException(status_code=403, detail=str(error)) from error
 
+    mcp_mutation_scope: ContextVar[dict[str, object] | None] = ContextVar(
+        "jobos_mcp_mutation_scope", default=None
+    )
+
     @app.middleware("http")
     async def enforce_mcp_conversation_job_scope(
         request: Request, call_next: Callable[[Request], Any]
@@ -1340,7 +1374,11 @@ def create_app(
         conversation_id = request.query_params.get("conversation_id")
         turn_id = request.query_params.get("turn_id")
         if conversation_id is None and turn_id is None:
-            if path != "/v1/browser/commands":
+            # Career Profile collaboration uses its own connected-agent token and
+            # revisioned audit model; it is not a conversation-turn capability.
+            if path == "/v1/career-profile/consumer-projection" or path.startswith(
+                "/v1/career-profile/agent-"
+            ):
                 return await call_next(request)
             return error_response(
                 request,
@@ -1433,7 +1471,20 @@ def create_app(
                         message="This agent session is attached to a different job",
                         retryable=False,
                     )
-            return await call_next(request)
+            binding = scoped_service.store.binding()
+            scope_token = mcp_mutation_scope.set(
+                {
+                    "profile_id": settings.installation_profile_id,
+                    "conversation_id": conversation_id,
+                    "turn_id": turn_id,
+                    "connected_agent_id": binding.get("connected_agent_id"),
+                    "provider": binding.get("provider"),
+                }
+            )
+            try:
+                return await call_next(request)
+            finally:
+                mcp_mutation_scope.reset(scope_token)
 
     def mutation_hash(command_name: str, payload: dict[str, object]) -> str:
         return hashlib.sha256(
@@ -1443,6 +1494,9 @@ def create_app(
                 sort_keys=True,
             ).encode()
         ).hexdigest()
+
+    def scoped_mcp_detail(origin: str) -> dict[str, object]:
+        return dict(mcp_mutation_scope.get() or {}) if origin == "mcp" else {}
 
     def mutation_replay(
         *,
@@ -1493,6 +1547,7 @@ def create_app(
                 "state": outcome,
                 "origin": origin,
                 "outcome": outcome,
+                **scoped_mcp_detail(origin),
                 **(detail or {}),
             },
             job_id=job_id,
@@ -1528,6 +1583,7 @@ def create_app(
                 "state": "completed",
                 "origin": origin,
                 "outcome": "completed",
+                **scoped_mcp_detail(origin),
                 **(detail or {}),
             },
             job_id=job_id,
@@ -1545,7 +1601,12 @@ def create_app(
     ) -> None:
         if origin != "mcp" or not idempotency_key:
             return
-        audit_detail = {"label": label, "origin": "mcp", **(detail or {})}
+        audit_detail = {
+            "label": label,
+            "origin": "mcp",
+            **scoped_mcp_detail("mcp"),
+            **(detail or {}),
+        }
         request_hash = mutation_hash(command_name, audit_detail)
         try:
             state_store.record_mutation_result(
@@ -1717,6 +1778,7 @@ def create_app(
                     "origin": "mcp",
                     "outcome": result.outcome,
                     "error": result.error.model_dump() if result.error else None,
+                    **scoped_mcp_detail("mcp"),
                 },
             )
 
@@ -1757,6 +1819,7 @@ def create_app(
                         "origin": command.origin,
                         "outcome": result.outcome,
                         "error": result.error.model_dump() if result.error else None,
+                        **scoped_mcp_detail(command.origin),
                     },
                 )
             audit_non_durable_command(result)
@@ -5143,7 +5206,9 @@ def create_app(
     def report_activity(
         command: ActivityReportRequest,
         identity: Annotated[DeviceIdentity, Depends(authenticated_device)],
+        mcp_token: Annotated[str | None, Header(alias="X-JobOS-MCP-Token")] = None,
     ) -> ActivityReportResponse:
+        require_trusted_mcp(identity, command.origin, mcp_token)
         request_hash = mutation_hash(
             "activity.report",
             {
@@ -5181,6 +5246,7 @@ def create_app(
                 "state": command.state,
                 "origin": "mcp",
                 "outcome": command.state,
+                **scoped_mcp_detail("mcp"),
             },
             inject_event_id=True,
         )

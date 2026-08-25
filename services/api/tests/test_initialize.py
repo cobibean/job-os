@@ -179,6 +179,25 @@ def test_config_backed_settings_honor_explicit_career_profile_activation(tmp_pat
     assert configured.career_profile_enabled is True
 
 
+def test_config_backed_settings_preserve_codex_mcp_args_without_env_override(
+    tmp_path, monkeypatch
+):
+    initialize_jobos(tmp_path)
+    config = tmp_path / "config.json"
+    configured = settings_from_config(config).model_copy(
+        update={"codex_mcp_args": ("--runtime", "(FAKE)-runtime.json")}
+    )
+    monkeypatch.delenv("JOBOS_DEVICE_TOKEN", raising=False)
+    monkeypatch.delenv("JOBOS_MCP_TOKEN", raising=False)
+    monkeypatch.delenv("JOBOS_CODEX_MCP_ARGS_JSON", raising=False)
+    monkeypatch.setenv("JOBOS_CONFIG_PATH", str(config))
+    monkeypatch.setattr("jobos_api.main.settings_from_config", lambda _path: configured)
+
+    loaded = settings_from_environment()
+
+    assert loaded.codex_mcp_args == ("--runtime", "(FAKE)-runtime.json")
+
+
 def test_file_credentials_reject_symlinks(tmp_path):
     target = tmp_path / "outside.json"
     target.write_text('{"deviceToken":"device","mcpToken":"mcp"}', encoding="utf-8")

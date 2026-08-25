@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
+import os
 import stat
+import tomllib
 from pathlib import Path
 
 import pytest
@@ -50,6 +52,88 @@ def test_prepare_codex_home_rejects_standalone_plaintext_and_symlink(tmp_path: P
         prepare_codex_home(alias, standalone_home=standalone)
 
 
+def test_prepare_codex_home_configures_only_the_trusted_jobos_mcp(tmp_path: Path) -> None:
+    codex_home = tmp_path / "jobos" / "codex-home"
+    launcher = tmp_path / "jobos-mcp-launcher"
+    launcher.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    launcher.chmod(0o700)
+
+    prepare_codex_home(codex_home, standalone_home=tmp_path / "standalone")
+    prepare_codex_home(
+        codex_home,
+        standalone_home=tmp_path / "standalone",
+        mcp_command=launcher,
+        mcp_args=("--runtime", "(FAKE)-runtime.json"),
+    )
+
+    config = (codex_home / "config.toml").read_text(encoding="utf-8")
+    assert config.startswith(CODEX_CONFIG)
+    assert "[mcp_servers.jobos]" in config
+    assert f'command = "{launcher}"' in config
+    assert 'args = ["--runtime", "(FAKE)-runtime.json"]' in config
+    assert "token" not in config.lower()
+
+    with pytest.raises(CodexRuntimeError, match="tools unavailable"):
+        prepare_codex_home(
+            tmp_path / "missing-home",
+            standalone_home=tmp_path / "standalone",
+            mcp_command=tmp_path / "missing-launcher",
+        )
+
+
+def test_prepare_codex_home_updates_previous_jobos_owned_mcp_config(tmp_path: Path) -> None:
+    codex_home = tmp_path / "codex-home"
+    old_launcher = tmp_path / "old-launcher"
+    new_launcher = tmp_path / "new-launcher"
+    for launcher in (old_launcher, new_launcher):
+        launcher.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+        launcher.chmod(0o700)
+
+    prepare_codex_home(codex_home, mcp_command=old_launcher, mcp_args=("old",))
+    prepare_codex_home(codex_home, mcp_command=new_launcher, mcp_args=("new",))
+
+    config = (codex_home / "config.toml").read_text(encoding="utf-8")
+    assert str(new_launcher) in config
+    assert str(old_launcher) not in config
+    assert 'args = ["new"]' in config
+
+
+def test_prepare_codex_home_preserves_live_config_when_atomic_replace_fails(
+    tmp_path: Path, monkeypatch
+) -> None:
+    codex_home = tmp_path / "codex-home"
+    old_launcher = tmp_path / "old-launcher"
+    new_launcher = tmp_path / "new-launcher"
+    for launcher in (old_launcher, new_launcher):
+        launcher.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+        launcher.chmod(0o700)
+    prepare_codex_home(codex_home, mcp_command=old_launcher, mcp_args=("old",))
+    original = (codex_home / "config.toml").read_bytes()
+
+    def fail_replace(_source, _destination) -> None:
+        raise OSError("(FAKE) interrupted replacement")
+
+    monkeypatch.setattr(os, "replace", fail_replace)
+    with pytest.raises(CodexRuntimeError, match="configuration is unavailable"):
+        prepare_codex_home(codex_home, mcp_command=new_launcher, mcp_args=("new",))
+
+    assert (codex_home / "config.toml").read_bytes() == original
+    assert list(codex_home.glob(".config.toml.*")) == []
+
+
+def test_prepare_codex_home_writes_valid_unicode_toml(tmp_path: Path) -> None:
+    codex_home = tmp_path / "codex-home"
+    launcher = tmp_path / "jobos-\U0001F525-launcher"
+    launcher.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    launcher.chmod(0o700)
+
+    prepare_codex_home(codex_home, mcp_command=launcher, mcp_args=("--label", "\U0001F525"))
+
+    parsed = tomllib.loads((codex_home / "config.toml").read_text(encoding="utf-8"))
+    assert parsed["mcp_servers"]["jobos"]["command"] == str(launcher)
+    assert parsed["mcp_servers"]["jobos"]["args"] == ["--label", "\U0001F525"]
+
+
 @pytest.mark.anyio
 async def test_stdio_supervisor_initializes_and_uses_dedicated_home(tmp_path: Path) -> None:
     requests_path = tmp_path / "requests.jsonl"
@@ -65,7 +149,11 @@ output = Path({str(requests_path)!r})
 for line in sys.stdin:
     message = json.loads(line)
     with output.open("a", encoding="utf-8") as stream:
-        record = {{"message": message, "codex_home": os.environ["CODEX_HOME"]}}
+        record = {{
+            "message": message,
+            "codex_home": os.environ["CODEX_HOME"],
+            "device_id": os.environ.get("JOBOS_DEVICE_ID"),
+        }}
         stream.write(json.dumps(record) + "\\n")
     if "id" not in message:
         continue
@@ -84,6 +172,7 @@ for line in sys.stdin:
         codex_home,
         request_timeout=2,
         verify_binary=lambda _: None,
+        mcp_device_id="(FAKE)-device",
     )
     try:
         await client.start()
@@ -98,6 +187,7 @@ for line in sys.stdin:
         "model/list",
     ]
     assert {record["codex_home"] for record in records} == {str(codex_home)}
+    assert {record["device_id"] for record in records} == {"(FAKE)-device"}
 
 
 @pytest.mark.anyio
@@ -159,7 +249,7 @@ for line in sys.stdin:
     client = CodexAppServerProcess(
         server,
         tmp_path / "codex-home",
-        request_timeout=0.25,
+        request_timeout=1.0,
         verify_binary=lambda _: None,
     )
     try:

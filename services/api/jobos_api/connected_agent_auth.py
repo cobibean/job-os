@@ -13,10 +13,11 @@ from pydantic import BaseModel, ConfigDict, Field
 from .codex_runtime import (
     CODEX_APP_SERVER_RECEIPT_ID,
     CODEX_APP_SERVER_VERSION,
-    CODEX_CONFIG,
     CodexRpcClient,
     CodexRpcError,
     CodexRuntimeError,
+    codex_config,
+    jobos_mcp_ready,
     prepare_codex_home,
 )
 from .installation_profiles import (
@@ -88,6 +89,9 @@ class AuthFlowBroker(Protocol):
 
 
 class CredentialVault(Protocol):
+    @property
+    def tools_configured(self) -> bool: ...
+
     async def inspect(self, vault_ref: str) -> VaultStatus: ...
 
     async def verify_isolation(self, vault_ref: str) -> IsolationProof: ...
@@ -159,9 +163,29 @@ def _namespace_from_reference(reference: str) -> str:
 class CodexCredentialVault:
     """Verifies Codex-owned Keychain state without reading raw credentials."""
 
-    def __init__(self, client: CodexRpcClient, codex_home: Path) -> None:
+    def __init__(
+        self,
+        client: CodexRpcClient,
+        codex_home: Path,
+        *,
+        mcp_command: Path | None = None,
+        mcp_args: tuple[str, ...] = (),
+    ) -> None:
         self.client = client
         self.codex_home = codex_home
+        self.mcp_command = mcp_command
+        self.mcp_args = mcp_args
+
+    @property
+    def tools_configured(self) -> bool:
+        if self.mcp_command is None:
+            return False
+        try:
+            return "[mcp_servers.jobos]" in codex_config(
+                self.mcp_command, self.mcp_args
+            )
+        except CodexRuntimeError:
+            return False
 
     async def inspect(self, vault_ref: str) -> VaultStatus:
         _namespace_from_reference(vault_ref)
@@ -176,7 +200,11 @@ class CodexCredentialVault:
     async def verify_isolation(self, vault_ref: str) -> IsolationProof:
         _namespace_from_reference(vault_ref)
         try:
-            prepare_codex_home(self.codex_home)
+            prepare_codex_home(
+                self.codex_home,
+                mcp_command=self.mcp_command,
+                mcp_args=self.mcp_args,
+            )
             config = (self.codex_home / "config.toml").read_text(encoding="utf-8")
             plaintext_absent = not (self.codex_home / "auth.json").exists()
         except (OSError, CodexRuntimeError) as error:
@@ -185,7 +213,7 @@ class CodexCredentialVault:
             ) from error
         proof = IsolationProof(
             isolated=True,
-            keyring_only=config == CODEX_CONFIG,
+            keyring_only=config == codex_config(self.mcp_command, self.mcp_args),
             plaintext_credentials_absent=plaintext_absent,
             runtime_receipt_id=CODEX_APP_SERVER_RECEIPT_ID,
         )
@@ -464,7 +492,7 @@ class CodexAuthFlowBroker:
 
 
 class CodexConnectedAgentRuntime:
-    """Phase 4 runtime health/models/logout control; chat sessions arrive in Phase 5."""
+    """Codex runtime health, MCP readiness, models, and logout control."""
 
     def __init__(self, client: CodexRpcClient, vault: CredentialVault) -> None:
         self.client = client
@@ -486,12 +514,21 @@ class CodexConnectedAgentRuntime:
             state, label = "sign_in_required", "Sign-in required"
         else:
             state, label = "connected", "Connected"
+        tools_available = False
+        if status.available and status.authenticated and self.vault.tools_configured:
+            try:
+                await self.client.start()
+                result = await self.client.request(
+                    "mcpServerStatus/list", {"detail": "full"}
+                )
+                tools_available = jobos_mcp_ready(result)
+            except (CodexRuntimeError, CodexRpcError, AuthFlowError):
+                tools_available = False
         return {
             "state": state,
             "label": label,
             "provider_available": status.available and status.authenticated,
-            # Phase 5 owns MCP/capability readiness and Codex chat acceptance.
-            "tools_available": False,
+            "tools_available": tools_available,
             "retry_after_seconds": None,
         }
 
