@@ -43,6 +43,8 @@ def runtime_mapping(tmp_path: Path) -> dict[str, object]:
         "artifact_roots": [str(tmp_path / "job-hunter/resume/exports")],
         "hermes_dashboard_url": "ws://127.0.0.1:9119/api/ws",
         "hermes_job_hunter_cwd": str(tmp_path / "job-hunter"),
+        "hermes_default_model_id": "gpt-5.6-sol-900k",
+        "hermes_default_reasoning_effort": "medium",
         "device_id": "mini-device",
         "remote_device_ids": [],
         "host": "127.0.0.1",
@@ -61,6 +63,8 @@ def local_runtime_mapping(tmp_path: Path) -> dict[str, object]:
             "artifact_roots": [],
             "hermes_dashboard_url": None,
             "hermes_job_hunter_cwd": None,
+            "hermes_default_model_id": None,
+            "hermes_default_reasoning_effort": None,
         }
     )
     return value
@@ -313,6 +317,8 @@ def test_service_environment_and_uvicorn_command_are_fixed_and_loopback_only(tmp
         "JOBOS_HERMES_DASHBOARD_URL": "ws://127.0.0.1:9119/api/ws",
         "JOBOS_HERMES_DASHBOARD_TOKEN": "hermes-secret-value",
         "JOBOS_HERMES_JOB_HUNTER_CWD": str(tmp_path / "job-hunter"),
+        "JOBOS_HERMES_DEFAULT_MODEL_ID": "gpt-5.6-sol-900k",
+        "JOBOS_HERMES_DEFAULT_REASONING_EFFORT": "medium",
         "JOBOS_CAREER_PROFILE_ENABLED": "1",
         "JOBOS_CAREER_PROFILE_AGENT_ID": "trusted-local-mcp",
         "JOBOS_CAREER_PROFILE_AGENT_DISPLAY_NAME": "JobOS Agent",

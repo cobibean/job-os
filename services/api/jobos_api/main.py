@@ -89,6 +89,10 @@ def settings_from_environment() -> Settings:
         hermes_dashboard_url=hermes_url,
         hermes_dashboard_token=hermes_token,
         hermes_job_hunter_cwd=Path(hermes_cwd) if hermes_cwd else None,
+        hermes_default_model_id=os.environ.get("JOBOS_HERMES_DEFAULT_MODEL_ID"),
+        hermes_default_reasoning_effort=os.environ.get(
+            "JOBOS_HERMES_DEFAULT_REASONING_EFFORT"
+        ),
         hermes_request_timeout=float(os.environ.get("JOBOS_HERMES_REQUEST_TIMEOUT", "5")),
         codex_app_server_path=(
             Path(value) if (value := os.environ.get("JOBOS_CODEX_APP_SERVER_PATH")) else None

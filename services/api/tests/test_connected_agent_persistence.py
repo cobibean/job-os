@@ -447,6 +447,40 @@ def test_offline_v1_v31_migration_is_exact_idempotent_and_unknown_model_stays_lo
     assert registry.resume_connected_agent_migration(runtime) == completed
 
 
+def test_completed_provider_offline_migration_accepts_late_hermes_runtime_configuration(
+    tmp_path,
+):
+    root = tmp_path / "installation"
+    runtime = anchored_runtime(root)
+    JobOsStateStore(runtime.state_db_path).initialize(installation_profile_id=PROFILE_A)
+    registry = InstallationProfileRegistry(root / "installation-profiles.json")
+    registry.write(registry_data(root, runtime).model_copy(update={"schema_version": 1}))
+    registry.load_or_bootstrap(runtime, now=NOW)
+
+    completed = registry.resume_connected_agent_migration(runtime)
+    assert completed.connected_agent_migration is not None
+    assert completed.connected_agents[0].lifecycle == "disconnected"
+    assert registry.legacy_hermes_configuration_required() is True
+
+    repaired = registry.apply_legacy_hermes_configuration(
+        endpoint_url="http://127.0.0.1:9120",
+        default_model_id="gpt-5.6-sol-900k",
+        default_reasoning_effort="medium",
+        now=NOW,
+    )
+
+    assert repaired.lifecycle == "connected"
+    assert repaired.connection_config is not None
+    assert repaired.connection_config.model_dump() == {
+        "endpoint_url": "http://127.0.0.1:9120",
+        "runtime_profile": None,
+    }
+    assert repaired.disconnected_at is None
+    assert repaired.default_model_id == "gpt-5.6-sol-900k"
+    assert repaired.default_reasoning_effort == "medium"
+    assert registry.legacy_hermes_configuration_required() is False
+
+
 def test_completed_legacy_migration_cannot_reconnect_disconnected_agent_on_restart(tmp_path):
     root = tmp_path / "installation"
     runtime = anchored_runtime(root)
@@ -465,6 +499,7 @@ def test_completed_legacy_migration_cannot_reconnect_disconnected_agent_on_resta
         now=NOW,
     )
     assert disconnected.lifecycle == "disconnected"
+    assert registry.legacy_hermes_configuration_required() is False
 
     with pytest.raises(InstallationProfileConflict, match="already complete"):
         registry.apply_legacy_hermes_configuration(endpoint_url="http://127.0.0.1:9120")
@@ -474,6 +509,33 @@ def test_completed_legacy_migration_cannot_reconnect_disconnected_agent_on_resta
     )
     assert migrated.lifecycle == "disconnected"
     assert migrated.connection_config is None
+
+
+def test_pending_legacy_migration_cannot_reconnect_explicitly_disconnected_agent(tmp_path):
+    root = tmp_path / "installation"
+    runtime = anchored_runtime(root)
+    JobOsStateStore(runtime.state_db_path).initialize(installation_profile_id=PROFILE_A)
+    registry = InstallationProfileRegistry(root / "installation-profiles.json")
+    registry.write(registry_data(root, runtime).model_copy(update={"schema_version": 1}))
+    pending = registry.load_or_bootstrap(runtime, now=NOW)
+    journal = pending.connected_agent_migration
+    assert journal is not None
+    assert {item.status for item in journal.profiles} == {"pending"}
+
+    disconnected = registry.disconnect_connected_agent(
+        journal.connected_agent_id,
+        expected_registry_revision=pending.registry_revision,
+        idempotency_key="disconnect-during-migration",
+        now=NOW,
+    )
+
+    assert disconnected.lifecycle == "disconnected"
+    assert disconnected.updated_at > disconnected.created_at
+    persisted = registry.load()
+    registry.write(persisted.model_copy(update={"idempotency_replays": ()}))
+    assert registry.legacy_hermes_configuration_required() is False
+    with pytest.raises(InstallationProfileConflict, match="target was modified"):
+        registry.apply_legacy_hermes_configuration(endpoint_url="http://127.0.0.1:9120")
 
 
 def test_known_legacy_defaults_seal_exact_model_and_binding_is_immutable(tmp_path):

@@ -80,6 +80,10 @@ class Settings(BaseModel):
     hermes_dashboard_url: str | None = None
     hermes_dashboard_token: str | None = Field(default=None, min_length=16, repr=False)
     hermes_job_hunter_cwd: Path | None = None
+    hermes_default_model_id: str | None = Field(default=None, min_length=1, max_length=256)
+    hermes_default_reasoning_effort: str | None = Field(
+        default=None, min_length=1, max_length=64
+    )
     hermes_request_timeout: float = Field(default=5.0, gt=0, le=30)
     codex_app_server_path: Path | None = None
     codex_home_path: Path | None = None
@@ -141,6 +145,10 @@ class Settings(BaseModel):
 
     @model_validator(mode="after")
     def validate_unique_device_credentials(self) -> "Settings":
+        if (self.hermes_default_model_id is None) != (
+            self.hermes_default_reasoning_effort is None
+        ):
+            raise ValueError("Hermes defaults require model and reasoning effort")
         device_ids = [
             self.device_id,
             MCP_RUNTIME_DEVICE_ID,
