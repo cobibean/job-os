@@ -340,6 +340,8 @@ def test_version_and_openapi_describe_the_shared_workspace_contract(tmp_path):
         "/v1/connected-agents/{agent_id}/models",
         "/v1/connected-agents/{agent_id}/disconnect-impact",
         "/v1/connected-agents/{agent_id}/disconnect",
+        "/v1/connected-agents/{agent_id}/auth/device-code",
+        "/v1/connected-agent-auth/{transaction_id}",
         "/v1/installation-profiles/{profile_id}/default-agent",
         "/v1/conversations",
         "/v1/conversations/current",

@@ -3900,6 +3900,44 @@ export type RetryTurnRequest = {
 };
 
 /**
+ * SafeAuthTransaction
+ */
+export type SafeAuthTransaction = {
+    /**
+     * Agent Id
+     */
+    agent_id: string;
+    /**
+     * Error Code
+     */
+    error_code?: string | null;
+    /**
+     * Expires At
+     */
+    expires_at: string;
+    /**
+     * Method
+     */
+    method: 'device_code' | 'host_callback';
+    /**
+     * Status
+     */
+    status: 'login_pending' | 'connected' | 'cancelled' | 'expired' | 'failed' | 'cleanup_required';
+    /**
+     * Transaction Id
+     */
+    transaction_id: string;
+    /**
+     * User Code
+     */
+    user_code?: string | null;
+    /**
+     * Verification Url
+     */
+    verification_url?: string | null;
+};
+
+/**
  * SaveEditableDocumentRequest
  */
 export type SaveEditableDocumentRequest = {
@@ -4085,6 +4123,20 @@ export type SourceEvidenceRecord = {
      * Sha256
      */
     sha256: string;
+};
+
+/**
+ * StartAuthRequest
+ */
+export type StartAuthRequest = {
+    /**
+     * Expected Account Fingerprint
+     */
+    expected_account_fingerprint?: string | null;
+    /**
+     * Mode
+     */
+    mode: 'connect' | 'reconnect' | 'replace';
 };
 
 /**
@@ -6806,6 +6858,110 @@ export type CareerProfileWorkArrangementRestoreV1CareerProfileWorkArrangementRes
 
 export type CareerProfileWorkArrangementRestoreV1CareerProfileWorkArrangementRestorePostResponse = CareerProfileWorkArrangementRestoreV1CareerProfileWorkArrangementRestorePostResponses[keyof CareerProfileWorkArrangementRestoreV1CareerProfileWorkArrangementRestorePostResponses];
 
+export type ConnectedAgentAuthCancelV1ConnectedAgentAuthTransactionIdDeleteData = {
+    body?: never;
+    headers?: {
+        /**
+         * X-Jobos-Agent-Id
+         */
+        'X-JobOS-Agent-Id'?: string | null;
+        /**
+         * X-Jobos-Agent-Token
+         */
+        'X-JobOS-Agent-Token'?: string | null;
+        /**
+         * X-Jobos-Mcp-Token
+         */
+        'X-JobOS-MCP-Token'?: string | null;
+    };
+    path: {
+        /**
+         * Transaction Id
+         */
+        transaction_id: string;
+    };
+    query?: never;
+    url: '/v1/connected-agent-auth/{transaction_id}';
+};
+
+export type ConnectedAgentAuthCancelV1ConnectedAgentAuthTransactionIdDeleteErrors = {
+    /**
+     * Device authentication required
+     */
+    401: ApiErrorResponse;
+    /**
+     * Request validation failed
+     */
+    422: ApiErrorResponse;
+    /**
+     * Internal server error
+     */
+    500: ApiErrorResponse;
+};
+
+export type ConnectedAgentAuthCancelV1ConnectedAgentAuthTransactionIdDeleteError = ConnectedAgentAuthCancelV1ConnectedAgentAuthTransactionIdDeleteErrors[keyof ConnectedAgentAuthCancelV1ConnectedAgentAuthTransactionIdDeleteErrors];
+
+export type ConnectedAgentAuthCancelV1ConnectedAgentAuthTransactionIdDeleteResponses = {
+    /**
+     * Successful Response
+     */
+    200: SafeAuthTransaction;
+};
+
+export type ConnectedAgentAuthCancelV1ConnectedAgentAuthTransactionIdDeleteResponse = ConnectedAgentAuthCancelV1ConnectedAgentAuthTransactionIdDeleteResponses[keyof ConnectedAgentAuthCancelV1ConnectedAgentAuthTransactionIdDeleteResponses];
+
+export type ConnectedAgentAuthReadV1ConnectedAgentAuthTransactionIdGetData = {
+    body?: never;
+    headers?: {
+        /**
+         * X-Jobos-Agent-Id
+         */
+        'X-JobOS-Agent-Id'?: string | null;
+        /**
+         * X-Jobos-Agent-Token
+         */
+        'X-JobOS-Agent-Token'?: string | null;
+        /**
+         * X-Jobos-Mcp-Token
+         */
+        'X-JobOS-MCP-Token'?: string | null;
+    };
+    path: {
+        /**
+         * Transaction Id
+         */
+        transaction_id: string;
+    };
+    query?: never;
+    url: '/v1/connected-agent-auth/{transaction_id}';
+};
+
+export type ConnectedAgentAuthReadV1ConnectedAgentAuthTransactionIdGetErrors = {
+    /**
+     * Device authentication required
+     */
+    401: ApiErrorResponse;
+    /**
+     * Request validation failed
+     */
+    422: ApiErrorResponse;
+    /**
+     * Internal server error
+     */
+    500: ApiErrorResponse;
+};
+
+export type ConnectedAgentAuthReadV1ConnectedAgentAuthTransactionIdGetError = ConnectedAgentAuthReadV1ConnectedAgentAuthTransactionIdGetErrors[keyof ConnectedAgentAuthReadV1ConnectedAgentAuthTransactionIdGetErrors];
+
+export type ConnectedAgentAuthReadV1ConnectedAgentAuthTransactionIdGetResponses = {
+    /**
+     * Successful Response
+     */
+    200: SafeAuthTransaction;
+};
+
+export type ConnectedAgentAuthReadV1ConnectedAgentAuthTransactionIdGetResponse = ConnectedAgentAuthReadV1ConnectedAgentAuthTransactionIdGetResponses[keyof ConnectedAgentAuthReadV1ConnectedAgentAuthTransactionIdGetResponses];
+
 export type ConnectedAgentsListV1ConnectedAgentsGetData = {
     body?: never;
     headers?: {
@@ -6987,6 +7143,58 @@ export type ConnectedAgentUpdateV1ConnectedAgentsAgentIdPatchResponses = {
 };
 
 export type ConnectedAgentUpdateV1ConnectedAgentsAgentIdPatchResponse = ConnectedAgentUpdateV1ConnectedAgentsAgentIdPatchResponses[keyof ConnectedAgentUpdateV1ConnectedAgentsAgentIdPatchResponses];
+
+export type ConnectedAgentAuthStartV1ConnectedAgentsAgentIdAuthDeviceCodePostData = {
+    body: StartAuthRequest;
+    headers?: {
+        /**
+         * X-Jobos-Agent-Id
+         */
+        'X-JobOS-Agent-Id'?: string | null;
+        /**
+         * X-Jobos-Agent-Token
+         */
+        'X-JobOS-Agent-Token'?: string | null;
+        /**
+         * X-Jobos-Mcp-Token
+         */
+        'X-JobOS-MCP-Token'?: string | null;
+    };
+    path: {
+        /**
+         * Agent Id
+         */
+        agent_id: string;
+    };
+    query?: never;
+    url: '/v1/connected-agents/{agent_id}/auth/device-code';
+};
+
+export type ConnectedAgentAuthStartV1ConnectedAgentsAgentIdAuthDeviceCodePostErrors = {
+    /**
+     * Device authentication required
+     */
+    401: ApiErrorResponse;
+    /**
+     * Request validation failed
+     */
+    422: ApiErrorResponse;
+    /**
+     * Internal server error
+     */
+    500: ApiErrorResponse;
+};
+
+export type ConnectedAgentAuthStartV1ConnectedAgentsAgentIdAuthDeviceCodePostError = ConnectedAgentAuthStartV1ConnectedAgentsAgentIdAuthDeviceCodePostErrors[keyof ConnectedAgentAuthStartV1ConnectedAgentsAgentIdAuthDeviceCodePostErrors];
+
+export type ConnectedAgentAuthStartV1ConnectedAgentsAgentIdAuthDeviceCodePostResponses = {
+    /**
+     * Successful Response
+     */
+    200: SafeAuthTransaction;
+};
+
+export type ConnectedAgentAuthStartV1ConnectedAgentsAgentIdAuthDeviceCodePostResponse = ConnectedAgentAuthStartV1ConnectedAgentsAgentIdAuthDeviceCodePostResponses[keyof ConnectedAgentAuthStartV1ConnectedAgentsAgentIdAuthDeviceCodePostResponses];
 
 export type ConnectedAgentDisconnectV1ConnectedAgentsAgentIdDisconnectPostData = {
     body: DisconnectConnectedAgentRequest;

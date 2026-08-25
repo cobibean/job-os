@@ -145,7 +145,17 @@ from jobos_api.career_profile_portability import (
     CareerProfileRestoreRequest,
     CareerProfileRestoreResult,
 )
+from jobos_api.codex_runtime import CodexAppServerProcess, CodexRuntimeError
 from jobos_api.composition import create_job_services
+from jobos_api.connected_agent_auth import (
+    AuthFlowBroker,
+    AuthFlowError,
+    CodexAuthFlowBroker,
+    CodexConnectedAgentRuntime,
+    CodexCredentialVault,
+    SafeAuthTransaction,
+    StartAuthRequest,
+)
 from jobos_api.connected_agents import (
     ConnectedAgentConflict,
     ConnectedAgentImpactResponse,
@@ -566,6 +576,7 @@ def create_app(
     capability_broker: CapabilityBroker | None = None,
     state_store: JobOsStateStore | None = None,
     connected_agent_runtime: ConnectedAgentRuntimeControl | None = None,
+    connected_agent_auth_broker: AuthFlowBroker | None = None,
 ) -> FastAPI:
     state_store = state_store or JobOsStateStore(settings.state_db_path)
     career_profiles = CareerProfileStore(settings.state_db_path)
@@ -602,9 +613,27 @@ def create_app(
         settings.resolved_local_artifact_root()
     )
     installation_profiles = InstallationProfileRegistry(settings.installation_registry_path)
+    codex_client: CodexAppServerProcess | None = None
+    selected_connected_agent_runtime = connected_agent_runtime
+    selected_auth_broker = connected_agent_auth_broker
+    if settings.codex_app_server_path is not None:
+        codex_client = CodexAppServerProcess(
+            settings.codex_app_server_path,
+            settings.resolved_codex_home(),
+            request_timeout=settings.codex_request_timeout,
+        )
+        codex_vault = CodexCredentialVault(codex_client, settings.resolved_codex_home())
+        if selected_connected_agent_runtime is None:
+            selected_connected_agent_runtime = CodexConnectedAgentRuntime(
+                codex_client, codex_vault
+            )
+        if selected_auth_broker is None:
+            selected_auth_broker = CodexAuthFlowBroker(
+                codex_client, codex_vault, installation_profiles
+            )
     connected_agents = ConnectedAgentService(
         installation_profiles,
-        connected_agent_runtime or UnavailableConnectedAgentRuntime(),
+        selected_connected_agent_runtime or UnavailableConnectedAgentRuntime(),
         profile_id=settings.installation_profile_id,
         state_store=state_store,
     )
@@ -793,6 +822,8 @@ def create_app(
             yield
         finally:
             await conversation_manager.close()
+            if codex_client is not None:
+                await codex_client.close()
 
     app = FastAPI(
         title="JobOS API",
@@ -2875,6 +2906,11 @@ def create_app(
             return await connected_agents.models(agent_id)
         except InstallationProfileNotFound as error:
             raise HTTPException(status_code=404, detail=str(error)) from error
+        except CodexRuntimeError as error:
+            raise HTTPException(
+                status_code=503,
+                detail={"code": error.code, "message": str(error), "retryable": True},
+            ) from error
 
     @app.get("/v1/connected-agents/{agent_id}/disconnect-impact", tags=["agent"])
     def connected_agent_disconnect_impact(
@@ -2900,6 +2936,89 @@ def create_app(
             raise HTTPException(status_code=404, detail=str(error)) from error
         except (ConnectedAgentConflict, InstallationProfileConflict) as error:
             raise HTTPException(status_code=409, detail=str(error)) from error
+
+    @app.post(
+        "/v1/connected-agents/{agent_id}/auth/device-code", tags=["agent"]
+    )
+    async def connected_agent_auth_start(
+        agent_id: str,
+        command: StartAuthRequest,
+        identity: Annotated[DeviceIdentity, Depends(direct_installation_profile_user)],
+    ) -> SafeAuthTransaction:
+        if selected_auth_broker is None:
+            raise HTTPException(
+                status_code=503,
+                detail={
+                    "code": "AGENT_PROVIDER_UNAVAILABLE",
+                    "message": "Pinned Codex runtime is unavailable",
+                    "retryable": True,
+                },
+            )
+        try:
+            return await selected_auth_broker.start_device_code(
+                agent_id,
+                command.mode,
+                command.expected_account_fingerprint,
+                allow_host_callback=(
+                    identity.device_id == settings.device_id
+                    and settings.transport == "local-loopback"
+                ),
+            )
+        except InstallationProfileNotFound as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        except (AuthFlowError, CodexRuntimeError) as error:
+            code = error.code
+            status = 409 if code == "AUTH_ACCOUNT_REPLACEMENT_REQUIRED" else 503
+            raise HTTPException(
+                status_code=status,
+                detail={"code": code, "message": str(error), "retryable": status == 503},
+            ) from error
+
+    @app.get("/v1/connected-agent-auth/{transaction_id}", tags=["agent"])
+    async def connected_agent_auth_read(
+        transaction_id: str,
+        identity: Annotated[DeviceIdentity, Depends(direct_installation_profile_user)],
+    ) -> SafeAuthTransaction:
+        del identity
+        if selected_auth_broker is None:
+            raise HTTPException(
+                status_code=503,
+                detail={
+                    "code": "AGENT_PROVIDER_UNAVAILABLE",
+                    "message": "Pinned Codex runtime is unavailable",
+                    "retryable": True,
+                },
+            )
+        try:
+            return await selected_auth_broker.read(transaction_id)
+        except (AuthFlowError, CodexRuntimeError) as error:
+            raise HTTPException(
+                status_code=503,
+                detail={"code": error.code, "message": str(error), "retryable": True},
+            ) from error
+
+    @app.delete("/v1/connected-agent-auth/{transaction_id}", tags=["agent"])
+    async def connected_agent_auth_cancel(
+        transaction_id: str,
+        identity: Annotated[DeviceIdentity, Depends(direct_installation_profile_user)],
+    ) -> SafeAuthTransaction:
+        del identity
+        if selected_auth_broker is None:
+            raise HTTPException(
+                status_code=503,
+                detail={
+                    "code": "AGENT_PROVIDER_UNAVAILABLE",
+                    "message": "Pinned Codex runtime is unavailable",
+                    "retryable": True,
+                },
+            )
+        try:
+            return await selected_auth_broker.cancel(transaction_id)
+        except (AuthFlowError, CodexRuntimeError) as error:
+            raise HTTPException(
+                status_code=503,
+                detail={"code": error.code, "message": str(error), "retryable": True},
+            ) from error
 
     @app.put("/v1/installation-profiles/{profile_id}/default-agent", tags=["profiles"])
     async def installation_profile_default_agent(

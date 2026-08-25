@@ -21,9 +21,10 @@
     "build:electron": "pnpm build:keychain-helper && pnpm build:docx-helper && pnpm build:career-profile-archive-helper && pnpm --filter @jobos/docx-engine build && pnpm --filter @jobos/docx-editor-core build && node scripts/verify-docx-package-exports.mjs && tsc -p tsconfig.electron.json && node scripts/verify-preload-artifact.mjs",
     "build:career-profile-archive-helper": "node scripts/build-career-profile-archive-write.mjs",
     "build:keychain-helper": "node scripts/build-keychain-helper.mjs",
+    "prepare:codex-runtime": "node scripts/prepare-codex-runtime.mjs",
     "dev": "pnpm build:electron && concurrently --kill-others --success first \"vite --host 127.0.0.1\" \"wait-on http://127.0.0.1:5173 && VITE_DEV_SERVER_URL=http://127.0.0.1:5173 electron dist/main/main.js\"",
     "lint": "oxlint src vite.config.ts",
-    "package:mac": "pnpm build:keychain-helper && pnpm build && electron-builder --mac dir --arm64 && node scripts/sign-and-zip-mac.mjs",
+    "package:mac": "pnpm prepare:codex-runtime && pnpm build:keychain-helper && pnpm build && electron-builder --mac dir --arm64 && node scripts/sign-and-zip-mac.mjs",
     "package:macbook-update": "node scripts/create-macbook-update.mjs",
     "start": "electron dist/main/main.js",
     "test": "pnpm build:electron && NODE_OPTIONS=--no-experimental-webstorage vitest run && pnpm test:macbook-update",
@@ -103,6 +104,10 @@
         "to": "jobos-career-profile-archive-write"
       },
       {
+        "from": "build/codex-runtime",
+        "to": "codex-runtime"
+      },
+      {
         "from": "../../THIRD_PARTY_NOTICES.md",
         "to": "THIRD_PARTY_NOTICES.md"
       },
@@ -137,6 +142,14 @@
       {
         "from": "../../packages/docx-editor-core/UPSTREAM.md",
         "to": "licenses/docx-editor-core/UPSTREAM.md"
+      },
+      {
+        "from": "../../tests/connected_agents/receipts/codex-0.144.4/LICENSE",
+        "to": "licenses/codex/LICENSE"
+      },
+      {
+        "from": "../../tests/connected_agents/receipts/codex-0.144.4/NOTICE",
+        "to": "licenses/codex/NOTICE"
       }
     ],
     "mac": {

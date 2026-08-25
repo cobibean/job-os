@@ -29,6 +29,12 @@ def settings_from_environment() -> Settings:
                 os.environ.get("JOBOS_CAREER_PROFILE_OWNER_DEVICE_IDS_JSON")
             ),
         }
+        if codex_binary := os.environ.get("JOBOS_CODEX_APP_SERVER_PATH"):
+            updates["codex_app_server_path"] = Path(codex_binary)
+        if codex_home := os.environ.get("JOBOS_CODEX_HOME"):
+            updates["codex_home_path"] = Path(codex_home)
+        if codex_timeout := os.environ.get("JOBOS_CODEX_REQUEST_TIMEOUT"):
+            updates["codex_request_timeout"] = float(codex_timeout)
         for environment_name, field_name in (
             ("JOBOS_CAREER_PROFILE_AGENT_ID", "career_profile_agent_id"),
             ("JOBOS_CAREER_PROFILE_AGENT_DISPLAY_NAME", "career_profile_agent_display_name"),
@@ -75,6 +81,11 @@ def settings_from_environment() -> Settings:
         hermes_dashboard_token=hermes_token,
         hermes_job_hunter_cwd=Path(hermes_cwd) if hermes_cwd else None,
         hermes_request_timeout=float(os.environ.get("JOBOS_HERMES_REQUEST_TIMEOUT", "5")),
+        codex_app_server_path=(
+            Path(value) if (value := os.environ.get("JOBOS_CODEX_APP_SERVER_PATH")) else None
+        ),
+        codex_home_path=(Path(value) if (value := os.environ.get("JOBOS_CODEX_HOME")) else None),
+        codex_request_timeout=float(os.environ.get("JOBOS_CODEX_REQUEST_TIMEOUT", "15")),
         career_profile_enabled=os.environ.get("JOBOS_CAREER_PROFILE_ENABLED") == "1",
         career_profile_owner_device_ids=parse_device_ids(
             os.environ.get("JOBOS_CAREER_PROFILE_OWNER_DEVICE_IDS_JSON")

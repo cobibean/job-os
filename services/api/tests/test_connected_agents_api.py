@@ -10,6 +10,7 @@ from jobos_api.agent_gateway import (
     GatewayEvent,
 )
 from jobos_api.app import create_app
+from jobos_api.connected_agent_auth import SafeAuthTransaction
 from jobos_api.conversation_store import ConversationStore
 from jobos_api.installation_profiles import (
     AnchoredRuntime,
@@ -125,7 +126,49 @@ class ReadyRuntimeControl:
         return {"verified": True}
 
 
-def setup_app(tmp_path: Path, *, gateway_type=ReadyGateway, runtime_control=None):
+class ReadyAuthBroker:
+    def __init__(self) -> None:
+        self.started = 0
+        self.cancelled = 0
+        self.transaction = SafeAuthTransaction(
+            transaction_id="jauth_" + "c" * 32,
+            agent_id=AGENT_ID,
+            method="device_code",
+            status="login_pending",
+            verification_url="https://auth.example.test/device",
+            user_code="SAFE-CODE",
+            expires_at=NOW,
+        )
+
+    async def start_device_code(
+        self,
+        agent_id,
+        mode,
+        expected_account_fingerprint,
+        *,
+        allow_host_callback,
+    ):
+        del agent_id, mode, expected_account_fingerprint, allow_host_callback
+        self.started += 1
+        return self.transaction
+
+    async def read(self, transaction_id):
+        del transaction_id
+        return self.transaction
+
+    async def cancel(self, transaction_id):
+        del transaction_id
+        self.cancelled += 1
+        return self.transaction.model_copy(update={"status": "cancelled", "user_code": None})
+
+
+def setup_app(
+    tmp_path: Path,
+    *,
+    gateway_type=ReadyGateway,
+    runtime_control=None,
+    auth_broker=None,
+):
     registry_path = tmp_path / "installation-profiles.json"
     state_path = tmp_path / "state" / "jobos.db"
     runtime = AnchoredRuntime(
@@ -191,6 +234,7 @@ def setup_app(tmp_path: Path, *, gateway_type=ReadyGateway, runtime_control=None
         state_store=state_store,
         agent_gateway_factory=gateway_factory,
         connected_agent_runtime=runtime_control or ReadyRuntimeControl(),
+        connected_agent_auth_broker=auth_broker,
     )
     return app, registry, state_store, gateway_factory, settings
 
@@ -769,3 +813,45 @@ def test_disconnected_agent_models_do_not_probe_runtime(tmp_path):
     assert response.status_code == 200
     assert response.json() == {"live": False, "models": []}
     assert runtime_control.model_calls == 0
+
+
+def test_auth_routes_require_direct_user_and_return_safe_transaction(tmp_path):
+    broker = ReadyAuthBroker()
+    app, _, _, _, _ = setup_app(tmp_path, auth_broker=broker)
+    transaction_id = broker.transaction.transaction_id
+    agent_headers = {**auth(), "X-JobOS-Agent-Id": AGENT_ID}
+
+    with TestClient(app) as client:
+        unauthenticated = client.post(
+            f"/v1/connected-agents/{AGENT_ID}/auth/device-code",
+            json={"mode": "connect", "expected_account_fingerprint": None},
+        )
+        blocked_agent = client.post(
+            f"/v1/connected-agents/{AGENT_ID}/auth/device-code",
+            headers=agent_headers,
+            json={"mode": "connect", "expected_account_fingerprint": None},
+        )
+        started = client.post(
+            f"/v1/connected-agents/{AGENT_ID}/auth/device-code",
+            headers=auth(),
+            json={"mode": "connect", "expected_account_fingerprint": None},
+        )
+        read = client.get(f"/v1/connected-agent-auth/{transaction_id}", headers=auth())
+        blocked_agent_read = client.get(
+            f"/v1/connected-agent-auth/{transaction_id}", headers=agent_headers
+        )
+        cancel = client.delete(
+            f"/v1/connected-agent-auth/{transaction_id}", headers=auth()
+        )
+
+    assert unauthenticated.status_code == 401
+    assert blocked_agent.status_code == 403
+    assert started.status_code == 200
+    assert started.json()["verification_url"] == "https://auth.example.test/device"
+    assert started.json()["user_code"] == "SAFE-CODE"
+    assert read.status_code == 200
+    assert blocked_agent_read.status_code == 403
+    assert cancel.status_code == 200
+    assert cancel.json()["user_code"] is None
+    assert broker.started == 1
+    assert broker.cancelled == 1
