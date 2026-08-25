@@ -252,6 +252,7 @@ export function AgentPanel({ agentLabel, avatarId, contextLabel, apiState = 'con
                 const approvalId = waiting && typeof terminal?.detail.approval_id === 'string'
                   ? terminal.detail.approval_id
                   : null
+                const reviewConsumed = approvalId !== null && sessions.activeSession?.consumedReviewId === approvalId
                 const stopping = active && Boolean(conversation.activeTurn?.cancelRequested)
                 const assistant = item.assistant
                 const streaming = Boolean(assistant && assistant.state === 'working' && active && !terminal && !stopping)
@@ -280,7 +281,7 @@ export function AgentPanel({ agentLabel, avatarId, contextLabel, apiState = 'con
                       <article className={`agent-notice ${terminal.kind} ${waiting ? 'waiting' : terminal.state}`}>
                         <strong><CircleAlert aria-hidden="true" size={14} /> {waiting ? 'Waiting for you' : terminal.state === 'waiting' ? 'Turn paused' : terminal.state === 'interrupted' ? 'Turn interrupted' : 'Turn failed'}</strong>
                         <p>{terminal.label}</p>
-                        {approvalId && activeId && (
+                        {approvalId && activeId && !reviewConsumed && (
                           <div className="review-actions" role="group" aria-label="Tool review">
                             <button aria-label="Approve tool" className="retry-button" disabled={conversation.operationPending} onClick={() => void sessions.review(activeId, item.turnId, approvalId, true)} type="button">
                               Approve

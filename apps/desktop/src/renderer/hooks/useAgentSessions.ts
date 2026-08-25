@@ -25,6 +25,7 @@ export interface AgentSessionViewState {
   conversation: AgentConversationState
   draft: string
   operation: SessionOperation
+  consumedReviewId?: string | null
   unreadTerminal: boolean
   scrollTop: number
   pinnedToBottom: boolean
@@ -65,6 +66,7 @@ function sessionFromSummary(summary: AgentSessionSummary): AgentSessionViewState
     },
     draft: '',
     operation: null,
+    consumedReviewId: null,
     unreadTerminal: false,
     scrollTop: 0,
     pinnedToBottom: true
@@ -127,6 +129,12 @@ function transitionSessionUpdate(
             ? { ...session.summary, recoveryState: update.recoveryState }
             : session.summary,
           conversation,
+          consumedReviewId: update.kind === 'event'
+            && update.event.state === 'waiting'
+            && typeof update.event.detail.approval_id === 'string'
+            && update.event.detail.approval_id !== session.consumedReviewId
+              ? null
+              : session.consumedReviewId,
           unreadTerminal: session.unreadTerminal || inactiveAttention
         }
       }
@@ -416,13 +424,20 @@ export function useAgentSessions() {
     if (!turn || turn.turnId !== turnId || !window.jobos?.agent || !beginOperation(conversationId, 'review')) return
     try {
       await window.jobos.agent.review(conversationId, turnId, approvalId, approved)
+      updateState(current => {
+        const session = current.sessions[conversationId]
+        return session ? {
+          ...current,
+          sessions: { ...current.sessions, [conversationId]: { ...session, consumedReviewId: approvalId } }
+        } : current
+      })
       setAnnouncement(approved ? 'Tool approved' : 'Tool declined')
     } catch (error) {
       mutateConversation(conversationId, { type: 'failure', message: safeError(error, 'Tool review could not be submitted') })
     } finally {
       finishOperation(conversationId, 'review')
     }
-  }, [beginOperation, finishOperation, mutateConversation])
+  }, [beginOperation, finishOperation, mutateConversation, updateState])
 
   const retry = useCallback(async (conversationId: string, turnId: string) => {
     const session = stateRef.current.sessions[conversationId]

@@ -347,13 +347,9 @@ test('tool review requires an explicit turn-scoped approve or decline', async ()
     true
   ))
 
-  fireEvent.click(screen.getByRole('button', { name: 'Decline tool' }))
-  await waitFor(() => expect(agent.review).toHaveBeenLastCalledWith(
-    'conv_1',
-    'turn-1',
-    'approval_abcdefghijklmnop',
-    false
-  ))
+  await waitFor(() => expect(screen.queryByRole('button', { name: 'Approve tool' })).toBeNull())
+  expect(screen.queryByRole('button', { name: 'Decline tool' })).toBeNull()
+  expect(agent.review).toHaveBeenCalledTimes(1)
 })
 
 test('close compacts visible positions while last and running sessions cannot close', async () => {

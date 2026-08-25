@@ -739,6 +739,24 @@ async def test_codex_tool_review_is_scoped_and_requires_explicit_response(
         },
     ) == {"action": "decline", "content": {}}
 
+    for unsupported_schema in (
+        {"type": "object", "properties": {}, "additionalProperties": True},
+        {"type": "object", "properties": {}, "patternProperties": {}},
+        {"type": "object", "properties": {}, "$ref": "#/$defs/review"},
+        {"type": "object", "properties": {}, "oneOf": []},
+    ):
+        assert await client.server_request(
+            "mcpServer/elicitation/request",
+            {
+                "threadId": "thread-a",
+                "turnId": "provider-turn-a",
+                "serverName": "jobos",
+                "mode": "form",
+                "message": 'Allow the jobos MCP server to run tool "job_inspect"?',
+                "requestedSchema": unsupported_schema,
+            },
+        ) == {"action": "decline", "content": {}}
+
     disconnect_request = asyncio.create_task(
         client.server_request(
             "mcpServer/elicitation/request",

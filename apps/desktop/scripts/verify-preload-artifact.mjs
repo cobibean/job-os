@@ -82,6 +82,7 @@ await bridge.agent.archive('conv_two')
 await bridge.agent.send('conv_one', 'Hello', 'idempotency-0001')
 await bridge.agent.cancel('conv_one', 'turn-1')
 await bridge.agent.retry('conv_two', 'turn-1', 'idempotency-0002')
+await bridge.agent.review('conv_one', 'turn-1', 'approval_abcdefghijklmnop', true)
 assert.deepEqual(invokeCalls, [
   ['jobos:agent:list'],
   ['jobos:agent:create', 'job-inherited'],
@@ -89,7 +90,8 @@ assert.deepEqual(invokeCalls, [
   ['jobos:agent:archive', 'conv_two'],
   ['jobos:agent:send', 'conv_one', 'Hello', 'idempotency-0001'],
   ['jobos:agent:cancel', 'conv_one', 'turn-1'],
-  ['jobos:agent:retry', 'conv_two', 'turn-1', 'idempotency-0002']
+  ['jobos:agent:retry', 'conv_two', 'turn-1', 'idempotency-0002'],
+  ['jobos:agent:review', 'conv_one', 'turn-1', 'approval_abcdefghijklmnop', true]
 ])
 
 const received = []

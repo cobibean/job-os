@@ -320,11 +320,10 @@ class CodexAppServerGateway:
     ) -> object:
         message = params.get("message")
         requested_schema = params.get("requestedSchema")
-        schema_is_empty = requested_schema == {} or (
-            isinstance(requested_schema, dict)
-            and requested_schema.get("type") == "object"
-            and requested_schema.get("properties") == {}
-            and not requested_schema.get("required")
+        schema_is_empty = requested_schema in (
+            {},
+            {"type": "object", "properties": {}},
+            {"type": "object", "properties": {}, "required": []},
         )
         match = _JOBOS_TOOL_REVIEW.fullmatch(message) if isinstance(message, str) else None
         if (

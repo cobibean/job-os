@@ -7862,6 +7862,14 @@ export type ConversationReviewV1ConversationsConversationIdTurnsTurnIdReviewPost
      */
     401: ApiErrorResponse;
     /**
+     * Turn not found
+     */
+    404: ApiErrorResponse;
+    /**
+     * Review is stale or unmatched
+     */
+    409: ApiErrorResponse;
+    /**
      * Request validation failed
      */
     422: ApiErrorResponse;

@@ -3471,7 +3471,14 @@ def create_app(
             raise HTTPException(status_code=404, detail="Turn not found")
         return result
 
-    @app.post("/v1/conversations/{conversation_id}/turns/{turn_id}/review", tags=["agent"])
+    @app.post(
+        "/v1/conversations/{conversation_id}/turns/{turn_id}/review",
+        tags=["agent"],
+        responses={
+            404: {"model": ApiErrorResponse, "description": "Turn not found"},
+            409: {"model": ApiErrorResponse, "description": "Review is stale or unmatched"},
+        },
+    )
     async def conversation_review(
         conversation_id: ConversationId,
         turn_id: TurnId,
