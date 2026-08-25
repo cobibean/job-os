@@ -50,8 +50,11 @@ interface AgentPanelProps {
 }
 
 function ConnectionNotice({ apiState, connection }: { apiState: ConnectivityState; connection: typeof initialAgentConversationState.connection }) {
-  if (apiState === 'disconnected' || apiState === 'degraded') {
-    return <div className="agent-connection offline" role="status"><WifiOff aria-hidden="true" size={14} /> JobOS API offline</div>
+  if (apiState === 'disconnected') {
+    return <div className="agent-connection offline" role="status"><WifiOff aria-hidden="true" size={14} /> JobOS host unavailable</div>
+  }
+  if (apiState === 'degraded') {
+    return <div className="agent-connection offline" role="status"><WifiOff aria-hidden="true" size={14} /> Device authentication needs attention</div>
   }
   if (connection === 'reconnecting' || connection === 'connecting') {
     return <div className="agent-connection reconnecting" role="status"><LoaderCircle aria-hidden="true" className="spin" size={14} /> Reconnecting to agent…</div>

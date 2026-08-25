@@ -1,10 +1,10 @@
 # Connected Agents and ChatGPT/Codex Implementation Plan
 
-- **Status:** Active implementation — Phases 0–5 delivered; Phase 6 verified and awaiting merge; Phases 7–8 remain
+- **Status:** Active implementation — Phases 0–6 delivered; Phase 7 verified and awaiting merge; Phase 8 remains
 - **Wayfinder:** [#100](https://github.com/cobibean/job-os/issues/100)
 - **Planning ticket:** [#109](https://github.com/cobibean/job-os/issues/109)
-- **Verified source baseline:** `ee542e9d7c19d5c5a16bb15cb9e1072121415ff1` on `origin/main`, verified 2026-08-23
-- **Progress update (2026-08-25):** Phases 0–5 are merged and verified. Phase 6 adds the Connected Agents roster/inspector, live provider model defaults, device-code and disconnect flows, immutable New Chat selection, readable locked history, and five-chat archive recovery. Shipment receipts remain on Issues [#111–#117](https://github.com/cobibean/job-os/issues/117).
+- **Verified source baseline:** `7753e88ff9c9671682d29b5bd5cb409cbe690978` on `origin/main`, verified 2026-08-25
+- **Progress update (2026-08-25):** Phases 0–6 are merged and verified. Phase 6 shipped the Connected Agents roster/inspector, live provider model defaults, device-code and disconnect flows, immutable New Chat selection, readable locked history, and five-chat archive recovery in [PR #127](https://github.com/cobibean/job-os/pull/127). Phase 7 now has verified scoped concurrency/failure/recovery behavior, honest remote-host and authentication states, bounded credential-free diagnostics, and terminal Codex rate-limit handling that does not blindly retry or switch providers. Its acceptance map is in `docs/acceptance/connected-agents/phase-7/`; merge receipts will be recorded on [#118](https://github.com/cobibean/job-os/issues/118).
 
 **Goal:** Let a JobOS user connect and manage multiple agent identities, choose a profile default, and create a chat permanently owned by a selected Hermes or ChatGPT/Codex agent and supported model—without weakening JobOS context, tools, recovery, privacy, or existing Hermes behavior.
 

@@ -28,7 +28,7 @@ const remoteRuntime: DesktopRuntimeConfig = {
 const disconnected: ConnectivitySnapshot = {
   state: 'disconnected',
   checkedAt: '2026-07-20T00:00:00Z',
-  message: 'JobOS API unavailable'
+  message: 'JobOS host unavailable'
 }
 const connected: ConnectivitySnapshot = {
   state: 'connected',

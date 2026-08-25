@@ -123,7 +123,7 @@ test('network exceptions never expose credential material', async () => {
 
   expect(result).toMatchObject({
     state: 'disconnected',
-    message: 'JobOS API unavailable'
+    message: 'JobOS host unavailable'
   })
   expect(JSON.stringify(result)).not.toContain(token)
 })
@@ -145,6 +145,6 @@ test('an unresponsive API request is aborted instead of blocking desktop startup
 
   expect(result).toMatchObject({
     state: 'disconnected',
-    message: 'JobOS API unavailable'
+    message: 'JobOS host unavailable'
   })
 })

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 
@@ -21,6 +22,9 @@ class FakeCodexClient:
         self.subscribers: list[Callable[[str, object], Awaitable[None]]] = []
         self.started = False
         self.turns: list[dict[str, object]] = []
+        self.rate_limits: dict[str, object] = {}
+        self.interrupt_error = False
+        self.complete_before_interrupt_response = False
 
     @property
     def is_running(self) -> bool:
@@ -52,12 +56,27 @@ class FakeCodexClient:
                     }
                 ]
             }
+        if method == "account/rateLimits/read":
+            return {"rateLimits": self.rate_limits}
         if method == "turn/start":
             return {"turn": {"id": "provider-turn-a", "status": "inProgress"}}
         if method == "thread/read":
             assert isinstance(params, dict)
             return {"thread": {"id": params["threadId"], "turns": self.turns}}
         if method == "turn/interrupt":
+            if self.complete_before_interrupt_response:
+                assert isinstance(params, dict)
+                await self.emit(
+                    "turn/completed",
+                    {
+                        "threadId": params["threadId"],
+                        "turn": {"id": params["turnId"], "status": "interrupted"},
+                    },
+                )
+            if self.interrupt_error:
+                raise CodexRuntimeError(
+                    "AGENT_PROVIDER_UNAVAILABLE", "(FAKE) interrupt unavailable"
+                )
             return {}
         raise AssertionError(method)
 
@@ -106,7 +125,12 @@ async def test_codex_turn_uses_opaque_thread_and_exact_jobos_context(tmp_path: P
     await gateway.submit_turn("Tailor this", context())
 
     methods = [method for method, _ in client.requests]
-    assert methods == ["thread/start", "mcpServerStatus/list", "turn/start"]
+    assert methods == [
+        "thread/start",
+        "mcpServerStatus/list",
+        "account/rateLimits/read",
+        "turn/start",
+    ]
     thread_params = client.requests[0][1]
     assert isinstance(thread_params, dict)
     assert thread_params["sandbox"] == "read-only"
@@ -339,3 +363,305 @@ async def test_codex_redacts_credentials_split_across_stream_deltas(tmp_path: Pa
     assert tail.summary == "tail"
     assert terminal.state == "completed"
     assert "sk-proj" not in tail.summary
+
+
+@pytest.mark.anyio
+async def test_codex_rate_limit_is_scoped_and_never_blindly_retried(tmp_path: Path) -> None:
+    client = FakeCodexClient()
+    client.rate_limits = {
+        "primary": {"usedPercent": 100, "resetsAt": int(time.time()) + 60},
+        "secondary": {"usedPercent": 10, "resetsAt": int(time.time()) + 600},
+    }
+    factory = CodexGatewayFactory(client, cwd=tmp_path)
+    factory.create("conv_warm")
+    await client.emit(
+        "account/rateLimits/updated",
+        {
+            "rateLimits": {
+                "primary": {"usedPercent": 100, "resetsAt": int(time.time()) + 60},
+                "secondary": {"usedPercent": 10, "resetsAt": int(time.time()) + 600},
+            }
+        },
+    )
+    await client.emit(
+        "account/rateLimits/updated",
+        {"rateLimits": {"credits": {"hasCredits": True, "unlimited": False}}},
+    )
+    gateway = factory.create("conv_alpha")
+    await gateway.create_or_resume_conversation(None)
+    await gateway.submit_turn("Do work", context())
+    requests_before_error = list(client.requests)
+    events = gateway.stream_events()
+
+    await client.emit(
+        "error",
+        {
+            "threadId": "thread-a",
+            "turnId": "provider-turn-a",
+            "willRetry": True,
+            "error": {
+                "message": "(FAKE) usage exhausted",
+                "codexErrorInfo": "usageLimitExceeded",
+            },
+        },
+    )
+    await client.emit(
+        "error",
+        {
+            "threadId": "other-thread",
+            "turnId": "other-provider-turn",
+            "willRetry": False,
+            "error": {
+                "message": "(FAKE) unrelated usage exhausted",
+                "codexErrorInfo": "usageLimitExceeded",
+            },
+        },
+    )
+
+    limited = await anext(events)
+    assert limited.event_type == "error"
+    assert limited.state == "failed"
+    assert limited.summary.startswith("Codex rate limit reached. Try again in ")
+    assert limited.detail["reason"] == "rate_limited"
+    assert limited.detail["retry"] is False
+    retry_after = limited.detail["retry_after_seconds"]
+    assert isinstance(retry_after, int)
+    assert 1 <= retry_after <= 60
+    assert client.requests == [
+        *requests_before_error,
+        (
+            "turn/interrupt",
+            {"threadId": "thread-a", "turnId": "provider-turn-a"},
+        )
+    ]
+    assert gateway.connection_state == "online"
+
+
+@pytest.mark.anyio
+async def test_codex_rate_limit_refresh_preserves_reset_through_sparse_update(
+    tmp_path: Path,
+) -> None:
+    client = FakeCodexClient()
+    client.rate_limits = {
+        "primary": {"usedPercent": 100, "resetsAt": int(time.time()) + 60}
+    }
+    factory = CodexGatewayFactory(client, cwd=tmp_path)
+    gateway = factory.create("conv_alpha")
+    await gateway.create_or_resume_conversation(None)
+    await gateway.submit_turn("Do work", context())
+    await client.emit(
+        "account/rateLimits/updated",
+        {"rateLimits": {"credits": {"hasCredits": False, "unlimited": False}}},
+    )
+    events = gateway.stream_events()
+    await client.emit(
+        "error",
+        {
+            "threadId": "thread-a",
+            "turnId": "provider-turn-a",
+            "willRetry": False,
+            "error": {"codexErrorInfo": "usageLimitExceeded"},
+        },
+    )
+
+    limited = await anext(events)
+    assert limited.summary.startswith("Codex rate limit reached. Try again in ")
+    assert limited.detail["retry"] is False
+    retry_after = limited.detail["retry_after_seconds"]
+    assert isinstance(retry_after, int)
+    assert 1 <= retry_after <= 60
+
+
+@pytest.mark.anyio
+async def test_codex_expired_rate_limit_snapshot_omits_stale_countdown(tmp_path: Path) -> None:
+    client = FakeCodexClient()
+    factory = CodexGatewayFactory(client, cwd=tmp_path)
+    gateway = factory.create("conv_alpha")
+    await client.emit(
+        "account/rateLimits/updated",
+        {
+            "rateLimits": {
+                "primary": {"usedPercent": 100, "resetsAt": int(time.time()) - 1}
+            }
+        },
+    )
+    await gateway.create_or_resume_conversation(None)
+    await gateway.submit_turn("Do work", context())
+    events = gateway.stream_events()
+    await client.emit(
+        "error",
+        {
+            "threadId": "thread-a",
+            "turnId": "provider-turn-a",
+            "willRetry": False,
+            "error": {"codexErrorInfo": "usageLimitExceeded"},
+        },
+    )
+
+    limited = await anext(events)
+    assert limited.summary == "Codex rate limit reached"
+    assert limited.detail["retry_after_seconds"] is None
+
+
+@pytest.mark.anyio
+async def test_codex_full_rate_limit_refresh_replaces_stale_windows(tmp_path: Path) -> None:
+    client = FakeCodexClient()
+    factory = CodexGatewayFactory(client, cwd=tmp_path)
+    gateway = factory.create("conv_alpha")
+    await client.emit(
+        "account/rateLimits/updated",
+        {
+            "rateLimits": {
+                "primary": {"usedPercent": 100, "resetsAt": int(time.time()) + 60}
+            }
+        },
+    )
+    client.rate_limits = {"primary": None, "credits": {"hasCredits": True}}
+    await gateway.create_or_resume_conversation(None)
+    await gateway.submit_turn("Do work", context())
+    events = gateway.stream_events()
+    await client.emit(
+        "error",
+        {
+            "threadId": "thread-a",
+            "turnId": "provider-turn-a",
+            "willRetry": False,
+            "error": {"codexErrorInfo": "usageLimitExceeded"},
+        },
+    )
+
+    limited = await anext(events)
+    assert limited.summary == "Codex rate limit reached"
+    assert limited.detail["retry_after_seconds"] is None
+
+
+@pytest.mark.anyio
+async def test_codex_rate_limit_interrupt_failure_requires_recovery(tmp_path: Path) -> None:
+    client = FakeCodexClient()
+    client.interrupt_error = True
+    gateway = CodexGatewayFactory(client, cwd=tmp_path).create("conv_alpha")
+    await gateway.create_or_resume_conversation(None)
+    await gateway.submit_turn("Do work", context())
+    events = gateway.stream_events()
+    await client.emit(
+        "error",
+        {
+            "threadId": "thread-a",
+            "turnId": "provider-turn-a",
+            "willRetry": True,
+            "error": {"codexErrorInfo": "usageLimitExceeded"},
+        },
+    )
+
+    limited = await anext(events)
+    assert limited.summary == "Codex rate limit reached; recovery required"
+    assert limited.detail == {
+        "reason": "transport_lost",
+        "cause": "rate_limited",
+        "retry": False,
+        "recovery_required": True,
+    }
+
+
+@pytest.mark.anyio
+async def test_codex_rate_limit_refresh_keeps_update_delivered_after_read_response(
+    tmp_path: Path,
+) -> None:
+    class RacingClient(FakeCodexClient):
+        async def request(self, method: str, params: object | None = None) -> object:
+            if method == "account/rateLimits/read":
+                self.requests.append((method, params))
+                await self.emit(
+                    "account/rateLimits/updated",
+                    {
+                        "rateLimits": {
+                            "primary": {
+                                "usedPercent": 100,
+                                "resetsAt": int(time.time()) + 120,
+                            }
+                        }
+                    },
+                )
+                return {
+                    "rateLimits": {
+                        "primary": {
+                            "usedPercent": 100,
+                            "resetsAt": int(time.time()) + 60,
+                        }
+                    }
+                }
+            return await super().request(method, params)
+
+    client = RacingClient()
+    gateway = CodexGatewayFactory(client, cwd=tmp_path).create("conv_alpha")
+    await gateway.create_or_resume_conversation(None)
+    await gateway.submit_turn("Do work", context())
+    events = gateway.stream_events()
+    await client.emit(
+        "error",
+        {
+            "threadId": "thread-a",
+            "turnId": "provider-turn-a",
+            "willRetry": False,
+            "error": {"codexErrorInfo": "usageLimitExceeded"},
+        },
+    )
+
+    limited = await anext(events)
+    retry_after = limited.detail["retry_after_seconds"]
+    assert isinstance(retry_after, int)
+    assert 61 <= retry_after <= 120
+
+
+@pytest.mark.anyio
+async def test_codex_rate_limit_survives_completion_before_interrupt_response(
+    tmp_path: Path,
+) -> None:
+    client = FakeCodexClient()
+    client.complete_before_interrupt_response = True
+    client.rate_limits = {
+        "primary": {"usedPercent": 100, "resetsAt": int(time.time()) + 60}
+    }
+    gateway = CodexGatewayFactory(client, cwd=tmp_path).create("conv_alpha")
+    await gateway.create_or_resume_conversation(None)
+    await gateway.submit_turn("Do work", context())
+    events = gateway.stream_events()
+    await client.emit(
+        "error",
+        {
+            "threadId": "thread-a",
+            "turnId": "provider-turn-a",
+            "willRetry": True,
+            "error": {"codexErrorInfo": "usageLimitExceeded"},
+        },
+    )
+
+    limited = await anext(events)
+    assert limited.detail["reason"] == "rate_limited"
+    assert limited.detail["retry"] is False
+
+
+@pytest.mark.anyio
+async def test_codex_completed_rate_limit_does_not_require_recovery_on_interrupt_error(
+    tmp_path: Path,
+) -> None:
+    client = FakeCodexClient()
+    client.complete_before_interrupt_response = True
+    client.interrupt_error = True
+    gateway = CodexGatewayFactory(client, cwd=tmp_path).create("conv_alpha")
+    await gateway.create_or_resume_conversation(None)
+    await gateway.submit_turn("Do work", context())
+    events = gateway.stream_events()
+    await client.emit(
+        "error",
+        {
+            "threadId": "thread-a",
+            "turnId": "provider-turn-a",
+            "willRetry": True,
+            "error": {"codexErrorInfo": "usageLimitExceeded"},
+        },
+    )
+
+    limited = await anext(events)
+    assert limited.detail["reason"] == "rate_limited"
+    assert "recovery_required" not in limited.detail
