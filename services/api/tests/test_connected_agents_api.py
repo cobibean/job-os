@@ -338,6 +338,8 @@ def test_app_startup_repairs_completed_offline_hermes_migration_for_new_chat(tmp
             hermes_job_hunter_cwd=tmp_path,
             hermes_default_model_id="gpt-5.6-sol-900k",
             hermes_default_reasoning_effort="medium",
+            codex_app_server_path=tmp_path / "(FAKE)-codex-app-server",
+            codex_home_path=tmp_path / "(FAKE)-codex-home",
         ),
         agent_gateway_factory=ReadyGatewayFactory(),  # type: ignore[arg-type]
     )
