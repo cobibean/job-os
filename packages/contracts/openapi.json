@@ -1050,19 +1050,13 @@
             "title": "Active Turn"
           },
           "agent": {
-            "additionalProperties": true,
-            "title": "Agent",
-            "type": "object"
+            "$ref": "#/components/schemas/ConversationAgentPresentation"
           },
           "availability": {
-            "additionalProperties": true,
-            "title": "Availability",
-            "type": "object"
+            "$ref": "#/components/schemas/ConversationAvailabilityResponse"
           },
           "binding": {
-            "additionalProperties": true,
-            "title": "Binding",
-            "type": "object"
+            "$ref": "#/components/schemas/ConversationBindingResponse"
           },
           "connection": {
             "$ref": "#/components/schemas/ConnectionResponse"
@@ -2750,6 +2744,107 @@
           "state"
         ],
         "title": "ConnectionResponse",
+        "type": "object"
+      },
+      "ConversationAgentPresentation": {
+        "additionalProperties": false,
+        "properties": {
+          "avatar_id": {
+            "title": "Avatar Id",
+            "type": "string"
+          },
+          "display_name": {
+            "title": "Display Name",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "provider": {
+            "enum": [
+              "hermes",
+              "codex"
+            ],
+            "title": "Provider",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "provider",
+          "display_name",
+          "avatar_id"
+        ],
+        "title": "ConversationAgentPresentation",
+        "type": "object"
+      },
+      "ConversationAvailabilityResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "state": {
+            "enum": [
+              "ready",
+              "locked"
+            ],
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "state"
+        ],
+        "title": "ConversationAvailabilityResponse",
+        "type": "object"
+      },
+      "ConversationBindingResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "binding_state": {
+            "const": "sealed",
+            "title": "Binding State",
+            "type": "string"
+          },
+          "connected_agent_id": {
+            "title": "Connected Agent Id",
+            "type": "string"
+          },
+          "model_id": {
+            "title": "Model Id",
+            "type": "string"
+          },
+          "provider": {
+            "enum": [
+              "hermes",
+              "codex"
+            ],
+            "title": "Provider",
+            "type": "string"
+          },
+          "reasoning_effort": {
+            "title": "Reasoning Effort",
+            "type": "string"
+          }
+        },
+        "required": [
+          "connected_agent_id",
+          "provider",
+          "model_id",
+          "reasoning_effort",
+          "binding_state"
+        ],
+        "title": "ConversationBindingResponse",
         "type": "object"
       },
       "ConversationDocumentViewRequest": {
@@ -7544,6 +7639,37 @@
           "idempotency_key"
         ],
         "title": "SetDefaultConnectedAgentRequest",
+        "type": "object"
+      },
+      "SetDefaultConnectedAgentResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "default_connected_agent_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Connected Agent Id"
+          },
+          "profile_id": {
+            "title": "Profile Id",
+            "type": "string"
+          },
+          "registry_revision": {
+            "title": "Registry Revision",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "profile_id",
+          "default_connected_agent_id",
+          "registry_revision"
+        ],
+        "title": "SetDefaultConnectedAgentResponse",
         "type": "object"
       },
       "SkillValue": {
@@ -13860,6 +13986,38 @@
         "parameters": [
           {
             "in": "header",
+            "name": "X-JobOS-Agent-Id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Jobos-Agent-Id"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-JobOS-Agent-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Jobos-Agent-Token"
+            }
+          },
+          {
+            "in": "header",
             "name": "X-JobOS-MCP-Token",
             "required": false,
             "schema": {
@@ -14034,6 +14192,38 @@
           },
           {
             "in": "header",
+            "name": "X-JobOS-Agent-Id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Jobos-Agent-Id"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-JobOS-Agent-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Jobos-Agent-Token"
+            }
+          },
+          {
+            "in": "header",
             "name": "X-JobOS-MCP-Token",
             "required": false,
             "schema": {
@@ -14123,6 +14313,38 @@
             "schema": {
               "title": "Agent Id",
               "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-JobOS-Agent-Id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Jobos-Agent-Id"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-JobOS-Agent-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Jobos-Agent-Token"
             }
           },
           {
@@ -17496,6 +17718,38 @@
           },
           {
             "in": "header",
+            "name": "X-JobOS-Agent-Id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Jobos-Agent-Id"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-JobOS-Agent-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Jobos-Agent-Token"
+            }
+          },
+          {
+            "in": "header",
             "name": "X-JobOS-MCP-Token",
             "required": false,
             "schema": {
@@ -17526,9 +17780,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Installation Profile Default Agent V1 Installation Profiles  Profile Id  Default Agent Put",
-                  "type": "object"
+                  "$ref": "#/components/schemas/SetDefaultConnectedAgentResponse"
                 }
               }
             },

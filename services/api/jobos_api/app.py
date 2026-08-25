@@ -157,6 +157,7 @@ from jobos_api.connected_agents import (
     CreateConnectedAgentRequest,
     DisconnectConnectedAgentRequest,
     SetDefaultConnectedAgentRequest,
+    SetDefaultConnectedAgentResponse,
     UnavailableConnectedAgentRuntime,
     UpdateConnectedAgentRequest,
 )
@@ -1062,12 +1063,12 @@ def create_app(
 
     def direct_installation_profile_user(
         identity: Annotated[DeviceIdentity, Depends(authenticated_device)],
-        agent_id: Annotated[str | None, Header(alias="X-JobOS-Agent-Id")] = None,
+        agent_header_id: Annotated[str | None, Header(alias="X-JobOS-Agent-Id")] = None,
         agent_token: Annotated[str | None, Header(alias="X-JobOS-Agent-Token")] = None,
     ) -> DeviceIdentity:
         if (
             identity.device_id == MCP_RUNTIME_DEVICE_ID
-            or agent_id is not None
+            or agent_header_id is not None
             or agent_token is not None
         ):
             raise HTTPException(
@@ -2785,7 +2786,7 @@ def create_app(
     @app.post("/v1/connected-agents", tags=["agent"], status_code=201)
     async def connected_agent_create(
         command: CreateConnectedAgentRequest,
-        identity: Annotated[DeviceIdentity, Depends(authenticated_device)],
+        identity: Annotated[DeviceIdentity, Depends(direct_installation_profile_user)],
     ) -> ConnectedAgentPublic:
         del identity
         try:
@@ -2829,7 +2830,7 @@ def create_app(
     async def connected_agent_update(
         agent_id: str,
         command: UpdateConnectedAgentRequest,
-        identity: Annotated[DeviceIdentity, Depends(authenticated_device)],
+        identity: Annotated[DeviceIdentity, Depends(direct_installation_profile_user)],
     ) -> ConnectedAgentPublic:
         del identity
         try:
@@ -2890,7 +2891,7 @@ def create_app(
     async def connected_agent_disconnect(
         agent_id: str,
         command: DisconnectConnectedAgentRequest,
-        identity: Annotated[DeviceIdentity, Depends(authenticated_device)],
+        identity: Annotated[DeviceIdentity, Depends(direct_installation_profile_user)],
     ) -> ConnectedAgentPublic:
         del identity
         try:
@@ -2904,8 +2905,8 @@ def create_app(
     async def installation_profile_default_agent(
         profile_id: str,
         command: SetDefaultConnectedAgentRequest,
-        identity: Annotated[DeviceIdentity, Depends(authenticated_device)],
-    ) -> dict[str, object]:
+        identity: Annotated[DeviceIdentity, Depends(direct_installation_profile_user)],
+    ) -> SetDefaultConnectedAgentResponse:
         del identity
         try:
             return await connected_agents.set_default(profile_id, command)

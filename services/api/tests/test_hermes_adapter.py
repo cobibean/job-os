@@ -3,7 +3,12 @@ import json
 from urllib.parse import parse_qs, urlsplit
 
 import pytest
-from jobos_api.agent_gateway import AgentContext, AmbiguousDeliveryError, GatewayEvent
+from jobos_api.agent_gateway import (
+    AgentContext,
+    AmbiguousDeliveryError,
+    DefinitiveSessionCreationError,
+    GatewayEvent,
+)
 from jobos_api.career_profile import (
     CareerProfileStore,
     WorkArrangementMutation,
@@ -140,6 +145,24 @@ def test_session_attachment_timeout_is_ambiguous_delivery(tmp_path):
         with pytest.raises(AmbiguousDeliveryError):
             await gateway.create_or_resume_conversation(None)
         assert [request["method"] for request in socket.requests] == ["session.create"]
+        await gateway.close()
+
+    asyncio.run(scenario())
+
+
+def test_session_create_rpc_rejection_is_definitive(tmp_path):
+    async def scenario():
+        socket = FakeWebSocket(lambda request: [rpc_error(request, 4001)])
+        gateway = HermesWebSocketGateway(
+            url="ws://127.0.0.1:9119/api/ws",
+            token=TOKEN,
+            cwd=tmp_path,
+            request_timeout=1,
+            connector=FakeConnector(socket),
+        )
+        await gateway.start()
+        with pytest.raises(DefinitiveSessionCreationError):
+            await gateway.create_or_resume_conversation(None)
         await gateway.close()
 
     asyncio.run(scenario())

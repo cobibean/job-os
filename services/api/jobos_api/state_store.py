@@ -2267,16 +2267,23 @@ class JobOsStateStore:
     def connected_agent_chat_impact_at(path: Path, agent_id: str) -> dict[str, int]:
         if not path.exists():
             return {"active_chats": 0, "locked_chats": 0}
-        with connect_sqlite(f"file:{path}?mode=ro", uri=True) as connection:
-            row = connection.execute(
-                """
-                SELECT COUNT(*) AS active_count,
-                       SUM(CASE WHEN creation_state = 'locked' THEN 1 ELSE 0 END) AS locked_count
-                FROM conversations
-                WHERE archived_at IS NULL AND connected_agent_id = ?
-                """,
-                (agent_id,),
-            ).fetchone()
+        try:
+            with connect_sqlite(f"file:{path}?mode=ro", uri=True) as connection:
+                row = connection.execute(
+                    """
+                    SELECT COUNT(*) AS active_count,
+                           SUM(
+                               CASE WHEN creation_state = 'locked' THEN 1 ELSE 0 END
+                           ) AS locked_count
+                    FROM conversations
+                    WHERE archived_at IS NULL AND connected_agent_id = ?
+                    """,
+                    (agent_id,),
+                ).fetchone()
+        except sqlite3.OperationalError as error:
+            if "no such table" not in str(error) and "no such column" not in str(error):
+                raise
+            return {"active_chats": 0, "locked_chats": 0}
         return {"active_chats": int(row[0]), "locked_chats": int(row[1] or 0)}
 
     def create_conversation(
@@ -2581,6 +2588,9 @@ class JobOsStateStore:
                 raise ConversationBusy("Conversation can no longer be compensated")
             position = int(row[0])
             connection.execute(
+                "DELETE FROM conversation_events WHERE conversation_id = ?", (conversation_id,)
+            )
+            connection.execute(
                 "DELETE FROM conversations WHERE conversation_id = ?", (conversation_id,)
             )
             remaining = connection.execute(
@@ -2589,9 +2599,10 @@ class JobOsStateStore:
                 (position,),
             ).fetchall()
             for remaining_id, old_position in remaining:
+                new_position = int(old_position) - 1
                 connection.execute(
-                    "UPDATE conversations SET position = ? WHERE conversation_id = ?",
-                    (int(old_position) - 1, remaining_id),
+                    "UPDATE conversations SET position = ?, title = ? WHERE conversation_id = ?",
+                    (new_position, f"Session {new_position}", remaining_id),
                 )
             cursor = connection.execute(
                 """UPDATE job_events SET outcome = 'failed', result_json = ?

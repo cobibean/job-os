@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import asyncio
 import json
 import logging
@@ -7,7 +9,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager, suppress
 from typing import Literal, Protocol, cast
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from .agent_gateway import (
     AgentContext,
@@ -77,8 +79,8 @@ class CreateConversationRequest(ConversationModel):
     expected_profile_revision: int | None = Field(default=None, ge=1)
     expected_agent_registry_revision: int | None = Field(default=None, ge=1)
 
-    @property
-    def coordinated(self) -> bool:
+    @model_validator(mode="after")
+    def validate_coordination(self) -> CreateConversationRequest:
         values = (
             self.idempotency_key,
             self.expected_profile_revision,
@@ -86,6 +88,10 @@ class CreateConversationRequest(ConversationModel):
         )
         if any(value is not None for value in values) and any(value is None for value in values):
             raise ValueError("Coordinated chat creation requires revisions and idempotency key")
+        return self
+
+    @property
+    def coordinated(self) -> bool:
         return self.idempotency_key is not None
 
 
@@ -115,10 +121,30 @@ class ConversationResponse(ConversationModel):
     job_context: ConversationJobContext
 
 
+class ConversationBindingResponse(ConversationModel):
+    connected_agent_id: str
+    provider: Literal["hermes", "codex"]
+    model_id: str
+    reasoning_effort: str
+    binding_state: Literal["sealed"]
+
+
+class ConversationAvailabilityResponse(ConversationModel):
+    state: Literal["ready", "locked"]
+    reason: str | None = None
+
+
+class ConversationAgentPresentation(ConversationModel):
+    id: str
+    provider: Literal["hermes", "codex"]
+    display_name: str
+    avatar_id: str
+
+
 class BoundConversationResponse(ConversationResponse):
-    binding: dict[str, object]
-    availability: dict[str, object]
-    agent: dict[str, object]
+    binding: ConversationBindingResponse
+    availability: ConversationAvailabilityResponse
+    agent: ConversationAgentPresentation
 
 
 class ConversationService:

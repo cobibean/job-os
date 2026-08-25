@@ -93,6 +93,7 @@ class AmbiguousFailureGateway(ReadyGateway):
 class ReadyRuntimeControl:
     def __init__(self) -> None:
         self.disconnect_calls = 0
+        self.model_calls = 0
 
     async def inspect_connection(self, agent) -> dict[str, object]:
         del agent
@@ -106,6 +107,7 @@ class ReadyRuntimeControl:
 
     async def list_models(self, agent) -> dict[str, object]:
         del agent
+        self.model_calls += 1
         return {
             "live": True,
             "models": [
@@ -697,3 +699,73 @@ def test_disconnect_impact_aggregates_all_profile_stores(tmp_path):
     assert impact.status_code == 200
     assert impact.json()["active_chats"] == 1
     assert impact.json()["locked_chats"] == 0
+
+
+def test_agent_configuration_mutations_require_direct_user_principal(tmp_path):
+    app, registry, _, _, _ = setup_app(tmp_path)
+    revision = registry.load().registry_revision
+    headers = {**auth(), "X-JobOS-Agent-Id": AGENT_ID}
+    with TestClient(app) as client:
+        responses = (
+            client.post(
+                "/v1/connected-agents",
+                headers=headers,
+                json={
+                    "provider": "hermes",
+                    "display_name": "(FAKE) Blocked Agent",
+                    "avatar_id": "blocked-agent",
+                    "expected_registry_revision": revision,
+                    "idempotency_key": "(FAKE)-blocked-create",
+                },
+            ),
+            client.patch(
+                f"/v1/connected-agents/{AGENT_ID}",
+                headers=headers,
+                json={
+                    "display_name": "(FAKE) Blocked Rename",
+                    "avatar_id": "blocked-agent",
+                    "expected_registry_revision": revision,
+                    "idempotency_key": "(FAKE)-blocked-update",
+                },
+            ),
+            client.post(
+                f"/v1/connected-agents/{AGENT_ID}/disconnect",
+                headers=headers,
+                json={
+                    "confirmation_token": AGENT_ID,
+                    "expected_registry_revision": revision,
+                    "idempotency_key": "(FAKE)-blocked-disconnect",
+                },
+            ),
+            client.put(
+                f"/v1/installation-profiles/{PROFILE_ID}/default-agent",
+                headers=headers,
+                json={
+                    "connected_agent_id": AGENT_ID,
+                    "expected_profile_revision": revision,
+                    "expected_agent_registry_revision": revision,
+                    "idempotency_key": "(FAKE)-blocked-default",
+                },
+            ),
+        )
+
+    assert [response.status_code for response in responses] == [403, 403, 403, 403]
+    assert registry.load().registry_revision == revision
+
+
+def test_disconnected_agent_models_do_not_probe_runtime(tmp_path):
+    runtime_control = ReadyRuntimeControl()
+    app, registry, _, _, _ = setup_app(tmp_path, runtime_control=runtime_control)
+    registry.disconnect_connected_agent(
+        AGENT_ID,
+        expected_registry_revision=registry.load().registry_revision,
+        idempotency_key="(FAKE)-disconnect-before-models",
+        now=NOW,
+    )
+
+    with TestClient(app) as client:
+        response = client.get(f"/v1/connected-agents/{AGENT_ID}/models", headers=auth())
+
+    assert response.status_code == 200
+    assert response.json() == {"live": False, "models": []}
+    assert runtime_control.model_calls == 0

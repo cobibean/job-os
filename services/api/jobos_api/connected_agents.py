@@ -6,6 +6,7 @@ from typing import Literal, Protocol, TypedDict
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from .installation_profiles import (
+    ConnectedAgentCardinalityConflict,
     ConnectedAgentRecord,
     InstallationProfileNotFound,
     InstallationProfileRegistry,
@@ -135,6 +136,12 @@ class SetDefaultConnectedAgentRequest(ConnectedAgentModel):
     idempotency_key: str = Field(min_length=8, max_length=200)
 
 
+class SetDefaultConnectedAgentResponse(ConnectedAgentModel):
+    profile_id: str
+    default_connected_agent_id: str | None
+    registry_revision: int
+
+
 class ConnectedAgentImpactResponse(ConnectedAgentModel):
     agent_id: str
     default_profile_ids: list[str]
@@ -215,9 +222,10 @@ class ConnectedAgentService:
         return await self.public(self._record(agent_id))
 
     async def models(self, agent_id: str) -> ConnectedAgentModelsResponse:
-        return ConnectedAgentModelsResponse.model_validate(
-            await self.runtime.list_models(self._record(agent_id))
-        )
+        record = self._record(agent_id)
+        if record.lifecycle == "disconnected":
+            return ConnectedAgentModelsResponse(live=False, models=[])
+        return ConnectedAgentModelsResponse.model_validate(await self.runtime.list_models(record))
 
     async def _validate_defaults(
         self,
@@ -271,10 +279,8 @@ class ConnectedAgentService:
                     expected_registry_revision=command.expected_registry_revision,
                     idempotency_key=command.idempotency_key,
                 )
-            except Exception as error:
-                if command.provider == "codex" and "durable Codex identity" in str(error):
-                    raise ConnectedAgentConflict("AGENT_CARDINALITY_CONFLICT") from error
-                raise
+            except ConnectedAgentCardinalityConflict as error:
+                raise ConnectedAgentConflict("AGENT_CARDINALITY_CONFLICT") from error
         return await self.public(self._record(record.id))
 
     async def update(
@@ -368,7 +374,7 @@ class ConnectedAgentService:
 
     async def set_default(
         self, profile_id: str, command: SetDefaultConnectedAgentRequest
-    ) -> dict[str, object]:
+    ) -> SetDefaultConnectedAgentResponse:
         if command.expected_profile_revision != command.expected_agent_registry_revision:
             raise ConnectedAgentConflict("PROFILE_REVISION_CONFLICT")
         async with self._mutation_lock:
@@ -379,11 +385,11 @@ class ConnectedAgentService:
                 idempotency_key=command.idempotency_key,
             )
             registry_revision = self.registry.load().registry_revision
-        return {
-            "profile_id": profile.profile_id,
-            "default_connected_agent_id": profile.default_connected_agent_id,
-            "registry_revision": registry_revision,
-        }
+        return SetDefaultConnectedAgentResponse(
+            profile_id=profile.profile_id,
+            default_connected_agent_id=profile.default_connected_agent_id,
+            registry_revision=registry_revision,
+        )
 
     def presentation(self, agent_id: str) -> dict[str, object]:
         record = self._record(agent_id)

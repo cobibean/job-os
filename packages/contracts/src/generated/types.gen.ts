@@ -562,24 +562,9 @@ export type BoundConversationResponse = {
     active_turn: {
         [key: string]: unknown;
     } | null;
-    /**
-     * Agent
-     */
-    agent: {
-        [key: string]: unknown;
-    };
-    /**
-     * Availability
-     */
-    availability: {
-        [key: string]: unknown;
-    };
-    /**
-     * Binding
-     */
-    binding: {
-        [key: string]: unknown;
-    };
+    agent: ConversationAgentPresentation;
+    availability: ConversationAvailabilityResponse;
+    binding: ConversationBindingResponse;
     connection: ConnectionResponse;
     /**
      * Conversation Id
@@ -1466,6 +1451,68 @@ export type ConnectionResponse = {
      * State
      */
     state: 'online' | 'connecting' | 'offline';
+};
+
+/**
+ * ConversationAgentPresentation
+ */
+export type ConversationAgentPresentation = {
+    /**
+     * Avatar Id
+     */
+    avatar_id: string;
+    /**
+     * Display Name
+     */
+    display_name: string;
+    /**
+     * Id
+     */
+    id: string;
+    /**
+     * Provider
+     */
+    provider: 'hermes' | 'codex';
+};
+
+/**
+ * ConversationAvailabilityResponse
+ */
+export type ConversationAvailabilityResponse = {
+    /**
+     * Reason
+     */
+    reason?: string | null;
+    /**
+     * State
+     */
+    state: 'ready' | 'locked';
+};
+
+/**
+ * ConversationBindingResponse
+ */
+export type ConversationBindingResponse = {
+    /**
+     * Binding State
+     */
+    binding_state: 'sealed';
+    /**
+     * Connected Agent Id
+     */
+    connected_agent_id: string;
+    /**
+     * Model Id
+     */
+    model_id: string;
+    /**
+     * Provider
+     */
+    provider: 'hermes' | 'codex';
+    /**
+     * Reasoning Effort
+     */
+    reasoning_effort: string;
 };
 
 /**
@@ -3959,6 +4006,24 @@ export type SetDefaultConnectedAgentRequest = {
      * Idempotency Key
      */
     idempotency_key: string;
+};
+
+/**
+ * SetDefaultConnectedAgentResponse
+ */
+export type SetDefaultConnectedAgentResponse = {
+    /**
+     * Default Connected Agent Id
+     */
+    default_connected_agent_id: string | null;
+    /**
+     * Profile Id
+     */
+    profile_id: string;
+    /**
+     * Registry Revision
+     */
+    registry_revision: number;
 };
 
 /**
@@ -6784,6 +6849,14 @@ export type ConnectedAgentCreateV1ConnectedAgentsPostData = {
     body: CreateConnectedAgentRequest;
     headers?: {
         /**
+         * X-Jobos-Agent-Id
+         */
+        'X-JobOS-Agent-Id'?: string | null;
+        /**
+         * X-Jobos-Agent-Token
+         */
+        'X-JobOS-Agent-Token'?: string | null;
+        /**
          * X-Jobos-Mcp-Token
          */
         'X-JobOS-MCP-Token'?: string | null;
@@ -6867,6 +6940,14 @@ export type ConnectedAgentUpdateV1ConnectedAgentsAgentIdPatchData = {
     body: UpdateConnectedAgentRequest;
     headers?: {
         /**
+         * X-Jobos-Agent-Id
+         */
+        'X-JobOS-Agent-Id'?: string | null;
+        /**
+         * X-Jobos-Agent-Token
+         */
+        'X-JobOS-Agent-Token'?: string | null;
+        /**
          * X-Jobos-Mcp-Token
          */
         'X-JobOS-MCP-Token'?: string | null;
@@ -6910,6 +6991,14 @@ export type ConnectedAgentUpdateV1ConnectedAgentsAgentIdPatchResponse = Connecte
 export type ConnectedAgentDisconnectV1ConnectedAgentsAgentIdDisconnectPostData = {
     body: DisconnectConnectedAgentRequest;
     headers?: {
+        /**
+         * X-Jobos-Agent-Id
+         */
+        'X-JobOS-Agent-Id'?: string | null;
+        /**
+         * X-Jobos-Agent-Token
+         */
+        'X-JobOS-Agent-Token'?: string | null;
         /**
          * X-Jobos-Mcp-Token
          */
@@ -8528,6 +8617,14 @@ export type InstallationProfileDefaultAgentV1InstallationProfilesProfileIdDefaul
     body: SetDefaultConnectedAgentRequest;
     headers?: {
         /**
+         * X-Jobos-Agent-Id
+         */
+        'X-JobOS-Agent-Id'?: string | null;
+        /**
+         * X-Jobos-Agent-Token
+         */
+        'X-JobOS-Agent-Token'?: string | null;
+        /**
          * X-Jobos-Mcp-Token
          */
         'X-JobOS-MCP-Token'?: string | null;
@@ -8561,13 +8658,9 @@ export type InstallationProfileDefaultAgentV1InstallationProfilesProfileIdDefaul
 
 export type InstallationProfileDefaultAgentV1InstallationProfilesProfileIdDefaultAgentPutResponses = {
     /**
-     * Response Installation Profile Default Agent V1 Installation Profiles  Profile Id  Default Agent Put
-     *
      * Successful Response
      */
-    200: {
-        [key: string]: unknown;
-    };
+    200: SetDefaultConnectedAgentResponse;
 };
 
 export type InstallationProfileDefaultAgentV1InstallationProfilesProfileIdDefaultAgentPutResponse = InstallationProfileDefaultAgentV1InstallationProfilesProfileIdDefaultAgentPutResponses[keyof InstallationProfileDefaultAgentV1InstallationProfilesProfileIdDefaultAgentPutResponses];

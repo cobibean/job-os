@@ -84,6 +84,10 @@ class InstallationProfileConflict(InstallationProfileError):
     code = "profile_registry_conflict"
 
 
+class ConnectedAgentCardinalityConflict(InstallationProfileConflict):
+    code = "connected_agent_cardinality_conflict"
+
+
 class InstallationProfileNotFound(InstallationProfileError):
     code = "installation_profile_not_found"
 
@@ -1264,7 +1268,7 @@ class InstallationProfileRegistry:
             if provider == "codex" and any(
                 item.provider == "codex" for item in data.connected_agents
             ):
-                raise InstallationProfileConflict(
+                raise ConnectedAgentCardinalityConflict(
                     "This installation already has a durable Codex identity"
                 )
             timestamp = now or utc_now()

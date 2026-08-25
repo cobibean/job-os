@@ -1,4 +1,5 @@
 import asyncio
+import logging
 from typing import Literal
 
 from pydantic import Field
@@ -23,6 +24,8 @@ from .state_store import (
     ConversationProvisioningFailed,
     JobOsStateStore,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class ConversationSummary(ConversationModel):
@@ -174,7 +177,7 @@ class ConversationManager:
                 service = self._make_service(conversation_id)
                 self._services[conversation_id] = service
                 await service.start()
-            except BaseException:
+            except Exception:
                 self._services.pop(conversation_id, None)
                 if service is not None:
                     await asyncio.gather(service.close(), return_exceptions=True)
@@ -242,10 +245,14 @@ class ConversationManager:
                 if service is not None:
                     service.store.lock_provisioning()
                 raise
-            except BaseException:
+            except Exception as error:
                 if service is None:
                     raise
                 service.store.lock_provisioning()
+                logger.exception(
+                    "Connected Agent conversation provisioning requires recovery",
+                    exc_info=error,
+                )
         return self._bound_snapshot(service, agent_summary), True
 
     async def replay_bound(
