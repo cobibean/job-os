@@ -545,78 +545,86 @@
     {
       "id": "PKG-01",
       "owner_phase": 8,
-      "status": "partial",
-      "source_commit": null,
+      "status": "verified",
+      "source_commit": "5881d9d3adf07eadc9937ce80f6f43b55833dbb4",
       "proof_refs": [
-        "apps/desktop/scripts/verify-phase8-package.mjs"
+        "apps/desktop/scripts/verify-phase8-package.mjs",
+        "docs/acceptance/connected-agents/phase-8/README.md"
       ],
-      "remaining_proof": "Final exact-commit Phase 8 package or regression receipt must be attached before closeout."
+      "remaining_proof": null
     },
     {
       "id": "PKG-02",
       "owner_phase": 8,
-      "status": "approval_blocked",
-      "source_commit": null,
+      "status": "verified",
+      "source_commit": "5881d9d3adf07eadc9937ce80f6f43b55833dbb4",
       "proof_refs": [
-        "apps/desktop/scripts/verify-phase8-package.mjs"
+        "docs/acceptance/connected-agents/phase-8/README.md"
       ],
-      "remaining_proof": "Fresh installed golden-path run requires approval."
+      "remaining_proof": null
     },
     {
       "id": "PKG-03",
       "owner_phase": 8,
-      "status": "approval_blocked",
-      "source_commit": null,
+      "status": "verified",
+      "source_commit": "5881d9d3adf07eadc9937ce80f6f43b55833dbb4",
       "proof_refs": [
-        "apps/desktop/scripts/verify-phase8-package.mjs"
+        "docs/acceptance/connected-agents/phase-8/README.md"
       ],
-      "remaining_proof": "Real-data upgrade requires fresh approval."
+      "remaining_proof": null
     },
     {
       "id": "PKG-04",
       "owner_phase": 8,
-      "status": "partial",
-      "source_commit": null,
+      "status": "verified",
+      "source_commit": "5881d9d3adf07eadc9937ce80f6f43b55833dbb4",
       "proof_refs": [
-        "apps/desktop/scripts/verify-phase8-package.mjs"
+        "apps/desktop/scripts/verify-phase8-package.mjs",
+        "docs/acceptance/connected-agents/phase-8/README.md"
       ],
-      "remaining_proof": "Final exact-commit Phase 8 package or regression receipt must be attached before closeout."
+      "remaining_proof": null
     },
     {
       "id": "PKG-05",
       "owner_phase": 8,
-      "status": "partial",
-      "source_commit": null,
+      "status": "verified",
+      "source_commit": "5881d9d3adf07eadc9937ce80f6f43b55833dbb4",
       "proof_refs": [
-        "apps/desktop/scripts/verify-phase8-package.mjs"
+        "apps/desktop/scripts/verify-phase8-package.mjs",
+        "docs/acceptance/connected-agents/phase-8/README.md"
       ],
-      "remaining_proof": "Final exact-commit Phase 8 package or regression receipt must be attached before closeout."
+      "remaining_proof": null
     },
     {
       "id": "INST-01",
       "owner_phase": 8,
-      "status": "approval_blocked",
-      "source_commit": null,
-      "proof_refs": [],
-      "remaining_proof": "Real installed host/data/tool proof requires fresh approval."
+      "status": "verified",
+      "source_commit": "5881d9d3adf07eadc9937ce80f6f43b55833dbb4",
+      "proof_refs": [
+        "docs/acceptance/connected-agents/phase-8/README.md"
+      ],
+      "remaining_proof": null
     },
     {
       "id": "INST-02",
       "owner_phase": 8,
-      "status": "approval_blocked",
-      "source_commit": null,
-      "proof_refs": [],
-      "remaining_proof": "Authorized MacBook/Tailscale proof requires fresh approval."
+      "status": "partial",
+      "source_commit": "5881d9d3adf07eadc9937ce80f6f43b55833dbb4",
+      "proof_refs": [
+        "docs/acceptance/connected-agents/phase-8/README.md"
+      ],
+      "remaining_proof": "Tailscale Serve health is verified; fresh human MacBook and visual/accessibility acceptance remains."
     },
     {
       "id": "REG-01",
       "owner_phase": 8,
       "status": "partial",
-      "source_commit": null,
+      "source_commit": "5881d9d3adf07eadc9937ce80f6f43b55833dbb4",
       "proof_refs": [
-        "tests/connected_agents/test_phase0_harness.py"
+        "tests/connected_agents/test_phase0_harness.py",
+        "docs/acceptance/connected-agents/phase-8/README.md"
       ],
-      "remaining_proof": "Final exact-commit Phase 8 package or regression receipt must be attached before closeout."
+      "remaining_proof": "Fresh redistribution approval remains separate from historical Phase 0 evidence."
     }
   ]
 }

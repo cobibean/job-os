@@ -63,12 +63,6 @@ def test_connected_agents_evidence_index_is_complete_unique_and_honest():
         "CAP-04",
         "A11Y-01",
         "VIS-01",
-        "PKG-01",
-        "PKG-02",
-        "PKG-03",
-        "PKG-04",
-        "PKG-05",
-        "INST-01",
         "INST-02",
         "REG-01",
     }

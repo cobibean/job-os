@@ -32,16 +32,22 @@ The package verifier checks:
 - extracted generated application-payload privacy checks and exact hashes for large pinned binaries;
 - a truthful status split: package/integrity checks may pass while installed and real-data runs remain approval-gated.
 
-## Fresh approval boundary
+## Exact candidate and installed proof
 
-The following proof is intentionally **not** claimed by automated or synthetic results:
+The approval-gated installed run used exact source commit `5881d9d3adf07eadc9937ce80f6f43b55833dbb4` and package SHA-256 `7cf990529e0816832ceb8a87b6f0ec0961fbf14af1633009a9f8ff2ee7ee508a`.
 
-1. replacing or upgrading Cobi's real installed JobOS app;
-2. reading or migrating Cobi's installed profiles, chats, jobs, Career Profile, or artifacts;
-3. restarting the live Mac host API;
-4. performing live ChatGPT device-code or Keychain authentication;
-5. operating the authorized MacBook/Tailscale path;
-6. creating or approving a real useful document;
-7. final human visual, keyboard, screen-reader, reduced-motion, zoom, remote, and recovery acceptance.
+Mechanically verified results:
 
-Those actions require fresh approval immediately before the run. Production/public release remains a separate approval gate.
+- the installed app and stable runtime release came from that exact candidate, with strict app signature and packaged payload checks passing;
+- rollback was created before replacement, the launchd API restarted healthy, and the diagnostic CDP endpoint was loopback-only and removed after the bounded run;
+- all 148 pre-existing jobs remained available after installation;
+- the dedicated JobOS Codex home remained authenticated through Keychain-backed credentials and returned the live runtime model catalog;
+- visible, exact-turn approval was required separately for each supported MCP operation; approved requests were consumed and stale or contradictory decisions were not reused;
+- a Codex chat read an existing synthetic-fixture editable cover letter and created a fresh manual snapshot without changing document content or job state; database readback confirmed the completed turn, unchanged document revision, new snapshot, matching revision, and persisted snapshot payloads;
+- the Tailscale Serve health endpoint returned HTTP 200 and `ready`, proving the served host route without claiming a fresh human MacBook UI walkthrough.
+
+The attempted real resume render correctly remains **failed**, not acceptance evidence. The renderer produced a PDF but the existing Job Hunter PDF verifier rejected extractor-dependent text ordering. Phase 8 therefore uses the independently useful and durable editable-document snapshot workflow as its successful installed MCP mutation rather than weakening PDF verification or expanding this PR into Job Hunter renderer work.
+
+## Remaining human and release boundary
+
+Automated, diagnostic, or operator-run results do not substitute for a user's judgment of keyboard, screen-reader, reduced-motion, zoom, remote MacBook, and recovery experience. Fresh redistribution approval also remains separate from the historical Phase 0 receipt. Production/public release remains a separate approval gate.
