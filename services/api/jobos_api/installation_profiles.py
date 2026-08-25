@@ -260,6 +260,7 @@ class PersistentIdempotencyReplay(StrictModel):
         "agent_create",
         "agent_update",
         "agent_disconnect",
+        "agent_auth_complete",
         "profile_default_agent",
     ]
     key_hash: str = Field(pattern=r"^[a-f0-9]{64}$")
@@ -1147,7 +1148,11 @@ class InstallationProfileRegistry:
         self,
         data: InstallationProfileRegistryData,
         operation: Literal[
-            "agent_create", "agent_update", "agent_disconnect", "profile_default_agent"
+            "agent_create",
+            "agent_update",
+            "agent_disconnect",
+            "agent_auth_complete",
+            "profile_default_agent",
         ],
         key: str,
         request_hash: str,
@@ -1170,7 +1175,11 @@ class InstallationProfileRegistry:
         self,
         data: InstallationProfileRegistryData,
         operation: Literal[
-            "agent_create", "agent_update", "agent_disconnect", "profile_default_agent"
+            "agent_create",
+            "agent_update",
+            "agent_disconnect",
+            "agent_auth_complete",
+            "profile_default_agent",
         ],
         key: str,
         request_hash: str,
@@ -1187,7 +1196,11 @@ class InstallationProfileRegistry:
         self,
         data: InstallationProfileRegistryData,
         operation: Literal[
-            "agent_create", "agent_update", "agent_disconnect", "profile_default_agent"
+            "agent_create",
+            "agent_update",
+            "agent_disconnect",
+            "agent_auth_complete",
+            "profile_default_agent",
         ],
         key: str,
         request_hash: str,
@@ -1272,6 +1285,7 @@ class InstallationProfileRegistry:
                     "This installation already has a durable Codex identity"
                 )
             timestamp = now or utc_now()
+            awaiting_codex_auth = provider == "codex" and credential_reference is None
             record = ConnectedAgentRecord(
                 id=identifier,
                 provider=provider,
@@ -1279,14 +1293,14 @@ class InstallationProfileRegistry:
                 avatar_id=avatar_id,
                 default_model_id=default_model_id,
                 default_reasoning_effort=default_reasoning_effort,
-                lifecycle="connected",
-                connection_config=normalized_config,
+                lifecycle="disconnected" if awaiting_codex_auth else "connected",
+                connection_config=None if awaiting_codex_auth else normalized_config,
                 credential_reference=credential_reference,
                 account_summary=None,
                 account_fingerprint=None,
                 created_at=timestamp,
                 updated_at=timestamp,
-                disconnected_at=None,
+                disconnected_at=timestamp if awaiting_codex_auth else None,
             )
             result = record.model_copy(
                 update={"connection_config": None, "credential_reference": None}
@@ -1439,6 +1453,78 @@ class InstallationProfileRegistry:
             updated = self._with_registry_mutation_replay(
                 updated,
                 "agent_disconnect",
+                idempotency_key,
+                request_hash,
+                response_json=changed.model_dump_json(),
+            )
+            self._write_unlocked(updated)
+            return changed
+
+    def complete_connected_agent_auth(
+        self,
+        agent_id: str,
+        *,
+        runtime_namespace: str,
+        credential_reference: str,
+        account_summary: dict[str, str] | None,
+        account_fingerprint: str | None,
+        idempotency_key: str,
+        now: datetime | None = None,
+    ) -> ConnectedAgentRecord:
+        """Persist only safe host-derived auth metadata after vault verification."""
+        if not CONNECTED_AGENT_ID_PATTERN.fullmatch(agent_id):
+            raise ValueError("Connected Agent identifier is invalid")
+        request_hash = self._request_hash(
+            {
+                "agent_id": agent_id,
+                "runtime_namespace": runtime_namespace,
+                "credential_reference": credential_reference,
+                "account_summary": account_summary,
+                "account_fingerprint": account_fingerprint,
+            }
+        )
+        with self.locked():
+            data = self.load()
+            replay = self._registry_mutation_replay(
+                data, "agent_auth_complete", idempotency_key, request_hash
+            )
+            if replay is not None:
+                try:
+                    return ConnectedAgentRecord.model_validate_json(replay.response_json)
+                except ValidationError as error:
+                    raise InstallationProfileRegistryError(
+                        "Connected Agent auth replay is invalid"
+                    ) from error
+            target = next((item for item in data.connected_agents if item.id == agent_id), None)
+            if target is None:
+                raise InstallationProfileNotFound("Connected Agent was not found")
+            if target.provider != "codex":
+                raise InstallationProfileConflict("Connected Agent does not use Codex")
+            timestamp = now or utc_now()
+            changed = target.model_copy(
+                update={
+                    "lifecycle": "connected",
+                    "connection_config": CodexConnectionConfiguration(
+                        runtime_namespace=runtime_namespace
+                    ),
+                    "credential_reference": credential_reference,
+                    "account_summary": account_summary,
+                    "account_fingerprint": account_fingerprint,
+                    "updated_at": timestamp,
+                    "disconnected_at": None,
+                }
+            )
+            updated = data.model_copy(
+                update={
+                    "registry_revision": data.registry_revision + 1,
+                    "connected_agents": tuple(
+                        changed if item.id == agent_id else item for item in data.connected_agents
+                    ),
+                }
+            )
+            updated = self._with_registry_mutation_replay(
+                updated,
+                "agent_auth_complete",
                 idempotency_key,
                 request_hash,
                 response_json=changed.model_dump_json(),

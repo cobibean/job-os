@@ -52,3 +52,5 @@ desktop.ini
 # Generated native helpers
 apps/desktop/build/jobos-keychain
 apps/desktop/build/jobos-docx-atomic-replace
+apps/desktop/build/codex-runtime/
+apps/desktop/build/codex-runtime-download.tar.gz

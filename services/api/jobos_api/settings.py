@@ -69,6 +69,9 @@ class Settings(BaseModel):
     hermes_dashboard_token: str | None = Field(default=None, min_length=16, repr=False)
     hermes_job_hunter_cwd: Path | None = None
     hermes_request_timeout: float = Field(default=5.0, gt=0, le=30)
+    codex_app_server_path: Path | None = None
+    codex_home_path: Path | None = None
+    codex_request_timeout: float = Field(default=15.0, gt=0, le=60)
     career_profile_enabled: bool = False
     career_profile_owner_device_ids: tuple[str, ...] = ()
     career_profile_agent_id: str = Field(
@@ -170,6 +173,9 @@ class Settings(BaseModel):
 
     def resolved_evidence_vault_root(self) -> Path:
         return self.state_db_path.parent / "career-profile-evidence"
+
+    def resolved_codex_home(self) -> Path:
+        return self.codex_home_path or self.state_db_path.parent.parent / "codex-home"
 
     def resolved_artifact_roots(self) -> tuple[Path, ...]:
         roots = (self.resolved_local_artifact_root(), *self.artifact_roots)

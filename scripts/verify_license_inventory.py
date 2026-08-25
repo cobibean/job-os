@@ -30,6 +30,14 @@ REQUIRED_PACKAGED_NOTICES = {
         "../../packages/docx-editor-core/UPSTREAM.md",
         "licenses/docx-editor-core/UPSTREAM.md",
     ),
+    (
+        "../../tests/connected_agents/receipts/codex-0.144.4/LICENSE",
+        "licenses/codex/LICENSE",
+    ),
+    (
+        "../../tests/connected_agents/receipts/codex-0.144.4/NOTICE",
+        "licenses/codex/NOTICE",
+    ),
 }
 ADAPTED_SOURCE_ROOTS = (
     "packages/docx-engine/scripts/",
