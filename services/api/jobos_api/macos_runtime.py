@@ -344,7 +344,10 @@ def build_service_environment(
             raise ValueError("remote device credential is invalid")
     source = base_environment if base_environment is not None else os.environ
     environment = {
-        "PATH": source.get("PATH", "/usr/bin:/bin:/usr/sbin:/sbin"),
+        "PATH": source.get(
+            "PATH",
+            "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin",
+        ),
         "PYTHONUNBUFFERED": "1",
         "PYTHONPATH": os.pathsep.join(
             [

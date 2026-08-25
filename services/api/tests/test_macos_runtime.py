@@ -345,6 +345,9 @@ def test_service_environment_and_uvicorn_command_are_fixed_and_loopback_only(tmp
     assert json.loads(
         remote_environment["JOBOS_CAREER_PROFILE_OWNER_DEVICE_IDS_JSON"]
     ) == ["macbook-device"]
+    assert remote_environment["PATH"] == (
+        "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+    )
 
 
 def test_local_service_environment_has_no_private_provider_inputs(tmp_path):
