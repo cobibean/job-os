@@ -567,6 +567,14 @@ def test_runtime_rejects_tampered_installed_keychain_helper(tmp_path, monkeypatc
     with pytest.raises(RuntimeError, match="Keychain helper failed integrity"):
         validate_runtime_paths(RuntimeServiceConfig.from_mapping(mapping))
 
+    config = RuntimeServiceConfig.from_mapping(mapping)
+    with pytest.raises(RuntimeError, match="Keychain helper failed integrity"):
+        macos_runtime._configured_store_secret(config, macos_runtime.store_keychain_secret)
+    with pytest.raises(RuntimeError, match="Keychain helper failed integrity"):
+        macos_runtime._configured_read_secret(config, macos_runtime.read_keychain_secret)
+    with pytest.raises(RuntimeError, match="Keychain helper failed integrity"):
+        macos_runtime._configured_delete_secret(config, macos_runtime.delete_keychain_secret)
+
 
 def test_installed_app_runtime_rejects_symlinked_resource_ancestors(tmp_path):
     app = tmp_path / "Applications/JobOS.app"

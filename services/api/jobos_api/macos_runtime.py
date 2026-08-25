@@ -921,12 +921,28 @@ def _restore_secret(
         store_secret(service, account, previous)
 
 
+def _validated_keychain_helper(config: RuntimeServiceConfig) -> Path | None:
+    helper = config.keychain_helper_path
+    if helper is None:
+        return None
+    if (
+        not helper.is_absolute()
+        or helper.is_symlink()
+        or not helper.is_file()
+        or not os.access(helper, os.X_OK)
+        or config.keychain_helper_sha256 is None
+        or _sha256(helper) != config.keychain_helper_sha256
+    ):
+        raise RuntimeError("installed JobOS Keychain helper failed integrity verification")
+    return helper
+
+
 def _configured_store_secret(
     config: RuntimeServiceConfig,
     callback: Callable[[str, str, str], None],
 ) -> Callable[[str, str, str], None]:
     if config.keychain_helper_path is not None and callback is store_keychain_secret:
-        return partial(store_keychain_secret, helper_path=config.keychain_helper_path)
+        return partial(store_keychain_secret, helper_path=_validated_keychain_helper(config))
     return callback
 
 
@@ -935,7 +951,7 @@ def _configured_read_secret(
     callback: Callable[[str, str], str | None],
 ) -> Callable[[str, str], str | None]:
     if config.keychain_helper_path is not None and callback is read_keychain_secret:
-        return partial(read_keychain_secret, helper_path=config.keychain_helper_path)
+        return partial(read_keychain_secret, helper_path=_validated_keychain_helper(config))
     return callback
 
 
@@ -944,7 +960,7 @@ def _configured_delete_secret(
     callback: Callable[[str, str], None],
 ) -> Callable[[str, str], None]:
     if config.keychain_helper_path is not None and callback is delete_keychain_secret:
-        return partial(delete_keychain_secret, helper_path=config.keychain_helper_path)
+        return partial(delete_keychain_secret, helper_path=_validated_keychain_helper(config))
     return callback
 
 
