@@ -37,7 +37,6 @@ from jobos_api.macos_keychain import (
 )
 
 SERVICE_LABEL = "com.cobibean.jobos.api"
-KEYCHAIN_HELPER_SHA256 = "76d0159bddbb28b2a9d9839eaca9fa85e77f0797e4d792c3a6506109302daff3"
 DEVICE_TOKEN_SERVICE = "com.cobibean.jobos.device-token"
 MCP_TOKEN_SERVICE = "com.cobibean.jobos.mcp-token"
 HERMES_TOKEN_SERVICE = "com.cobibean.jobos.hermes-dashboard-token"
@@ -479,7 +478,14 @@ def _sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
-def installed_codex_paths(jobos_app: Path, data_dir: Path) -> dict[str, str]:
+def installed_codex_paths(
+    jobos_app: Path,
+    data_dir: Path,
+    *,
+    expected_keychain_helper_sha256: str,
+) -> dict[str, str]:
+    if not re.fullmatch(r"[a-f0-9]{64}", expected_keychain_helper_sha256):
+        raise ValueError("expected Keychain helper SHA-256 is invalid")
     if not jobos_app.is_absolute() or jobos_app.is_symlink() or not jobos_app.is_dir():
         raise ValueError("JobOS app must be an absolute installed application")
     app_root = jobos_app.resolve(strict=True)
@@ -516,7 +522,7 @@ def installed_codex_paths(jobos_app: Path, data_dir: Path) -> dict[str, str]:
     if receipt_hash != CODEX_APP_SERVER_SHA256 or _sha256(app_server) != CODEX_APP_SERVER_SHA256:
         raise ValueError("installed JobOS Codex runtime failed integrity verification")
     helper_hash = _sha256(keychain_helper)
-    if helper_hash != KEYCHAIN_HELPER_SHA256:
+    if helper_hash != expected_keychain_helper_sha256:
         raise ValueError("installed JobOS Keychain helper failed integrity verification")
     return {
         "keychain_helper_path": str(keychain_helper),
@@ -534,8 +540,19 @@ def build_local_runtime_config(
     device_id: str,
     port: int,
     jobos_app: Path | None = None,
+    keychain_helper_sha256: str | None = None,
 ) -> RuntimeServiceConfig:
-    codex_paths = installed_codex_paths(jobos_app, data_dir) if jobos_app else {}
+    if jobos_app is not None and keychain_helper_sha256 is None:
+        raise ValueError("installed JobOS requires an expected Keychain helper SHA-256")
+    codex_paths = (
+        installed_codex_paths(
+            jobos_app,
+            data_dir,
+            expected_keychain_helper_sha256=keychain_helper_sha256,
+        )
+        if jobos_app is not None and keychain_helper_sha256 is not None
+        else {}
+    )
     return RuntimeServiceConfig.from_mapping(
         {
             "schema_version": 1,
@@ -1307,6 +1324,7 @@ def parse_arguments(arguments: list[str]) -> argparse.Namespace:
     install_local.add_argument("--home", type=Path, default=Path.home())
     install_local.add_argument("--launcher", type=Path, required=True)
     install_local.add_argument("--jobos-app", type=Path)
+    install_local.add_argument("--keychain-helper-sha256")
     authorize = subparsers.add_parser(
         "authorize-remote",
         help="authorize one remote desktop device",
@@ -1353,6 +1371,7 @@ def main(arguments: list[str] | None = None) -> int:
                     device_id=options.device_id,
                     port=options.port,
                     jobos_app=options.jobos_app,
+                    keychain_helper_sha256=options.keychain_helper_sha256,
                 )
             )
             install_runtime(

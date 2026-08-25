@@ -384,11 +384,6 @@ def test_installed_app_runtime_wires_codex_and_keychain_without_persisting_secre
         encoding="utf-8",
     )
     monkeypatch.setattr(macos_runtime, "CODEX_APP_SERVER_SHA256", digest)
-    monkeypatch.setattr(
-        macos_runtime,
-        "KEYCHAIN_HELPER_SHA256",
-        hashlib.sha256(keychain_helper.read_bytes()).hexdigest(),
-    )
     data_dir = tmp_path / "data"
     config = build_local_runtime_config(
         jobos_root=tmp_path / "release",
@@ -397,6 +392,7 @@ def test_installed_app_runtime_wires_codex_and_keychain_without_persisting_secre
         device_id="mini-device",
         port=8766,
         jobos_app=app,
+        keychain_helper_sha256=hashlib.sha256(keychain_helper.read_bytes()).hexdigest(),
     )
     service_config = tmp_path / "home/Library/Application Support/JobOS/service/runtime.json"
     environment = build_service_environment(
@@ -424,6 +420,37 @@ def test_installed_app_runtime_wires_codex_and_keychain_without_persisting_secre
     assert "mcp-secret-value" not in persisted
 
 
+def test_installed_app_runtime_requires_operator_supplied_keychain_helper_hash(tmp_path):
+    app = tmp_path / "Applications/JobOS.app"
+    app.mkdir(parents=True)
+
+    with pytest.raises(ValueError, match="expected Keychain helper SHA-256"):
+        build_local_runtime_config(
+            jobos_root=tmp_path / "release",
+            python_path=tmp_path / "python",
+            data_dir=tmp_path / "data",
+            device_id="mini-device",
+            port=8766,
+            jobos_app=app,
+        )
+
+
+def test_installed_app_runtime_rejects_invalid_keychain_helper_hash(tmp_path):
+    app = tmp_path / "Applications/JobOS.app"
+    app.mkdir(parents=True)
+
+    with pytest.raises(ValueError, match="expected Keychain helper SHA-256 is invalid"):
+        build_local_runtime_config(
+            jobos_root=tmp_path / "release",
+            python_path=tmp_path / "python",
+            data_dir=tmp_path / "data",
+            device_id="mini-device",
+            port=8766,
+            jobos_app=app,
+            keychain_helper_sha256="not-a-sha256",
+        )
+
+
 def test_installed_app_runtime_rejects_tampered_binary(tmp_path, monkeypatch):
     app = tmp_path / "Applications/JobOS.app"
     resources = app / "Contents/Resources"
@@ -448,6 +475,7 @@ def test_installed_app_runtime_rejects_tampered_binary(tmp_path, monkeypatch):
             device_id="mini-device",
             port=8766,
             jobos_app=app,
+            keychain_helper_sha256="f" * 64,
         )
 
 
@@ -467,7 +495,6 @@ def test_installed_app_runtime_rejects_untrusted_keychain_helper(tmp_path, monke
         encoding="utf-8",
     )
     monkeypatch.setattr(macos_runtime, "CODEX_APP_SERVER_SHA256", digest)
-    monkeypatch.setattr(macos_runtime, "KEYCHAIN_HELPER_SHA256", "f" * 64)
 
     with pytest.raises(ValueError, match="Keychain helper failed integrity"):
         build_local_runtime_config(
@@ -477,6 +504,7 @@ def test_installed_app_runtime_rejects_untrusted_keychain_helper(tmp_path, monke
             device_id="mini-device",
             port=8766,
             jobos_app=app,
+            keychain_helper_sha256="f" * 64,
         )
 
 
@@ -505,6 +533,7 @@ def test_installed_app_runtime_rejects_non_executable_tools(tmp_path, monkeypatc
             device_id="mini-device",
             port=8766,
             jobos_app=app,
+            keychain_helper_sha256="f" * 64,
         )
 
 
@@ -554,6 +583,7 @@ def test_installed_app_runtime_rejects_symlinked_resource_ancestors(tmp_path):
             device_id="mini-device",
             port=8766,
             jobos_app=app,
+            keychain_helper_sha256="f" * 64,
         )
 
 

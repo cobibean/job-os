@@ -22,7 +22,6 @@ const packagedReceiptPath = path.join(
   resources,
   'codex-runtime/JOBOS_CODEX_RUNTIME_RECEIPT.json'
 )
-const keychainHelperSha256 = '76d0159bddbb28b2a9d9839eaca9fa85e77f0797e4d792c3a6506109302daff3'
 
 function sha256(file) {
   return createHash('sha256').update(readFileSync(file)).digest('hex')
@@ -93,6 +92,8 @@ function main() {
     throw new Error('Packaged Codex runtime receipt does not match the pinned source receipt')
   }
   const appServer = requireFile(receipt.package.entrypoint.replace(/^/, 'codex-runtime/'))
+  const keychainHelper = requireFile('jobos-keychain')
+  const keychainHelperSha256 = sha256(keychainHelper)
   if (sha256(appServer) !== receipt.app_server_binary.sha256) {
     throw new Error('Packaged Codex App Server hash is incorrect')
   }
@@ -108,9 +109,6 @@ function main() {
   ]) {
     requireFile(resource)
   }
-  if (sha256(requireFile('jobos-keychain')) !== keychainHelperSha256) {
-    throw new Error('Packaged JobOS Keychain helper hash is incorrect')
-  }
   if (sha256(requireFile('licenses/codex/LICENSE')) !== receipt.redistribution.license.sha256) {
     throw new Error('Packaged Codex LICENSE hash is incorrect')
   }
@@ -122,6 +120,9 @@ function main() {
     stdio: 'inherit',
   })
   execFileSync('/usr/bin/codesign', ['--verify', '--strict', '--verbose=2', appServer], {
+    stdio: 'inherit',
+  })
+  execFileSync('/usr/bin/codesign', ['--verify', '--strict', '--verbose=2', keychainHelper], {
     stdio: 'inherit',
   })
   const appArchitecture = execFileSync('/usr/bin/file', [path.join(app, 'Contents/MacOS/JobOS')], {
@@ -157,6 +158,7 @@ function main() {
           'PKG-03': 'approval_gated_real_data_upgrade',
         },
         app: { architecture: 'arm64', signature: 'valid' },
+        keychainHelper: { sha256: keychainHelperSha256, signature: 'valid' },
         codex: {
           receiptId: receipt.receipt_id,
           version: receipt.candidate.version,
