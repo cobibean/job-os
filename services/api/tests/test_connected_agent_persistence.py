@@ -437,6 +437,15 @@ def test_offline_v1_v31_migration_is_exact_idempotent_and_unknown_model_stays_lo
     assert registry.resume_connected_agent_migration(runtime) == completed
     assert registry.load().connected_agents == (agent,)
 
+    JobOsStateStore(state_path).create_conversation(
+        actor_id="device-a",
+        connected_agent_id="jagent_55555555555555555555555555555555",
+        provider="codex",
+        model_id="fake-codex-model",
+        reasoning_effort="medium",
+    )
+    assert registry.resume_connected_agent_migration(runtime) == completed
+
 
 def test_completed_legacy_migration_cannot_reconnect_disconnected_agent_on_restart(tmp_path):
     root = tmp_path / "installation"

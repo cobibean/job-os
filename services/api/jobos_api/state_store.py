@@ -1977,20 +1977,27 @@ class JobOsStateStore:
             if row is None or str(row[0]) != connected_agent_id:
                 connection.rollback()
                 raise IncompatibleSchemaError("Connected Agent migration receipt is missing")
+            binding_scope = (
+                "connected_agent_id IS ? AND ("
+                if str(row[1]) == "complete"
+                else "connected_agent_id IS NOT ? OR ("
+            )
             missing = connection.execute(
-                """
+                f"""
                 SELECT conversation_id FROM conversations
-                WHERE connected_agent_id IS NOT ? OR provider IS NOT 'hermes'
-                   OR binding_state NOT IN ('sealed', 'legacy_awaiting_resolution')
-                   OR (binding_state = 'sealed' AND (
-                        model_id IS NULL OR reasoning_effort IS NULL
-                        OR creation_state != 'ready' OR lock_reason IS NOT NULL
-                   ))
-                   OR (binding_state = 'legacy_awaiting_resolution' AND (
-                        model_id IS NOT NULL OR reasoning_effort IS NOT NULL
-                        OR creation_state != 'locked'
-                        OR lock_reason != 'LEGACY_MODEL_UNRESOLVED'
-                   ))
+                WHERE {binding_scope}
+                       provider IS NOT 'hermes'
+                       OR binding_state NOT IN ('sealed', 'legacy_awaiting_resolution')
+                       OR (binding_state = 'sealed' AND (
+                            model_id IS NULL OR reasoning_effort IS NULL
+                            OR creation_state != 'ready' OR lock_reason IS NOT NULL
+                       ))
+                       OR (binding_state = 'legacy_awaiting_resolution' AND (
+                            model_id IS NOT NULL OR reasoning_effort IS NOT NULL
+                            OR creation_state != 'locked'
+                            OR lock_reason != 'LEGACY_MODEL_UNRESOLVED'
+                       ))
+                )
                 LIMIT 1
                 """,
                 (connected_agent_id,),
