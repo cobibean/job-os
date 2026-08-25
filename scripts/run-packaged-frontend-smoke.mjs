@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { spawnSync } from 'node:child_process'
-import { chmod, mkdir, mkdtemp, rm } from 'node:fs/promises'
+import { chmod, mkdir, mkdtemp, readFile, rm } from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -10,6 +10,7 @@ await mkdir(taskRoot, { recursive: true, mode: 0o700 })
 const temporaryRoot = await mkdtemp(path.join(taskRoot, 'packaged-frontend-'))
 const runtime = path.join(temporaryRoot, 'runtime')
 const output = path.join(temporaryRoot, 'output')
+const statusPath = path.join(runtime, 'smoke-status.txt')
 const privateDirectories = [
   runtime,
   output,
@@ -65,11 +66,17 @@ try {
       JOBOS_ACCEPTANCE_CI: '1',
       JOBOS_ACCEPTANCE_RUNTIME: runtime,
       JOBOS_ACCEPTANCE_OUTPUT: output,
+      JOBOS_ACCEPTANCE_STATUS: statusPath,
       JOBOS_KEYCHAIN_HELPER_PATH: disabledKeychainHelper,
     })
     process.stdout.write(report)
   } catch (error) {
-    process.stderr.write('\nPackaged frontend smoke failed; disposable runtime logs were withheld from CI output to prevent credential disclosure.\n')
+    let safeStage = 'unknown-stage'
+    try {
+      const candidate = (await readFile(statusPath, 'utf8')).trim()
+      if (/^(?:starting|passed|failed):[a-z0-9-]+$/.test(candidate)) safeStage = candidate
+    } catch {}
+    process.stderr.write(`\nPackaged frontend smoke failed at ${safeStage}; disposable runtime logs were withheld from CI output to prevent credential disclosure.\n`)
     throw error
   }
 } finally {

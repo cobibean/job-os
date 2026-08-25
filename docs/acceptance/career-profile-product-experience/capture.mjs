@@ -11,6 +11,7 @@ const acceptanceDirectory = path.dirname(fileURLToPath(import.meta.url))
 const root = path.resolve(acceptanceDirectory, '../../..')
 const runtime = process.env.JOBOS_ACCEPTANCE_RUNTIME
 const output = process.env.JOBOS_ACCEPTANCE_OUTPUT
+const statusPath = process.env.JOBOS_ACCEPTANCE_STATUS
 if (!runtime || !output) {
   throw new Error('JOBOS_ACCEPTANCE_RUNTIME and JOBOS_ACCEPTANCE_OUTPUT are required')
 }
@@ -51,6 +52,12 @@ const acceptanceScreenshotNames = [
 ]
 const acceptanceRelativeDirectory = 'docs/acceptance/career-profile-product-experience'
 const fixtureManifestRelativePath = 'tests/public-release/synthetic-fixtures.json'
+let smokeStage = 'initialization'
+
+async function markStage(state, stage) {
+  smokeStage = stage
+  if (statusPath) await writeFile(statusPath, `${state}:${stage}\n`, { mode: 0o600 })
+}
 
 function assert(condition, message) {
   if (!condition) throw new Error(message)
@@ -224,6 +231,7 @@ function startApp() {
   return spawnTracked(appBinary, [
     `--user-data-dir=${path.join(runtime, 'electron')}`,
     `--remote-debugging-port=${debuggerPort}`,
+    '--disable-gpu',
     '--disable-features=CalculateNativeWinOcclusion'
   ], {
     cwd: root,
@@ -695,6 +703,7 @@ async function restoreProfileOnlyThroughUi(current) {
 }
 
 try {
+  await markStage('starting', 'api-startup')
   apiProcess = startApi()
   await waitUntil(async () => {
     const response = await fetch(`${config.apiBaseUrl}/v1/health`)
@@ -708,26 +717,33 @@ try {
   installationProfileId = deviceSession.installation_profile_id
   await seed()
 
+  await markStage('starting', 'first-app-launch')
   appProcess = startApp()
   cdp = await connectCdp()
+  await markStage('starting', 'first-ui-journey')
   const journey = await runFirstPackagedJourney()
   cdp.socket.close()
   await terminate(appProcess)
 
+  await markStage('starting', 'second-app-launch')
   appProcess = startApp()
   cdp = await connectCdp()
+  await markStage('starting', 'restart-and-restore')
   await runRestartProof('Available')
   const portability = await inspectNativeExports()
   const restoreProof = await restoreProfileOnlyThroughUi(portability.current)
   cdp.socket.close()
   await terminate(appProcess)
 
+  await markStage('starting', 'third-app-launch')
   appProcess = startApp()
   cdp = await connectCdp()
+  await markStage('starting', 'restored-baseline-proof')
   await runRestartProof('Unavailable')
   cdp.socket.close()
   await terminate(appProcess)
 
+  await markStage('starting', 'protocol-and-identity')
   const protocol = verifyProtocolLifecycle()
   const identity = await artifactIdentity()
   const packageBytes = await readFile(path.join(root, 'release/desktop/JobOS-0.1.0-arm64.zip'))
@@ -752,7 +768,11 @@ try {
     ...protocol
   }
   await writeFile(path.join(output, 'acceptance-report.json'), `${JSON.stringify(report, null, 2)}\n`, { mode: 0o600 })
+  await markStage('passed', 'complete')
   process.stdout.write(`${JSON.stringify(report, null, 2)}\n`)
+} catch (error) {
+  await markStage('failed', smokeStage)
+  throw error
 } finally {
   if (cdp?.socket?.readyState === WebSocket.OPEN) cdp.socket.close()
   await terminate(appProcess)
