@@ -167,6 +167,19 @@ async def test_codex_turn_uses_opaque_thread_and_exact_jobos_context(tmp_path: P
 
 
 @pytest.mark.anyio
+async def test_codex_attachment_is_idempotent_for_the_current_live_thread(
+    tmp_path: Path,
+) -> None:
+    client = FakeCodexClient()
+    gateway = CodexGatewayFactory(client, cwd=tmp_path).create("conv_alpha")
+
+    stored_id, _ = await gateway.create_or_resume_conversation(None)
+    assert await gateway.create_or_resume_conversation(stored_id) == (stored_id, stored_id)
+
+    assert [method for method, _ in client.requests] == ["thread/start"]
+
+
+@pytest.mark.anyio
 async def test_codex_rejects_turn_when_canonical_jobos_mcp_is_not_ready(tmp_path: Path) -> None:
     client = FakeCodexClient(ready=False)
     gateway = CodexGatewayFactory(client, cwd=tmp_path).create("conv_alpha")
