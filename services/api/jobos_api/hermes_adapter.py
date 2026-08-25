@@ -548,6 +548,11 @@ class HermesWebSocketGateway:
         await self._request("session.interrupt", {"session_id": self._live_session_id})
         self._active_turn_id = None
 
+    async def respond_to_review(
+        self, turn_id: str, approval_id: str, *, approved: bool
+    ) -> None:
+        raise ValueError("This provider does not expose JobOS tool reviews")
+
     async def recover_active_turn(self, stored_session_id: str, turn_id: str) -> None:
         """Reattach a persisted session and confirm its remote operation is interrupted."""
         await self.create_or_resume_conversation(stored_session_id)

@@ -249,6 +249,9 @@ export function AgentPanel({ agentLabel, avatarId, contextLabel, apiState = 'con
                 const active = item.turnId === conversation.activeTurn?.turnId
                 const terminal = item.terminal
                 const waiting = terminal?.state === 'waiting' && active
+                const approvalId = waiting && typeof terminal?.detail.approval_id === 'string'
+                  ? terminal.detail.approval_id
+                  : null
                 const stopping = active && Boolean(conversation.activeTurn?.cancelRequested)
                 const assistant = item.assistant
                 const streaming = Boolean(assistant && assistant.state === 'working' && active && !terminal && !stopping)
@@ -277,6 +280,16 @@ export function AgentPanel({ agentLabel, avatarId, contextLabel, apiState = 'con
                       <article className={`agent-notice ${terminal.kind} ${waiting ? 'waiting' : terminal.state}`}>
                         <strong><CircleAlert aria-hidden="true" size={14} /> {waiting ? 'Waiting for you' : terminal.state === 'waiting' ? 'Turn paused' : terminal.state === 'interrupted' ? 'Turn interrupted' : 'Turn failed'}</strong>
                         <p>{terminal.label}</p>
+                        {approvalId && activeId && (
+                          <div className="review-actions" role="group" aria-label="Tool review">
+                            <button aria-label="Approve tool" className="retry-button" disabled={conversation.operationPending} onClick={() => void sessions.review(activeId, item.turnId, approvalId, true)} type="button">
+                              Approve
+                            </button>
+                            <button aria-label="Decline tool" className="stop-button" disabled={conversation.operationPending} onClick={() => void sessions.review(activeId, item.turnId, approvalId, false)} type="button">
+                              Decline
+                            </button>
+                          </div>
+                        )}
                         {terminal.retryable && !conversation.activeTurn && activeSummary?.availability?.state !== 'locked' && (
                           <button aria-label="Retry turn" className="retry-button" onClick={() => { if (activeId) void sessions.retry(activeId, item.turnId) }} type="button">
                             <RotateCcw aria-hidden="true" size={13} /> Retry

@@ -33,6 +33,7 @@ function install(summaries = [summary(1)], snapshots = summaries.map(item => sna
     send: vi.fn().mockResolvedValue({ turnId: 'turn-new', status: 'running' }),
     cancel: vi.fn().mockResolvedValue({ turnId: 'turn-1', status: 'interrupted' }),
     retry: vi.fn().mockResolvedValue({ turnId: 'turn-retry', status: 'running' }),
+    review: vi.fn().mockResolvedValue({ turnId: 'turn-1', status: 'running' }),
     subscribe: vi.fn((next: typeof listener) => { listener = next; return () => undefined })
   }
   Object.defineProperty(window, 'jobos', { configurable: true, value: { agent } })
@@ -321,6 +322,38 @@ test('interleaved background completion waiting and failure states identify thei
     type: 'error', state: 'failed', summary: 'Failed', detail: { retry: true }
   }) }))
   expect(screen.getByRole('tab', { name: 'Session 2, Failed' })).not.toBeNull()
+})
+
+test('tool review requires an explicit turn-scoped approve or decline', async () => {
+  const activeTurn = { turnId: 'turn-1', status: 'running' as const, cancelRequested: false }
+  const waiting = event(1, {
+    type: 'status',
+    state: 'waiting',
+    summary: 'Allow the JobOS tool to inspect this job?',
+    detail: {
+      actionable: true,
+      approval_id: 'approval_abcdefghijklmnop',
+      tool_name: 'job_inspect'
+    }
+  })
+  const { agent } = install([summary(1, activeTurn)], [snapshot(1, [waiting], activeTurn)])
+  render(<Harness />)
+
+  fireEvent.click(await screen.findByRole('button', { name: 'Approve tool' }))
+  await waitFor(() => expect(agent.review).toHaveBeenCalledWith(
+    'conv_1',
+    'turn-1',
+    'approval_abcdefghijklmnop',
+    true
+  ))
+
+  fireEvent.click(screen.getByRole('button', { name: 'Decline tool' }))
+  await waitFor(() => expect(agent.review).toHaveBeenLastCalledWith(
+    'conv_1',
+    'turn-1',
+    'approval_abcdefghijklmnop',
+    false
+  ))
 })
 
 test('close compacts visible positions while last and running sessions cannot close', async () => {

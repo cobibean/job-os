@@ -18,7 +18,7 @@ import {
 const ACTIVE_CONVERSATION_KEY = 'jobos.agent.activeConversationId'
 const MAX_SESSIONS = 5
 
-type SessionOperation = 'send' | 'stop' | 'retry' | 'archive' | null
+type SessionOperation = 'send' | 'stop' | 'review' | 'retry' | 'archive' | null
 
 export interface AgentSessionViewState {
   summary: AgentSessionSummary
@@ -406,6 +406,24 @@ export function useAgentSessions() {
     }
   }, [beginOperation, finishOperation, mutateConversation])
 
+  const review = useCallback(async (
+    conversationId: string,
+    turnId: string,
+    approvalId: string,
+    approved: boolean
+  ) => {
+    const turn = stateRef.current.sessions[conversationId]?.conversation.activeTurn
+    if (!turn || turn.turnId !== turnId || !window.jobos?.agent || !beginOperation(conversationId, 'review')) return
+    try {
+      await window.jobos.agent.review(conversationId, turnId, approvalId, approved)
+      setAnnouncement(approved ? 'Tool approved' : 'Tool declined')
+    } catch (error) {
+      mutateConversation(conversationId, { type: 'failure', message: safeError(error, 'Tool review could not be submitted') })
+    } finally {
+      finishOperation(conversationId, 'review')
+    }
+  }, [beginOperation, finishOperation, mutateConversation])
+
   const retry = useCallback(async (conversationId: string, turnId: string) => {
     const session = stateRef.current.sessions[conversationId]
     if (!session || session.conversation.activeTurn || !window.jobos?.agent || !beginOperation(conversationId, 'retry')) return
@@ -512,6 +530,7 @@ export function useAgentSessions() {
     setDraft,
     send,
     stop,
+    review,
     retry,
     refreshAvailability,
     saveScroll,

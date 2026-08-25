@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import stat
@@ -188,6 +189,77 @@ for line in sys.stdin:
     ]
     assert {record["codex_home"] for record in records} == {str(codex_home)}
     assert {record["device_id"] for record in records} == {"(FAKE)-device"}
+
+
+@pytest.mark.anyio
+async def test_stdio_supervisor_answers_server_request_without_blocking_reader(
+    tmp_path: Path,
+) -> None:
+    requests_path = tmp_path / "requests.jsonl"
+    server = tmp_path / "fake-codex-app-server"
+    server.write_text(
+        f"""#!/usr/bin/env python3
+import json
+import sys
+from pathlib import Path
+
+output = Path({str(requests_path)!r})
+for line in sys.stdin:
+    message = json.loads(line)
+    with output.open("a", encoding="utf-8") as stream:
+        stream.write(json.dumps(message) + "\\n")
+    if message.get("id") == 2 and "result" in message:
+        response = {{"id": 2, "result": {{"data": []}}}}
+        print(json.dumps(response), flush=True)
+        continue
+    if message.get("method") == "initialize":
+        result = {{"id": message["id"], "result": {{"serverInfo": {{"name": "fake"}}}}}}
+        print(json.dumps(result), flush=True)
+    elif message.get("method") == "model/list":
+        request = {{
+            "id": message["id"],
+            "method": "mcpServer/elicitation/request",
+            "params": {{"serverName": "jobos", "mode": "form"}},
+        }}
+        print(json.dumps(request), flush=True)
+    elif "id" in message:
+        print(json.dumps({{"id": message["id"], "result": {{"data": []}}}}), flush=True)
+""",
+        encoding="utf-8",
+    )
+    server.chmod(0o700)
+    handled: list[tuple[str, object]] = []
+    client = CodexAppServerProcess(
+        server,
+        tmp_path / "codex-home",
+        request_timeout=2,
+        verify_binary=lambda _: None,
+    )
+
+    async def handle(method: str, params: object) -> object:
+        handled.append((method, params))
+        return {"action": "accept", "content": {}}
+
+    client.set_server_request_handler(handle)
+    records: list[dict[str, object]] = []
+    try:
+        await client.start()
+        assert await client.request("model/list") == {"data": []}
+        for _ in range(50):
+            records = [json.loads(line) for line in requests_path.read_text().splitlines()]
+            if any(record.get("id") == 2 and "result" in record for record in records):
+                break
+            await asyncio.sleep(0.01)
+        else:
+            pytest.fail("server request response was not written")
+    finally:
+        await client.close()
+
+    assert handled == [
+        ("mcpServer/elicitation/request", {"serverName": "jobos", "mode": "form"})
+    ]
+    response = next(record for record in records if record.get("id") == 2 and "result" in record)
+    assert response == {"id": 2, "result": {"action": "accept", "content": {}}}
 
 
 @pytest.mark.anyio

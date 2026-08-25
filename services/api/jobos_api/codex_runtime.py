@@ -46,6 +46,10 @@ class CodexRpcClient(Protocol):
 
     def subscribe(self, callback: Callable[[str, object], Awaitable[None]]) -> None: ...
 
+    def set_server_request_handler(
+        self, callback: Callable[[str, object], Awaitable[object]]
+    ) -> None: ...
+
 
 def codex_config(mcp_command: Path | None, mcp_args: tuple[str, ...]) -> str:
     if mcp_command is None:
@@ -238,11 +242,40 @@ class CodexAppServerProcess:
         self._next_id = 1
         self._pending: dict[int, asyncio.Future[object]] = {}
         self._subscribers: list[Callable[[str, object], Awaitable[None]]] = []
+        self._server_request_handler: Callable[[str, object], Awaitable[object]] | None = None
+        self._server_request_tasks: set[asyncio.Task[None]] = set()
         self._start_lock = asyncio.Lock()
         self._closing = False
 
     def subscribe(self, callback: Callable[[str, object], Awaitable[None]]) -> None:
         self._subscribers.append(callback)
+
+    def set_server_request_handler(
+        self, callback: Callable[[str, object], Awaitable[object]]
+    ) -> None:
+        self._server_request_handler = callback
+
+    async def _answer_server_request(
+        self, request_id: int, method: str, params: object
+    ) -> None:
+        handler = self._server_request_handler
+        try:
+            if handler is None:
+                raise CodexRuntimeError(
+                    "AGENT_PROVIDER_UNAVAILABLE", "Codex requested unsupported user input"
+                )
+            result = await handler(method, params)
+            await self._write({"id": request_id, "result": result})
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            with suppress(Exception):
+                await self._write(
+                    {
+                        "id": request_id,
+                        "error": {"code": -32601, "message": "Request not supported"},
+                    }
+                )
 
     @property
     def is_running(self) -> bool:
@@ -368,6 +401,19 @@ class CodexAppServerProcess:
                 if not isinstance(message, dict):
                     continue
                 response_id = message.get("id")
+                method = message.get("method")
+                if isinstance(method, str):
+                    params = message.get("params")
+                    if isinstance(response_id, int):
+                        task = asyncio.create_task(
+                            self._answer_server_request(response_id, method, params)
+                        )
+                        self._server_request_tasks.add(task)
+                        task.add_done_callback(self._server_request_tasks.discard)
+                    for subscriber in tuple(self._subscribers):
+                        with suppress(Exception):
+                            await subscriber(method, params)
+                    continue
                 if isinstance(response_id, int) and response_id in self._pending:
                     future = self._pending[response_id]
                     if "error" in message:
@@ -383,13 +429,6 @@ class CodexAppServerProcess:
                         )
                     else:
                         future.set_result(message.get("result"))
-                    continue
-                method = message.get("method")
-                if isinstance(method, str):
-                    params = message.get("params")
-                    for subscriber in tuple(self._subscribers):
-                        with suppress(Exception):
-                            await subscriber(method, params)
         except asyncio.CancelledError:
             raise
         except BaseException as error:
@@ -425,6 +464,11 @@ class CodexAppServerProcess:
 
     async def close(self) -> None:
         self._closing = True
+        for task in tuple(self._server_request_tasks):
+            task.cancel()
+        if self._server_request_tasks:
+            await asyncio.gather(*self._server_request_tasks, return_exceptions=True)
+        self._server_request_tasks.clear()
         process, self._process = self._process, None
         for task in (self._reader_task, self._stderr_task):
             if task is not None:

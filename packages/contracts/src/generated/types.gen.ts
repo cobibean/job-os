@@ -3910,6 +3910,20 @@ export type RetryTurnRequest = {
 };
 
 /**
+ * ReviewTurnRequest
+ */
+export type ReviewTurnRequest = {
+    /**
+     * Approval Id
+     */
+    approval_id: string;
+    /**
+     * Approved
+     */
+    approved: boolean;
+};
+
+/**
  * SafeAuthTransaction
  */
 export type SafeAuthTransaction = {
@@ -7819,6 +7833,54 @@ export type ConversationRetryV1ConversationsConversationIdTurnsTurnIdRetryPostRe
 };
 
 export type ConversationRetryV1ConversationsConversationIdTurnsTurnIdRetryPostResponse = ConversationRetryV1ConversationsConversationIdTurnsTurnIdRetryPostResponses[keyof ConversationRetryV1ConversationsConversationIdTurnsTurnIdRetryPostResponses];
+
+export type ConversationReviewV1ConversationsConversationIdTurnsTurnIdReviewPostData = {
+    body: ReviewTurnRequest;
+    headers?: {
+        /**
+         * X-Jobos-Mcp-Token
+         */
+        'X-JobOS-MCP-Token'?: string | null;
+    };
+    path: {
+        /**
+         * Conversation Id
+         */
+        conversation_id: string;
+        /**
+         * Turn Id
+         */
+        turn_id: string;
+    };
+    query?: never;
+    url: '/v1/conversations/{conversation_id}/turns/{turn_id}/review';
+};
+
+export type ConversationReviewV1ConversationsConversationIdTurnsTurnIdReviewPostErrors = {
+    /**
+     * Device authentication required
+     */
+    401: ApiErrorResponse;
+    /**
+     * Request validation failed
+     */
+    422: ApiErrorResponse;
+    /**
+     * Internal server error
+     */
+    500: ApiErrorResponse;
+};
+
+export type ConversationReviewV1ConversationsConversationIdTurnsTurnIdReviewPostError = ConversationReviewV1ConversationsConversationIdTurnsTurnIdReviewPostErrors[keyof ConversationReviewV1ConversationsConversationIdTurnsTurnIdReviewPostErrors];
+
+export type ConversationReviewV1ConversationsConversationIdTurnsTurnIdReviewPostResponses = {
+    /**
+     * Successful Response
+     */
+    200: TurnMutationResponse;
+};
+
+export type ConversationReviewV1ConversationsConversationIdTurnsTurnIdReviewPostResponse = ConversationReviewV1ConversationsConversationIdTurnsTurnIdReviewPostResponses[keyof ConversationReviewV1ConversationsConversationIdTurnsTurnIdReviewPostResponses];
 
 export type ConversationSaveDocumentViewV1ConversationsConversationIdWorkspaceDocumentPutData = {
     body: ConversationDocumentViewRequest;

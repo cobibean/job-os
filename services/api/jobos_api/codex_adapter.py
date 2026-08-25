@@ -16,6 +16,10 @@ from .redaction import redact_detail, sanitize_assistant_text, sanitize_text
 
 _TERMINAL_STATUSES = {"completed", "failed", "interrupted"}
 _STREAM_TOKEN_TAIL = re.compile(r"[A-Za-z0-9_+=.\-]+$")
+_JOBOS_TOOL_REVIEW = re.compile(
+    r'^Allow the jobos MCP server to run tool "([A-Za-z][A-Za-z0-9_]{0,127})"\?$'
+)
+_TOOL_REVIEW_TIMEOUT_SECONDS = 300.0
 
 
 class CodexGatewayFactory:
@@ -29,6 +33,7 @@ class CodexGatewayFactory:
         self._rate_limit_updates: list[dict[str, object]] = []
         self._rate_limit_refresh_lock = asyncio.Lock()
         self._subscribed = False
+        self._client.set_server_request_handler(self._handle_server_request)
 
     def create(self, conversation_id: str) -> CodexAppServerGateway:
         if not self._subscribed:
@@ -91,6 +96,19 @@ class CodexGatewayFactory:
             if gateway.thread_id == thread_id:
                 await gateway.handle_notification(method, params)
 
+    async def _handle_server_request(self, method: str, params: object) -> object:
+        if method != "mcpServer/elicitation/request" or not isinstance(params, dict):
+            raise CodexRuntimeError(
+                "AGENT_PROVIDER_UNAVAILABLE", "Unsupported Codex server request"
+            )
+        thread_id = params.get("threadId")
+        if not isinstance(thread_id, str):
+            return {"action": "decline", "content": {}}
+        for gateway in tuple(self._gateways.values()):
+            if gateway.thread_id == thread_id:
+                return await gateway.handle_server_request(method, params)
+        return {"action": "decline", "content": {}}
+
     def _unregister(self, conversation_id: str, gateway: CodexAppServerGateway) -> None:
         if self._gateways.get(conversation_id) is gateway:
             self._gateways.pop(conversation_id, None)
@@ -123,6 +141,9 @@ class CodexAppServerGateway:
         self._rate_limit_completed: set[str] = set()
         self._rate_limit_tasks: set[asyncio.Task[None]] = set()
         self._events: asyncio.Queue[GatewayEvent | None] = asyncio.Queue()
+        self._pending_review_id: str | None = None
+        self._pending_review_turn_id: str | None = None
+        self._pending_review_future: asyncio.Future[bool] | None = None
         self._closed = False
 
     @property
@@ -196,6 +217,7 @@ class CodexAppServerGateway:
         return thread_id, thread_id
 
     async def detach_conversation(self) -> None:
+        self._resolve_pending_review(False)
         self._thread_id = None
         self._jobos_turn_id = None
         self._provider_turn_id = None
@@ -216,6 +238,7 @@ class CodexAppServerGateway:
         provider_turn_id = self._provider_turn_id
         if turn_id is None or provider_turn_id is None:
             return
+        self._resolve_pending_review(False)
         self._event_sequence += 1
         await self._events.put(
             GatewayEvent(
@@ -286,10 +309,85 @@ class CodexAppServerGateway:
             or self._provider_turn_id is None
         ):
             return
+        self._resolve_pending_review(False)
         await self._client.request(
             "turn/interrupt",
             {"threadId": self._thread_id, "turnId": self._provider_turn_id},
         )
+
+    async def handle_server_request(
+        self, method: str, params: dict[str, object]
+    ) -> object:
+        message = params.get("message")
+        requested_schema = params.get("requestedSchema")
+        schema_is_empty = requested_schema == {} or (
+            isinstance(requested_schema, dict)
+            and requested_schema.get("type") == "object"
+            and requested_schema.get("properties") == {}
+            and not requested_schema.get("required")
+        )
+        match = _JOBOS_TOOL_REVIEW.fullmatch(message) if isinstance(message, str) else None
+        if (
+            method != "mcpServer/elicitation/request"
+            or params.get("serverName") != "jobos"
+            or params.get("mode") != "form"
+            or params.get("turnId") != self._provider_turn_id
+            or not schema_is_empty
+            or match is None
+            or self._jobos_turn_id is None
+            or self._provider_turn_id is None
+            or self._pending_review_future is not None
+        ):
+            return {"action": "decline", "content": {}}
+        approval_id = f"approval_{secrets.token_urlsafe(18)}"
+        future: asyncio.Future[bool] = asyncio.get_running_loop().create_future()
+        self._pending_review_id = approval_id
+        self._pending_review_turn_id = self._jobos_turn_id
+        self._pending_review_future = future
+        self._event_sequence += 1
+        await self._events.put(
+            GatewayEvent(
+                "status",
+                "waiting",
+                f'Allow JobOS tool “{match.group(1)}”?',
+                {
+                    "actionable": True,
+                    "approval_id": approval_id,
+                    "tool_name": match.group(1),
+                },
+                self._jobos_turn_id,
+                f"codex:{self._event_namespace}:{self._provider_turn_id}:{self._event_sequence}",
+            )
+        )
+        try:
+            approved = await asyncio.wait_for(
+                asyncio.shield(future), timeout=_TOOL_REVIEW_TIMEOUT_SECONDS
+            )
+        except TimeoutError:
+            approved = False
+        finally:
+            if self._pending_review_future is future:
+                self._pending_review_id = None
+                self._pending_review_turn_id = None
+                self._pending_review_future = None
+        return {"action": "accept" if approved else "decline", "content": {}}
+
+    async def respond_to_review(
+        self, turn_id: str, approval_id: str, *, approved: bool
+    ) -> None:
+        if (
+            self._pending_review_turn_id != turn_id
+            or self._pending_review_id != approval_id
+            or self._pending_review_future is None
+            or self._pending_review_future.done()
+        ):
+            raise ValueError("Tool review is no longer pending")
+        self._pending_review_future.set_result(approved)
+
+    def _resolve_pending_review(self, approved: bool) -> None:
+        future = self._pending_review_future
+        if future is not None and not future.done():
+            future.set_result(approved)
 
     async def recover_active_turn(self, stored_session_id: str, turn_id: str) -> None:
         await self.start()
@@ -391,6 +489,7 @@ class CodexAppServerGateway:
         if event is not None:
             await self._events.put(event)
         if method == "turn/completed":
+            self._resolve_pending_review(False)
             self._jobos_turn_id = None
             self._provider_turn_id = None
             self._assistant_pending = ""
@@ -462,6 +561,7 @@ class CodexAppServerGateway:
             self._jobos_turn_id == jobos_turn_id
             and self._provider_turn_id == provider_turn_id
         ):
+            self._resolve_pending_review(False)
             self._jobos_turn_id = None
             self._provider_turn_id = None
             self._assistant_pending = ""
@@ -544,6 +644,7 @@ class CodexAppServerGateway:
         return None
 
     async def close(self) -> None:
+        self._resolve_pending_review(False)
         for task in tuple(self._rate_limit_tasks):
             task.cancel()
         if self._rate_limit_tasks:

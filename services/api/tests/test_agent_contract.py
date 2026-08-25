@@ -96,6 +96,9 @@ class FakeGateway:
     async def interrupt_turn(self, turn_id):
         self.interruptions.append(turn_id)
 
+    async def respond_to_review(self, turn_id, approval_id, *, approved) -> None:
+        raise ValueError("No tool review is pending")
+
     async def recover_active_turn(self, stored_session_id, turn_id):
         self.interruptions.append(turn_id)
 
@@ -218,6 +221,43 @@ class FifteenActionGateway(FakeGateway):
     async def stream_events(self):
         while True:
             yield await self.events.get()
+
+
+class ToolReviewGateway(FakeGateway):
+    def __init__(self) -> None:
+        super().__init__()
+        self.events: asyncio.Queue[GatewayEvent] = asyncio.Queue()
+        self.pending: tuple[str, str] | None = None
+        self.reviews: list[tuple[str, str, bool]] = []
+
+    async def submit_turn(self, text, context):
+        await super().submit_turn(text, context)
+        approval_id = "approval_abcdefghijklmnop"
+        self.pending = (context.turn_id, approval_id)
+        await self.events.put(
+            GatewayEvent(
+                event_type="status",
+                state="waiting",
+                summary="Allow the JobOS tool to inspect this job?",
+                detail={
+                    "actionable": True,
+                    "approval_id": approval_id,
+                    "tool_name": "job_inspect",
+                },
+                turn_id=context.turn_id,
+                source_event_id="review-request-1",
+            )
+        )
+
+    async def stream_events(self):
+        while True:
+            yield await self.events.get()
+
+    async def respond_to_review(self, turn_id, approval_id, *, approved):
+        if self.pending != (turn_id, approval_id):
+            raise ValueError("Tool review does not match the active turn")
+        self.reviews.append((turn_id, approval_id, approved))
+        self.pending = None
 
 
 def headers():
@@ -521,6 +561,53 @@ def test_turn_snapshots_selected_job_and_device_workspace_without_new_conversati
         "company": "Northstar",
         "title": "Product Engineer",
     }
+
+
+def test_tool_review_endpoint_is_authenticated_and_scoped_to_exact_waiting_turn(tmp_path):
+    gateway = ToolReviewGateway()
+    with make_client(tmp_path, gateway) as client:
+        created = send_message(client).json()
+        conversation_id = current_id(client)
+        turn_id = created["turn_id"]
+        review_url = f"/v1/conversations/{conversation_id}/turns/{turn_id}/review"
+
+        for _ in range(100):
+            current = client.get(
+                f"/v1/conversations/{conversation_id}", headers=headers()
+            ).json()
+            if current["active_turn"] and current["active_turn"]["status"] == "waiting":
+                break
+            time.sleep(0.01)
+        else:
+            pytest.fail("turn did not enter the waiting review state")
+
+        unauthorized = client.post(
+            review_url,
+            json={"approval_id": "approval_abcdefghijklmnop", "approved": True},
+        )
+        wrong_request = client.post(
+            review_url,
+            headers=headers(),
+            json={"approval_id": "approval_wrongwrongwrong1", "approved": True},
+        )
+        accepted = client.post(
+            review_url,
+            headers=headers(),
+            json={"approval_id": "approval_abcdefghijklmnop", "approved": True},
+        )
+        stale = client.post(
+            review_url,
+            headers=headers(),
+            json={"approval_id": "approval_abcdefghijklmnop", "approved": False},
+        )
+
+    assert unauthorized.status_code == 401
+    assert wrong_request.status_code == 409
+    assert accepted.status_code == 200
+    assert accepted.json()["turn_id"] == turn_id
+    assert accepted.json()["status"] == "waiting"
+    assert stale.status_code == 409
+    assert gateway.reviews == [(turn_id, "approval_abcdefghijklmnop", True)]
 
 
 def test_cancel_is_idempotent_and_retry_appends_linked_turn(tmp_path):

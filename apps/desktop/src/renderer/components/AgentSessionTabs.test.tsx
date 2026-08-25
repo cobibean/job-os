@@ -38,7 +38,7 @@ function controller(count = 3): AgentSessionsController {
     atMaximum: count === 5,
     select: vi.fn(() => true), selectByIndex: vi.fn(() => true), create: vi.fn(async () => true),
     createJobless: vi.fn(async () => 'conv_save'),
-    archive: vi.fn(async () => true), updateJobContext: vi.fn(), setDraft: vi.fn(), send: vi.fn(), stop: vi.fn(), retry: vi.fn(), refreshAvailability: vi.fn(), saveScroll: vi.fn()
+    archive: vi.fn(async () => true), updateJobContext: vi.fn(), setDraft: vi.fn(), send: vi.fn(), stop: vi.fn(), review: vi.fn(), retry: vi.fn(), refreshAvailability: vi.fn(), saveScroll: vi.fn()
   }
 }
 

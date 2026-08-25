@@ -71,7 +71,7 @@ assert.equal(typeof bridge, 'object')
 assert.equal(Object.isFrozen(bridge.agent), true, 'bridge.agent must be frozen')
 assert.deepEqual(
   Object.keys(bridge.agent).sort(),
-  ['archive', 'cancel', 'create', 'get', 'list', 'retry', 'send', 'subscribe'],
+  ['archive', 'cancel', 'create', 'get', 'list', 'retry', 'review', 'send', 'subscribe'],
   'bridge.agent must expose only fixed methods'
 )
 

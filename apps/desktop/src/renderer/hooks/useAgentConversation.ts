@@ -180,6 +180,7 @@ export interface StatusOrErrorItem extends BaseProjectedItem {
   kind: 'status' | 'error'
   label: string
   retryable: boolean
+  detail: ConversationEvent['detail']
 }
 
 export interface ProjectedAgentTurn {
@@ -216,7 +217,8 @@ function statusOrErrorItem(entry: ConversationEvent): StatusOrErrorItem {
     ...projectedBase(entry),
     kind: entry.type === 'error' ? 'error' : 'status',
     label: entry.summary,
-    retryable: entry.detail.retry === true || (entry.type === 'error' && entry.detail.actionable === true)
+    retryable: entry.detail.retry === true || (entry.type === 'error' && entry.detail.actionable === true),
+    detail: entry.detail
   }
 }
 
@@ -333,7 +335,8 @@ export function projectConversation(entries: ConversationEvent[]): ProjectedConv
           ...base,
           kind: 'status',
           label: entry.summary,
-          retryable: true
+          retryable: true,
+          detail: entry.detail
         }
       }
       continue
@@ -344,7 +347,8 @@ export function projectConversation(entries: ConversationEvent[]): ProjectedConv
         ...base,
         kind: 'error',
         label: entry.summary,
-        retryable: entry.detail.retry === true || entry.detail.actionable === true
+        retryable: entry.detail.retry === true || entry.detail.actionable === true,
+        detail: entry.detail
       }
       continue
     }
@@ -354,7 +358,8 @@ export function projectConversation(entries: ConversationEvent[]): ProjectedConv
         ...base,
         kind: 'status',
         label: entry.summary,
-        retryable: entry.detail.retry === true
+        retryable: entry.detail.retry === true,
+        detail: entry.detail
       }
     }
   }

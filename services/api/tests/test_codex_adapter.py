@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import time
 from collections.abc import Awaitable, Callable
 from pathlib import Path
@@ -25,6 +26,7 @@ class FakeCodexClient:
         self.rate_limits: dict[str, object] = {}
         self.interrupt_error = False
         self.complete_before_interrupt_response = False
+        self.server_request_handler: Callable[[str, object], Awaitable[object]] | None = None
 
     @property
     def is_running(self) -> bool:
@@ -88,6 +90,15 @@ class FakeCodexClient:
 
     def subscribe(self, callback: Callable[[str, object], Awaitable[None]]) -> None:
         self.subscribers.append(callback)
+
+    def set_server_request_handler(
+        self, callback: Callable[[str, object], Awaitable[object]]
+    ) -> None:
+        self.server_request_handler = callback
+
+    async def server_request(self, method: str, params: object) -> object:
+        assert self.server_request_handler is not None
+        return await self.server_request_handler(method, params)
 
     async def emit(self, method: str, params: object) -> None:
         if method == "jobos/runtime/disconnected":
@@ -665,3 +676,83 @@ async def test_codex_completed_rate_limit_does_not_require_recovery_on_interrupt
     limited = await anext(events)
     assert limited.detail["reason"] == "rate_limited"
     assert "recovery_required" not in limited.detail
+
+
+@pytest.mark.anyio
+async def test_codex_tool_review_is_scoped_and_requires_explicit_response(
+    tmp_path: Path,
+) -> None:
+    client = FakeCodexClient()
+    factory = CodexGatewayFactory(client, cwd=tmp_path)
+    gateway = factory.create("conv_alpha")
+    await gateway.create_or_resume_conversation(None)
+    await gateway.submit_turn("Inspect the job", context())
+
+    request = asyncio.create_task(
+        client.server_request(
+            "mcpServer/elicitation/request",
+            {
+                "threadId": "thread-a",
+                "turnId": "provider-turn-a",
+                "serverName": "jobos",
+                "mode": "form",
+                "message": 'Allow the jobos MCP server to run tool "job_inspect"?',
+                "requestedSchema": {"type": "object", "properties": {}},
+            },
+        )
+    )
+    review = await anext(gateway.stream_events())
+    approval_id = review.detail["approval_id"]
+    assert review.state == "waiting"
+    assert review.detail["tool_name"] == "job_inspect"
+    assert isinstance(approval_id, str)
+
+    with pytest.raises(ValueError, match="no longer pending"):
+        await gateway.respond_to_review(
+            "turn_wrong", approval_id, approved=True
+        )
+    await gateway.respond_to_review(
+        "turn_12345678", approval_id, approved=True
+    )
+    assert await request == {"action": "accept", "content": {}}
+
+    assert await client.server_request(
+        "mcpServer/elicitation/request",
+        {
+            "threadId": "thread-a",
+            "turnId": "provider-turn-stale",
+            "serverName": "jobos",
+            "mode": "form",
+            "message": 'Allow the jobos MCP server to run tool "job_inspect"?',
+            "requestedSchema": {"type": "object", "properties": {}},
+        },
+    ) == {"action": "decline", "content": {}}
+
+    assert await client.server_request(
+        "mcpServer/elicitation/request",
+        {
+            "threadId": "thread-other",
+            "serverName": "jobos",
+            "mode": "form",
+            "message": 'Allow the jobos MCP server to run tool "job_inspect"?',
+            "requestedSchema": {"type": "object", "properties": {}},
+        },
+    ) == {"action": "decline", "content": {}}
+
+    disconnect_request = asyncio.create_task(
+        client.server_request(
+            "mcpServer/elicitation/request",
+            {
+                "threadId": "thread-a",
+                "turnId": "provider-turn-a",
+                "serverName": "jobos",
+                "mode": "form",
+                "message": 'Allow the jobos MCP server to run tool "job_inspect"?',
+                "requestedSchema": {"type": "object", "properties": {}},
+            },
+        )
+    )
+    disconnect_review = await anext(gateway.stream_events())
+    assert disconnect_review.state == "waiting"
+    await gateway.handle_runtime_disconnect()
+    assert await disconnect_request == {"action": "decline", "content": {}}

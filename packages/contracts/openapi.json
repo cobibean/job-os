@@ -7466,6 +7466,26 @@
         "title": "RetryTurnRequest",
         "type": "object"
       },
+      "ReviewTurnRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "approval_id": {
+            "pattern": "^approval_[A-Za-z0-9_-]{16,80}$",
+            "title": "Approval Id",
+            "type": "string"
+          },
+          "approved": {
+            "title": "Approved",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "approval_id",
+          "approved"
+        ],
+        "title": "ReviewTurnRequest",
+        "type": "object"
+      },
       "SafeAuthTransaction": {
         "additionalProperties": false,
         "properties": {
@@ -16054,6 +16074,112 @@
           }
         ],
         "summary": "Conversation Retry",
+        "tags": [
+          "agent"
+        ]
+      }
+    },
+    "/v1/conversations/{conversation_id}/turns/{turn_id}/review": {
+      "post": {
+        "operationId": "conversation_review_v1_conversations__conversation_id__turns__turn_id__review_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "conversation_id",
+            "required": true,
+            "schema": {
+              "maxLength": 133,
+              "pattern": "^conv_[A-Za-z0-9_-]{1,128}$",
+              "title": "Conversation Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "turn_id",
+            "required": true,
+            "schema": {
+              "maxLength": 133,
+              "pattern": "^turn_[A-Za-z0-9_-]{1,128}$",
+              "title": "Turn Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-JobOS-MCP-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Jobos-Mcp-Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReviewTurnRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TurnMutationResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Device authentication required"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Request validation failed"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Internal server error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Conversation Review",
         "tags": [
           "agent"
         ]
