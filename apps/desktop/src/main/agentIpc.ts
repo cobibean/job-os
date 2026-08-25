@@ -7,6 +7,7 @@ type AgentClient = ReturnType<typeof createMainAgentClient>
 
 const turnPattern = /^turn_[A-Za-z0-9_-]{1,128}$/
 const conversationPattern = /^conv_[A-Za-z0-9_-]{1,128}$/
+const approvalPattern = /^approval_[A-Za-z0-9_-]{16,80}$/
 
 function idempotencyKey(value: unknown): string {
   if (typeof value !== 'string' || value.length < 8 || value.length > 200 || /[\r\n]/.test(value)) throw new Error('Invalid idempotency key')
@@ -20,6 +21,11 @@ function turnId(value: unknown): string {
 
 function conversationId(value: unknown): string {
   if (typeof value !== 'string' || !conversationPattern.test(value)) throw new Error('Invalid agent conversation')
+  return value
+}
+
+function approvalId(value: unknown): string {
+  if (typeof value !== 'string' || !approvalPattern.test(value)) throw new Error('Invalid tool review')
   return value
 }
 
@@ -38,5 +44,9 @@ export function registerAgentIpc(
     return trusted(event).send(conversationId(conversation), text.trim(), idempotencyKey(key))
   })
   ipc.handle('jobos:agent:cancel', (event, conversation: unknown, id: unknown) => trusted(event).cancel(conversationId(conversation), turnId(id)))
+  ipc.handle('jobos:agent:review', (event, conversation: unknown, id: unknown, approval: unknown, approved: unknown) => {
+    if (typeof approved !== 'boolean') throw new Error('Invalid tool review')
+    return trusted(event).review(conversationId(conversation), turnId(id), approvalId(approval), approved)
+  })
   ipc.handle('jobos:agent:retry', (event, conversation: unknown, id: unknown, key: unknown) => trusted(event).retry(conversationId(conversation), turnId(id), idempotencyKey(key)))
 }

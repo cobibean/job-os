@@ -183,6 +183,7 @@ from jobos_api.conversations import (
     ConversationResponse,
     CreateConversationRequest,
     RetryTurnRequest,
+    ReviewTurnRequest,
     SendMessageRequest,
     TurnMutationResponse,
     conversation_event_source,
@@ -3466,6 +3467,30 @@ def create_app(
         result = await conversation_service(conversation_id, identity).cancel(
             validated_turn_id(turn_id)
         )
+        if result is None:
+            raise HTTPException(status_code=404, detail="Turn not found")
+        return result
+
+    @app.post(
+        "/v1/conversations/{conversation_id}/turns/{turn_id}/review",
+        tags=["agent"],
+        responses={
+            404: {"model": ApiErrorResponse, "description": "Turn not found"},
+            409: {"model": ApiErrorResponse, "description": "Review is stale or unmatched"},
+        },
+    )
+    async def conversation_review(
+        conversation_id: ConversationId,
+        turn_id: TurnId,
+        command: ReviewTurnRequest,
+        identity: Annotated[DeviceIdentity, Depends(authenticated_device)],
+    ) -> TurnMutationResponse:
+        try:
+            result = await conversation_service(conversation_id, identity).review(
+                validated_turn_id(turn_id), command
+            )
+        except ValueError as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
         if result is None:
             raise HTTPException(status_code=404, detail="Turn not found")
         return result

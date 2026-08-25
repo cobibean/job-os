@@ -11,5 +11,6 @@
     "target": "ES2024",
     "types": ["node"]
   },
-  "include": ["src/main", "src/preload", "src/shared"]
+  "include": ["src/main", "src/preload", "src/shared"],
+  "exclude": ["src/**/*.test.ts", "src/**/*.spec.ts"]
 }

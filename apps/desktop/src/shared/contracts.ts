@@ -781,6 +781,7 @@ export interface JobOsRendererBridge {
     archive: (conversationId: string) => Promise<void>
     send: (conversationId: string, text: string, idempotencyKey: string) => Promise<AgentTurnMutation>
     cancel: (conversationId: string, turnId: string) => Promise<AgentTurnMutation>
+    review: (conversationId: string, turnId: string, approvalId: string, approved: boolean) => Promise<AgentTurnMutation>
     retry: (conversationId: string, turnId: string, idempotencyKey: string) => Promise<AgentTurnMutation>
     subscribe: (listener: (update: AgentSessionStreamUpdate) => void) => () => void
   }

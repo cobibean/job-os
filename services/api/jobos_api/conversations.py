@@ -49,6 +49,11 @@ class RetryTurnRequest(ConversationModel):
     idempotency_key: str = Field(min_length=8, max_length=200)
 
 
+class ReviewTurnRequest(ConversationModel):
+    approval_id: str = Field(pattern=r"^approval_[A-Za-z0-9_-]{16,80}$")
+    approved: bool
+
+
 class TurnMutationResponse(ConversationModel):
     turn_id: str
     message_id: str | None = None
@@ -391,6 +396,25 @@ class ConversationService:
     async def cancel(self, turn_id: str) -> TurnMutationResponse | None:
         async with self._turn_scope_lock:
             return await self._cancel_under_lease(turn_id)
+
+    async def review(
+        self, turn_id: str, command: ReviewTurnRequest
+    ) -> TurnMutationResponse | None:
+        turn = self.store.turn_record(turn_id)
+        if turn is None:
+            return None
+        if turn["status"] != "waiting":
+            raise ValueError("Turn is not waiting for a tool review")
+        await self.gateway.respond_to_review(
+            turn_id, command.approval_id, approved=command.approved
+        )
+        source_turn_id = turn.get("source_turn_id")
+        return TurnMutationResponse(
+            turn_id=turn_id,
+            message_id=str(turn["message_id"]),
+            source_turn_id=str(source_turn_id) if source_turn_id is not None else None,
+            status="waiting",
+        )
 
     async def _cancel_under_lease(self, turn_id: str) -> TurnMutationResponse | None:
         initial = self.store.turn_record(turn_id)

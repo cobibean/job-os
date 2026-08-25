@@ -173,6 +173,7 @@ const bridge: JobOsRendererBridge = Object.freeze({
     archive: (conversationId: string) => ipcRenderer.invoke('jobos:agent:archive', conversationId),
     send: (conversationId: string, text: string, idempotencyKey: string) => ipcRenderer.invoke('jobos:agent:send', conversationId, text, idempotencyKey),
     cancel: (conversationId: string, turnId: string) => ipcRenderer.invoke('jobos:agent:cancel', conversationId, turnId),
+    review: (conversationId: string, turnId: string, approvalId: string, approved: boolean) => ipcRenderer.invoke('jobos:agent:review', conversationId, turnId, approvalId, approved),
     retry: (conversationId: string, turnId: string, idempotencyKey: string) => ipcRenderer.invoke('jobos:agent:retry', conversationId, turnId, idempotencyKey),
     subscribe: (listener: (update: AgentSessionStreamUpdate) => void) => {
       const wrapped = (_event: IpcRendererEvent, update: AgentSessionStreamUpdate) => listener(update)

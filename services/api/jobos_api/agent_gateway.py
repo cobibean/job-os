@@ -137,6 +137,10 @@ class AgentGateway(Protocol):
 
     async def interrupt_turn(self, turn_id: str) -> None: ...
 
+    async def respond_to_review(
+        self, turn_id: str, approval_id: str, *, approved: bool
+    ) -> None: ...
+
     async def recover_active_turn(self, stored_session_id: str, turn_id: str) -> None: ...
 
     async def close(self) -> None: ...
@@ -339,6 +343,13 @@ class _RoutedAgentGateway:
             if self._active_turn_id == turn_id:
                 self._active_turn_id = None
 
+    async def respond_to_review(
+        self, turn_id: str, approval_id: str, *, approved: bool
+    ) -> None:
+        if self._active_turn_id != turn_id:
+            raise ValueError("Turn is not active for this conversation")
+        await self._gateway.respond_to_review(turn_id, approval_id, approved=approved)
+
     async def recover_active_turn(self, stored_session_id: str, turn_id: str) -> None:
         await self._router.claim_sessions(
             self._provider,
@@ -497,6 +508,11 @@ class OfflineAgentGateway:
 
     async def interrupt_turn(self, turn_id: str) -> None:
         return None
+
+    async def respond_to_review(
+        self, turn_id: str, approval_id: str, *, approved: bool
+    ) -> None:
+        raise ConnectionError("Agent gateway is not configured")
 
     async def recover_active_turn(self, stored_session_id: str, turn_id: str) -> None:
         raise ConnectionError("Agent gateway is not configured")

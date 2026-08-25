@@ -4,6 +4,7 @@ import {
   conversationCreateV1ConversationsPost,
   conversationGetV1ConversationsConversationIdGet,
   conversationRetryV1ConversationsConversationIdTurnsTurnIdRetryPost,
+  conversationReviewV1ConversationsConversationIdTurnsTurnIdReviewPost,
   conversationSendV1ConversationsConversationIdMessagesPost,
   conversationsListV1ConversationsGet,
   createJobOsApiClient,
@@ -47,7 +48,7 @@ const normalizedDetailKeys = new Set([
   'activity_id', 'phase', 'type', 'name', 'tool_name', 'status', 'operation', 'path', 'file',
   'artifact', 'command', 'result', 'message', 'question', 'prompt', 'choices', 'actionable',
   'retry', 'redacted', 'redactions', 'transport_confirmed', 'text',
-  'agent_connection', 'recovery_pending'
+  'agent_connection', 'recovery_pending', 'approval_id'
 ])
 const MAX_ASSISTANT_TRANSCRIPT_DETAIL = 100_001
 const conversationPattern = /^conv_[A-Za-z0-9_-]{1,128}$/
@@ -354,6 +355,15 @@ export function createScopedMainAgentClient(config: AgentConfig, registry?: Agen
       if (!validConversationId(conversationId)) throw new Error('Invalid agent conversation')
       const result = await conversationCancelV1ConversationsConversationIdTurnsTurnIdCancelPost({ client, path: { conversation_id: conversationId, turn_id: turnId } })
       return toMutation(unwrap(result, [200], 'Turn could not be stopped'))
+    },
+    async review(conversationId: string, turnId: string, approvalId: string, approved: boolean): Promise<AgentTurnMutation> {
+      if (!validConversationId(conversationId)) throw new Error('Invalid agent conversation')
+      const result = await conversationReviewV1ConversationsConversationIdTurnsTurnIdReviewPost({
+        client,
+        path: { conversation_id: conversationId, turn_id: turnId },
+        body: { approval_id: approvalId, approved }
+      })
+      return toMutation(unwrap(result, [200], 'Tool review could not be submitted'))
     },
     async retry(conversationId: string, turnId: string, idempotencyKey: string): Promise<AgentTurnMutation> {
       if (!validConversationId(conversationId)) throw new Error('Invalid agent conversation')

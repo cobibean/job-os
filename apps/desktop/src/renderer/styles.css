@@ -973,6 +973,8 @@ button:focus-visible {
 .agent-notice.waiting { border-color: var(--warn-border); background: var(--warn-tint); }
 .agent-notice strong { display: flex; align-items: center; gap: 7px; font-size: var(--text-xs); }
 .agent-notice p { margin: 6px 0 0; font-size: var(--text-sm); line-height: 1.45; }
+.review-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+.review-actions .retry-button, .review-actions .stop-button { margin: 0; }
 .retry-button, .stop-button { display: inline-flex; align-items: center; justify-content: center; gap: 5px; height: 28px; margin-top: 8px; padding: 0 9px; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); color: var(--text-soft); background: var(--surface-raised); font-size: var(--text-xs); cursor: pointer; }
 .retry-button:hover, .stop-button:hover { border-color: var(--accent-border-strong); color: var(--text); background: var(--surface-hover); }
 .agent-inline-error { margin: 0 16px 12px; color: var(--danger); font-size: var(--text-xs); }

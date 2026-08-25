@@ -1,3 +1,4 @@
+import hashlib
 import json
 import plistlib
 from pathlib import Path
@@ -12,6 +13,7 @@ from jobos_api.installation_profiles import (
 from jobos_api.macos_runtime import (
     RuntimeServiceConfig,
     authorize_remote_device,
+    build_local_runtime_config,
     build_service_environment,
     build_uvicorn_arguments,
     install_runtime,
@@ -21,6 +23,7 @@ from jobos_api.macos_runtime import (
     render_launchd_plist,
     run_profile_switch,
     uninstall_runtime,
+    validate_runtime_paths,
 )
 
 
@@ -342,6 +345,26 @@ def test_service_environment_and_uvicorn_command_are_fixed_and_loopback_only(tmp
     assert json.loads(
         remote_environment["JOBOS_CAREER_PROFILE_OWNER_DEVICE_IDS_JSON"]
     ) == ["macbook-device"]
+    assert remote_environment["PATH"] == (
+        "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+    )
+
+
+def test_service_environment_adds_installed_tool_paths_to_launchd_path(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setenv("PATH", "/usr/bin:/bin:/usr/sbin:/sbin")
+
+    environment = build_service_environment(
+        RuntimeServiceConfig.from_mapping(runtime_mapping(tmp_path)),
+        device_token="device-secret-value",
+        mcp_token="mcp-secret-value",
+        hermes_dashboard_token=None,
+    )
+
+    assert environment["PATH"] == (
+        "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+    )
 
 
 def test_local_service_environment_has_no_private_provider_inputs(tmp_path):
@@ -358,6 +381,238 @@ def test_local_service_environment_has_no_private_provider_inputs(tmp_path):
     assert environment["JOBOS_ARTIFACT_PROVIDER"] == "local"
     assert environment["PYTHONPATH"] == str(tmp_path / "job-os/services/api")
     assert not any("JOB_HUNTER" in key or "HERMES" in key for key in environment)
+
+
+def test_installed_app_runtime_wires_codex_and_keychain_without_persisting_secrets(
+    tmp_path, monkeypatch
+):
+    app = tmp_path / "Applications/JobOS.app"
+    resources = app / "Contents/Resources"
+    app_server = resources / "codex-runtime/bin/codex-app-server"
+    receipt = resources / "codex-runtime/JOBOS_CODEX_RUNTIME_RECEIPT.json"
+    keychain_helper = resources / "jobos-keychain"
+    for path, contents in (
+        (app_server, b"synthetic installed app server"),
+        (keychain_helper, b"synthetic keychain helper"),
+    ):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(contents)
+        path.chmod(0o755)
+    digest = hashlib.sha256(app_server.read_bytes()).hexdigest()
+    receipt.write_text(
+        json.dumps({"app_server_binary": {"sha256": digest}}),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(macos_runtime, "CODEX_APP_SERVER_SHA256", digest)
+    data_dir = tmp_path / "data"
+    config = build_local_runtime_config(
+        jobos_root=tmp_path / "release",
+        python_path=tmp_path / "release/.venv/bin/python",
+        data_dir=data_dir,
+        device_id="mini-device",
+        port=8766,
+        jobos_app=app,
+        keychain_helper_sha256=hashlib.sha256(keychain_helper.read_bytes()).hexdigest(),
+    )
+    service_config = tmp_path / "home/Library/Application Support/JobOS/service/runtime.json"
+    environment = build_service_environment(
+        config,
+        device_token="device-secret-value",
+        mcp_token="mcp-secret-value",
+        hermes_dashboard_token=None,
+        base_environment={"PATH": "/usr/bin:/bin"},
+        service_config_path=service_config,
+    )
+
+    assert config.codex_app_server_path == app_server
+    assert config.codex_home_path == data_dir / "codex"
+    assert config.keychain_helper_sha256 == hashlib.sha256(keychain_helper.read_bytes()).hexdigest()
+    assert environment["JOBOS_KEYCHAIN_HELPER_PATH"] == str(keychain_helper)
+    assert environment["JOBOS_CODEX_APP_SERVER_PATH"] == str(app_server)
+    assert environment["JOBOS_CODEX_HOME"] == str(data_dir / "codex")
+    assert environment["JOBOS_CODEX_MCP_COMMAND"] == str(config.python_path)
+    assert json.loads(environment["JOBOS_CODEX_MCP_ARGS_JSON"]) == [
+        str(config.jobos_root / "scripts/macos/jobos_mcp_runtime.py"),
+        str(service_config),
+    ]
+    persisted = json.dumps(config.to_mapping())
+    assert "device-secret-value" not in persisted
+    assert "mcp-secret-value" not in persisted
+
+
+def test_installed_app_runtime_requires_operator_supplied_keychain_helper_hash(tmp_path):
+    app = tmp_path / "Applications/JobOS.app"
+    app.mkdir(parents=True)
+
+    with pytest.raises(ValueError, match="expected Keychain helper SHA-256"):
+        build_local_runtime_config(
+            jobos_root=tmp_path / "release",
+            python_path=tmp_path / "python",
+            data_dir=tmp_path / "data",
+            device_id="mini-device",
+            port=8766,
+            jobos_app=app,
+        )
+
+
+def test_installed_app_runtime_rejects_invalid_keychain_helper_hash(tmp_path):
+    app = tmp_path / "Applications/JobOS.app"
+    app.mkdir(parents=True)
+
+    with pytest.raises(ValueError, match="expected Keychain helper SHA-256 is invalid"):
+        build_local_runtime_config(
+            jobos_root=tmp_path / "release",
+            python_path=tmp_path / "python",
+            data_dir=tmp_path / "data",
+            device_id="mini-device",
+            port=8766,
+            jobos_app=app,
+            keychain_helper_sha256="not-a-sha256",
+        )
+
+
+def test_installed_app_runtime_rejects_tampered_binary(tmp_path, monkeypatch):
+    app = tmp_path / "Applications/JobOS.app"
+    resources = app / "Contents/Resources"
+    app_server = resources / "codex-runtime/bin/codex-app-server"
+    app_server.parent.mkdir(parents=True)
+    app_server.write_bytes(b"tampered")
+    app_server.chmod(0o755)
+    keychain_helper = resources / "jobos-keychain"
+    keychain_helper.write_bytes(b"helper")
+    keychain_helper.chmod(0o755)
+    (resources / "codex-runtime/JOBOS_CODEX_RUNTIME_RECEIPT.json").write_text(
+        json.dumps({"app_server_binary": {"sha256": "0" * 64}}),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(macos_runtime, "CODEX_APP_SERVER_SHA256", "f" * 64)
+
+    with pytest.raises(ValueError, match="integrity"):
+        build_local_runtime_config(
+            jobos_root=tmp_path / "release",
+            python_path=tmp_path / "python",
+            data_dir=tmp_path / "data",
+            device_id="mini-device",
+            port=8766,
+            jobos_app=app,
+            keychain_helper_sha256="f" * 64,
+        )
+
+
+def test_installed_app_runtime_rejects_untrusted_keychain_helper(tmp_path, monkeypatch):
+    app = tmp_path / "Applications/JobOS.app"
+    resources = app / "Contents/Resources"
+    app_server = resources / "codex-runtime/bin/codex-app-server"
+    keychain_helper = resources / "jobos-keychain"
+    app_server.parent.mkdir(parents=True)
+    app_server.write_bytes(b"synthetic installed app server")
+    app_server.chmod(0o755)
+    keychain_helper.write_bytes(b"untrusted helper")
+    keychain_helper.chmod(0o755)
+    digest = hashlib.sha256(app_server.read_bytes()).hexdigest()
+    (resources / "codex-runtime/JOBOS_CODEX_RUNTIME_RECEIPT.json").write_text(
+        json.dumps({"app_server_binary": {"sha256": digest}}),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(macos_runtime, "CODEX_APP_SERVER_SHA256", digest)
+
+    with pytest.raises(ValueError, match="Keychain helper failed integrity"):
+        build_local_runtime_config(
+            jobos_root=tmp_path / "release",
+            python_path=tmp_path / "python",
+            data_dir=tmp_path / "data",
+            device_id="mini-device",
+            port=8766,
+            jobos_app=app,
+            keychain_helper_sha256="f" * 64,
+        )
+
+
+def test_installed_app_runtime_rejects_non_executable_tools(tmp_path, monkeypatch):
+    app = tmp_path / "Applications/JobOS.app"
+    resources = app / "Contents/Resources"
+    app_server = resources / "codex-runtime/bin/codex-app-server"
+    keychain_helper = resources / "jobos-keychain"
+    app_server.parent.mkdir(parents=True)
+    app_server.write_bytes(b"synthetic installed app server")
+    keychain_helper.write_bytes(b"synthetic keychain helper")
+    app_server.chmod(0o755)
+    keychain_helper.chmod(0o644)
+    digest = hashlib.sha256(app_server.read_bytes()).hexdigest()
+    (resources / "codex-runtime/JOBOS_CODEX_RUNTIME_RECEIPT.json").write_text(
+        json.dumps({"app_server_binary": {"sha256": digest}}),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(macos_runtime, "CODEX_APP_SERVER_SHA256", digest)
+
+    with pytest.raises(ValueError, match="not executable"):
+        build_local_runtime_config(
+            jobos_root=tmp_path / "release",
+            python_path=tmp_path / "python",
+            data_dir=tmp_path / "data",
+            device_id="mini-device",
+            port=8766,
+            jobos_app=app,
+            keychain_helper_sha256="f" * 64,
+        )
+
+
+def test_runtime_rejects_tampered_installed_keychain_helper(tmp_path, monkeypatch):
+    mapping = local_runtime_mapping(tmp_path)
+    helper = tmp_path / "job-os/bin/jobos-keychain"
+    app_server = tmp_path / "job-os/bin/codex-app-server"
+    for path in (helper, app_server):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"trusted")
+        path.chmod(0o755)
+    mapping.update(
+        {
+            "keychain_helper_path": str(helper),
+            "keychain_helper_sha256": hashlib.sha256(b"trusted").hexdigest(),
+            "codex_app_server_path": str(app_server),
+            "codex_home_path": str(tmp_path / "codex-home"),
+        }
+    )
+    (tmp_path / "job-os/services/api/jobos_api").mkdir(parents=True)
+    (tmp_path / "job-os/scripts/macos").mkdir(parents=True)
+    (tmp_path / "job-os/scripts/macos/jobos_mcp_runtime.py").write_text("test")
+    python_path = Path(str(mapping["python_path"]))
+    python_path.parent.mkdir(parents=True, exist_ok=True)
+    python_path.write_text("test")
+    monkeypatch.setattr(
+        macos_runtime, "CODEX_APP_SERVER_SHA256", hashlib.sha256(b"trusted").hexdigest()
+    )
+    helper.write_bytes(b"tampered")
+
+    with pytest.raises(RuntimeError, match="Keychain helper failed integrity"):
+        validate_runtime_paths(RuntimeServiceConfig.from_mapping(mapping))
+
+    config = RuntimeServiceConfig.from_mapping(mapping)
+    with pytest.raises(RuntimeError, match="Keychain helper failed integrity"):
+        macos_runtime._configured_store_secret(config, macos_runtime.store_keychain_secret)
+    with pytest.raises(RuntimeError, match="Keychain helper failed integrity"):
+        macos_runtime._configured_read_secret(config, macos_runtime.read_keychain_secret)
+    with pytest.raises(RuntimeError, match="Keychain helper failed integrity"):
+        macos_runtime._configured_delete_secret(config, macos_runtime.delete_keychain_secret)
+
+
+def test_installed_app_runtime_rejects_symlinked_resource_ancestors(tmp_path):
+    app = tmp_path / "Applications/JobOS.app"
+    app.mkdir(parents=True)
+    external_contents = tmp_path / "external/Contents"
+    external_contents.mkdir(parents=True)
+    (app / "Contents").symlink_to(external_contents, target_is_directory=True)
+
+    with pytest.raises(ValueError, match="contains a symlink"):
+        build_local_runtime_config(
+            jobos_root=tmp_path / "release",
+            python_path=tmp_path / "python",
+            data_dir=tmp_path / "data",
+            device_id="mini-device",
+            port=8766,
+            jobos_app=app,
+            keychain_helper_sha256="f" * 64,
+        )
 
 
 @pytest.mark.parametrize(
@@ -408,6 +663,67 @@ def test_install_accepts_public_local_runtime_without_private_trees(tmp_path):
 
     assert (tmp_path / "jobs").is_dir()
     assert (tmp_path / "artifacts").is_dir()
+
+
+def test_install_accepts_installed_codex_runtime_with_service_config_path(
+    tmp_path, monkeypatch
+):
+    mapping = local_runtime_mapping(tmp_path)
+    mapping.update(
+        {
+            "keychain_helper_path": str(tmp_path / "job-os/bin/jobos-keychain"),
+            "keychain_helper_sha256": hashlib.sha256(
+                b'#!/bin/sh\nif [ "$1" = "get" ]; then exit 44; fi\nexit 0\n'
+            ).hexdigest(),
+            "codex_app_server_path": str(tmp_path / "job-os/bin/codex-app-server"),
+            "codex_home_path": str(tmp_path / "codex-home"),
+        }
+    )
+    (tmp_path / "job-os/services/api/jobos_api").mkdir(parents=True)
+    for file_path in (
+        tmp_path / "job-os/.venv/bin/python",
+        tmp_path / "job-os/scripts/macos/jobos_runtime.py",
+        tmp_path / "job-os/scripts/macos/jobos_mcp_runtime.py",
+        tmp_path / "job-os/bin/codex-app-server",
+    ):
+        file_path.parent.mkdir(parents=True, exist_ok=True)
+        file_path.write_text("test", encoding="utf-8")
+    keychain_helper = tmp_path / "job-os/bin/jobos-keychain"
+    keychain_helper.write_text(
+        '#!/bin/sh\nif [ "$1" = "get" ]; then exit 44; fi\nexit 0\n',
+        encoding="utf-8",
+    )
+    keychain_helper.chmod(0o755)
+    (tmp_path / "job-os/bin/codex-app-server").chmod(0o755)
+    monkeypatch.setattr(
+        macos_runtime,
+        "CODEX_APP_SERVER_SHA256",
+        hashlib.sha256(b"test").hexdigest(),
+    )
+    loaded = False
+
+    def run(command, allow_failure=False):
+        nonlocal loaded
+        if "bootout" in command:
+            loaded = False
+        elif "bootstrap" in command:
+            loaded = True
+
+    result = install_runtime(
+        RuntimeServiceConfig.from_mapping(mapping),
+        home=tmp_path / "home",
+        launcher_path=tmp_path / "job-os/scripts/macos/jobos_runtime.py",
+        uid=501,
+        device_token="device-secret-value",
+        mcp_token="mcp-secret-value",
+        hermes_dashboard_token=None,
+        run=run,
+        is_loaded=lambda _uid, _label: loaded,
+        verify_ready=lambda *_args: None,
+    )
+
+    assert result.service_config_path.is_file()
+    assert (tmp_path / "codex-home").is_dir()
 
 
 def test_launchd_plist_and_persisted_configs_never_contain_secrets(tmp_path):

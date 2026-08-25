@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import importlib.util
 import json
 import sys
@@ -137,9 +138,7 @@ def test_mcp_runtime_rejects_release_package_symlinks(tmp_path):
 def test_mcp_runtime_main_executes_the_release_module(tmp_path, monkeypatch):
     runtime, credentials = runtime_files(tmp_path)
     runtime_path = tmp_path / "runtime.json"
-    credentials_path = tmp_path / "credentials.json"
     runtime_path.write_text(json.dumps(runtime), encoding="utf-8")
-    credentials_path.write_text(json.dumps(credentials), encoding="utf-8")
     captured: dict[str, object] = {}
 
     def capture_execve(executable, arguments, environment):
@@ -150,7 +149,12 @@ def test_mcp_runtime_main_executes_the_release_module(tmp_path, monkeypatch):
         )
 
     monkeypatch.setattr(jobos_mcp_runtime.os, "execve", capture_execve)
-    jobos_mcp_runtime.main([str(runtime_path), str(credentials_path)])
+    monkeypatch.setattr(
+        jobos_mcp_runtime,
+        "keychain_credentials",
+        lambda _runtime: credentials,
+    )
+    jobos_mcp_runtime.main([str(runtime_path)])
 
     assert captured["executable"] == str(runtime["python_path"])
     assert captured["arguments"] == [
@@ -162,6 +166,65 @@ def test_mcp_runtime_main_executes_the_release_module(tmp_path, monkeypatch):
     environment = captured["environment"]
     assert isinstance(environment, dict)
     assert environment["PYTHONPATH"] == str(Path(str(runtime["jobos_root"])) / "services/mcp")
+
+
+def test_mcp_runtime_reads_credentials_from_keychain_without_a_credentials_file(
+    tmp_path, monkeypatch
+):
+    runtime, _ = runtime_files(tmp_path)
+    release = Path(str(runtime["jobos_root"]))
+    (release / "services/api").mkdir(parents=True)
+    helper = tmp_path / "JobOS.app/Contents/Resources/jobos-keychain"
+    helper.parent.mkdir(parents=True)
+    helper.write_text("synthetic helper", encoding="utf-8")
+    runtime.update(
+        {
+            "device_id": "mini-device",
+            "keychain_helper_path": str(helper),
+            "keychain_helper_sha256": hashlib.sha256(helper.read_bytes()).hexdigest(),
+        }
+    )
+    reads = []
+    keychain = ModuleType("synthetic_keychain")
+
+    def read_secret(service, account):
+        reads.append((service, account))
+        return "device-secret-value" if "device-token" in service else "mcp-secret-value"
+
+    keychain.__dict__["read_keychain_secret"] = read_secret
+    monkeypatch.setattr(jobos_mcp_runtime.importlib, "import_module", lambda _name: keychain)
+
+    credentials = jobos_mcp_runtime.keychain_credentials(runtime)
+
+    assert credentials == {
+        "device_token": "device-secret-value",
+        "mcp_token": "mcp-secret-value",
+    }
+    assert reads == [
+        ("com.cobibean.jobos.device-token", "mini-device"),
+        ("com.cobibean.jobos.mcp-token", "mini-device"),
+    ]
+    assert jobos_mcp_runtime.os.environ["JOBOS_KEYCHAIN_HELPER_PATH"] == str(helper)
+
+
+def test_mcp_runtime_rejects_tampered_keychain_helper_before_reading_secrets(tmp_path):
+    runtime, _ = runtime_files(tmp_path)
+    release = Path(str(runtime["jobos_root"]))
+    (release / "services/api").mkdir(parents=True)
+    helper = tmp_path / "JobOS.app/Contents/Resources/jobos-keychain"
+    helper.parent.mkdir(parents=True)
+    helper.write_text("trusted helper", encoding="utf-8")
+    runtime.update(
+        {
+            "device_id": "mini-device",
+            "keychain_helper_path": str(helper),
+            "keychain_helper_sha256": hashlib.sha256(helper.read_bytes()).hexdigest(),
+        }
+    )
+    helper.write_text("tampered helper", encoding="utf-8")
+
+    with pytest.raises(RuntimeError, match="failed integrity verification"):
+        jobos_mcp_runtime.keychain_credentials(runtime)
 
 
 @pytest.mark.anyio

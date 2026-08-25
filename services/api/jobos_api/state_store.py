@@ -63,6 +63,17 @@ def mutation_activity_source_id(
 def _conversation_detail(event_type: str, detail: dict[str, object] | None) -> dict[str, object]:
     raw_detail = detail or {}
     safe_detail = redact_detail(raw_detail)
+    approval_id = raw_detail.get("approval_id")
+    if (
+        event_type == "status"
+        and raw_detail.get("actionable") is True
+        and isinstance(approval_id, str)
+        and re.fullmatch(r"approval_[A-Za-z0-9_-]{16,80}", approval_id)
+    ):
+        # This bounded, one-time review handle is not a provider credential. The
+        # renderer needs the exact value to answer the active turn; all malformed
+        # values and unrelated opaque strings still pass through normal redaction.
+        safe_detail["approval_id"] = approval_id
     assistant_text = raw_detail.get("text")
     if (
         event_type == "assistant_message"
@@ -1977,20 +1988,27 @@ class JobOsStateStore:
             if row is None or str(row[0]) != connected_agent_id:
                 connection.rollback()
                 raise IncompatibleSchemaError("Connected Agent migration receipt is missing")
+            binding_scope = (
+                "connected_agent_id IS ? AND ("
+                if str(row[1]) == "complete"
+                else "connected_agent_id IS NOT ? OR ("
+            )
             missing = connection.execute(
-                """
+                f"""
                 SELECT conversation_id FROM conversations
-                WHERE connected_agent_id IS NOT ? OR provider IS NOT 'hermes'
-                   OR binding_state NOT IN ('sealed', 'legacy_awaiting_resolution')
-                   OR (binding_state = 'sealed' AND (
-                        model_id IS NULL OR reasoning_effort IS NULL
-                        OR creation_state != 'ready' OR lock_reason IS NOT NULL
-                   ))
-                   OR (binding_state = 'legacy_awaiting_resolution' AND (
-                        model_id IS NOT NULL OR reasoning_effort IS NOT NULL
-                        OR creation_state != 'locked'
-                        OR lock_reason != 'LEGACY_MODEL_UNRESOLVED'
-                   ))
+                WHERE {binding_scope}
+                       provider IS NOT 'hermes'
+                       OR binding_state NOT IN ('sealed', 'legacy_awaiting_resolution')
+                       OR (binding_state = 'sealed' AND (
+                            model_id IS NULL OR reasoning_effort IS NULL
+                            OR creation_state != 'ready' OR lock_reason IS NOT NULL
+                       ))
+                       OR (binding_state = 'legacy_awaiting_resolution' AND (
+                            model_id IS NOT NULL OR reasoning_effort IS NOT NULL
+                            OR creation_state != 'locked'
+                            OR lock_reason != 'LEGACY_MODEL_UNRESOLVED'
+                       ))
+                )
                 LIMIT 1
                 """,
                 (connected_agent_id,),

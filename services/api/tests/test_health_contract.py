@@ -351,6 +351,7 @@ def test_version_and_openapi_describe_the_shared_workspace_contract(tmp_path):
         "/v1/conversations/{conversation_id}/workspace/document",
         "/v1/conversations/{conversation_id}/messages",
         "/v1/conversations/{conversation_id}/turns/{turn_id}/cancel",
+        "/v1/conversations/{conversation_id}/turns/{turn_id}/review",
         "/v1/conversations/{conversation_id}/turns/{turn_id}/retry",
         "/v1/desktop/capabilities",
         "/v1/browser/commands",
