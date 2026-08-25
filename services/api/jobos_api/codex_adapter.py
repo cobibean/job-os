@@ -121,6 +121,7 @@ class CodexAppServerGateway:
         self._refresh_rate_limits = refresh_rate_limits
         self._rate_limit_settling: set[str] = set()
         self._rate_limit_completed: set[str] = set()
+        self._rate_limit_tasks: set[asyncio.Task[None]] = set()
         self._events: asyncio.Queue[GatewayEvent | None] = asyncio.Queue()
         self._closed = False
 
@@ -372,8 +373,10 @@ class CodexAppServerGateway:
                 and params.get("willRetry") is True
                 and isinstance(provider_turn_id, str)
             ):
+                if provider_turn_id in self._rate_limit_settling:
+                    return
                 self._rate_limit_settling.add(provider_turn_id)
-                asyncio.create_task(
+                task = asyncio.create_task(
                     self._settle_provider_rate_limit_retry(
                         self._thread_id,
                         provider_turn_id,
@@ -381,6 +384,8 @@ class CodexAppServerGateway:
                         params,
                     )
                 )
+                self._rate_limit_tasks.add(task)
+                task.add_done_callback(self._rate_limit_tasks.discard)
                 return
         event = self._normalize(method, params)
         if event is not None:
@@ -407,6 +412,7 @@ class CodexAppServerGateway:
                 event = self._normalize("error", params)
                 if event is not None:
                     await self._events.put(event)
+                self._clear_rate_limited_turn(jobos_turn_id, provider_turn_id)
                 self._rate_limit_completed.discard(provider_turn_id)
                 self._rate_limit_settling.discard(provider_turn_id)
                 return
@@ -432,6 +438,7 @@ class CodexAppServerGateway:
                     f"codex:{self._event_namespace}:{provider_turn_id}:{self._event_sequence}",
                 )
             )
+            self._clear_rate_limited_turn(jobos_turn_id, provider_turn_id)
             self._rate_limit_settling.discard(provider_turn_id)
             return
         if (
@@ -444,8 +451,20 @@ class CodexAppServerGateway:
         event = self._normalize("error", params)
         if event is not None:
             await self._events.put(event)
+        self._clear_rate_limited_turn(jobos_turn_id, provider_turn_id)
         self._rate_limit_completed.discard(provider_turn_id)
         self._rate_limit_settling.discard(provider_turn_id)
+
+    def _clear_rate_limited_turn(
+        self, jobos_turn_id: str, provider_turn_id: str
+    ) -> None:
+        if (
+            self._jobos_turn_id == jobos_turn_id
+            and self._provider_turn_id == provider_turn_id
+        ):
+            self._jobos_turn_id = None
+            self._provider_turn_id = None
+            self._assistant_pending = ""
 
     def _normalize(self, method: str, params: dict[str, object]) -> GatewayEvent | None:
         turn_id = self._jobos_turn_id
@@ -525,6 +544,11 @@ class CodexAppServerGateway:
         return None
 
     async def close(self) -> None:
+        for task in tuple(self._rate_limit_tasks):
+            task.cancel()
+        if self._rate_limit_tasks:
+            await asyncio.gather(*self._rate_limit_tasks, return_exceptions=True)
+        self._rate_limit_tasks.clear()
         self._closed = True
         self._thread_id = None
         self._jobos_turn_id = None

@@ -427,7 +427,8 @@ async def test_codex_rate_limit_is_scoped_and_never_blindly_retried(tmp_path: Pa
     retry_after = limited.detail["retry_after_seconds"]
     assert isinstance(retry_after, int)
     assert 1 <= retry_after <= 60
-    assert client.requests == requests_before_error + [
+    assert client.requests == [
+        *requests_before_error,
         (
             "turn/interrupt",
             {"threadId": "thread-a", "turnId": "provider-turn-a"},

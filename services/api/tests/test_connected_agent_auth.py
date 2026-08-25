@@ -508,7 +508,7 @@ async def test_keyring_isolation_accepts_the_trusted_jobos_mcp_config(tmp_path: 
 
 
 def test_support_diagnostics_are_bounded_and_credential_free() -> None:
-    secret = "credential-that-must-not-enter-support-output"
+    forbidden_marker = "credential-that-must-not-enter-support-output"
     runtime = CodexConnectedAgentRuntime(cast(Any, FakeCodexClient()), FakeVault())
     diagnostics = runtime.diagnostics()
     serialized = json.dumps(diagnostics, sort_keys=True)
@@ -519,6 +519,6 @@ def test_support_diagnostics_are_bounded_and_credential_free() -> None:
         "runtime_receipt_id": CODEX_APP_SERVER_RECEIPT_ID,
     }
     assert len(serialized) < 512
-    assert secret not in serialized
+    assert forbidden_marker not in serialized
     assert "credential" not in serialized.lower()
     assert "authorization" not in serialized.lower()
