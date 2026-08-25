@@ -89,7 +89,7 @@ export async function probeConnectivity(config: ConnectivityConfig): Promise<Con
       return {
         state: 'disconnected',
         checkedAt,
-        message: 'JobOS API unavailable'
+        message: 'JobOS host unavailable'
       }
     }
     if (!isHealthResponse(health.data)) {
@@ -136,7 +136,7 @@ export async function probeConnectivity(config: ConnectivityConfig): Promise<Con
     return {
       state: 'disconnected',
       checkedAt,
-      message: 'JobOS API unavailable'
+      message: 'JobOS host unavailable'
     }
   }
 }

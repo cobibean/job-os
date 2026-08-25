@@ -66,7 +66,7 @@ export async function initializeDesktopRuntime(
     return {
       runtime,
       deviceToken,
-      connectivity: disconnected('JobOS API unavailable')
+      connectivity: disconnected('JobOS host unavailable')
     }
   }
 }

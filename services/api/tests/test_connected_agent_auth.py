@@ -1,10 +1,16 @@
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import Any, cast
 
 import pytest
-from jobos_api.codex_runtime import CODEX_APP_SERVER_RECEIPT_ID, CodexRpcError
+from jobos_api.codex_runtime import (
+    CODEX_APP_SERVER_RECEIPT_ID,
+    CODEX_APP_SERVER_VERSION,
+    CodexRpcError,
+)
 from jobos_api.connected_agent_auth import (
     AuthFlowError,
     CodexAuthFlowBroker,
@@ -499,3 +505,20 @@ async def test_keyring_isolation_accepts_the_trusted_jobos_mcp_config(tmp_path: 
     config = (tmp_path / "codex-home" / "config.toml").read_text(encoding="utf-8")
     assert "[mcp_servers.jobos]" in config
     assert str(launcher.resolve()) in config
+
+
+def test_support_diagnostics_are_bounded_and_credential_free() -> None:
+    secret = "credential-that-must-not-enter-support-output"
+    runtime = CodexConnectedAgentRuntime(cast(Any, FakeCodexClient()), FakeVault())
+    diagnostics = runtime.diagnostics()
+    serialized = json.dumps(diagnostics, sort_keys=True)
+
+    assert diagnostics == {
+        "provider": "codex",
+        "runtime_version": CODEX_APP_SERVER_VERSION,
+        "runtime_receipt_id": CODEX_APP_SERVER_RECEIPT_ID,
+    }
+    assert len(serialized) < 512
+    assert secret not in serialized
+    assert "credential" not in serialized.lower()
+    assert "authorization" not in serialized.lower()

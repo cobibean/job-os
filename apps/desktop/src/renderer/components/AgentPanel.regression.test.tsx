@@ -421,7 +421,12 @@ test('failed and interrupted turns expose Retry and offline states remain distin
   expect(agent.retry).toHaveBeenCalledWith(CONVERSATION_ID, 'turn-1', expect.stringMatching(/^desktop-retry-/))
 
   rerender(<Harness apiState="disconnected" contextLabel="Northstar" />)
-  expect(screen.getByText('JobOS API offline')).not.toBeNull()
+  expect(screen.getByText('JobOS host unavailable')).not.toBeNull()
+  expect((screen.getByRole('button', { name: 'Send message' }) as HTMLButtonElement).disabled).toBe(true)
+
+  rerender(<Harness apiState="degraded" contextLabel="Northstar" />)
+  expect(screen.getByText('Device authentication needs attention')).not.toBeNull()
+  expect((screen.getByRole('button', { name: 'Send message' }) as HTMLButtonElement).disabled).toBe(true)
 })
 
 test('API-online users can use Send to reconnect an initially offline agent', async () => {

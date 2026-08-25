@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import asyncio
+import math
 import os
 import re
 import secrets
-from collections.abc import AsyncIterator, Callable
+import time
+from collections.abc import AsyncIterator, Awaitable, Callable
 from pathlib import Path
 
 from .agent_gateway import AgentContext, ConnectionState, GatewayEvent
@@ -23,6 +25,9 @@ class CodexGatewayFactory:
         self._client = client
         self._cwd = cwd.expanduser().absolute()
         self._gateways: dict[str, CodexAppServerGateway] = {}
+        self._rate_limit_snapshot: dict[str, object] = {}
+        self._rate_limit_updates: list[dict[str, object]] = []
+        self._rate_limit_refresh_lock = asyncio.Lock()
         self._subscribed = False
 
     def create(self, conversation_id: str) -> CodexAppServerGateway:
@@ -34,9 +39,29 @@ class CodexGatewayFactory:
             cwd=self._cwd,
             conversation_id=conversation_id,
             unregister=self._unregister,
+            rate_limit_snapshot=self._rate_limit_snapshot,
+            refresh_rate_limits=self._refresh_rate_limits,
         )
         self._gateways[conversation_id] = gateway
         return gateway
+
+    async def _refresh_rate_limits(self) -> dict[str, object]:
+        async with self._rate_limit_refresh_lock:
+            self._rate_limit_updates = []
+            try:
+                result = await self._client.request("account/rateLimits/read")
+            except CodexRuntimeError:
+                return dict(self._rate_limit_snapshot)
+            snapshot = result.get("rateLimits") if isinstance(result, dict) else None
+            if isinstance(snapshot, dict):
+                refreshed = dict(snapshot)
+                for update in self._rate_limit_updates:
+                    refreshed = _merge_rate_limit_snapshot(refreshed, update)
+                self._rate_limit_snapshot = refreshed
+                self._rate_limit_updates = []
+                for gateway in tuple(self._gateways.values()):
+                    gateway.update_rate_limits(self._rate_limit_snapshot)
+            return dict(self._rate_limit_snapshot)
 
     async def _dispatch(self, method: str, params: object) -> None:
         if method == "jobos/runtime/disconnected":
@@ -44,6 +69,17 @@ class CodexGatewayFactory:
                 await gateway.handle_runtime_disconnect()
             return
         if not isinstance(params, dict):
+            return
+        if method == "account/rateLimits/updated":
+            snapshot = params.get("rateLimits")
+            if not isinstance(snapshot, dict):
+                return
+            self._rate_limit_updates.append(snapshot)
+            self._rate_limit_snapshot = _merge_rate_limit_snapshot(
+                self._rate_limit_snapshot, snapshot
+            )
+            for gateway in tuple(self._gateways.values()):
+                gateway.update_rate_limits(self._rate_limit_snapshot)
             return
         thread_id = params.get("threadId")
         if not isinstance(thread_id, str):
@@ -68,6 +104,8 @@ class CodexAppServerGateway:
         cwd: Path,
         conversation_id: str,
         unregister: Callable[[str, CodexAppServerGateway], None],
+        rate_limit_snapshot: dict[str, object],
+        refresh_rate_limits: Callable[[], Awaitable[dict[str, object]]],
     ) -> None:
         self._client = client
         self._cwd = cwd
@@ -79,6 +117,10 @@ class CodexAppServerGateway:
         self._event_namespace = secrets.token_hex(8)
         self._event_sequence = 0
         self._assistant_pending = ""
+        self._rate_limit_snapshot = dict(rate_limit_snapshot)
+        self._refresh_rate_limits = refresh_rate_limits
+        self._rate_limit_settling: set[str] = set()
+        self._rate_limit_completed: set[str] = set()
         self._events: asyncio.Queue[GatewayEvent | None] = asyncio.Queue()
         self._closed = False
 
@@ -192,6 +234,7 @@ class CodexAppServerGateway:
         if self._thread_id is None:
             raise RuntimeError("Codex conversation is not attached")
         await self._require_jobos_mcp()
+        self._rate_limit_snapshot = await self._refresh_rate_limits()
         prompt = _prompt_with_context(
             text,
             {
@@ -300,6 +343,13 @@ class CodexAppServerGateway:
             or provider_turn_id != self._provider_turn_id
         ):
             return
+        if (
+            method == "turn/completed"
+            and isinstance(provider_turn_id, str)
+            and provider_turn_id in self._rate_limit_settling
+        ):
+            self._rate_limit_completed.add(provider_turn_id)
+            return
         if method == "turn/completed" and self._assistant_pending:
             pending = sanitize_assistant_text(self._assistant_pending)
             self._assistant_pending = ""
@@ -314,6 +364,24 @@ class CodexAppServerGateway:
                     f"codex:{self._event_namespace}:{provider_turn_id}:{self._event_sequence}",
                 )
             )
+        if method == "error":
+            error = params.get("error")
+            error_info = error.get("codexErrorInfo") if isinstance(error, dict) else None
+            if (
+                error_info == "usageLimitExceeded"
+                and params.get("willRetry") is True
+                and isinstance(provider_turn_id, str)
+            ):
+                self._rate_limit_settling.add(provider_turn_id)
+                asyncio.create_task(
+                    self._settle_provider_rate_limit_retry(
+                        self._thread_id,
+                        provider_turn_id,
+                        self._jobos_turn_id,
+                        params,
+                    )
+                )
+                return
         event = self._normalize(method, params)
         if event is not None:
             await self._events.put(event)
@@ -321,6 +389,63 @@ class CodexAppServerGateway:
             self._jobos_turn_id = None
             self._provider_turn_id = None
             self._assistant_pending = ""
+
+    async def _settle_provider_rate_limit_retry(
+        self,
+        thread_id: str,
+        provider_turn_id: str,
+        jobos_turn_id: str,
+        params: dict[str, object],
+    ) -> None:
+        try:
+            await self._client.request(
+                "turn/interrupt",
+                {"threadId": thread_id, "turnId": provider_turn_id},
+            )
+        except CodexRuntimeError:
+            if provider_turn_id in self._rate_limit_completed:
+                event = self._normalize("error", params)
+                if event is not None:
+                    await self._events.put(event)
+                self._rate_limit_completed.discard(provider_turn_id)
+                self._rate_limit_settling.discard(provider_turn_id)
+                return
+            if (
+                self._jobos_turn_id != jobos_turn_id
+                or self._provider_turn_id != provider_turn_id
+            ):
+                self._rate_limit_settling.discard(provider_turn_id)
+                return
+            self._event_sequence += 1
+            await self._events.put(
+                GatewayEvent(
+                    "error",
+                    "failed",
+                    "Codex rate limit reached; recovery required",
+                    {
+                        "reason": "transport_lost",
+                        "cause": "rate_limited",
+                        "retry": False,
+                        "recovery_required": True,
+                    },
+                    jobos_turn_id,
+                    f"codex:{self._event_namespace}:{provider_turn_id}:{self._event_sequence}",
+                )
+            )
+            self._rate_limit_settling.discard(provider_turn_id)
+            return
+        if (
+            self._jobos_turn_id != jobos_turn_id
+            or self._provider_turn_id != provider_turn_id
+        ):
+            self._rate_limit_completed.discard(provider_turn_id)
+            self._rate_limit_settling.discard(provider_turn_id)
+            return
+        event = self._normalize("error", params)
+        if event is not None:
+            await self._events.put(event)
+        self._rate_limit_completed.discard(provider_turn_id)
+        self._rate_limit_settling.discard(provider_turn_id)
 
     def _normalize(self, method: str, params: dict[str, object]) -> GatewayEvent | None:
         turn_id = self._jobos_turn_id
@@ -353,6 +478,25 @@ class CodexAppServerGateway:
             summary = sanitize_text(str(detail.get("name") or "Codex tool activity"))[:500]
             return GatewayEvent("activity", state, summary, detail, turn_id, source_id)
         if method == "error":
+            error = params.get("error")
+            error_info = error.get("codexErrorInfo") if isinstance(error, dict) else None
+            if error_info == "usageLimitExceeded":
+                retry_after = _retry_after_seconds(self._rate_limit_snapshot)
+                summary = "Codex rate limit reached"
+                if retry_after is not None:
+                    summary = f"Codex rate limit reached. Try again in {retry_after} seconds"
+                return GatewayEvent(
+                    "error",
+                    "failed",
+                    summary,
+                    {
+                        "reason": "rate_limited",
+                        "retry": False,
+                        "retry_after_seconds": retry_after,
+                    },
+                    turn_id,
+                    source_id,
+                )
             if params.get("willRetry") is True:
                 return GatewayEvent(
                     "activity",
@@ -387,3 +531,44 @@ class CodexAppServerGateway:
         self._provider_turn_id = None
         self._unregister(self._conversation_id, self)
         await self._events.put(None)
+
+    def update_rate_limits(self, snapshot: dict[str, object]) -> None:
+        self._rate_limit_snapshot = dict(snapshot)
+
+
+def _retry_after_seconds(snapshot: dict[str, object]) -> int | None:
+    resets: list[int] = []
+    for name in ("primary", "secondary"):
+        window = snapshot.get(name)
+        if not isinstance(window, dict):
+            continue
+        used_percent = window.get("usedPercent")
+        if not isinstance(used_percent, int) or isinstance(used_percent, bool):
+            continue
+        if used_percent < 100:
+            continue
+        resets_at = window.get("resetsAt")
+        if isinstance(resets_at, int) and not isinstance(resets_at, bool):
+            resets.append(resets_at)
+    now = time.time()
+    future_resets = [reset for reset in resets if reset > now]
+    if not future_resets:
+        return None
+    return math.ceil(max(future_resets) - now)
+
+
+def _merge_rate_limit_snapshot(
+    previous: dict[str, object], update: dict[str, object]
+) -> dict[str, object]:
+    merged = dict(previous)
+    for key, value in update.items():
+        if value is None:
+            continue
+        if key in {"primary", "secondary"} and isinstance(value, dict):
+            prior_window = merged.get(key)
+            window = dict(prior_window) if isinstance(prior_window, dict) else {}
+            window.update({name: field for name, field in value.items() if field is not None})
+            merged[key] = window
+            continue
+        merged[key] = value
+    return merged
