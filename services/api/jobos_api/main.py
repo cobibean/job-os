@@ -98,6 +98,12 @@ def settings_from_environment() -> Settings:
             Path(value) if (value := os.environ.get("JOBOS_CODEX_APP_SERVER_PATH")) else None
         ),
         codex_home_path=(Path(value) if (value := os.environ.get("JOBOS_CODEX_HOME")) else None),
+        codex_publication_root=Path(
+            os.environ.get(
+                "JOBOS_CODEX_PUBLICATION_ROOT",
+                application_data / "artifacts/publication-inbox",
+            )
+        ),
         codex_request_timeout=float(os.environ.get("JOBOS_CODEX_REQUEST_TIMEOUT", "15")),
         codex_mcp_command=(
             Path(value) if (value := os.environ.get("JOBOS_CODEX_MCP_COMMAND")) else None

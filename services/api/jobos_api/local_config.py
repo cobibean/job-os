@@ -166,6 +166,7 @@ def settings_from_config(path: Path) -> Settings:
         jobs_db_path=effective["jobs_db_path"],
         artifact_provider=effective["artifact_provider"],
         local_artifact_root=effective["local_artifact_root"],
+        codex_publication_root=artifact_root / "publication-inbox",
         artifact_roots=effective["artifact_roots"],
         job_provider=effective["job_provider"],
         job_hunter_db_path=effective["job_hunter_db_path"],
