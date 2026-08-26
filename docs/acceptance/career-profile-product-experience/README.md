@@ -1,6 +1,6 @@
 # Career Profile product-experience acceptance
 
-This directory records the packaged-app acceptance for [Issue #56](https://github.com/cobibean/job-os/issues/56). The run used an isolated JobOS profile containing only visibly `(FAKE)` synthetic data. It did not read or mutate a live Career Profile, deploy JobOS, begin Issue #57, or perform the Issue #58 authority cutover.
+This directory records the packaged-app acceptance for [Issue #56](https://github.com/cobibean/job-os/issues/56). The checked-in report is historical evidence for the exact source and package identities recorded in `acceptance-report.json`; it is not automatically evidence for later commits. The run used an isolated JobOS profile containing only visibly `(FAKE)` synthetic data. It did not read or mutate a live Career Profile, deploy JobOS, begin Issue #57, or perform the Issue #58 authority cutover.
 
 ## Verdict
 
@@ -14,6 +14,10 @@ This directory records the packaged-app acceptance for [Issue #56](https://githu
 - Restore result: revision 7, one non-undoable baseline, agent context reset to `none`
 
 The machine-readable result is in [`acceptance-report.json`](acceptance-report.json).
+
+## Current-commit frontend smoke
+
+Run `pnpm test:frontend:packaged` on arm64 macOS to build the current commit and exercise the same visible packaged Electron journey against a disposable synthetic profile. The CI smoke crosses renderer → preload → main → API/storage, exports and restores archives, restarts the app, and fails when an interactive accessibility node has no accessible name. It deliberately does not claim that newly captured pixels match the separately reviewed historical screenshots.
 
 ## Captured journey
 

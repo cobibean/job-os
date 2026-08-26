@@ -29,6 +29,7 @@
     "contracts:check": "pnpm contracts:generate && node scripts/verify-contract-drift.mjs",
     "contracts:test-drift": "node scripts/test-contract-drift.mjs",
     "contracts:generate": "pnpm api:export && pnpm --filter @jobos/openapi-generator generate",
+    "docx:pagination-baseline": "uv run --with pymupdf==1.28.2 python scripts/generate_docx_pagination_baseline.py",
     "dev": "pnpm --filter @jobos/desktop dev",
     "license:check": "uv run python scripts/verify_license_inventory.py",
     "media:capture": "pnpm build && node docs/media/source/capture-media.mjs",
@@ -36,8 +37,10 @@
     "public:check": "uv run python scripts/public-release/verify-public-tree.py && uv run python scripts/public-release/verify-fixture-manifest.py",
     "public:smoke-clean-clone": "python scripts/public-release/smoke-clean-clone.py --source . --ref HEAD",
     "lint": "pnpm --filter @jobos/contracts lint && pnpm --filter @jobos/desktop lint && uv run ruff check services scripts",
-    "test": "pnpm --filter @jobos/desktop test && uv run pytest",
+    "test": "pnpm --filter @jobos/docx-engine test && pnpm --filter @jobos/docx-editor-core test && pnpm --filter @jobos/desktop test && uv run pytest",
     "test:connected-agents:phase-0": "uv run pytest tests/connected_agents",
+    "test:frontend:packaged": "pnpm --filter @jobos/desktop package:mac && node scripts/run-packaged-frontend-smoke.mjs",
+    "test:macos-native": "pnpm --filter @jobos/desktop build:keychain-helper && pnpm --filter @jobos/desktop test:macbook-update && JOBOS_RUN_KEYCHAIN_INTEGRATION=1 uv run pytest -q services/api/tests/test_macos_keychain.py tests/connected_agents/test_phase0_harness.py",
     "test:updater": "pnpm --filter @jobos/desktop test:macbook-update",
     "typecheck": "pnpm contracts:generate && pnpm --filter @jobos/contracts build && pnpm --filter @jobos/contracts typecheck && pnpm --filter @jobos/desktop typecheck"
   }

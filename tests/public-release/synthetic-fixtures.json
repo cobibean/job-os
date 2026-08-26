@@ -3,18 +3,6 @@
   "policy": "Every tracked binary asset must be checksum-pinned and publication-approved; every binary test fixture must be synthetic.",
   "assets": [
     {
-      "path": "apps/desktop/build/jobos-career-profile-archive-write",
-      "sha256": "3f990d2d7a5f579ae86efafd5d6306a8f1095da2c13280fd1b29458a6f51fc10",
-      "classification": "project-asset",
-      "publication": "keep",
-      "source": "Deterministically compiled from the tracked JobOS Swift helper source",
-      "purpose": "Packaged descriptor-relative Career Profile archive writer",
-      "provenance": {
-        "trackedSource": "apps/desktop/native/JobOSCareerProfileArchiveWrite.swift",
-        "method": "Built by apps/desktop/scripts/build-career-profile-archive-write.mjs."
-      }
-    },
-    {
       "path": "apps/desktop/build/icon.icns",
       "sha256": "328bc6fba639806631d537800f079b61017cb4d17167f6d3655586a5202bf23b",
       "classification": "project-asset",

@@ -309,6 +309,7 @@ test('adds a typed career detail and dismisses its success feedback', async () =
   fireEvent.change(within(editor).getByLabelText('Detail type'), { target: { value: 'skill' } })
   fireEvent.change(within(editor).getByLabelText('Skill name'), { target: { value: 'React' } })
   fireEvent.change(within(editor).getByLabelText('Level'), { target: { value: 'expert' } })
+  const timeout = vi.spyOn(window, 'setTimeout')
   fireEvent.click(within(editor).getByRole('button', { name: 'Save detail' }))
 
   await waitFor(() => expect(createCareerProfileItem).toHaveBeenCalledWith(expect.objectContaining({
@@ -319,8 +320,18 @@ test('adds a typed career detail and dismisses its success feedback', async () =
   expect(await screen.findByRole('button', { name: /React/i })).not.toBeNull()
   expect(screen.queryByText(/"kind"|JSON/i)).toBeNull()
   expect(await screen.findByText('Career detail added.')).not.toBeNull()
-  await waitFor(() => expect(screen.queryByText('Career detail added.')).toBeNull(), { timeout: 6_000 })
-}, 7_000)
+  const dismissCallIndex = timeout.mock.calls.findIndex(([, delay]) => delay === 5_000)
+  const dismiss = timeout.mock.calls[dismissCallIndex]?.[0]
+  expect(dismiss).toBeTypeOf('function')
+  if (typeof dismiss !== 'function') throw new Error('Expected a transient feedback timer')
+  try {
+    act(() => { dismiss() })
+    expect(screen.queryByText('Career detail added.')).toBeNull()
+  } finally {
+    window.clearTimeout(timeout.mock.results[dismissCallIndex]?.value)
+    timeout.mockRestore()
+  }
+})
 
 test('keeps an actionable career-detail error visible', async () => {
   const api = bridge({
