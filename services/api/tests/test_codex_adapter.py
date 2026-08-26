@@ -5,6 +5,7 @@ import time
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 from types import SimpleNamespace
+from typing import cast
 
 import jobos_api.codex_adapter as codex_adapter_module
 import pytest
@@ -137,12 +138,19 @@ async def test_codex_turn_uses_opaque_thread_and_exact_jobos_context(tmp_path: P
     publication_root.parent.mkdir()
     gateway = CodexGatewayFactory(
         client,
-        cwd=tmp_path / "codex-workspace",
+        # The macOS sandbox grants the active workspace root reliably. Keep
+        # the Codex cwd and JobOS publication inbox identical in production.
+        cwd=publication_root,
         publication_root=publication_root,
     ).create("conv_alpha")
 
     assert gateway.connection_state == "offline"
     assert await gateway.create_or_resume_conversation(None) == ("thread-a", "thread-a")
+    thread_start = cast(
+        dict[str, object],
+        next(params for method, params in client.requests if method == "thread/start"),
+    )
+    assert thread_start["cwd"] == str(publication_root)
     assert gateway.connection_state == "online"
     await gateway.submit_turn("Tailor this", context())
 
@@ -156,7 +164,7 @@ async def test_codex_turn_uses_opaque_thread_and_exact_jobos_context(tmp_path: P
     thread_params = client.requests[0][1]
     assert isinstance(thread_params, dict)
     assert thread_params["sandbox"] == "workspace-write"
-    assert thread_params["cwd"] == str(tmp_path / "codex-workspace")
+    assert thread_params["cwd"] == str(publication_root)
     turn_params = client.requests[-1][1]
     assert isinstance(turn_params, dict)
     assert turn_params["threadId"] == "thread-a"

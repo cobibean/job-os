@@ -757,11 +757,16 @@ def create_app(
         )
         configured_gateway = True
     selected_gateway_factory = gateway_factory or OfflineAgentGatewayFactory()
+    publication_root = settings.resolved_local_artifact_root() / "publication-inbox"
     codex_gateway_factory = (
         CodexGatewayFactory(
             codex_client,
-            cwd=settings.resolved_codex_home() / "workspace",
-            publication_root=settings.resolved_local_artifact_root() / "publication-inbox",
+            # Codex's macOS workspace sandbox reliably grants the active cwd,
+            # while additional writableRoots can still be rejected by Seatbelt.
+            # Make the app-owned inbox the workspace boundary so document
+            # generation is both functional and narrowly scoped.
+            cwd=publication_root,
+            publication_root=publication_root,
         )
         if codex_client is not None
         else None
