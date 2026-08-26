@@ -583,6 +583,8 @@ test('saving dispatches job-hunter and reconciles a failure emitted before send 
   expect(savePrompt).toContain('do not call either mutation')
   expect(savePrompt).toContain('ERROR_BROWSER_TOOL_UNAVAILABLE')
   expect(savePrompt).toContain('ERROR_SOURCE_TAB_RECOVERY_FAILED')
+  expect(savePrompt).toContain('Return JOBOS_SAVE_ERROR:ERROR_SOURCE_TAB_RECOVERY_FAILED only when tab inspection succeeded')
+  expect(savePrompt).toContain('its MCP transport is down')
   expect(savePrompt).toContain('ERROR_BROWSER_SNAPSHOT_FAILED')
   expect(savePrompt).toContain('ERROR_PAGE_NOT_JOB_LISTING')
   expect(savePrompt).toContain('ERROR_LISTING_CONTENT_NOT_EXTRACTABLE')
