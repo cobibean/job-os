@@ -574,44 +574,55 @@ class ConversationService:
                     return
                 selected_job = context.get("selected_job")
                 binding = self.store.binding()
-                await self.gateway.submit_turn(
-                    str(turn["text"]),
-                    AgentContext(
-                        turn_id=turn_id,
-                        conversation_id=self.conversation_id,
-                        selected_job_id=context.get("selected_job_id"),
-                        workspace=dict(context.get("workspace", {})),
-                        selected_job=(
-                            {str(key): str(value) for key, value in selected_job.items()}
-                            if isinstance(selected_job, dict)
-                            else None
-                        ),
-                        career_profile=career_profile,
-                        career_profile_context=career_profile_context,
-                        profile_id=self.profile_id,
-                        connected_agent_id=(
-                            str(binding["connected_agent_id"])
-                            if binding.get("connected_agent_id") is not None
-                            else None
-                        ),
-                        provider=(
-                            cast(ConnectedAgentProvider, binding["provider"])
-                            if binding.get("provider") in {"hermes", "codex"}
-                            else None
-                        ),
-                        model_id=(
-                            str(binding["model_id"])
-                            if binding.get("model_id") is not None
-                            else None
-                        ),
-                        reasoning_effort=(
-                            str(binding["reasoning_effort"])
-                            if binding.get("reasoning_effort") is not None
-                            else None
-                        ),
-                        permission_state={"scope": "global"},
+                agent_context = AgentContext(
+                    turn_id=turn_id,
+                    conversation_id=self.conversation_id,
+                    selected_job_id=context.get("selected_job_id"),
+                    workspace=dict(context.get("workspace", {})),
+                    selected_job=(
+                        {str(key): str(value) for key, value in selected_job.items()}
+                        if isinstance(selected_job, dict)
+                        else None
                     ),
+                    career_profile=career_profile,
+                    career_profile_context=career_profile_context,
+                    profile_id=self.profile_id,
+                    connected_agent_id=(
+                        str(binding["connected_agent_id"])
+                        if binding.get("connected_agent_id") is not None
+                        else None
+                    ),
+                    provider=(
+                        cast(ConnectedAgentProvider, binding["provider"])
+                        if binding.get("provider") in {"hermes", "codex"}
+                        else None
+                    ),
+                    model_id=(
+                        str(binding["model_id"])
+                        if binding.get("model_id") is not None
+                        else None
+                    ),
+                    reasoning_effort=(
+                        str(binding["reasoning_effort"])
+                        if binding.get("reasoning_effort") is not None
+                        else None
+                    ),
+                    permission_state={"scope": "global"},
                 )
+                try:
+                    await self.gateway.submit_turn(str(turn["text"]), agent_context)
+                except DefinitivePreSubmitError:
+                    # The prompt was definitively not accepted, so it is safe to
+                    # repair a stale JobOS-to-agent session attachment and submit
+                    # once more. This is deliberately bounded to one retry: an
+                    # ambiguous submission must still enter recovery quarantine.
+                    logger.info(
+                        "Reattaching agent session after definitive pre-submit rejection"
+                    )
+                    await self.gateway.create_or_resume_conversation(
+                        self.store.stored_session_id()
+                    )
+                    await self.gateway.submit_turn(str(turn["text"]), agent_context)
         except DefinitivePreSubmitError as error:
             logger.warning(
                 "Agent turn was rejected before prompt submission (%s, code=%s)",

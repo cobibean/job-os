@@ -1141,7 +1141,7 @@ def test_definitive_pre_submit_failure_can_retry_without_remote_cleanup(tmp_path
 
             async def submit_turn(self, text, context):
                 self.attempts += 1
-                if self.attempts == 1:
+                if self.attempts <= 2:
                     raise DefinitivePreSubmitError(
                         "Hermes session isolation could not be verified"
                     )
@@ -1173,8 +1173,48 @@ def test_definitive_pre_submit_failure_can_retry_without_remote_cleanup(tmp_path
     assert recovery_after_failure is None
     assert retried is not None
     assert retried.source_turn_id == failed_record["turn_id"]
-    assert gateway.attempts == 2
+    assert gateway.attempts == 3
     assert len(gateway.submissions) == 1
+
+
+def test_definitive_pre_submit_attachment_loss_is_repaired_before_failing_turn(tmp_path):
+    async def scenario():
+        store = JobOsStateStore(tmp_path / "jobos.db")
+        store.initialize()
+        store.save_stored_session_id("ordinary-session")
+
+        class LostAttachmentGateway(FakeGateway):
+            def __init__(self):
+                super().__init__()
+                self.attempts = 0
+
+            async def submit_turn(self, text, context):
+                self.attempts += 1
+                if self.attempts == 1:
+                    raise DefinitivePreSubmitError("Hermes session is not attached")
+                await super().submit_turn(text, context)
+
+        gateway = LostAttachmentGateway()
+        service = ConversationService(store, gateway)
+        result = await service.send(
+            SendMessageRequest(
+                text="Explain the failed Save Job turn",
+                idempotency_key="lost-attachment-follow-up",
+            ),
+            actor_id="device-a",
+            context={"selected_job_id": None, "workspace": {}},
+        )
+        return result, gateway, store
+
+    result, gateway, store = asyncio.run(scenario())
+
+    record = store.turn_record(result.turn_id)
+    assert record is not None
+    assert record["status"] == "running"
+    assert gateway.attempts == 2
+    assert gateway.session_requests == ["ordinary-session", "stored-session"]
+    assert len(gateway.submissions) == 1
+    assert store.recovery_turn_id() is None
 
 
 def test_rotated_durable_id_reconciles_without_transcript_or_raw_metadata(tmp_path):
