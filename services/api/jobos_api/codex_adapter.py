@@ -30,9 +30,20 @@ _TOOL_REVIEW_TIMEOUT_SECONDS = 300.0
 class CodexGatewayFactory:
     """Create isolated JobOS conversation gateways over one private app-server."""
 
-    def __init__(self, client: CodexRpcClient, *, cwd: Path) -> None:
+    def __init__(
+        self,
+        client: CodexRpcClient,
+        *,
+        cwd: Path,
+        publication_root: Path | None = None,
+    ) -> None:
         self._client = client
         self._cwd = cwd.expanduser().absolute()
+        self._publication_root = (
+            publication_root.expanduser().absolute()
+            if publication_root is not None
+            else self._cwd / "publication-inbox"
+        )
         self._gateways: dict[str, CodexAppServerGateway] = {}
         self._rate_limit_snapshot: dict[str, object] = {}
         self._rate_limit_updates: list[dict[str, object]] = []
@@ -47,6 +58,7 @@ class CodexGatewayFactory:
         gateway = CodexAppServerGateway(
             client=self._client,
             cwd=self._cwd,
+            publication_root=self._publication_root,
             conversation_id=conversation_id,
             unregister=self._unregister,
             rate_limit_snapshot=self._rate_limit_snapshot,
@@ -125,6 +137,7 @@ class CodexAppServerGateway:
         *,
         client: CodexRpcClient,
         cwd: Path,
+        publication_root: Path,
         conversation_id: str,
         unregister: Callable[[str, CodexAppServerGateway], None],
         rate_limit_snapshot: dict[str, object],
@@ -132,6 +145,7 @@ class CodexAppServerGateway:
     ) -> None:
         self._client = client
         self._cwd = cwd
+        self._publication_root = publication_root
         self._conversation_id = conversation_id
         self._unregister = unregister
         self._thread_id: str | None = None
@@ -176,6 +190,16 @@ class CodexAppServerGateway:
                 "AGENT_PROVIDER_UNAVAILABLE", "Codex workspace is unsafe"
             )
         os.chmod(self._cwd, 0o700)
+        if self._publication_root.parent.is_symlink() or self._publication_root.is_symlink():
+            raise CodexRuntimeError(
+                "AGENT_PROVIDER_UNAVAILABLE", "Codex publication inbox is unsafe"
+            )
+        self._publication_root.mkdir(mode=0o700, parents=True, exist_ok=True)
+        if self._publication_root.is_symlink() or not self._publication_root.is_dir():
+            raise CodexRuntimeError(
+                "AGENT_PROVIDER_UNAVAILABLE", "Codex publication inbox is unsafe"
+            )
+        os.chmod(self._publication_root, 0o700)
         if not was_running and self._thread_id is not None:
             result = await self._client.request(
                 "thread/resume",
@@ -184,7 +208,7 @@ class CodexAppServerGateway:
                     "cwd": str(self._cwd),
                     "approvalPolicy": "never",
                     "approvalsReviewer": "user",
-                    "sandbox": "read-only",
+                    "sandbox": "workspace-write",
                 },
             )
             thread = result.get("thread") if isinstance(result, dict) else None
@@ -204,7 +228,7 @@ class CodexAppServerGateway:
             "cwd": str(self._cwd),
             "approvalPolicy": "never",
             "approvalsReviewer": "user",
-            "sandbox": "read-only",
+            "sandbox": "workspace-write",
         }
         if stored_session_id is None:
             method = "thread/start"
@@ -309,7 +333,11 @@ class CodexAppServerGateway:
             "clientUserMessageId": context.turn_id,
             "approvalPolicy": "never",
             "approvalsReviewer": "user",
-            "sandboxPolicy": {"type": "readOnly", "networkAccess": False},
+            "sandboxPolicy": {
+                "type": "workspaceWrite",
+                "writableRoots": [str(self._publication_root)],
+                "networkAccess": False,
+            },
         }
         if context.model_id is not None:
             params["model"] = context.model_id
@@ -431,7 +459,7 @@ class CodexAppServerGateway:
                 "cwd": str(self._cwd),
                 "approvalPolicy": "never",
                 "approvalsReviewer": "user",
-                "sandbox": "read-only",
+                "sandbox": "workspace-write",
             },
         )
         resumed_thread = resumed.get("thread") if isinstance(resumed, dict) else None

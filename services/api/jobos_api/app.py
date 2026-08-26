@@ -761,6 +761,7 @@ def create_app(
         CodexGatewayFactory(
             codex_client,
             cwd=settings.resolved_codex_home() / "workspace",
+            publication_root=settings.resolved_local_artifact_root() / "publication-inbox",
         )
         if codex_client is not None
         else None
