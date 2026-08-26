@@ -80,6 +80,21 @@ test('renders accessible tabs and routes additive creation through the New Chat 
   expect(screen.queryByRole('alertdialog')).toBeNull()
 })
 
+test('keeps session binding metadata in the header above the flexible chat body', async () => {
+  install()
+  render(<Harness />)
+  await screen.findByRole('tab', { name: 'Session 1, Idle' })
+
+  const panel = screen.getByRole('complementary', { name: 'Agent chat' })
+  const header = panel.querySelector('.agent-session-header')
+  const body = screen.getByRole('tabpanel')
+
+  expect(header).not.toBeNull()
+  expect(header?.querySelector('.agent-session-toolbar')).not.toBeNull()
+  expect(header?.querySelector('.agent-binding')?.textContent).toContain('Hermesdefault · mediumLocked for this chat')
+  expect(header?.nextElementSibling).toBe(body)
+})
+
 test('every session tab controls a persistent panel while only the selected panel is visible', async () => {
   install([summary(1), summary(2)])
   render(<Harness />)

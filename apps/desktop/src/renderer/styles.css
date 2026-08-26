@@ -854,6 +854,7 @@ button:focus-visible {
 
 .agent-context > span { display: flex; align-items: center; gap: 10px; }
 .agent-context > span > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.agent-session-header { min-width: 0; }
 .agent-session-toolbar { display: flex; min-width: 0; align-items: stretch; gap: 6px; padding: 6px 8px; border-bottom: 1px solid var(--border); background: var(--surface); }
 .agent-session-tabs { display: grid; grid-template-columns: repeat(var(--agent-session-count), minmax(36px, 1fr)); flex: 1; min-width: 0; gap: 3px; }
 .agent-session-tab { min-width: 36px; min-height: 40px; overflow: hidden; display: flex; align-items: center; justify-content: center; gap: 6px; padding: 6px; border: 1px solid transparent; border-radius: var(--radius-sm); color: var(--text-soft); background: var(--surface-raised); font-size: 12px; font-weight: 700; white-space: nowrap; cursor: pointer; }

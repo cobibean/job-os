@@ -198,17 +198,19 @@ export function AgentPanel({ agentLabel, avatarId, contextLabel, apiState = 'con
       <div className="agent-context">
         <span title={contextLabel}><BriefcaseBusiness aria-hidden="true" size={16} strokeWidth={1.5} /> <span>{contextLabel}</span></span>
       </div>
-      <AgentSessionTabs controller={sessions} onNewChat={onNewChat} />
-      {activeSummary?.binding ? (
-        <div className="agent-binding" role="status">
-          <strong>{agentLabel ?? (activeSummary.binding.provider === 'codex' ? 'ChatGPT · Codex' : 'Hermes')}</strong>
-          <span>{activeSummary.binding.modelId} · {activeSummary.binding.reasoningEffort}</span>
-          <small>Locked for this chat</small>
-        </div>
-      ) : null}
-      {activeSummary?.availability?.state === 'locked' ? (
-        <div className="agent-connection offline" role="status"><WifiOff aria-hidden="true" size={14} /> This chat is read-only · {activeSummary.availability.reason ?? 'Reconnect its agent to continue'}</div>
-      ) : null}
+      <div className="agent-session-header">
+        <AgentSessionTabs controller={sessions} onNewChat={onNewChat} />
+        {activeSummary?.binding ? (
+          <div className="agent-binding" role="status">
+            <strong>{agentLabel ?? (activeSummary.binding.provider === 'codex' ? 'ChatGPT · Codex' : 'Hermes')}</strong>
+            <span>{activeSummary.binding.modelId} · {activeSummary.binding.reasoningEffort}</span>
+            <small>Locked for this chat</small>
+          </div>
+        ) : null}
+        {activeSummary?.availability?.state === 'locked' ? (
+          <div className="agent-connection offline" role="status"><WifiOff aria-hidden="true" size={14} /> This chat is read-only · {activeSummary.availability.reason ?? 'Reconnect its agent to continue'}</div>
+        ) : null}
+      </div>
 
       {(sessions.order.length ? sessions.order : ['']).map(panelId => {
         const selected = !panelId || panelId === activeId
