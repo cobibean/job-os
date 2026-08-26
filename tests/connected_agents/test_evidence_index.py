@@ -58,7 +58,7 @@ def test_connected_agents_evidence_index_is_complete_unique_and_honest():
         assert 0 <= entry["owner_phase"] <= 8
         if entry["status"] == "verified":
             assert entry["source_commit"]
-            assert len(entry["source_commit"]) == 40
+            assert re.fullmatch(r"[0-9a-f]{40}", entry["source_commit"])
             assert entry["proof_refs"]
             assert entry["remaining_proof"] is None
             commit = subprocess.run(
@@ -68,6 +68,15 @@ def test_connected_agents_evidence_index_is_complete_unique_and_honest():
                 check=False,
             )
             assert commit.returncode == 0, f'{entry["id"]} references an unreachable commit'
+            reachable = subprocess.run(
+                ["git", "merge-base", "--is-ancestor", entry["source_commit"], "HEAD"],
+                cwd=ROOT,
+                capture_output=True,
+                check=False,
+            )
+            assert reachable.returncode == 0, (
+                f'{entry["id"]} source commit is not reachable from HEAD'
+            )
             for proof_ref in entry["proof_refs"]:
                 if proof_ref.startswith("https://"):
                     assert GITHUB_PR.fullmatch(proof_ref), (
@@ -75,7 +84,12 @@ def test_connected_agents_evidence_index_is_complete_unique_and_honest():
                     )
                 else:
                     proof_path = proof_ref.split("::", 1)[0]
-                    assert (ROOT / proof_path).is_file(), (
+                    resolved_root = ROOT.resolve()
+                    resolved_proof = (ROOT / proof_path).resolve()
+                    assert resolved_proof.is_relative_to(resolved_root), (
+                        f'{entry["id"]} proof path escapes the repository'
+                    )
+                    assert resolved_proof.is_file(), (
                         f'{entry["id"]} references a missing proof file'
                     )
         else:

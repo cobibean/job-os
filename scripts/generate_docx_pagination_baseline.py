@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
 import tempfile
@@ -66,7 +67,26 @@ def main() -> None:
                 }
 
     OUTPUT.parent.mkdir(parents=True, exist_ok=True)
-    OUTPUT.write_text(json.dumps(baseline, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    serialized = json.dumps(baseline, indent=2, ensure_ascii=False) + "\n"
+    temporary_output: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            dir=OUTPUT.parent,
+            prefix=f".{OUTPUT.name}.",
+            suffix=".tmp",
+            delete=False,
+        ) as temporary:
+            temporary.write(serialized)
+            temporary.flush()
+            os.fsync(temporary.fileno())
+            temporary_output = Path(temporary.name)
+        temporary_output.replace(OUTPUT)
+        temporary_output = None
+    finally:
+        if temporary_output is not None:
+            temporary_output.unlink(missing_ok=True)
     print(f"Wrote {len(baseline)} pagination baselines to {OUTPUT.relative_to(ROOT)}")
 
 
