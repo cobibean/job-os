@@ -6,6 +6,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 from jobos_api.initialize import initialize_jobos
+from jobos_api.installation_profiles import InstallationProfileRegistry
 from jobos_api.local_config import (
     LocalConfigError,
     load_credentials,
@@ -164,6 +165,67 @@ def test_token_configured_source_defaults_use_application_data_not_cwd(tmp_path,
     assert configured.resolved_local_artifact_root() == (
         tmp_path / "Library/Application Support/JobOS/artifacts"
     )
+    assert configured.resolved_codex_publication_root() == (
+        tmp_path / "Library/Application Support/JobOS/artifacts/publication-inbox"
+    )
+
+
+def test_token_configured_codex_publication_root_does_not_follow_runtime_artifacts(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr("jobos_api.local_config.sys.platform", "darwin")
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("JOBOS_DEVICE_TOKEN", "source-default-device-token")
+    monkeypatch.setenv("JOBOS_MCP_TOKEN", "source-default-mcp-token")
+    monkeypatch.setenv("JOBOS_LOCAL_ARTIFACT_ROOT", str(tmp_path / "job-hunter-artifacts"))
+    monkeypatch.delenv("JOBOS_CODEX_PUBLICATION_ROOT", raising=False)
+
+    configured = settings_from_environment()
+
+    assert configured.resolved_local_artifact_root() == tmp_path / "job-hunter-artifacts"
+    assert configured.resolved_codex_publication_root() == (
+        tmp_path / "Library/Application Support/JobOS/artifacts/publication-inbox"
+    )
+
+
+def test_config_backed_codex_publication_root_stays_with_jobos_artifacts(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr("jobos_api.local_config.sys.platform", "linux")
+    initialize_jobos(tmp_path)
+    config_path = tmp_path / "config.json"
+    settings_from_config(config_path)
+    registry = InstallationProfileRegistry(tmp_path / "installation-profiles.json")
+    data = registry.load()
+    external_artifacts = (tmp_path / "job-hunter-artifacts").absolute()
+    active = next(
+        profile for profile in data.profiles if profile.profile_id == data.active_profile_id
+    )
+    assert active.anchored_runtime is not None
+    anchored_runtime = active.anchored_runtime.model_copy(
+        update={
+            "local_artifact_root": external_artifacts,
+            "artifact_roots": (external_artifacts,),
+        }
+    )
+    registry.write(
+        data.model_copy(
+            update={
+                "registry_revision": data.registry_revision + 1,
+                "profiles": tuple(
+                    profile.model_copy(update={"anchored_runtime": anchored_runtime})
+                    if profile.profile_id == active.profile_id
+                    else profile
+                    for profile in data.profiles
+                ),
+            }
+        )
+    )
+
+    configured = settings_from_config(config_path)
+
+    assert configured.resolved_local_artifact_root() == external_artifacts
+    assert configured.resolved_codex_publication_root() == tmp_path / "artifacts/publication-inbox"
 
 
 def test_config_backed_settings_honor_explicit_career_profile_activation(tmp_path, monkeypatch):

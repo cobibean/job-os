@@ -5,6 +5,7 @@ import time
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 from types import SimpleNamespace
+from typing import cast
 
 import jobos_api.codex_adapter as codex_adapter_module
 import pytest
@@ -143,6 +144,11 @@ async def test_codex_turn_uses_opaque_thread_and_exact_jobos_context(tmp_path: P
 
     assert gateway.connection_state == "offline"
     assert await gateway.create_or_resume_conversation(None) == ("thread-a", "thread-a")
+    thread_start = cast(
+        dict[str, object],
+        next(params for method, params in client.requests if method == "thread/start"),
+    )
+    assert thread_start["cwd"] == str(tmp_path / "codex-workspace")
     assert gateway.connection_state == "online"
     await gateway.submit_turn("Tailor this", context())
 

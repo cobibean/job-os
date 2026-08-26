@@ -757,11 +757,12 @@ def create_app(
         )
         configured_gateway = True
     selected_gateway_factory = gateway_factory or OfflineAgentGatewayFactory()
+    publication_root = settings.resolved_codex_publication_root()
     codex_gateway_factory = (
         CodexGatewayFactory(
             codex_client,
             cwd=settings.resolved_codex_home() / "workspace",
-            publication_root=settings.resolved_local_artifact_root() / "publication-inbox",
+            publication_root=publication_root,
         )
         if codex_client is not None
         else None
