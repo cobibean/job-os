@@ -1,11 +1,34 @@
 #!/usr/bin/env node
 import { spawnSync } from 'node:child_process'
-import { chmod, mkdir, mkdtemp, readFile, rm } from 'node:fs/promises'
+import { chmod, lstat, mkdir, mkdtemp, readFile, rm } from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const taskRoot = path.join(root, '.task')
+
+async function rejectSymlinkedPathComponents(base, target) {
+  const relative = path.relative(base, target)
+  if (relative.startsWith('..') || path.isAbsolute(relative)) {
+    throw new Error('Packaged frontend runtime must remain inside the checkout')
+  }
+
+  let current = base
+  for (const segment of relative.split(path.sep).filter(Boolean)) {
+    current = path.join(current, segment)
+    try {
+      const metadata = await lstat(current)
+      if (metadata.isSymbolicLink()) {
+        throw new Error(`Refusing symlinked runtime path component: ${path.relative(base, current)}`)
+      }
+    } catch (error) {
+      if (error?.code === 'ENOENT') break
+      throw error
+    }
+  }
+}
+
+await rejectSymlinkedPathComponents(root, taskRoot)
 await mkdir(taskRoot, { recursive: true, mode: 0o700 })
 const temporaryRoot = await mkdtemp(path.join(taskRoot, 'packaged-frontend-'))
 const runtime = path.join(temporaryRoot, 'runtime')

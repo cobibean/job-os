@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { createHash } from 'node:crypto'
 import { execFileSync, spawn } from 'node:child_process'
-import { chmod, mkdir, readFile, readlink, readdir, stat, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, readFile, readlink, readdir, rename, stat, unlink, writeFile } from 'node:fs/promises'
 import { openSync } from 'node:fs'
 import net from 'node:net'
 import path from 'node:path'
@@ -53,10 +53,21 @@ const acceptanceScreenshotNames = [
 const acceptanceRelativeDirectory = 'docs/acceptance/career-profile-product-experience'
 const fixtureManifestRelativePath = 'tests/public-release/synthetic-fixtures.json'
 let smokeStage = 'initialization'
+let statusWriteSequence = 0
 
 async function markStage(state, stage) {
   smokeStage = stage
-  if (statusPath) await writeFile(statusPath, `${state}:${stage}\n`, { mode: 0o600 })
+  if (!statusPath) return
+
+  const temporaryStatusPath = `${statusPath}.${process.pid}.${statusWriteSequence++}.tmp`
+  try {
+    await writeFile(temporaryStatusPath, `${state}:${stage}\n`, { mode: 0o600 })
+    await rename(temporaryStatusPath, statusPath)
+  } finally {
+    await unlink(temporaryStatusPath).catch(error => {
+      if (error?.code !== 'ENOENT') throw error
+    })
+  }
 }
 
 function assert(condition, message) {

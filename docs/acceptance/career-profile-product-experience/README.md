@@ -33,7 +33,7 @@ Run `pnpm test:frontend:packaged` on arm64 macOS to build the current commit and
 | `08-wide-after-restart-1440x1024.png` | Profile and Evidence persistence after packaged-app restart |
 | `09-narrow-restored-baseline-980x640.png` | Restored baseline with excluded Evidence clearly marked unavailable |
 
-Every PNG was visually inspected, stripped of metadata, and checksum-pinned in `tests/public-release/synthetic-fixtures.json`.
+Every checked-in historical PNG was visually inspected, stripped of metadata, and checksum-pinned in `tests/public-release/synthetic-fixtures.json`. Current-commit CI smoke generates disposable screenshots and validates the journey and output manifest, but does not treat those unreviewed pixels as matching the historical checksum set.
 
 ## Archive proof
 
@@ -54,7 +54,7 @@ The report is bound to `HEAD` and a canonical product-source digest of the stage
 - excludes PNGs directly under this acceptance directory, because they are generated evidence;
 - keeps `tests/public-release/synthetic-fixtures.json` in the source manifest but canonicalizes it by removing only asset records whose path is one of those excluded acceptance PNGs. Every other manifest field and asset record remains source identity.
 
-Therefore rerunning acceptance, copying the report/screenshots, or updating only their matching synthetic-fixture checksum records cannot change the canonical product-source digest recorded by the report. Any other staged source change does change it. The harness separately records a sorted generated-output manifest (`path`, `size`, SHA-256) and digest for all nine screenshots, and fails unless every screenshot hash matches its synthetic-fixture record. The report itself is intentionally not self-checksummed.
+Therefore rerunning acceptance, copying the report/screenshots, or updating only their matching synthetic-fixture checksum records cannot change the canonical product-source digest recorded by the report. Any other staged source change does change it. The harness separately records a sorted generated-output manifest (`path`, `size`, SHA-256) and digest for all nine screenshots. Historical acceptance runs require every screenshot hash to match its reviewed synthetic-fixture record; current-commit CI smoke records fresh disposable hashes without claiming historical pixel equivalence. The report itself is intentionally not self-checksummed.
 
 The report also records the exercised `.app` manifest SHA-256 and ZIP-extracted `.app` manifest SHA-256. The run fails unless those bundles are byte-for-byte equivalent by sorted file/symlink/mode manifest. Unstaged generated report/PNG changes are allowed; an unstaged fixture-manifest change is allowed only when its canonicalized non-acceptance content still equals the staged blob. Other unstaged product-source changes fail the run.
 
