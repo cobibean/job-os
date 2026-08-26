@@ -4,7 +4,9 @@ import asyncio
 import time
 from collections.abc import Awaitable, Callable
 from pathlib import Path
+from types import SimpleNamespace
 
+import jobos_api.codex_adapter as codex_adapter_module
 import pytest
 from jobos_api.agent_gateway import AgentContext
 from jobos_api.codex_adapter import CodexGatewayFactory
@@ -132,6 +134,7 @@ def context(conversation_id: str = "conv_alpha") -> AgentContext:
 async def test_codex_turn_uses_opaque_thread_and_exact_jobos_context(tmp_path: Path) -> None:
     client = FakeCodexClient()
     publication_root = tmp_path / "artifacts" / "publication-inbox"
+    publication_root.parent.mkdir()
     gateway = CodexGatewayFactory(
         client,
         cwd=tmp_path / "codex-workspace",
@@ -181,7 +184,11 @@ async def test_codex_attachment_is_idempotent_for_the_current_live_thread(
     tmp_path: Path,
 ) -> None:
     client = FakeCodexClient()
-    gateway = CodexGatewayFactory(client, cwd=tmp_path).create("conv_alpha")
+    gateway = CodexGatewayFactory(
+        client,
+        cwd=tmp_path,
+        publication_root=tmp_path / "publication-inbox",
+    ).create("conv_alpha")
 
     stored_id, _ = await gateway.create_or_resume_conversation(None)
     assert await gateway.create_or_resume_conversation(stored_id) == (stored_id, stored_id)
@@ -195,7 +202,11 @@ async def test_codex_replaces_a_missing_pre_turn_rollout(tmp_path: Path) -> None
     client.resume_error = CodexRpcError(
         -32600, "no rollout found for thread id thread-missing"
     )
-    gateway = CodexGatewayFactory(client, cwd=tmp_path).create("conv_alpha")
+    gateway = CodexGatewayFactory(
+        client,
+        cwd=tmp_path,
+        publication_root=tmp_path / "publication-inbox",
+    ).create("conv_alpha")
 
     assert await gateway.create_or_resume_conversation("thread-missing") == (
         "thread-a",
@@ -213,7 +224,11 @@ async def test_codex_does_not_replace_a_thread_for_unrelated_resume_errors(
 ) -> None:
     client = FakeCodexClient()
     client.resume_error = CodexRpcError(-32600, "another request was rejected")
-    gateway = CodexGatewayFactory(client, cwd=tmp_path).create("conv_alpha")
+    gateway = CodexGatewayFactory(
+        client,
+        cwd=tmp_path,
+        publication_root=tmp_path / "publication-inbox",
+    ).create("conv_alpha")
 
     with pytest.raises(CodexRpcError, match="Codex App Server rejected"):
         await gateway.create_or_resume_conversation("thread-missing")
@@ -224,7 +239,11 @@ async def test_codex_does_not_replace_a_thread_for_unrelated_resume_errors(
 @pytest.mark.anyio
 async def test_codex_rejects_turn_when_canonical_jobos_mcp_is_not_ready(tmp_path: Path) -> None:
     client = FakeCodexClient(ready=False)
-    gateway = CodexGatewayFactory(client, cwd=tmp_path).create("conv_alpha")
+    gateway = CodexGatewayFactory(
+        client,
+        cwd=tmp_path,
+        publication_root=tmp_path / "publication-inbox",
+    ).create("conv_alpha")
     await gateway.create_or_resume_conversation(None)
 
     with pytest.raises(CodexRuntimeError, match="JobOS tools unavailable") as captured:
@@ -237,7 +256,11 @@ async def test_codex_rejects_turn_when_canonical_jobos_mcp_is_not_ready(tmp_path
 @pytest.mark.anyio
 async def test_codex_events_are_isolated_lossless_and_terminal(tmp_path: Path) -> None:
     client = FakeCodexClient()
-    gateway = CodexGatewayFactory(client, cwd=tmp_path).create("conv_alpha")
+    gateway = CodexGatewayFactory(
+        client,
+        cwd=tmp_path,
+        publication_root=tmp_path / "publication-inbox",
+    ).create("conv_alpha")
     await gateway.create_or_resume_conversation(None)
     await gateway.submit_turn("Do work", context())
     events = gateway.stream_events()
@@ -330,7 +353,11 @@ async def test_codex_events_are_isolated_lossless_and_terminal(tmp_path: Path) -
 @pytest.mark.anyio
 async def test_codex_interrupt_and_recovery_use_exact_provider_turn(tmp_path: Path) -> None:
     client = FakeCodexClient()
-    gateway = CodexGatewayFactory(client, cwd=tmp_path).create("conv_alpha")
+    gateway = CodexGatewayFactory(
+        client,
+        cwd=tmp_path,
+        publication_root=tmp_path / "publication-inbox",
+    ).create("conv_alpha")
     await gateway.create_or_resume_conversation(None)
     await gateway.submit_turn("Do work", context())
     await gateway.interrupt_turn("turn_12345678")
@@ -341,7 +368,11 @@ async def test_codex_interrupt_and_recovery_use_exact_provider_turn(tmp_path: Pa
     )
 
     client.turns = [{"id": "provider-turn-recovered", "status": "inProgress", "items": []}]
-    recovered = CodexGatewayFactory(client, cwd=tmp_path).create("conv_alpha")
+    recovered = CodexGatewayFactory(
+        client,
+        cwd=tmp_path,
+        publication_root=tmp_path / "publication-inbox",
+    ).create("conv_alpha")
     await recovered.recover_active_turn("thread-a", "turn_87654321")
     assert [method for method, _params in client.requests[-3:]] == [
         "thread/resume",
@@ -361,7 +392,11 @@ async def test_codex_recovery_fails_closed_when_multiple_turns_are_active(tmp_pa
         {"id": "provider-turn-a", "status": "inProgress"},
         {"id": "provider-turn-b", "status": "inProgress"},
     ]
-    gateway = CodexGatewayFactory(client, cwd=tmp_path).create("conv_alpha")
+    gateway = CodexGatewayFactory(
+        client,
+        cwd=tmp_path,
+        publication_root=tmp_path / "publication-inbox",
+    ).create("conv_alpha")
 
     with pytest.raises(CodexRuntimeError, match="ambiguous"):
         await gateway.recover_active_turn("thread-a", "turn_87654321")
@@ -373,10 +408,61 @@ async def test_codex_rejects_symlinked_workspace(tmp_path: Path) -> None:
     target.mkdir()
     alias = tmp_path / "workspace"
     alias.symlink_to(target, target_is_directory=True)
-    gateway = CodexGatewayFactory(FakeCodexClient(), cwd=alias).create("conv_alpha")
+    gateway = CodexGatewayFactory(
+        FakeCodexClient(),
+        cwd=alias,
+        publication_root=tmp_path / "publication-inbox",
+    ).create("conv_alpha")
 
     with pytest.raises(CodexRuntimeError, match="unsafe"):
         await gateway.create_or_resume_conversation(None)
+
+
+@pytest.mark.anyio
+async def test_codex_rejects_symlinked_publication_parent_before_start(
+    tmp_path: Path,
+) -> None:
+    artifact_root = tmp_path / "artifacts"
+    artifact_root.mkdir()
+    alias = tmp_path / "artifact-alias"
+    alias.symlink_to(artifact_root, target_is_directory=True)
+    client = FakeCodexClient()
+    gateway = CodexGatewayFactory(
+        client,
+        cwd=tmp_path / "workspace",
+        publication_root=alias / "publication-inbox",
+    ).create("conv_alpha")
+
+    with pytest.raises(CodexRuntimeError, match="publication inbox is unsafe"):
+        await gateway.create_or_resume_conversation(None)
+
+    assert client.started is False
+
+
+@pytest.mark.anyio
+async def test_codex_rejects_publication_root_replacement_before_start(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    real_stat = codex_adapter_module.os.stat
+
+    def replaced_stat(path, *args, **kwargs):
+        result = real_stat(path, *args, **kwargs)
+        if path == "publication-inbox" and kwargs.get("dir_fd") is not None:
+            return SimpleNamespace(st_dev=result.st_dev, st_ino=result.st_ino + 1)
+        return result
+
+    monkeypatch.setattr(codex_adapter_module.os, "stat", replaced_stat)
+    client = FakeCodexClient()
+    gateway = CodexGatewayFactory(
+        client,
+        cwd=tmp_path / "workspace",
+        publication_root=tmp_path / "publication-inbox",
+    ).create("conv_alpha")
+
+    with pytest.raises(CodexRuntimeError, match="publication inbox is unsafe"):
+        await gateway.create_or_resume_conversation(None)
+
+    assert client.started is False
 
 
 @pytest.mark.anyio
@@ -384,7 +470,11 @@ async def test_codex_runtime_disconnect_settles_turn_and_resumes_exact_thread(
     tmp_path: Path,
 ) -> None:
     client = FakeCodexClient()
-    gateway = CodexGatewayFactory(client, cwd=tmp_path).create("conv_alpha")
+    gateway = CodexGatewayFactory(
+        client,
+        cwd=tmp_path,
+        publication_root=tmp_path / "publication-inbox",
+    ).create("conv_alpha")
     await gateway.create_or_resume_conversation(None)
     await gateway.submit_turn("Do work", context())
     events = gateway.stream_events()
@@ -409,7 +499,11 @@ async def test_codex_runtime_disconnect_settles_turn_and_resumes_exact_thread(
 @pytest.mark.anyio
 async def test_codex_redacts_credentials_split_across_stream_deltas(tmp_path: Path) -> None:
     client = FakeCodexClient()
-    gateway = CodexGatewayFactory(client, cwd=tmp_path).create("conv_alpha")
+    gateway = CodexGatewayFactory(
+        client,
+        cwd=tmp_path,
+        publication_root=tmp_path / "publication-inbox",
+    ).create("conv_alpha")
     await gateway.create_or_resume_conversation(None)
     await gateway.submit_turn("Do work", context())
     events = gateway.stream_events()
@@ -460,7 +554,11 @@ async def test_codex_rate_limit_is_scoped_and_never_blindly_retried(tmp_path: Pa
         "primary": {"usedPercent": 100, "resetsAt": int(time.time()) + 60},
         "secondary": {"usedPercent": 10, "resetsAt": int(time.time()) + 600},
     }
-    factory = CodexGatewayFactory(client, cwd=tmp_path)
+    factory = CodexGatewayFactory(
+        client,
+        cwd=tmp_path,
+        publication_root=tmp_path / "publication-inbox",
+    )
     factory.create("conv_warm")
     await client.emit(
         "account/rateLimits/updated",
@@ -533,7 +631,11 @@ async def test_codex_rate_limit_refresh_preserves_reset_through_sparse_update(
     client.rate_limits = {
         "primary": {"usedPercent": 100, "resetsAt": int(time.time()) + 60}
     }
-    factory = CodexGatewayFactory(client, cwd=tmp_path)
+    factory = CodexGatewayFactory(
+        client,
+        cwd=tmp_path,
+        publication_root=tmp_path / "publication-inbox",
+    )
     gateway = factory.create("conv_alpha")
     await gateway.create_or_resume_conversation(None)
     await gateway.submit_turn("Do work", context())
@@ -563,7 +665,11 @@ async def test_codex_rate_limit_refresh_preserves_reset_through_sparse_update(
 @pytest.mark.anyio
 async def test_codex_expired_rate_limit_snapshot_omits_stale_countdown(tmp_path: Path) -> None:
     client = FakeCodexClient()
-    factory = CodexGatewayFactory(client, cwd=tmp_path)
+    factory = CodexGatewayFactory(
+        client,
+        cwd=tmp_path,
+        publication_root=tmp_path / "publication-inbox",
+    )
     gateway = factory.create("conv_alpha")
     await client.emit(
         "account/rateLimits/updated",
@@ -594,7 +700,11 @@ async def test_codex_expired_rate_limit_snapshot_omits_stale_countdown(tmp_path:
 @pytest.mark.anyio
 async def test_codex_full_rate_limit_refresh_replaces_stale_windows(tmp_path: Path) -> None:
     client = FakeCodexClient()
-    factory = CodexGatewayFactory(client, cwd=tmp_path)
+    factory = CodexGatewayFactory(
+        client,
+        cwd=tmp_path,
+        publication_root=tmp_path / "publication-inbox",
+    )
     gateway = factory.create("conv_alpha")
     await client.emit(
         "account/rateLimits/updated",
@@ -627,7 +737,11 @@ async def test_codex_full_rate_limit_refresh_replaces_stale_windows(tmp_path: Pa
 async def test_codex_rate_limit_interrupt_failure_requires_recovery(tmp_path: Path) -> None:
     client = FakeCodexClient()
     client.interrupt_error = True
-    gateway = CodexGatewayFactory(client, cwd=tmp_path).create("conv_alpha")
+    gateway = CodexGatewayFactory(
+        client,
+        cwd=tmp_path,
+        publication_root=tmp_path / "publication-inbox",
+    ).create("conv_alpha")
     await gateway.create_or_resume_conversation(None)
     await gateway.submit_turn("Do work", context())
     events = gateway.stream_events()
@@ -681,7 +795,11 @@ async def test_codex_rate_limit_refresh_keeps_update_delivered_after_read_respon
             return await super().request(method, params)
 
     client = RacingClient()
-    gateway = CodexGatewayFactory(client, cwd=tmp_path).create("conv_alpha")
+    gateway = CodexGatewayFactory(
+        client,
+        cwd=tmp_path,
+        publication_root=tmp_path / "publication-inbox",
+    ).create("conv_alpha")
     await gateway.create_or_resume_conversation(None)
     await gateway.submit_turn("Do work", context())
     events = gateway.stream_events()
@@ -710,7 +828,11 @@ async def test_codex_rate_limit_survives_completion_before_interrupt_response(
     client.rate_limits = {
         "primary": {"usedPercent": 100, "resetsAt": int(time.time()) + 60}
     }
-    gateway = CodexGatewayFactory(client, cwd=tmp_path).create("conv_alpha")
+    gateway = CodexGatewayFactory(
+        client,
+        cwd=tmp_path,
+        publication_root=tmp_path / "publication-inbox",
+    ).create("conv_alpha")
     await gateway.create_or_resume_conversation(None)
     await gateway.submit_turn("Do work", context())
     events = gateway.stream_events()
@@ -736,7 +858,11 @@ async def test_codex_completed_rate_limit_does_not_require_recovery_on_interrupt
     client = FakeCodexClient()
     client.complete_before_interrupt_response = True
     client.interrupt_error = True
-    gateway = CodexGatewayFactory(client, cwd=tmp_path).create("conv_alpha")
+    gateway = CodexGatewayFactory(
+        client,
+        cwd=tmp_path,
+        publication_root=tmp_path / "publication-inbox",
+    ).create("conv_alpha")
     await gateway.create_or_resume_conversation(None)
     await gateway.submit_turn("Do work", context())
     events = gateway.stream_events()
@@ -760,7 +886,11 @@ async def test_codex_tool_review_is_scoped_and_requires_explicit_response(
     tmp_path: Path,
 ) -> None:
     client = FakeCodexClient()
-    factory = CodexGatewayFactory(client, cwd=tmp_path)
+    factory = CodexGatewayFactory(
+        client,
+        cwd=tmp_path,
+        publication_root=tmp_path / "publication-inbox",
+    )
     gateway = factory.create("conv_alpha")
     await gateway.create_or_resume_conversation(None)
     await gateway.submit_turn("Inspect the job", context())

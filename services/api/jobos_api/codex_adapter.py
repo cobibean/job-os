@@ -5,6 +5,7 @@ import math
 import os
 import re
 import secrets
+import stat
 import time
 from collections.abc import AsyncIterator, Awaitable, Callable
 from pathlib import Path
@@ -27,6 +28,59 @@ _JOBOS_TOOL_REVIEW = re.compile(
 _TOOL_REVIEW_TIMEOUT_SECONDS = 300.0
 
 
+def _prepare_publication_root(path: Path) -> None:
+    """Create the configured inbox without following replaceable path components."""
+    if not path.is_absolute() or path.name in {"", ".", ".."}:
+        raise CodexRuntimeError(
+            "AGENT_PROVIDER_UNAVAILABLE", "Codex publication inbox is unsafe"
+        )
+    directory_flags = os.O_RDONLY
+    if hasattr(os, "O_DIRECTORY"):
+        directory_flags |= os.O_DIRECTORY
+    if hasattr(os, "O_CLOEXEC"):
+        directory_flags |= os.O_CLOEXEC
+    directory_flags |= getattr(os, "O_NOFOLLOW", 0)
+    descriptors: list[int] = []
+    try:
+        current = os.open(os.sep, directory_flags)
+        descriptors.append(current)
+        for part in path.parent.parts[1:]:
+            child = os.open(part, directory_flags, dir_fd=current)
+            descriptors.append(child)
+            metadata = os.fstat(child)
+            named = os.stat(part, dir_fd=current, follow_symlinks=False)
+            if (
+                not stat.S_ISDIR(metadata.st_mode)
+                or metadata.st_dev != named.st_dev
+                or metadata.st_ino != named.st_ino
+            ):
+                raise OSError("Publication inbox parent changed during validation")
+            current = child
+        try:
+            os.mkdir(path.name, mode=0o700, dir_fd=current)
+            os.fsync(current)
+        except FileExistsError:
+            pass
+        publication = os.open(path.name, directory_flags, dir_fd=current)
+        descriptors.append(publication)
+        metadata = os.fstat(publication)
+        named = os.stat(path.name, dir_fd=current, follow_symlinks=False)
+        if (
+            not stat.S_ISDIR(metadata.st_mode)
+            or metadata.st_dev != named.st_dev
+            or metadata.st_ino != named.st_ino
+        ):
+            raise OSError("Publication inbox changed during validation")
+        os.fchmod(publication, 0o700)
+    except OSError as error:
+        raise CodexRuntimeError(
+            "AGENT_PROVIDER_UNAVAILABLE", "Codex publication inbox is unsafe"
+        ) from error
+    finally:
+        for descriptor in reversed(descriptors):
+            os.close(descriptor)
+
+
 class CodexGatewayFactory:
     """Create isolated JobOS conversation gateways over one private app-server."""
 
@@ -35,15 +89,11 @@ class CodexGatewayFactory:
         client: CodexRpcClient,
         *,
         cwd: Path,
-        publication_root: Path | None = None,
+        publication_root: Path,
     ) -> None:
         self._client = client
         self._cwd = cwd.expanduser().absolute()
-        self._publication_root = (
-            publication_root.expanduser().absolute()
-            if publication_root is not None
-            else self._cwd / "publication-inbox"
-        )
+        self._publication_root = publication_root.expanduser().absolute()
         self._gateways: dict[str, CodexAppServerGateway] = {}
         self._rate_limit_snapshot: dict[str, object] = {}
         self._rate_limit_updates: list[dict[str, object]] = []
@@ -178,6 +228,7 @@ class CodexAppServerGateway:
     async def start(self) -> None:
         if self._closed:
             raise ConnectionError("Codex gateway is closed")
+        _prepare_publication_root(self._publication_root)
         was_running = self._client.is_running
         await self._client.start()
         if self._cwd.parent.is_symlink() or self._cwd.is_symlink():
@@ -190,16 +241,6 @@ class CodexAppServerGateway:
                 "AGENT_PROVIDER_UNAVAILABLE", "Codex workspace is unsafe"
             )
         os.chmod(self._cwd, 0o700)
-        if self._publication_root.parent.is_symlink() or self._publication_root.is_symlink():
-            raise CodexRuntimeError(
-                "AGENT_PROVIDER_UNAVAILABLE", "Codex publication inbox is unsafe"
-            )
-        self._publication_root.mkdir(mode=0o700, parents=True, exist_ok=True)
-        if self._publication_root.is_symlink() or not self._publication_root.is_dir():
-            raise CodexRuntimeError(
-                "AGENT_PROVIDER_UNAVAILABLE", "Codex publication inbox is unsafe"
-            )
-        os.chmod(self._publication_root, 0o700)
         if not was_running and self._thread_id is not None:
             result = await self._client.request(
                 "thread/resume",
