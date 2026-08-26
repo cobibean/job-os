@@ -168,6 +168,45 @@ def test_mcp_runtime_main_executes_the_release_module(tmp_path, monkeypatch):
     assert environment["PYTHONPATH"] == str(Path(str(runtime["jobos_root"])) / "services/mcp")
 
 
+def test_mcp_runtime_main_accepts_the_legacy_profile_credentials_argument(
+    tmp_path, monkeypatch
+):
+    runtime, credentials = runtime_files(tmp_path)
+    runtime_path = tmp_path / "runtime.json"
+    runtime_path.write_text(json.dumps(runtime), encoding="utf-8")
+    legacy_credentials_path = tmp_path / "demo-credentials.json"
+    legacy_credentials_path.write_text("deliberately unreadable", encoding="utf-8")
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr(
+        jobos_mcp_runtime,
+        "keychain_credentials",
+        lambda _runtime: credentials,
+    )
+    monkeypatch.setattr(
+        jobos_mcp_runtime.os,
+        "execve",
+        lambda executable, arguments, environment: captured.update(
+            executable=executable,
+            arguments=arguments,
+            environment=environment,
+        ),
+    )
+
+    jobos_mcp_runtime.main([str(runtime_path), str(legacy_credentials_path)])
+
+    assert captured["executable"] == str(runtime["python_path"])
+    assert captured["arguments"] == [
+        str(runtime["python_path"]),
+        "-P",
+        "-m",
+        "jobos_mcp",
+    ]
+    environment = captured["environment"]
+    assert isinstance(environment, dict)
+    assert environment["JOBOS_DEVICE_TOKEN"] == "device-secret-value"
+
+
 def test_mcp_runtime_reads_credentials_from_keychain_without_a_credentials_file(
     tmp_path, monkeypatch
 ):

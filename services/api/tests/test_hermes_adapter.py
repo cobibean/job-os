@@ -6,6 +6,7 @@ import pytest
 from jobos_api.agent_gateway import (
     AgentContext,
     AmbiguousDeliveryError,
+    DefinitivePreSubmitError,
     DefinitiveSessionCreationError,
     GatewayEvent,
 )
@@ -1259,7 +1260,7 @@ def test_reconnect_resets_session_isolation_verification(tmp_path):
         await asyncio.sleep(0)
 
         await gateway.create_or_resume_conversation("stored-1")
-        with pytest.raises(RuntimeError) as caught:
+        with pytest.raises(DefinitivePreSubmitError) as caught:
             await gateway.submit_turn(
                 "must not submit", AgentContext("turn-1", None, {}, "conv_test")
             )
@@ -1267,6 +1268,24 @@ def test_reconnect_resets_session_isolation_verification(tmp_path):
 
         assert [request["method"] for request in second.requests] == ["session.resume"]
         assert str(caught.value) == "Hermes session isolation could not be verified"
+
+    asyncio.run(scenario())
+
+
+def test_missing_live_session_is_a_definitive_pre_submit_failure(tmp_path):
+    async def scenario():
+        gateway = HermesWebSocketGateway(
+            url="ws://127.0.0.1:9119/api/ws",
+            token=TOKEN,
+            cwd=tmp_path,
+        )
+
+        with pytest.raises(DefinitivePreSubmitError) as caught:
+            await gateway.submit_turn(
+                "must not submit", AgentContext("turn-1", None, {}, "conv_test")
+            )
+
+        assert str(caught.value) == "Hermes session is not attached"
 
     asyncio.run(scenario())
 

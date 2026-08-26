@@ -273,6 +273,8 @@ test('runtime transport quarantine updates the tab and close gate until ready st
   }))
   expect(screen.getByRole('tab', { name: 'Session 1, Quarantined' })).not.toBeNull()
   expect((screen.getByRole('button', { name: 'Close Session 1' }) as HTMLButtonElement).disabled).toBe(true)
+  expect(screen.queryByRole('button', { name: 'Retry turn' })).toBeNull()
+  expect(screen.getByRole('button', { name: 'Confirm cleanup and retry turn' })).not.toBeNull()
 
   act(() => emit({
     kind: 'event', conversationId: 'conv_1', recoveryState: 'ready',
@@ -280,6 +282,7 @@ test('runtime transport quarantine updates the tab and close gate until ready st
   }))
   expect(screen.getByRole('tab', { name: 'Session 1, Idle' })).not.toBeNull()
   expect((screen.getByRole('button', { name: 'Close Session 1' }) as HTMLButtonElement).disabled).toBe(false)
+  expect(screen.queryByRole('button', { name: 'Confirm cleanup and retry turn' })).toBeNull()
 })
 
 test('drafts survive switching and two sessions may send independently', async () => {

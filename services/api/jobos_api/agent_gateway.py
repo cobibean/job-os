@@ -32,6 +32,10 @@ class DefinitiveSessionCreationError(RuntimeError):
     """The provider rejected session creation before accepting it."""
 
 
+class DefinitivePreSubmitError(RuntimeError):
+    """The provider rejected work before the prompt could be submitted."""
+
+
 @dataclass(frozen=True)
 class AgentContext:
     turn_id: str

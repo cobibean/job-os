@@ -16,6 +16,7 @@ from .agent_gateway import (
     AgentContext,
     AmbiguousDeliveryError,
     ConnectionState,
+    DefinitivePreSubmitError,
     DefinitiveSessionCreationError,
     GatewayEvent,
 )
@@ -465,7 +466,9 @@ class HermesWebSocketGateway:
                     timeout=self._request_timeout,
                 )
         if self._session_isolation_state != "verified":
-            raise RuntimeError("Hermes session isolation could not be verified") from None
+            raise DefinitivePreSubmitError(
+                "Hermes session isolation could not be verified"
+            ) from None
 
     async def _create_session(self) -> dict[str, Any]:
         try:
@@ -504,7 +507,7 @@ class HermesWebSocketGateway:
 
     async def submit_turn(self, text: str, context: AgentContext) -> None:
         if not self._live_session_id:
-            raise RuntimeError("Hermes session is not attached")
+            raise DefinitivePreSubmitError("Hermes session is not attached")
         await self._require_session_verification()
         self._clear_pending_async_continuation()
         self._active_turn_id = context.turn_id

@@ -74,6 +74,7 @@ export function AgentPanel({ agentLabel, avatarId, contextLabel, apiState = 'con
   }
   const activeId = sessions.activeId
   const activeSummary = sessions.activeSession?.summary
+  const retryRequiresRecovery = activeSummary?.recoveryState === 'quarantined'
   const panelRefs = useRef(new Map<string, HTMLDivElement>())
   const lastScrollTops = useRef(new Map<string, number>())
   const pinnedToBottom = useRef(true)
@@ -87,6 +88,7 @@ export function AgentPanel({ agentLabel, avatarId, contextLabel, apiState = 'con
     && !conversation.operationPending
     && apiState === 'connected'
     && activeSummary?.availability?.state !== 'locked'
+    && activeSummary?.recoveryState === 'ready'
   )
 
 
@@ -292,8 +294,8 @@ export function AgentPanel({ agentLabel, avatarId, contextLabel, apiState = 'con
                           </div>
                         )}
                         {terminal.retryable && !conversation.activeTurn && activeSummary?.availability?.state !== 'locked' && (
-                          <button aria-label="Retry turn" className="retry-button" onClick={() => { if (activeId) void sessions.retry(activeId, item.turnId) }} type="button">
-                            <RotateCcw aria-hidden="true" size={13} /> Retry
+                          <button aria-label={retryRequiresRecovery ? 'Confirm cleanup and retry turn' : 'Retry turn'} className="retry-button" onClick={() => { if (activeId) void sessions.retry(activeId, item.turnId) }} type="button">
+                            <RotateCcw aria-hidden="true" size={13} /> {retryRequiresRecovery ? 'Confirm cleanup & retry' : 'Retry'}
                           </button>
                         )}
                       </article>
@@ -317,8 +319,8 @@ export function AgentPanel({ agentLabel, avatarId, contextLabel, apiState = 'con
                   <strong><CircleAlert aria-hidden="true" size={14} /> {noticeLabel}</strong>
                   <p>{item.label}</p>
                   {item.retryable && !conversation.activeTurn && activeSummary?.availability?.state !== 'locked' && (
-                    <button aria-label="Retry turn" className="retry-button" onClick={() => { if (activeId) void sessions.retry(activeId, item.turnId ?? '') }} type="button">
-                      <RotateCcw aria-hidden="true" size={13} /> Retry
+                    <button aria-label={retryRequiresRecovery ? 'Confirm cleanup and retry turn' : 'Retry turn'} className="retry-button" onClick={() => { if (activeId) void sessions.retry(activeId, item.turnId ?? '') }} type="button">
+                      <RotateCcw aria-hidden="true" size={13} /> {retryRequiresRecovery ? 'Confirm cleanup & retry' : 'Retry'}
                     </button>
                   )}
                 </article>
