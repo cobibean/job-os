@@ -131,7 +131,12 @@ def context(conversation_id: str = "conv_alpha") -> AgentContext:
 @pytest.mark.anyio
 async def test_codex_turn_uses_opaque_thread_and_exact_jobos_context(tmp_path: Path) -> None:
     client = FakeCodexClient()
-    gateway = CodexGatewayFactory(client, cwd=tmp_path).create("conv_alpha")
+    publication_root = tmp_path / "artifacts" / "publication-inbox"
+    gateway = CodexGatewayFactory(
+        client,
+        cwd=tmp_path / "codex-workspace",
+        publication_root=publication_root,
+    ).create("conv_alpha")
 
     assert gateway.connection_state == "offline"
     assert await gateway.create_or_resume_conversation(None) == ("thread-a", "thread-a")
@@ -147,8 +152,8 @@ async def test_codex_turn_uses_opaque_thread_and_exact_jobos_context(tmp_path: P
     ]
     thread_params = client.requests[0][1]
     assert isinstance(thread_params, dict)
-    assert thread_params["sandbox"] == "read-only"
-    assert thread_params["cwd"] == str(tmp_path)
+    assert thread_params["sandbox"] == "workspace-write"
+    assert thread_params["cwd"] == str(tmp_path / "codex-workspace")
     turn_params = client.requests[-1][1]
     assert isinstance(turn_params, dict)
     assert turn_params["threadId"] == "thread-a"
@@ -157,9 +162,11 @@ async def test_codex_turn_uses_opaque_thread_and_exact_jobos_context(tmp_path: P
     assert turn_params["effort"] == "medium"
     assert turn_params["approvalPolicy"] == "never"
     assert turn_params["sandboxPolicy"] == {
-        "type": "readOnly",
+        "type": "workspaceWrite",
+        "writableRoots": [str(publication_root)],
         "networkAccess": False,
     }
+    assert publication_root.is_dir()
     prompt = turn_params["input"][0]["text"]  # type: ignore[index]
     assert "conversation_id=\"conv_alpha\"" in prompt
     assert "turn_id=\"turn_12345678\"" in prompt
