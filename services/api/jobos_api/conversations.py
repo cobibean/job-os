@@ -16,6 +16,7 @@ from .agent_gateway import (
     AgentGateway,
     AmbiguousDeliveryError,
     ConnectedAgentProvider,
+    DefinitivePreSubmitError,
     GatewayEvent,
 )
 from .career_profile_context import CareerProfileContextStore
@@ -611,6 +612,23 @@ class ConversationService:
                         permission_state={"scope": "global"},
                     ),
                 )
+        except DefinitivePreSubmitError as error:
+            logger.warning(
+                "Agent turn was rejected before prompt submission (%s, code=%s)",
+                type(error).__name__,
+                getattr(error, "code", None),
+            )
+            current = self.store.turn_record(turn_id)
+            if current and current["cancel_requested"]:
+                return
+            self.store.settle_active_turn(
+                turn_id,
+                "failed",
+                event_type="error",
+                summary=safe_error_summary(error),
+                detail={"actionable": True, "retry": True},
+            )
+            self._restore_session_after_isolated_turn(turn_id)
         except Exception as error:
             logger.warning(
                 "Agent turn submission failed (%s, code=%s)",

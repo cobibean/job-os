@@ -7,6 +7,7 @@ from fastapi.testclient import TestClient
 from jobos_api.agent_gateway import (
     AgentContext,
     AmbiguousDeliveryError,
+    DefinitivePreSubmitError,
     GatewayEvent,
 )
 from jobos_api.app import create_app
@@ -1126,6 +1127,54 @@ def test_isolated_submission_failure_recovers_with_the_isolated_session_id(tmp_p
 
     assert recoveries == [("stored-session", turn_id)]
     assert recovery_turn_id is None
+
+
+def test_definitive_pre_submit_failure_can_retry_without_remote_cleanup(tmp_path):
+    async def scenario():
+        store = JobOsStateStore(tmp_path / "jobos.db")
+        store.initialize()
+
+        class PreSubmitFailureGateway(FakeGateway):
+            def __init__(self):
+                super().__init__()
+                self.attempts = 0
+
+            async def submit_turn(self, text, context):
+                self.attempts += 1
+                if self.attempts == 1:
+                    raise DefinitivePreSubmitError(
+                        "Hermes session isolation could not be verified"
+                    )
+                await super().submit_turn(text, context)
+
+        gateway = PreSubmitFailureGateway()
+        service = ConversationService(store, gateway)
+        failed = await service.send(
+            SendMessageRequest(
+                text="Explain why the browser tool was unavailable",
+                idempotency_key="definitive-pre-submit-failure",
+            ),
+            actor_id="device-a",
+            context={"selected_job_id": None, "workspace": {}},
+        )
+        failed_record = store.turn_record(failed.turn_id)
+        assert failed_record is not None
+        recovery_after_failure = store.recovery_turn_id()
+        retried = await service.retry(
+            failed.turn_id,
+            RetryTurnRequest(idempotency_key="definitive-pre-submit-retry"),
+            actor_id="device-a",
+        )
+        return failed_record, recovery_after_failure, retried, gateway
+
+    failed_record, recovery_after_failure, retried, gateway = asyncio.run(scenario())
+
+    assert failed_record["status"] == "failed"
+    assert recovery_after_failure is None
+    assert retried is not None
+    assert retried.source_turn_id == failed_record["turn_id"]
+    assert gateway.attempts == 2
+    assert len(gateway.submissions) == 1
 
 
 def test_rotated_durable_id_reconciles_without_transcript_or_raw_metadata(tmp_path):

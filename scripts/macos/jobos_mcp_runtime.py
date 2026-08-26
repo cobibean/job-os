@@ -163,8 +163,10 @@ def keychain_credentials(runtime: Mapping[str, Any]) -> dict[str, str]:
 
 def main(arguments: list[str] | None = None) -> None:
     values = list(sys.argv[1:] if arguments is None else arguments)
-    if len(values) != 1:
-        raise RuntimeError("Usage: jobos_mcp_runtime.py <runtime.json>")
+    if len(values) not in {1, 2}:
+        raise RuntimeError(
+            "Usage: jobos_mcp_runtime.py <runtime.json> [legacy-credentials.json]"
+        )
 
     runtime_path = _absolute_existing_path(values[0], "runtime configuration")
     runtime = json.loads(runtime_path.read_text(encoding="utf-8"))
