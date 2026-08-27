@@ -18,8 +18,8 @@ test('falls back to the default for an unknown stored avatar', () => {
 test('persists a valid avatar selection', () => {
   const { result } = renderHook(() => useAgentAvatarPreference())
 
-  act(() => result.current.selectAvatar('ninja'))
+  act(() => result.current.selectAvatar('starlight'))
 
-  expect(result.current.avatarId).toBe('ninja')
-  expect(window.localStorage.getItem('jobos.agentAvatar')).toBe('ninja')
+  expect(result.current.avatarId).toBe('starlight')
+  expect(window.localStorage.getItem('jobos.agentAvatar')).toBe('starlight')
 })

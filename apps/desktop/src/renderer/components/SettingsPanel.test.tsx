@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, expect, test, vi } from 'vitest'
 
 import type { CareerProfileBridge } from '../../shared/contracts'
@@ -22,6 +22,10 @@ test('shows the selected agent avatar and reports selection through the settings
   const ninja = screen.getByRole('radio', { name: /Ninja/ })
   expect(ninja.getAttribute('aria-checked')).toBe('true')
   expect(ninja.querySelector('[data-agent-avatar-id="ninja"]')).not.toBeNull()
+
+  const avatarPicker = screen.getByRole('radiogroup', { name: /Agent icon/ })
+  expect(within(avatarPicker).getAllByRole('radio')).toHaveLength(11)
+  expect(within(avatarPicker).getByRole('radio', { name: /Starlight/ })).not.toBeNull()
 
   fireEvent.click(ninja)
   expect(onSelectAgentAvatar).toHaveBeenCalledWith('ninja')
