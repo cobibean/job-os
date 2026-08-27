@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 
 import type { DiagnosticsSnapshot } from '../../shared/contracts'
+import { SettingsSection } from '../components/SettingsSection'
 
 function capabilityLabel(label: string, state: string): string {
   if (state === 'not-configured') return `${label} not configured`
@@ -25,8 +26,7 @@ export function DiagnosticsPanel() {
   }, [])
 
   return (
-    <section aria-labelledby="diagnostics-heading" className="settings-section diagnostics-panel">
-      <h2 className="settings-section-title" id="diagnostics-heading">Diagnostics</h2>
+    <SettingsSection className="diagnostics-panel" id="diagnostics" title="Diagnostics">
       {!snapshot ? <p>Capability states unavailable</p> : (
         <dl>
           <div><dt>Mode</dt><dd>{snapshot.mode}</dd></div>
@@ -63,6 +63,6 @@ export function DiagnosticsPanel() {
         )}
         {resetMessage ? <p role="status">{resetMessage}</p> : null}
       </div>
-    </section>
+    </SettingsSection>
   )
 }

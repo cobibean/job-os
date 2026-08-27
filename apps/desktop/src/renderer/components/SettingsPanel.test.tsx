@@ -19,6 +19,16 @@ test('shows the selected agent avatar and reports selection through the settings
     />
   )
 
+  const themeSection = screen.getByRole('button', { name: 'Color theme' })
+  const avatarSection = screen.getByRole('button', { name: 'Agent icon' })
+  const diagnosticsSection = screen.getByRole('button', { name: 'Diagnostics' })
+  expect(themeSection.getAttribute('aria-expanded')).toBe('false')
+  expect(avatarSection.getAttribute('aria-expanded')).toBe('false')
+  expect(diagnosticsSection.getAttribute('aria-expanded')).toBe('false')
+
+  fireEvent.click(avatarSection)
+  expect(avatarSection.getAttribute('aria-expanded')).toBe('true')
+
   const ninja = screen.getByRole('radio', { name: /Ninja/ })
   expect(ninja.getAttribute('aria-checked')).toBe('true')
   expect(ninja.querySelector('[data-agent-avatar-id="ninja"]')).not.toBeNull()
@@ -66,6 +76,7 @@ test('explains agent edit modes, changes trust as the user, and disconnects with
     />
   )
 
+  fireEvent.click(screen.getByRole('button', { name: 'Agent editing' }))
   const review = await screen.findByRole('radio', { name: /Review every change/i })
   expect(review.getAttribute('aria-checked')).toBe('true')
   expect(screen.getByText(/ordinary edits happen right away/i)).not.toBeNull()

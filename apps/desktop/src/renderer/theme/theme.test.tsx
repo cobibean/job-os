@@ -73,6 +73,7 @@ test('selecting a theme and toggling mode both persist for the next launch', () 
   expect(screen.getByTestId('active-theme').textContent).toBe(DEFAULT_THEME_ID)
   expect(screen.getByTestId('active-mode').textContent).toBe('dark')
 
+  fireEvent.click(screen.getByRole('button', { name: 'Color theme' }))
   fireEvent.click(screen.getByRole('radio', { name: /Forest/ }))
   fireEvent.click(screen.getByRole('button', { name: 'toggle mode' }))
 

@@ -26,6 +26,10 @@ test('shows capability states without paths or secrets and confirms demo reset',
     setup: { initialize }
   } })
   render(<DiagnosticsPanel />)
+  const diagnosticsSection = screen.getByRole('button', { name: 'Diagnostics' })
+  expect(diagnosticsSection.getAttribute('aria-expanded')).toBe('false')
+  fireEvent.click(diagnosticsSection)
+  expect(diagnosticsSection.getAttribute('aria-expanded')).toBe('true')
   expect(await screen.findByText('local-service')).not.toBeNull()
   expect(screen.getByText('Agent connecting')).not.toBeNull()
   expect(screen.getByText('jprof_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa')).not.toBeNull()

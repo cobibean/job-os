@@ -55,10 +55,24 @@ function state(): ReturnType<typeof useConnectedAgents> {
   }
 }
 
+function renderExpanded(
+  value: ReturnType<typeof useConnectedAgents>,
+  onAgentsChanged?: () => Promise<void>
+) {
+  const rendered = render(
+    <ConnectedAgentsSettings onAgentsChanged={onAgentsChanged} state={value} />
+  )
+  const toggle = screen.getByRole('button', { name: 'Connected Agents' })
+  expect(toggle.getAttribute('aria-expanded')).toBe('false')
+  fireEvent.click(toggle)
+  expect(toggle.getAttribute('aria-expanded')).toBe('true')
+  return rendered
+}
+
 afterEach(() => { cleanup(); vi.useRealTimers() })
 
 test('renders the roster inspector, live defaults, and immutable-chat explanation', async () => {
-  render(<ConnectedAgentsSettings state={state()} />)
+  renderExpanded(state())
   expect(screen.getByRole('list', { name: 'Connected Agent roster' })).toBeTruthy()
   expect(screen.getByText('Provider and JobOS tools are ready.')).toBeTruthy()
   expect(screen.queryByText(/Existing chats keep their original model/i)).toBeNull()
@@ -69,7 +83,7 @@ test('renders the roster inspector, live defaults, and immutable-chat explanatio
 test('refreshes both the roster and recovered chat summaries', async () => {
   const value = state()
   const onAgentsChanged = vi.fn().mockResolvedValue(undefined)
-  render(<ConnectedAgentsSettings onAgentsChanged={onAgentsChanged} state={value} />)
+  renderExpanded(value, onAgentsChanged)
 
   fireEvent.click(screen.getByRole('button', { name: 'Refresh Connected Agents' }))
 
@@ -81,7 +95,7 @@ test('testing an agent refreshes recovered chat summaries', async () => {
   const value = state()
   const onAgentsChanged = vi.fn().mockResolvedValue(undefined)
   value.bridge!.test = vi.fn().mockResolvedValue({ health: value.snapshot!.agents[0]!.health })
-  render(<ConnectedAgentsSettings onAgentsChanged={onAgentsChanged} state={value} />)
+  renderExpanded(value, onAgentsChanged)
 
   fireEvent.click(screen.getByRole('button', { name: 'Test' }))
 
@@ -92,7 +106,7 @@ test('testing an agent refreshes recovered chat summaries', async () => {
 
 test('disconnect requires impact disclosure and promises readable history', async () => {
   const value = state()
-  render(<ConnectedAgentsSettings state={value} />)
+  renderExpanded(value)
   fireEvent.click(screen.getByRole('button', { name: /Disconnect/ }))
   const dialog = await screen.findByRole('alertdialog')
   await waitFor(() => expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Keep connected' })))
@@ -106,7 +120,7 @@ test('disconnect requires impact disclosure and promises readable history', asyn
 test('disconnect disclosure pluralizes singular impact and traps keyboard focus', async () => {
   const value = state()
   value.bridge!.impact = vi.fn().mockResolvedValue({ activeChats: 1, lockedChats: 1, defaultProfileIds: [] })
-  render(<ConnectedAgentsSettings state={value} />)
+  renderExpanded(value)
   fireEvent.click(screen.getByRole('button', { name: /Disconnect/ }))
 
   const dialog = await screen.findByRole('alertdialog')
@@ -131,7 +145,7 @@ test('pending device auth can be cancelled and is cleaned up when settings close
     status: 'login_pending', userCode: '(FAKE)-CODE', verificationUrl: 'https://example.test/device', expiresAt: ''
   })
   value.bridge!.cancelAuth = vi.fn().mockResolvedValue(undefined)
-  const rendered = render(<ConnectedAgentsSettings state={value} />)
+  const rendered = renderExpanded(value)
 
   fireEvent.click(screen.getByRole('button', { name: 'Finish ChatGPT sign in' }))
   fireEvent.click(await screen.findByRole('button', { name: 'Cancel sign in' }))
@@ -157,7 +171,7 @@ test('successful device auth force-refreshes the runtime model catalog', async (
     transactionId: `jauth_${'a'.repeat(32)}`,
     status: 'connected', userCode: null, verificationUrl: null, expiresAt: '', errorCode: null
   })
-  render(<ConnectedAgentsSettings state={value} />)
+  renderExpanded(value)
   fireEvent.click(screen.getByRole('button', { name: 'Finish ChatGPT sign in' }))
   await act(async () => { await Promise.resolve() })
   await act(async () => { await vi.advanceTimersByTimeAsync(1500) })
@@ -175,7 +189,7 @@ test('a disconnected Codex identity offers explicit account replacement on the s
     transactionId: `jauth_${'b'.repeat(32)}`,
     status: 'login_pending', userCode: '(FAKE)-CODE', verificationUrl: 'https://example.test/device', expiresAt: ''
   })
-  render(<ConnectedAgentsSettings state={value} />)
+  renderExpanded(value)
   fireEvent.click(screen.getByRole('button', { name: 'Replace ChatGPT account' }))
   await waitFor(() => expect(value.bridge!.startAuth).toHaveBeenCalledWith(agentId, 'replace', 'a'.repeat(64)))
   expect(screen.getByText(/cannot verify the original account/i)).toBeTruthy()
@@ -193,7 +207,7 @@ test('an unhealthy connected Codex identity offers reconnect', async () => {
     status: 'login_pending', userCode: '(FAKE)-CODE', verificationUrl: 'https://example.test/device', expiresAt: ''
   })
 
-  render(<ConnectedAgentsSettings state={value} />)
+  renderExpanded(value)
   fireEvent.click(screen.getByRole('button', { name: 'Replace ChatGPT account' }))
 
   await waitFor(() => expect(value.bridge!.startAuth).toHaveBeenCalledWith(agentId, 'replace', null))

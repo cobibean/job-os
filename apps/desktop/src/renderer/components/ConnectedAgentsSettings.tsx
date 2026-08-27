@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 
 import type { ConnectedAgentSummary } from '../../shared/contracts'
 import type { useConnectedAgents } from '../hooks/useConnectedAgents'
+import { SettingsSection } from './SettingsSection'
 
 function operationKey(label: string): string {
   return `${label}-${crypto.randomUUID()}`
@@ -115,11 +116,10 @@ export function ConnectedAgentsSettings({ state, onAgentsChanged }: ConnectedAge
   if (!bridge) return null
 
   return (
-    <section aria-labelledby="connected-agents-title" className="settings-section connected-agents-settings">
+    <SettingsSection className="connected-agents-settings" id="connected-agents" title="Connected Agents">
       <div className="settings-section-heading">
         <div>
-          <span className="settings-eyebrow">Connected Agents</span>
-          <h3 id="connected-agents-title">Choose who works each chat</h3>
+          <h3>Choose who works each chat</h3>
           <p>Agents are shared across this JobOS installation. New chats lock their agent and model so history stays honest.</p>
         </div>
         <button aria-label="Refresh Connected Agents" className="settings-icon-button" disabled={loading} onClick={() => void (async () => { await refresh(); await onAgentsChanged?.() })()} type="button">
@@ -194,6 +194,6 @@ export function ConnectedAgentsSettings({ state, onAgentsChanged }: ConnectedAge
           else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus() }
         }} ref={disconnectDialog} role="alertdialog"><div className="settings-dialog"><h4 id="disconnect-agent-title">Disconnect {disconnecting.agent.displayName}?</h4><p>{disconnecting.activeChats} active {disconnecting.activeChats === 1 ? 'chat' : 'chats'} will become read-only. {disconnecting.lockedChats} {disconnecting.lockedChats === 1 ? 'is' : 'are'} already locked. Chat history stays visible.</p>{disconnecting.defaultProfileIds.length > 0 ? <p>This agent is still the New Chat default for {disconnecting.defaultProfileIds.length} profile{disconnecting.defaultProfileIds.length === 1 ? '' : 's'}: {disconnecting.defaultProfileIds.join(', ')}.</p> : null}<div><button onClick={() => setDisconnecting(null)} ref={disconnectCancel} type="button">Keep connected</button><button className="danger" onClick={() => void run('disconnect', async () => { if (!bridge || !snapshot) return; await bridge.disconnect(disconnecting.agent.id, snapshot.registryRevision, operationKey('disconnect-agent')); setDisconnecting(null); await refresh(); await onAgentsChanged?.() })} type="button">Disconnect agent</button></div></div></div>
       ) : null}
-    </section>
+    </SettingsSection>
   )
 }

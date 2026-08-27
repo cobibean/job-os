@@ -8,6 +8,7 @@ import { THEMES, type ThemeMode } from '../theme/themes'
 import { DiagnosticsPanel } from '../diagnostics/DiagnosticsPanel'
 import type { useConnectedAgents } from '../hooks/useConnectedAgents'
 import { ConnectedAgentsSettings } from './ConnectedAgentsSettings'
+import { SettingsSection } from './SettingsSection'
 
 interface SettingsPanelProps {
   activeAgentAvatarId: AgentAvatarId
@@ -113,11 +114,11 @@ export function SettingsPanel({
           </button>
         </header>
 
-        <section aria-labelledby="settings-theme-heading" className="settings-section">
-          <h2 className="settings-section-title" id="settings-theme-heading">Color theme</h2>
-          <p className="settings-section-hint">
-            Applies in both light and dark. Switch light/dark from the toggle in the top bar.
-          </p>
+        <SettingsSection
+          description="Applies in both light and dark. Switch light/dark from the toggle in the top bar."
+          id="settings-theme"
+          title="Color theme"
+        >
           <div className="theme-grid" role="radiogroup" aria-labelledby="settings-theme-heading">
             {THEMES.map(theme => {
               const selected = theme.id === activeThemeId
@@ -145,17 +146,16 @@ export function SettingsPanel({
               )
             })}
           </div>
-        </section>
+        </SettingsSection>
 
         {connectedAgentsState ? <ConnectedAgentsSettings onAgentsChanged={onConnectedAgentsChanged} state={connectedAgentsState} /> : null}
 
         {careerProfileBridge ? (
-          <section aria-labelledby="settings-agent-editing-heading" className="settings-section settings-section-divided">
-            <h2 className="settings-section-title" id="settings-agent-editing-heading">Agent editing</h2>
-            <p className="settings-section-hint">
-              Choose how each connected agent may help update your Career Profile. You can change this anytime.
-            </p>
-
+          <SettingsSection
+            description="Choose how each connected agent may help update your Career Profile. You can change this anytime."
+            id="settings-agent-editing"
+            title="Agent editing"
+          >
             {agentLoadFailed ? (
               <p className="settings-agent-message error" role="alert">Connected agents could not load. Close Settings and try again.</p>
             ) : connectedAgents.length === 0 ? (
@@ -218,14 +218,14 @@ export function SettingsPanel({
               </div>
             )}
             {agentMessage ? <p aria-live="polite" className="settings-agent-message">{agentMessage}</p> : null}
-          </section>
+          </SettingsSection>
         ) : null}
 
-        <section aria-labelledby="settings-agent-avatar-heading" className="settings-section settings-section-divided">
-          <h2 className="settings-section-title" id="settings-agent-avatar-heading">Agent icon</h2>
-          <p className="settings-section-hint">
-            Choose the character shown throughout Agent Chat.
-          </p>
+        <SettingsSection
+          description="Choose the character shown throughout Agent Chat."
+          id="settings-agent-avatar"
+          title="Agent icon"
+        >
           <div className="agent-avatar-grid" role="radiogroup" aria-labelledby="settings-agent-avatar-heading">
             {AGENT_AVATARS.map(avatar => {
               const selected = avatar.id === activeAgentAvatarId
@@ -245,7 +245,7 @@ export function SettingsPanel({
               )
             })}
           </div>
-        </section>
+        </SettingsSection>
         <DiagnosticsPanel />
       </div>
     </div>
