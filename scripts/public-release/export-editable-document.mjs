@@ -89,8 +89,8 @@ if (path.extname(resultPath).toLowerCase() !== '.json') throw new Error('result 
 
 async function exportDocuments() {
   const [{ exportEditableDocumentDocx }, { exportEditableDocumentPdf }] = await Promise.all([
-    import('../../apps/desktop/dist/main/document-export/documentDocx.js'),
-    import('../../apps/desktop/dist/main/document-export/pdfExporter.js')
+    import('../../apps/desktop/dist/main/documents/editable/export/documentDocx.js'),
+    import('../../apps/desktop/dist/main/documents/editable/export/pdfExporter.js')
   ])
   const document = canonicalDocument(JSON.parse(await readFile(input, 'utf8')))
   const docx = await exportEditableDocumentDocx(document)

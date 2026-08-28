@@ -278,7 +278,7 @@ function verifySourceIdentity() {
   if (desktopPackage.build?.appId !== appIdentifier || desktopPackage.build?.productName !== productName) {
     throw new Error('Desktop package identity does not match the updater identity')
   }
-  const credentialSource = readFileSync(path.join(desktopRoot, 'src/main/credentialStore.ts'), 'utf8')
+  const credentialSource = readFileSync(path.join(desktopRoot, 'src/main/app/runtime/credentialStore.ts'), 'utf8')
   if (!credentialSource.includes(`const KEYCHAIN_SERVICE = '${keychainService}'`)) {
     throw new Error(`Source does not declare the stable Keychain service identifier ${keychainService}`)
   }

@@ -18,7 +18,7 @@
   "scripts": {
     "build": "pnpm build:electron && vite build",
     "build:docx-helper": "node scripts/build-docx-atomic-replace.mjs",
-    "build:electron": "pnpm build:keychain-helper && pnpm build:docx-helper && pnpm build:career-profile-archive-helper && pnpm --filter @jobos/docx-engine build && pnpm --filter @jobos/docx-editor-core build && node scripts/verify-docx-package-exports.mjs && tsc -p tsconfig.electron.json && node scripts/verify-preload-artifact.mjs",
+    "build:electron": "pnpm build:keychain-helper && pnpm build:docx-helper && pnpm build:career-profile-archive-helper && pnpm --filter @jobos/docx-engine build && pnpm --filter @jobos/docx-editor-core build && node scripts/verify-docx-package-exports.mjs && node scripts/clean-electron-output.mjs && tsc -p tsconfig.electron.json && node scripts/verify-preload-artifact.mjs && node scripts/verify-electron-output.mjs",
     "build:career-profile-archive-helper": "node scripts/build-career-profile-archive-write.mjs",
     "build:keychain-helper": "node scripts/build-keychain-helper.mjs",
     "prepare:codex-runtime": "node scripts/prepare-codex-runtime.mjs",

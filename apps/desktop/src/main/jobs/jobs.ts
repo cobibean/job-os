@@ -1,0 +1,277 @@
+import {
+  conversationSelectJobV1ConversationsConversationIdWorkspaceJobPut,
+  createJobOsApiClient,
+  jobOsAuthenticatedHeaders,
+  jobCreateFromBrowserV1JobsPost,
+  jobInspectV1JobsJobIdGet,
+  jobRemoveDemoV1JobsJobIdDemoDelete,
+  jobUpdateStatusV1JobsJobIdStatusPut,
+  jobsListV1JobsGet,
+  jobsReorderV1JobsOrderPut,
+  workspaceJobsV1WorkspaceJobsGet,
+  workspaceSortJobsV1WorkspaceJobsSortPut
+} from '@jobos/contracts'
+import type {
+  BrowserJobCreateResponse,
+  JobEvent as ApiJobEvent,
+  JobDetail as ApiJobDetail,
+  JobListItem as ApiJobListItem,
+  JobListResponse,
+  JobMutationResponse,
+  StatusChangeResponse,
+  WorkspaceJobsResponse
+} from '@jobos/contracts'
+
+import type {
+  BrowserJobExtraction,
+  BrowserJobSaveResult,
+  AgentSessionJobContext,
+  JobDetail,
+  JobEvent,
+  JobListItem,
+  JobMutationResult,
+  JobSortMode,
+  JobStatus,
+  JobStatusMutationResult,
+  JobWorkspaceSnapshot
+} from '../../shared/contracts.js'
+import type { DesktopApiConfig } from '../app/runtime/desktopApiConfig.js'
+
+interface ApiResult<T> {
+  data?: T
+  error?: unknown
+  response?: Response
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object'
+}
+
+function errorMessage(error: unknown, fallback: string) {
+  if (isRecord(error) && typeof error.detail === 'string') return error.detail
+  return fallback
+}
+
+function unwrap<T>(result: ApiResult<T>, fallback: string): T {
+  if (result.response?.status === 200 && result.data !== undefined) return result.data
+  throw new Error(errorMessage(result.error, fallback))
+}
+
+function toJob(job: ApiJobListItem): JobListItem {
+  return {
+    jobId: job.job_id,
+    company: job.company,
+    title: job.title,
+    status: job.status as JobStatus,
+    statusGroup: job.status_group,
+    canonicalUrl: job.canonical_url,
+    discoveredAt: job.discovered_at,
+    lastSeenAt: job.last_seen_at,
+    syntheticDemo: job.synthetic_demo,
+    datasetVersion: job.dataset_version ?? null
+  }
+}
+
+function toJobDetail(job: ApiJobDetail): JobDetail {
+  return {
+    ...toJob(job),
+    description: job.description,
+    location: job.location ?? null
+  }
+}
+
+export function createMainJobsClient(config: DesktopApiConfig) {
+  const client = createJobOsApiClient(
+    config.baseUrl,
+    config.deviceToken,
+    config.installationProfileId
+  )
+
+  return {
+    async getState(): Promise<JobWorkspaceSnapshot> {
+      const [jobsResult, workspaceResult] = await Promise.all([
+        jobsListV1JobsGet({ client }),
+        workspaceJobsV1WorkspaceJobsGet({ client })
+      ])
+      const jobs = unwrap<JobListResponse>(jobsResult, 'Jobs unavailable')
+      const workspace = unwrap<WorkspaceJobsResponse>(workspaceResult, 'Job workspace unavailable')
+      return {
+        jobs: jobs.jobs.map(toJob),
+        selectedJobId: workspace.selected_job_id,
+        sortMode: workspace.sort_mode,
+        manualOrder: workspace.manual_order
+      }
+    },
+
+    async list(sort: JobSortMode, query?: string, statusGroup?: string): Promise<JobListItem[]> {
+      const result = await jobsListV1JobsGet({
+        client,
+        query: { sort, query, status_group: statusGroup }
+      })
+      return unwrap<JobListResponse>(result, 'Jobs unavailable').jobs.map(toJob)
+    },
+
+    async inspect(jobId: string): Promise<JobDetail> {
+      const result = await jobInspectV1JobsJobIdGet({ client, path: { job_id: jobId } })
+      return toJobDetail(unwrap<ApiJobDetail>(result, 'Job details unavailable'))
+    },
+
+    async select(conversationId: string, jobId: string): Promise<AgentSessionJobContext> {
+      if (!/^conv_[A-Za-z0-9_-]{1,128}$/.test(conversationId)) throw new Error('Invalid agent conversation')
+      const result = await conversationSelectJobV1ConversationsConversationIdWorkspaceJobPut({
+        client,
+        path: { conversation_id: conversationId },
+        body: { job_id: jobId, origin: 'user' }
+      })
+      const mutation = unwrap(result, 'Job selection failed')
+      return {
+        selectedJobId: mutation.job_context.selected_job_id ?? null,
+        activeArtifactId: mutation.job_context.active_artifact_id ?? null,
+        activeArtifactPage: mutation.job_context.active_artifact_page ?? 1,
+        activeArtifactZoom: mutation.job_context.active_artifact_zoom ?? 1
+      }
+    },
+
+    async reorder(jobIds: string[]): Promise<JobMutationResult> {
+      const result = await jobsReorderV1JobsOrderPut({
+        client,
+        body: { job_ids: jobIds, origin: 'user' }
+      })
+      const mutation = unwrap<JobMutationResponse>(result, 'Job reordering failed')
+      return { eventId: mutation.event_id }
+    },
+
+    async setSort(sortMode: JobSortMode): Promise<JobMutationResult> {
+      const result = await workspaceSortJobsV1WorkspaceJobsSortPut({
+        client,
+        body: { sort_mode: sortMode, origin: 'user' }
+      })
+      const mutation = unwrap<JobMutationResponse>(result, 'Job ordering failed')
+      return { eventId: mutation.event_id }
+    },
+
+    async updateStatus(jobId: string, status: JobStatus): Promise<JobStatusMutationResult> {
+      const result = await jobUpdateStatusV1JobsJobIdStatusPut({
+        client,
+        path: { job_id: jobId },
+        body: {
+          target_status: status,
+          origin: 'user',
+          record_application: status === 'applied'
+        }
+      })
+      const mutation = unwrap<StatusChangeResponse>(result, 'Status change failed')
+      return { eventId: mutation.event_id, job: toJob(mutation.job) }
+    },
+
+    async removeDemo(jobId: string): Promise<JobMutationResult> {
+      const result = await jobRemoveDemoV1JobsJobIdDemoDelete({
+        client,
+        path: { job_id: jobId },
+        body: { origin: 'user' }
+      })
+      const mutation = unwrap<JobMutationResponse>(result, 'Demo removal failed')
+      return { eventId: mutation.event_id }
+    },
+
+    async createFromBrowser(
+      extraction: BrowserJobExtraction,
+      idempotencyKey: string
+    ): Promise<BrowserJobSaveResult> {
+      const result = await jobCreateFromBrowserV1JobsPost({
+        client,
+        body: {
+          company_name: extraction.companyName,
+          title: extraction.title,
+          canonical_url: extraction.canonicalUrl,
+          location_text: extraction.locationText,
+          description_text: extraction.descriptionText,
+          application_url: extraction.applicationUrl,
+          origin: 'user',
+          idempotency_key: idempotencyKey
+        }
+      })
+      const mutation = unwrap<BrowserJobCreateResponse>(result, 'Could not save this job')
+      return {
+        eventId: mutation.event_id,
+        created: mutation.created,
+        associated: false,
+        job: toJob(mutation.job)
+      }
+    }
+  }
+}
+
+function toJobEvent(event: ApiJobEvent): JobEvent {
+  return {
+    eventId: event.event_id,
+    eventType: event.event_type,
+    origin: event.origin,
+    jobId: event.job_id
+  }
+}
+
+export class JobEventDecoder {
+  private buffer = ''
+
+  push(chunk: string): JobEvent[] {
+    this.buffer += chunk.replaceAll('\r\n', '\n')
+    const blocks = this.buffer.split('\n\n')
+    this.buffer = blocks.pop() ?? ''
+    const events: JobEvent[] = []
+    for (const block of blocks) {
+      const data = block.split('\n')
+        .filter(line => line.startsWith('data:'))
+        .map(line => line.slice(5).trimStart())
+        .join('\n')
+      if (!data) continue
+      const parsed: unknown = JSON.parse(data)
+      if (!isRecord(parsed) || typeof parsed.event_id !== 'number'
+        || typeof parsed.event_type !== 'string'
+        || (parsed.origin !== 'user' && parsed.origin !== 'mcp')) continue
+      events.push(toJobEvent(parsed as unknown as ApiJobEvent))
+    }
+    return events
+  }
+}
+
+export function startJobEventStream(
+  target: { isDestroyed: () => boolean; send: (channel: string, event: JobEvent) => void },
+  config: DesktopApiConfig
+): () => void {
+  const controller = new AbortController()
+  let cursor = 0
+
+  const connect = async () => {
+    while (!controller.signal.aborted && !target.isDestroyed()) {
+      try {
+        const url = new URL('/v1/events/stream', config.baseUrl)
+        url.searchParams.set('after', String(cursor))
+        const response = await fetch(url, {
+          headers: {
+            ...jobOsAuthenticatedHeaders(config.deviceToken, config.installationProfileId),
+            Accept: 'text/event-stream'
+          },
+          signal: controller.signal
+        })
+        if (!response.ok || !response.body) throw new Error('Job event stream unavailable')
+        const reader = response.body.getReader()
+        const textDecoder = new TextDecoder()
+        const eventDecoder = new JobEventDecoder()
+        while (!controller.signal.aborted) {
+          const { value, done } = await reader.read()
+          if (done) break
+          for (const event of eventDecoder.push(textDecoder.decode(value, { stream: true }))) {
+            cursor = Math.max(cursor, event.eventId)
+            target.send('jobos:jobs:event', event)
+          }
+        }
+      } catch {
+        if (controller.signal.aborted) return
+      }
+      await new Promise(resolve => setTimeout(resolve, 750))
+    }
+  }
+  void connect()
+  return () => controller.abort()
+}

@@ -48,8 +48,8 @@ These rules exist in current code and require direct remediation.
 
 **Where**
 
-- `apps/desktop/src/main/careerProfile.ts`, `validateValue()`
-- `apps/desktop/src/main/careerProfile.test.ts`
+- `apps/desktop/src/main/career-profile/careerProfile.ts`, `validateValue()`
+- `apps/desktop/src/main/career-profile/careerProfile.test.ts`
 - `apps/desktop/src/renderer/components/CareerProfileWorkspace.tsx`
 - renderer Career Profile tests
 

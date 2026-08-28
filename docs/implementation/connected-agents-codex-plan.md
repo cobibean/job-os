@@ -94,8 +94,8 @@ This section records the implementation baseline at `ee542e9d7c19d5c5a16bb15cb9e
 
 ### 3.4 Current desktop path
 
-- `apps/desktop/src/main/agent.ts` normalizes API snapshots/events for Electron.
-- `apps/desktop/src/main/agentIpc.ts` validates conversation/turn IDs and owns agent IPC handlers.
+- `apps/desktop/src/main/agents/agent.ts` normalizes API snapshots/events for Electron.
+- `apps/desktop/src/main/agents/agentIpc.ts` validates conversation/turn IDs and owns agent IPC handlers.
 - `apps/desktop/src/shared/contracts.ts` defines desktop agent state, snapshots, summaries, and bridge APIs.
 - `apps/desktop/src/renderer/hooks/useAgentSessions.ts` and `useAgentConversation.ts` own multiple chat sessions and per-chat behavior.
 - `apps/desktop/src/renderer/components/AgentSessionTabs.tsx` and `AgentPanel.tsx` own visible chat selection and presentation.

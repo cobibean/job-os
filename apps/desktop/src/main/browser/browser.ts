@@ -1,0 +1,832 @@
+import { randomUUID } from 'node:crypto'
+import path from 'node:path'
+
+import type {
+  BrowserWindow,
+  Clipboard,
+  Dialog,
+  DownloadItem,
+  LoadURLOptions,
+  Session,
+  WebContents,
+  WebContentsView,
+  WebContentsViewConstructorOptions,
+  WebPreferences
+} from 'electron'
+
+import type {
+  BrowserBounds,
+  BrowserDownload,
+  BrowserRestoreState,
+  BrowserSemanticSnapshot,
+  BrowserState,
+  BrowserTab,
+  BrowserTabMetadata
+} from '../../shared/contracts.js'
+import {
+  BROWSER_PERSISTENCE_LIMITS,
+  BROWSER_SAFE_TITLE_FALLBACK,
+  recoverBrowserRestoreState,
+  recoverBrowserTabMetadata,
+  sanitizeBrowserMetadata,
+  sanitizeBrowserTitleForPersistence,
+  sanitizeBrowserUrlForPersistence
+} from '../../shared/browserPersistence.js'
+
+export const BROWSER_PARTITION = 'persist:jobos-browser-v1'
+export const DEFAULT_BROWSER_URL = 'https://www.google.com/'
+
+export function remoteBrowserPreferences(partition = BROWSER_PARTITION): WebPreferences {
+  return {
+    allowRunningInsecureContent: false,
+    contextIsolation: true,
+    devTools: false,
+    javascript: true,
+    nodeIntegration: false,
+    partition,
+    sandbox: true,
+    webSecurity: true,
+    webviewTag: false
+  }
+}
+
+export function remoteBrowserViewOptions(
+  options?: WebContentsViewConstructorOptions,
+  partition = BROWSER_PARTITION
+): WebContentsViewConstructorOptions {
+  const webPreferences = { ...options?.webPreferences, ...remoteBrowserPreferences(partition) }
+  return options?.webContents
+    ? { webContents: options.webContents, webPreferences }
+    : { webPreferences }
+}
+
+export function normalizeBrowserInput(input: string): string {
+  const value = input.trim()
+  if (!value) return DEFAULT_BROWSER_URL
+  try {
+    const parsed = new URL(value)
+    if (parsed.protocol === 'http:' || parsed.protocol === 'https:') return parsed.toString()
+  } catch {
+    // A hostname or search query is handled below.
+  }
+  if (/^[\w-]+(?:\.[\w-]+)+(?:[/:?#].*)?$/u.test(value)) {
+    return new URL(`https://${value}`).toString()
+  }
+  return `https://www.google.com/search?q=${encodeURIComponent(value)}`
+}
+
+export function isOrdinaryWebUrl(value: string): boolean {
+  if (value === 'about:blank') return true
+  try {
+    const protocol = new URL(value).protocol
+    return protocol === 'http:' || protocol === 'https:'
+  } catch {
+    return false
+  }
+}
+
+export function isBrowserTabMetadata(value: unknown): value is BrowserTabMetadata {
+  return recoverBrowserTabMetadata(value) !== null
+}
+
+interface ManagedTab {
+  state: BrowserTab
+  view: WebContentsView
+  targetEpoch: number
+  documentEpoch: number
+  targets: Map<string, SemanticTarget>
+  snapshotTextOffset: number
+  snapshotTextLength: number
+}
+
+interface SemanticTargetFingerprint {
+  role: string
+  name: string
+  disabled: boolean
+  type: string
+}
+
+interface SemanticTarget {
+  index: number
+  fingerprint: SemanticTargetFingerprint
+}
+
+interface BrowserManagerOptions {
+  window: BrowserWindow
+  browserSession: Session
+  createView: (options?: WebContentsViewConstructorOptions) => WebContentsView
+  dialog: Pick<Dialog, 'showSaveDialog'>
+  downloadsPath: string
+  clipboard: Pick<Clipboard, 'writeText'>
+}
+
+export class BrowserManager {
+  readonly #window: BrowserWindow
+  readonly #session: Session
+  readonly #createView: (options?: WebContentsViewConstructorOptions) => WebContentsView
+  readonly #dialog: Pick<Dialog, 'showSaveDialog'>
+  readonly #downloadsPath: string
+  readonly #clipboard: Pick<Clipboard, 'writeText'>
+  readonly #tabs = new Map<string, ManagedTab>()
+  #order: string[] = []
+  #activeTabId: string | null = null
+  #attachedTabId: string | null = null
+  #bounds: BrowserBounds = { x: 0, y: 0, width: 0, height: 0, visible: false }
+  #download: BrowserDownload | null = null
+  #downloadsAllowed = true
+  #notice: string | null = null
+  #synthesizedDefault = false
+  #hasExplicitAction = false
+  readonly #downloadHandler = (_event: Electron.Event, item: DownloadItem, contents: WebContents) => this.#handleDownload(item, contents)
+
+  constructor(options: BrowserManagerOptions) {
+    this.#window = options.window
+    this.#session = options.browserSession
+    this.#createView = options.createView
+    this.#dialog = options.dialog
+    this.#downloadsPath = options.downloadsPath
+    this.#clipboard = options.clipboard
+    this.#installSessionPolicies()
+  }
+
+  getState(): BrowserState {
+    return {
+      tabs: this.#order.flatMap(tabId => {
+        const tab = this.#tabs.get(tabId)
+        if (!tab) return []
+        const metadata = sanitizeBrowserMetadata(tab.state)
+        if (
+          metadata.url !== tab.state.url
+          || metadata.title !== tab.state.title
+          || metadata.faviconUrl !== tab.state.faviconUrl
+          || metadata.associatedJobId !== tab.state.associatedJobId
+        ) this.#notice = 'Browser metadata was adjusted to fit Workspace security and size limits.'
+        return [{ ...tab.state, ...metadata }]
+      }),
+      activeTabId: this.#activeTabId,
+      download: this.#download ? { ...this.#download } : null,
+      notice: this.#notice
+    }
+  }
+
+  setDownloadsAllowed(allowed: boolean): void {
+    this.#downloadsAllowed = allowed
+  }
+
+  getBounds(): BrowserBounds {
+    return { ...this.#bounds }
+  }
+
+  contextToken(tabId: string): { url: string, documentEpoch: number, loading: boolean } {
+    const tab = this.#requireTab(tabId)
+    return {
+      url: sanitizeBrowserUrlForPersistence(tab.view.webContents.getURL()),
+      documentEpoch: tab.documentEpoch,
+      loading: tab.state.loading
+    }
+  }
+
+  async restore(restored: BrowserRestoreState): Promise<BrowserState> {
+    if (this.#order.length) {
+      if (!this.#synthesizedDefault || this.#hasExplicitAction || !restored.tabs.length) return this.getState()
+      for (const tab of this.#tabs.values()) {
+        if (this.#attachedTabId === tab.state.tabId) this.#window.contentView.removeChildView(tab.view)
+        tab.view.webContents.close({ waitForBeforeUnload: false })
+      }
+      this.#tabs.clear()
+      this.#order = []
+      this.#activeTabId = null
+      this.#attachedTabId = null
+      this.#synthesizedDefault = false
+    }
+    const recovered = recoverBrowserRestoreState(restored)
+    const initialLoads: Promise<void>[] = []
+    for (const tab of recovered.tabs) {
+      initialLoads.push(this.#createTab(tab))
+    }
+    if (!this.#order.length) {
+      this.#synthesizedDefault = true
+      initialLoads.push(this.#createTab({
+        tabId: randomUUID(),
+        url: DEFAULT_BROWSER_URL,
+        title: 'Google',
+        faviconUrl: null,
+        associatedJobId: null
+      }))
+    }
+    this.#activeTabId = recovered.activeTabId && this.#tabs.has(recovered.activeTabId)
+      ? recovered.activeTabId
+      : this.#order[0] ?? null
+    this.#syncAttachedView()
+    this.#emit()
+    await Promise.all(initialLoads)
+    return this.getState()
+  }
+
+  async create(
+    url = DEFAULT_BROWSER_URL,
+    associatedJobId: string | null = null,
+    activate = true
+  ): Promise<BrowserState> {
+    this.#hasExplicitAction = true
+    if (this.#order.length >= BROWSER_PERSISTENCE_LIMITS.tabs) {
+      this.#notice = `Tab limit reached (${BROWSER_PERSISTENCE_LIMITS.tabs}). Close a tab before opening another.`
+      this.#emit()
+      return this.getState()
+    }
+    const tabId = randomUUID()
+    const initialLoad = this.#createTab({
+      tabId,
+      url: normalizeBrowserInput(url),
+      title: 'New tab',
+      faviconUrl: null,
+      associatedJobId
+    })
+    if (activate) this.#activeTabId = tabId
+    this.#syncAttachedView()
+    this.#emit()
+    await initialLoad
+    return this.getState()
+  }
+
+  select(tabId: string): BrowserState {
+    this.#hasExplicitAction = true
+    this.#requireTab(tabId)
+    this.#activeTabId = tabId
+    this.#syncAttachedView()
+    this.#emit()
+    return this.getState()
+  }
+
+  async close(tabId: string): Promise<BrowserState> {
+    this.#hasExplicitAction = true
+    const index = this.#order.indexOf(tabId)
+    const tab = this.#requireTab(tabId)
+    if (this.#attachedTabId === tabId) {
+      this.#window.contentView.removeChildView(tab.view)
+      this.#attachedTabId = null
+    }
+    tab.view.webContents.close({ waitForBeforeUnload: false })
+    this.#tabs.delete(tabId)
+    this.#order = this.#order.filter(id => id !== tabId)
+    if (this.#activeTabId === tabId) {
+      this.#activeTabId = this.#order[Math.min(index, this.#order.length - 1)] ?? null
+    }
+    if (!this.#order.length) return this.create()
+    this.#syncAttachedView()
+    this.#emit()
+    return this.getState()
+  }
+
+  reorder(tabIds: string[]): BrowserState {
+    this.#hasExplicitAction = true
+    if (tabIds.length !== this.#order.length || new Set(tabIds).size !== tabIds.length || tabIds.some(id => !this.#tabs.has(id))) {
+      throw new Error('Tab order must contain every open tab exactly once')
+    }
+    this.#order = [...tabIds]
+    this.#emit()
+    return this.getState()
+  }
+
+  async navigate(tabId: string, input: string): Promise<BrowserState> {
+    this.#hasExplicitAction = true
+    const tab = this.#requireTab(tabId)
+    this.#invalidateTargets(tab)
+    this.#resetSnapshotText(tab)
+    const url = normalizeBrowserInput(input)
+    if (url !== tab.state.url) tab.state.associatedJobId = null
+    tab.state.error = null
+    tab.state.crashed = false
+    this.#emit()
+    await tab.view.webContents.loadURL(url).catch(() => undefined)
+    return this.getState()
+  }
+
+  back(tabId: string): BrowserState {
+    this.#hasExplicitAction = true
+    const tab = this.#requireTab(tabId)
+    this.#invalidateTargets(tab)
+    this.#resetSnapshotText(tab)
+    const contents = tab.view.webContents
+    if (contents.navigationHistory.canGoBack()) contents.navigationHistory.goBack()
+    return this.getState()
+  }
+
+  forward(tabId: string): BrowserState {
+    this.#hasExplicitAction = true
+    const tab = this.#requireTab(tabId)
+    this.#invalidateTargets(tab)
+    this.#resetSnapshotText(tab)
+    const contents = tab.view.webContents
+    if (contents.navigationHistory.canGoForward()) contents.navigationHistory.goForward()
+    return this.getState()
+  }
+
+  reload(tabId: string): BrowserState {
+    this.#hasExplicitAction = true
+    const tab = this.#requireTab(tabId)
+    this.#invalidateTargets(tab)
+    this.#resetSnapshotText(tab)
+    tab.state.error = null
+    tab.state.crashed = false
+    tab.view.webContents.reload()
+    this.#emit()
+    return this.getState()
+  }
+
+  stop(tabId: string): BrowserState {
+    this.#hasExplicitAction = true
+    this.#requireTab(tabId).view.webContents.stop()
+    return this.getState()
+  }
+
+  inspect(): BrowserState {
+    return this.getState()
+  }
+
+  async snapshot(
+    tabId: string,
+    requestedTextStart = 0,
+    requestedTextLength = 12_000,
+    includeTargets = true
+  ): Promise<BrowserSemanticSnapshot> {
+    const tab = this.#requireTab(tabId)
+    if (!Number.isInteger(requestedTextStart) || requestedTextStart < 0
+      || !Number.isInteger(requestedTextLength) || requestedTextLength < 1 || requestedTextLength > 12_000) {
+      throw new TypeError('Invalid browser snapshot range')
+    }
+    this.#invalidateTargets(tab)
+    const targetEpoch = tab.targetEpoch
+    const targetPrefix = randomUUID().replaceAll('-', '').slice(0, 20)
+    const raw = await tab.view.webContents.executeJavaScript(`(async () => {
+      const visible = (element) => {
+        const style = getComputedStyle(element);
+        return !element.hidden && style.visibility !== 'hidden'
+          && style.display !== 'none' && element.getClientRects().length > 0;
+      };
+      const candidates = ${includeTargets} ? [...document.querySelectorAll(
+        'a,button,input,textarea,select,[role="button"],[role="link"],[contenteditable="true"],[tabindex]'
+      )].filter(visible).slice(0, 100) : [];
+      const elements = candidates.map((element, index) => {
+        if (!visible(element)) return null;
+        const name = (element.getAttribute('aria-label') || element.getAttribute('title')
+          || element.innerText || element.placeholder || '').trim().slice(0, 200);
+        const type = (element.getAttribute('type') || ('type' in element ? element.type : ''))
+          .toLowerCase().slice(0, 40);
+        const href = element.tagName === 'A' ? String(element.href || '').slice(0, 8192) : '';
+        return { index, role: (element.getAttribute('role') || element.tagName).toLowerCase().slice(0, 40),
+          name, disabled: Boolean(element.disabled || element.getAttribute('aria-disabled') === 'true'), type, href };
+      }).filter(Boolean);
+      const frameTexts = [];
+      const seenDocuments = new Set();
+      const seenTexts = new Set();
+      const collectFrameText = (frameDocument) => {
+        if (!frameDocument || seenDocuments.has(frameDocument)) return;
+        seenDocuments.add(frameDocument);
+        const frameText = (frameDocument.body?.innerText || '').trim();
+        if (frameText && !seenTexts.has(frameText)) {
+          seenTexts.add(frameText);
+          frameTexts.push(frameText);
+        }
+        for (const frame of frameDocument.querySelectorAll('iframe,frame')) {
+          try {
+            collectFrameText(frame.contentDocument);
+          } catch {
+            // Cross-origin frames remain unreadable by design.
+          }
+        }
+      };
+      collectFrameText(document);
+      const pageText = frameTexts.join('\\n\\n');
+      const viewportHeight = Math.max(1, window.innerHeight);
+      const scrollHeight = Math.max(viewportHeight, document.documentElement.scrollHeight, document.body?.scrollHeight || 0);
+      const textStart = Math.min(${requestedTextStart}, pageText.length);
+      const text = pageText.slice(textStart, textStart + ${requestedTextLength});
+      const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(pageText));
+      const pageRevision = [...new Uint8Array(digest)].map(byte => byte.toString(16).padStart(2, '0')).join('');
+      return { text, textStart, totalTextLength: pageText.length, pageRevision,
+        scrollY: window.scrollY, scrollHeight, viewportHeight, elements };
+    })()`, true) as unknown
+    const value = raw && typeof raw === 'object' ? raw as Record<string, unknown> : {}
+    tab.snapshotTextOffset = boundedNonNegativeInteger(value.textStart)
+    tab.snapshotTextLength = boundedNonNegativeInteger(value.totalTextLength)
+    const targets = Array.isArray(value.elements)
+      ? value.elements.slice(0, 100).flatMap(item => {
+          if (!item || typeof item !== 'object') return []
+          const candidate = item as Record<string, unknown>
+          if (!Number.isInteger(candidate.index) || Number(candidate.index) < 0 || Number(candidate.index) >= 100) return []
+          const fingerprint = {
+            role: String(candidate.role ?? 'control').slice(0, 40),
+            name: String(candidate.name ?? '').slice(0, 200),
+            disabled: Boolean(candidate.disabled),
+            type: String(candidate.type ?? '').slice(0, 40)
+          }
+          return [{
+            targetId: `t_${targetPrefix}_${Number(candidate.index) + 1}`,
+            index: Number(candidate.index),
+            fingerprint,
+            href: typeof candidate.href === 'string' && isOrdinaryWebUrl(candidate.href)
+              ? sanitizeBrowserUrlForPersistence(candidate.href)
+              : null
+          }]
+        })
+      : []
+    if (tab.targetEpoch === targetEpoch) {
+      tab.targets = new Map(targets.map(target => [target.targetId, {
+        index: target.index,
+        fingerprint: target.fingerprint
+      }]))
+    }
+    const elements = targets.map(target => ({
+      targetId: target.targetId,
+      role: target.fingerprint.role,
+      name: target.fingerprint.name,
+      disabled: target.fingerprint.disabled,
+      href: target.href
+    }))
+    const state = this.getState().tabs.find(candidate => candidate.tabId === tabId)
+    return {
+      tabId,
+      url: state?.url ?? 'about:blank',
+      title: state?.title ?? 'Untitled',
+      text: typeof value.text === 'string' ? value.text.slice(0, requestedTextLength) : '',
+      requestedTextStart,
+      textStart: boundedNonNegativeInteger(value.textStart),
+      textLength: typeof value.text === 'string' ? value.text.slice(0, requestedTextLength).length : 0,
+      totalTextLength: boundedNonNegativeInteger(value.totalTextLength),
+      hasMore: boundedNonNegativeInteger(value.textStart)
+        + (typeof value.text === 'string' ? value.text.slice(0, requestedTextLength).length : 0)
+        < boundedNonNegativeInteger(value.totalTextLength),
+      pageRevision: typeof value.pageRevision === 'string' && /^[a-f0-9]{64}$/.test(value.pageRevision)
+        ? value.pageRevision : '',
+      scrollY: boundedNonNegativeInteger(value.scrollY),
+      scrollHeight: boundedNonNegativeInteger(value.scrollHeight),
+      viewportHeight: boundedNonNegativeInteger(value.viewportHeight),
+      elements
+    }
+  }
+
+  async click(tabId: string, targetId: string): Promise<BrowserState> {
+    this.#assertTargetId(targetId)
+    const tab = this.#requireTab(tabId)
+    const target = tab.targets.get(targetId)
+    if (!target) throw new Error('Browser target is stale; capture a new snapshot')
+    const fingerprint = JSON.stringify(target.fingerprint)
+    const result = await tab.view.webContents.executeJavaScript(`(() => {
+      const visible = (element) => {
+        const style = getComputedStyle(element);
+        return !element.hidden && style.visibility !== 'hidden'
+          && style.display !== 'none' && element.getClientRects().length > 0;
+      };
+      const candidates = [...document.querySelectorAll(
+        'a,button,input,textarea,select,[role="button"],[role="link"],[contenteditable="true"],[tabindex]'
+      )].filter(visible).slice(0, 100);
+      const element = candidates[${target.index}];
+      if (!element || !visible(element)) return { ok: false, code: 'target_not_found' };
+      const name = (element.getAttribute('aria-label') || element.getAttribute('title')
+        || element.innerText || element.placeholder || '').trim().slice(0, 200);
+      const fingerprint = { role: (element.getAttribute('role') || element.tagName).toLowerCase().slice(0, 40),
+        name, disabled: Boolean(element.disabled || element.getAttribute('aria-disabled') === 'true'),
+        type: (element.getAttribute('type') || ('type' in element ? element.type : '')).toLowerCase().slice(0, 40) };
+      if (JSON.stringify(fingerprint) !== JSON.stringify(${fingerprint})) return { ok: false, code: 'target_changed' };
+      element.scrollIntoView({ block: 'center', inline: 'center' }); element.click();
+      return { ok: true };
+    })()`, true) as { ok?: boolean }
+    if (!result?.ok) throw new Error('Browser target not found; capture a new snapshot')
+    return this.getState()
+  }
+
+  async type(tabId: string, targetId: string, text: string, clear = true): Promise<BrowserState> {
+    this.#assertTargetId(targetId)
+    if (typeof text !== 'string' || text.length > 4000) throw new Error('Invalid browser text')
+    const tab = this.#requireTab(tabId)
+    const target = tab.targets.get(targetId)
+    if (!target) throw new Error('Browser target is stale; capture a new snapshot')
+    const encodedText = JSON.stringify(text)
+    const fingerprint = JSON.stringify(target.fingerprint)
+    const result = await tab.view.webContents.executeJavaScript(`(() => {
+      const visible = (element) => {
+        const style = getComputedStyle(element);
+        return !element.hidden && style.visibility !== 'hidden'
+          && style.display !== 'none' && element.getClientRects().length > 0;
+      };
+      const candidates = [...document.querySelectorAll(
+        'a,button,input,textarea,select,[role="button"],[role="link"],[contenteditable="true"],[tabindex]'
+      )].filter(visible).slice(0, 100);
+      const element = candidates[${target.index}];
+      if (!element || !visible(element) || (!('value' in element) && !element.isContentEditable))
+        return { ok: false, code: 'target_not_found' };
+      const name = (element.getAttribute('aria-label') || element.getAttribute('title')
+        || element.innerText || element.placeholder || '').trim().slice(0, 200);
+      const fingerprint = { role: (element.getAttribute('role') || element.tagName).toLowerCase().slice(0, 40),
+        name, disabled: Boolean(element.disabled || element.getAttribute('aria-disabled') === 'true'),
+        type: (element.getAttribute('type') || ('type' in element ? element.type : '')).toLowerCase().slice(0, 40) };
+      if (JSON.stringify(fingerprint) !== JSON.stringify(${fingerprint})) return { ok: false, code: 'target_changed' };
+      element.focus();
+      if (element.isContentEditable) element.textContent = ${clear ? "''" : "element.textContent || ''"} + ${encodedText};
+      else element.value = ${clear ? "''" : "element.value || ''"} + ${encodedText};
+      element.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: ${encodedText} }));
+      element.dispatchEvent(new Event('change', { bubbles: true }));
+      return { ok: true };
+    })()`, true) as { ok?: boolean }
+    if (!result?.ok) throw new Error('Browser target not found; capture a new snapshot')
+    return this.getState()
+  }
+
+  async scroll(tabId: string, direction: 'up' | 'down', amount = 600): Promise<BrowserState> {
+    const tab = this.#requireTab(tabId)
+    if (!Number.isInteger(amount) || amount < 1 || amount > 2000) throw new Error('Invalid scroll amount')
+    const delta = direction === 'up' ? -amount : amount
+    tab.snapshotTextOffset = direction === 'up'
+      ? Math.max(0, tab.snapshotTextOffset - 4_000)
+      : Math.min(Math.max(0, tab.snapshotTextLength - 1), tab.snapshotTextOffset + 4_000)
+    await tab.view.webContents.executeJavaScript(
+      `(() => { window.scrollBy({ top: ${delta}, behavior: 'auto' }); return { ok: true }; })()`,
+      true
+    )
+    return this.getState()
+  }
+
+  associate(tabId: string, jobId: string | null): BrowserState {
+    this.#hasExplicitAction = true
+    const tab = this.#requireTab(tabId)
+    tab.state.associatedJobId = jobId
+    this.#emit()
+    return this.getState()
+  }
+
+  copyBlockedUrl(tabId: string): BrowserState {
+    const tab = this.#requireTab(tabId)
+    if (!tab.state.blockedUrl) throw new Error('No blocked link is available to copy')
+    this.#clipboard.writeText(tab.state.blockedUrl)
+    this.#notice = 'Blocked link copied. JobOS did not open it.'
+    this.#emit()
+    return this.getState()
+  }
+
+  setBounds(bounds: BrowserBounds): void {
+    this.#bounds = {
+      x: Math.max(0, Math.round(bounds.x)),
+      y: Math.max(0, Math.round(bounds.y)),
+      width: Math.max(0, Math.round(bounds.width)),
+      height: Math.max(0, Math.round(bounds.height)),
+      visible: Boolean(bounds.visible)
+    }
+    this.#syncAttachedView()
+  }
+
+  dispose(): void {
+    this.#session.removeListener('will-download', this.#downloadHandler)
+    for (const tab of this.#tabs.values()) {
+      if (!tab.view.webContents.isDestroyed()) tab.view.webContents.close()
+    }
+    this.#tabs.clear()
+    this.#order = []
+  }
+
+  #createTab(restored: BrowserTabMetadata): Promise<void> {
+    const view = this.#createView()
+    this.#registerTab(restored, view)
+    return view.webContents.loadURL(restored.url).then(() => undefined, () => undefined)
+  }
+
+  #registerTab(restored: BrowserTabMetadata, view: WebContentsView): ManagedTab {
+    const state: BrowserTab = {
+      ...restored,
+      loading: false,
+      canGoBack: false,
+      canGoForward: false,
+      error: null,
+      crashed: false,
+      blockedUrl: null
+    }
+    const managed = {
+      view, state, targetEpoch: 0, documentEpoch: 0, targets: new Map<string, SemanticTarget>(),
+      snapshotTextOffset: 0, snapshotTextLength: 0
+    }
+    this.#tabs.set(state.tabId, managed)
+    this.#order.push(state.tabId)
+    this.#wireTab(managed)
+    return managed
+  }
+
+  #wireTab(tab: ManagedTab): void {
+    const contents = tab.view.webContents
+    const refresh = () => {
+      if (contents.isDestroyed()) return
+      const currentUrl = contents.getURL()
+      if (isOrdinaryWebUrl(currentUrl) && currentUrl !== tab.state.url) {
+        tab.state.url = currentUrl
+        tab.state.associatedJobId = null
+      }
+      tab.state.canGoBack = contents.navigationHistory.canGoBack()
+      tab.state.canGoForward = contents.navigationHistory.canGoForward()
+      this.#emit()
+    }
+    contents.on('did-start-loading', () => { this.#invalidateTargets(tab); tab.state.loading = true; tab.state.error = null; tab.state.blockedUrl = null; this.#notice = null; refresh() })
+    contents.on('did-stop-loading', () => { tab.state.loading = false; refresh() })
+    contents.on('did-navigate', () => { tab.documentEpoch += 1; this.#invalidateTargets(tab); this.#resetSnapshotText(tab); refresh() })
+    contents.on('did-navigate-in-page', () => { tab.documentEpoch += 1; this.#invalidateTargets(tab); this.#resetSnapshotText(tab); refresh() })
+    contents.on('page-title-updated', (_event, title) => {
+      const nextTitle = title || 'Untitled'
+      const safeTitle = sanitizeBrowserTitleForPersistence(nextTitle)
+      if (safeTitle !== nextTitle && safeTitle === BROWSER_SAFE_TITLE_FALLBACK) {
+        this.#notice = 'A page title containing credential-like metadata was hidden.'
+      } else if (nextTitle.length > BROWSER_PERSISTENCE_LIMITS.title) {
+        this.#notice = 'A page title was shortened to keep Workspace saves reliable.'
+      }
+      tab.state.title = safeTitle
+      this.#emit()
+    })
+    contents.on('page-favicon-updated', (_event, favicons) => {
+      tab.state.faviconUrl = favicons.find(isOrdinaryWebUrl) ?? null
+      this.#emit()
+    })
+    contents.on('did-fail-load', (_event, code, description, validatedUrl, isMainFrame) => {
+      if (!isMainFrame || code === -3) return
+      tab.state.loading = false
+      if (isOrdinaryWebUrl(validatedUrl)) tab.state.url = validatedUrl
+      tab.state.error = `Page unavailable: ${description}`
+      this.#emit()
+    })
+    contents.on('render-process-gone', (_event, details) => {
+      tab.state.loading = false
+      tab.state.crashed = true
+      tab.state.error = `This page stopped working (${details.reason}). Reload to recover.`
+      this.#emit()
+    })
+    contents.on('unresponsive', () => { tab.state.error = 'This page is not responding. Reload or close the tab.'; this.#emit() })
+    contents.on('responsive', () => { if (!tab.state.crashed) tab.state.error = null; this.#emit() })
+    const blockExternalProtocol = (url: string) => {
+      tab.state.blockedUrl = safeBlockedExternalUrl(url)
+      tab.state.error = tab.state.blockedUrl
+        ? 'JobOS blocked an external protocol. Copy the link if you want to open it yourself.'
+        : 'JobOS blocked an unsafe external protocol.'
+      this.#emit()
+    }
+    const handleCancellableNavigation = (event: Electron.Event, url: string) => {
+      if (!isOrdinaryWebUrl(url)) {
+        event.preventDefault()
+        blockExternalProtocol(url)
+      }
+    }
+    contents.on('will-navigate', handleCancellableNavigation)
+    contents.on('will-redirect', handleCancellableNavigation)
+    contents.setWindowOpenHandler(details => {
+      if (!isOrdinaryWebUrl(details.url)) {
+        blockExternalProtocol(details.url)
+        return { action: 'deny' }
+      }
+      if (this.#order.length >= BROWSER_PERSISTENCE_LIMITS.tabs) {
+        this.#notice = `Tab limit reached (${BROWSER_PERSISTENCE_LIMITS.tabs}). Close a tab before opening another.`
+        this.#emit()
+        return { action: 'deny' }
+      }
+      return {
+        action: 'allow',
+        outlivesOpener: true,
+        createWindow: options => {
+          const popupOptions = options as typeof options & { webContents?: WebContents }
+          const view = this.#createView({
+            webContents: popupOptions.webContents,
+            webPreferences: popupOptions.webPreferences
+          })
+          const tabId = randomUUID()
+          this.#registerTab({
+            tabId,
+            url: normalizeBrowserInput(details.url),
+            title: 'New tab',
+            faviconUrl: null,
+            associatedJobId: tab.state.associatedJobId
+          }, view)
+          this.#hasExplicitAction = true
+          this.#activeTabId = tabId
+          this.#syncAttachedView()
+          this.#emit()
+          if (!popupOptions.webContents) {
+            const loadOptions: LoadURLOptions = { httpReferrer: details.referrer }
+            if (details.postBody) {
+              const contentType = details.postBody.boundary
+                ? `${details.postBody.contentType}; boundary=${details.postBody.boundary}`
+                : details.postBody.contentType
+              loadOptions.extraHeaders = `Content-Type: ${contentType}`
+              loadOptions.postData = details.postBody.data
+            }
+            void view.webContents.loadURL(details.url, loadOptions).catch(() => undefined)
+          }
+          return view.webContents
+        }
+      }
+    })
+  }
+
+  #syncAttachedView(): void {
+    const shouldAttach = this.#bounds.visible && this.#bounds.width > 0 && this.#bounds.height > 0 && this.#activeTabId
+    if (this.#attachedTabId && this.#attachedTabId !== (shouldAttach ? this.#activeTabId : null)) {
+      const attached = this.#tabs.get(this.#attachedTabId)
+      if (attached) this.#window.contentView.removeChildView(attached.view)
+      this.#attachedTabId = null
+    }
+    if (!shouldAttach || !this.#activeTabId) return
+    const active = this.#requireTab(this.#activeTabId)
+    if (this.#attachedTabId !== this.#activeTabId) {
+      this.#window.contentView.addChildView(active.view)
+      this.#attachedTabId = this.#activeTabId
+    }
+    active.view.setBounds({ x: this.#bounds.x, y: this.#bounds.y, width: this.#bounds.width, height: this.#bounds.height })
+  }
+
+  #installSessionPolicies(): void {
+    this.#session.setPermissionCheckHandler(() => false)
+    this.#session.setPermissionRequestHandler((contents, permission, callback) => {
+      const tab = [...this.#tabs.values()].find(candidate => candidate.view.webContents === contents)
+      this.#notice = `JobOS blocked ${permission} permission${tab ? ` for ${tab.state.title}` : ''}.`
+      this.#emit()
+      callback(false)
+    })
+    this.#session.on('will-download', this.#downloadHandler)
+  }
+
+  #handleDownload(item: DownloadItem, contents: WebContents): void {
+    if (!this.#downloadsAllowed) {
+      item.cancel()
+      this.#notice = 'JobOS blocked a new download while switching profiles.'
+      this.#emit()
+      return
+    }
+    const id = randomUUID()
+    const filename = item.getFilename() || 'download'
+    const update = (state: BrowserDownload['state'], message?: string) => {
+      this.#download = {
+        id,
+        filename,
+        state,
+        receivedBytes: item.getReceivedBytes(),
+        totalBytes: item.getTotalBytes(),
+        message
+      }
+      this.#emit()
+    }
+    item.pause()
+    update('starting')
+    void this.#dialog.showSaveDialog(this.#window, {
+      title: `Save ${filename}`,
+      defaultPath: path.join(this.#downloadsPath, filename)
+    }).then(result => {
+      if (result.canceled || !result.filePath) {
+        item.cancel()
+        update('cancelled', 'Download cancelled')
+        return
+      }
+      item.setSavePath(result.filePath)
+      item.resume()
+    }).catch(() => {
+      item.cancel()
+      update('failed', 'Could not choose a download location')
+    })
+    item.on('updated', (_event, state) => update(state === 'interrupted' ? 'interrupted' : 'progressing'))
+    item.once('done', (_event, state) => update(state === 'completed' ? 'completed' : state === 'cancelled' ? 'cancelled' : 'interrupted'))
+    if (contents.isDestroyed()) update('failed', 'The page closed before the download started')
+  }
+
+  #requireTab(tabId: string): ManagedTab {
+    const tab = this.#tabs.get(tabId)
+    if (!tab) throw new Error('Browser tab not found')
+    return tab
+  }
+
+  #assertTargetId(targetId: string): void {
+    if (!/^t_[A-Za-z0-9_-]{1,64}$/.test(targetId)) throw new Error('Invalid browser target')
+  }
+
+  #emit(): void {
+    if (!this.#window.isDestroyed()) this.#window.webContents.send('jobos:browser:state', this.getState())
+  }
+
+  #invalidateTargets(tab: ManagedTab): void {
+    tab.targetEpoch += 1
+    tab.targets.clear()
+  }
+
+  #resetSnapshotText(tab: ManagedTab): void {
+    tab.snapshotTextOffset = 0
+    tab.snapshotTextLength = 0
+  }
+}
+
+function boundedNonNegativeInteger(value: unknown): number {
+  return typeof value === 'number' && Number.isFinite(value)
+    ? Math.min(1_000_000_000, Math.max(0, Math.floor(value)))
+    : 0
+}
+
+export function safeBlockedExternalUrl(value: string): string | null {
+  try {
+    const parsed = new URL(value)
+    if (['http:', 'https:', 'about:', 'javascript:', 'data:', 'file:', 'blob:'].includes(parsed.protocol)) return null
+    const sanitized = sanitizeBrowserUrlForPersistence(value)
+    return sanitized.length <= 2048 ? sanitized : null
+  } catch {
+    return null
+  }
+}
