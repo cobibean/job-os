@@ -3,7 +3,7 @@ import { afterEach, beforeEach, expect, test } from 'vitest'
 
 import { DEFAULT_THEME_ID, getTheme, THEMES } from './themes'
 import { applyTheme, useTheme } from './useTheme'
-import { SettingsPanel } from '../components/SettingsPanel'
+import { SettingsPanel } from '../settings/SettingsPanel'
 
 function ThemeHarness() {
   const theme = useTheme()

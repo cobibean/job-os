@@ -99,8 +99,8 @@ This section records the implementation baseline at `ee542e9d7c19d5c5a16bb15cb9e
 - `apps/desktop/src/shared/contracts.ts` defines desktop agent state, snapshots, summaries, and bridge APIs.
 - `apps/desktop/src/renderer/agents/chat/useAgentSessions.ts` and `useAgentConversation.ts` own multiple chat sessions and per-chat behavior.
 - `apps/desktop/src/renderer/agents/chat/AgentSessionTabs.tsx` and `AgentPanel.tsx` own visible chat selection and presentation.
-- `apps/desktop/src/renderer/components/SettingsPanel.tsx` is the current Settings composition seam. Add a focused Connected Agents surface rather than growing one monolithic component.
-- `apps/desktop/src/renderer/App.tsx` composes Settings and Agent Chat.
+- `apps/desktop/src/renderer/app/settings/SettingsPanel.tsx` is the current Settings composition seam. Add a focused Connected Agents surface rather than growing one monolithic component.
+- `apps/desktop/src/renderer/app/WorkbenchApp.tsx` composes Settings and Agent Chat.
 - Existing `ConnectedCareerProfileAgent` renderer/API types are Career Profile access-control records. They are not Connected Agent connections and must remain a separate domain.
 
 ### 3.5 Current packaging path

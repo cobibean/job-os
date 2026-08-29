@@ -1,51 +1,30 @@
-import { AgentPanel } from './agents/chat/AgentPanel'
-import { CenterWorkspace, type JobListingRequest } from './components/CenterWorkspace'
-import { JobNavigator } from './jobs/navigator/JobNavigator'
-import { SettingsPanel } from './components/SettingsPanel'
-import { StatusBar } from './components/StatusBar'
-import { WorkbenchLayout } from './workspace/WorkbenchLayout'
-import { CareerProfileWorkspace } from './career-profile/CareerProfileWorkspace'
-import { hasCachedCareerProfile } from './career-profile/work-arrangement/useCareerProfile'
-import { WorkspaceBar, type WorkspaceBarWorkspace } from './workspace/WorkspaceBar'
-import { BrowseWorkspace } from './jobs/browse/BrowseWorkspace'
-import { useAgentAvatarPreference } from './agents/avatar/useAgentAvatarPreference'
-import { DocxDocumentEditorShell } from './documents/docx/editor/DocxDocumentEditorShell'
-import { useConnectivity } from './hooks/useConnectivity'
-import { useJobs } from './jobs/useJobs'
-import { useAgentSessions } from './agents/chat/useAgentSessions'
-import { useConnectedAgents } from './agents/connected-agents/useConnectedAgents'
-import { useWorkspace } from './workspace/useWorkspace'
+import { AgentPanel } from '../agents/chat/AgentPanel'
+import { CenterWorkspace, type JobListingRequest } from '../components/CenterWorkspace'
+import { JobNavigator } from '../jobs/navigator/JobNavigator'
+import { SettingsPanel } from './settings/SettingsPanel'
+import { StatusBar } from './status/StatusBar'
+import { WorkbenchLayout } from '../workspace/WorkbenchLayout'
+import { CareerProfileWorkspace } from '../career-profile/CareerProfileWorkspace'
+import { hasCachedCareerProfile } from '../career-profile/work-arrangement/useCareerProfile'
+import { WorkspaceBar, type WorkspaceBarWorkspace } from '../workspace/WorkspaceBar'
+import { BrowseWorkspace } from '../jobs/browse/BrowseWorkspace'
+import { useAgentAvatarPreference } from '../agents/avatar/useAgentAvatarPreference'
+import { DocxDocumentEditorShell } from '../documents/docx/editor/DocxDocumentEditorShell'
+import { useConnectivity } from './runtime/useConnectivity'
+import { useJobs } from '../jobs/useJobs'
+import { useAgentSessions } from '../agents/chat/useAgentSessions'
+import { useConnectedAgents } from '../agents/connected-agents/useConnectedAgents'
+import { useWorkspace } from '../workspace/useWorkspace'
 import { useTheme } from './theme/useTheme'
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { DocxOpenResult } from '../shared/docxDocuments'
+import type { DocxOpenResult } from '../../shared/docxDocuments'
 import type {
   AgentChatSelection,
   ConnectedAgentModelsSnapshot,
   ConnectedAgentSummary,
   ConnectedAgentsSnapshot,
-  SetupSnapshot
-} from '../shared/contracts'
-import { OnboardingScreen } from './onboarding/OnboardingScreen'
-import { NewAgentChatDialog } from './agents/new-chat/NewAgentChatDialog'
-
-export function App() {
-  const [setup, setSetup] = useState<SetupSnapshot | null>(
-    window.jobos?.setup ? null : { state: 'ready', message: 'JobOS is configured' }
-  )
-
-  useEffect(() => {
-    if (!window.jobos?.setup) return
-    let active = true
-    void window.jobos.setup.get().then(value => { if (active) setSetup(value) }).catch(() => {
-      if (active) setSetup({ state: 'required', message: 'JobOS setup is required' })
-    })
-    return () => { active = false }
-  }, [])
-
-  if (setup === null) return <div className="onboarding-loading" role="status">Checking local setup…</div>
-  if (setup.state !== 'ready') return <OnboardingScreen initial={setup} />
-  return <WorkbenchApp />
-}
+} from '../../shared/contracts'
+import { NewAgentChatDialog } from '../agents/new-chat/NewAgentChatDialog'
 
 export function requireDefaultConnectedAgent(snapshot: ConnectedAgentsSnapshot): ConnectedAgentSummary {
   const agent = snapshot.defaultConnectedAgentId
@@ -79,7 +58,7 @@ export function requireDefaultAgentModel(
   return { modelId: model.modelId, reasoningEffort: agent.defaultReasoningEffort }
 }
 
-function WorkbenchApp() {
+export function WorkbenchApp() {
   const connectivity = useConnectivity()
   const agentSessions = useAgentSessions()
   const connectedAgents = useConnectedAgents()

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 
-import type { DiagnosticsSnapshot } from '../../shared/contracts'
-import { SettingsSection } from '../components/SettingsSection'
+import type { DiagnosticsSnapshot } from '../../../../shared/contracts'
+import { SettingsSection } from '../SettingsSection'
 
 function capabilityLabel(label: string, state: string): string {
   if (state === 'not-configured') return `${label} not configured`

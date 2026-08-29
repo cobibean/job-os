@@ -1,7 +1,7 @@
 import { CheckCircle2, CircleAlert, LoaderCircle } from 'lucide-react'
 import { useState } from 'react'
 
-import type { SetupSnapshot } from '../../shared/contracts'
+import type { SetupSnapshot } from '../../../shared/contracts'
 
 interface OnboardingScreenProps {
   initial: SetupSnapshot

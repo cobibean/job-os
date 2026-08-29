@@ -1,6 +1,6 @@
 import { CheckCircle2, CircleAlert, LoaderCircle, Settings } from 'lucide-react'
 
-import type { ConnectivityState } from '../../shared/contracts'
+import type { ConnectivityState } from '../../../shared/contracts'
 
 interface StatusBarProps {
   apiVersion?: string

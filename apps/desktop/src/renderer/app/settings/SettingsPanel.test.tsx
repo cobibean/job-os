@@ -1,7 +1,7 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, expect, test, vi } from 'vitest'
 
-import type { CareerProfileBridge } from '../../shared/contracts'
+import type { CareerProfileBridge } from '../../../shared/contracts'
 import { SettingsPanel } from './SettingsPanel'
 
 afterEach(cleanup)

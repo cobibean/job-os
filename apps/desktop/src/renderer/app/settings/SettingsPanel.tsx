@@ -1,13 +1,13 @@
 import { Check, X } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 
-import type { CareerProfileBridge, CareerProfileTrustMode, ConnectedCareerProfileAgent } from '../../shared/contracts'
-import { AgentAvatar } from '../agents/avatar/AgentAvatar'
-import { AGENT_AVATARS, type AgentAvatarId } from '../agents/avatar/agentAvatars'
+import type { CareerProfileBridge, CareerProfileTrustMode, ConnectedCareerProfileAgent } from '../../../shared/contracts'
+import { AgentAvatar } from '../../agents/avatar/AgentAvatar'
+import { AGENT_AVATARS, type AgentAvatarId } from '../../agents/avatar/agentAvatars'
 import { THEMES, type ThemeMode } from '../theme/themes'
-import { DiagnosticsPanel } from '../diagnostics/DiagnosticsPanel'
-import type { useConnectedAgents } from '../agents/connected-agents/useConnectedAgents'
-import { ConnectedAgentsSettings } from '../agents/connected-agents/ConnectedAgentsSettings'
+import { DiagnosticsPanel } from './diagnostics/DiagnosticsPanel'
+import type { useConnectedAgents } from '../../agents/connected-agents/useConnectedAgents'
+import { ConnectedAgentsSettings } from '../../agents/connected-agents/ConnectedAgentsSettings'
 import { SettingsSection } from './SettingsSection'
 
 interface SettingsPanelProps {

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 
-import type { ConnectivitySnapshot, ConnectivityState } from '../../shared/contracts'
+import type { ConnectivitySnapshot, ConnectivityState } from '../../../shared/contracts'
 
 
 type ConnectivityView = Omit<Partial<ConnectivitySnapshot>, 'state'> & {

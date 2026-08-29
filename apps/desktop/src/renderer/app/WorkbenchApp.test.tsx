@@ -6,9 +6,9 @@ import type {
   ConnectedAgentSummary,
   ConnectedAgentsSnapshot,
   JobListItem
-} from '../shared/contracts'
-import { App, requireDefaultAgentModel, requireDefaultConnectedAgent } from './App'
-import { isExpectedSaveNavigation, parseAgentJobSaveError } from './components/CenterWorkspace'
+} from '../../shared/contracts'
+import { WorkbenchApp, requireDefaultAgentModel, requireDefaultConnectedAgent } from './WorkbenchApp'
+import { isExpectedSaveNavigation, parseAgentJobSaveError } from '../components/CenterWorkspace'
 
 afterEach(() => { cleanup(); window.localStorage.clear() })
 
@@ -71,34 +71,6 @@ test('browser save requires the exact live default model and reasoning effort', 
   })).toThrow('Default reasoning effort is unavailable')
 })
 
-test('missing configuration opens setup without starting workbench services', async () => {
-  const getConnectivity = vi.fn()
-  const getJobs = vi.fn()
-  const getWorkspace = vi.fn()
-  Object.defineProperty(window, 'jobos', {
-    configurable: true,
-    value: {
-      setup: {
-        get: vi.fn().mockResolvedValue({ state: 'required', message: 'JobOS setup is required' }),
-        initialize: vi.fn(),
-        restart: vi.fn()
-      },
-      connectivity: { get: getConnectivity },
-      jobs: { getState: getJobs },
-      workspace: { get: getWorkspace }
-    }
-  })
-
-  render(<App />)
-
-  expect(await screen.findByRole('heading', { name: 'Set up JobOS on this Mac' })).not.toBeNull()
-  expect(screen.queryByLabelText('Job navigation')).toBeNull()
-  expect(getConnectivity).not.toHaveBeenCalled()
-  expect(getJobs).not.toHaveBeenCalled()
-  expect(getWorkspace).not.toHaveBeenCalled()
-})
-
-
 test('browser save navigation only accepts the original listing or its slug-matched detail page', () => {
   expect(isExpectedSaveNavigation(
     'https://wellfound.com/jobs/starred?job_listing_slug=applied-ai-builder',
@@ -141,7 +113,7 @@ test('the shell reports authenticated local connectivity without exposing creden
     }
   })
 
-  render(<App />)
+  render(<WorkbenchApp />)
 
   expect(screen.getByText('Connecting to local service…')).not.toBeNull()
   expect(await screen.findByText('Local service connected')).not.toBeNull()
@@ -184,7 +156,7 @@ test('a profile change before the first probe replaces the workspace with restar
     }
   } })
 
-  render(<App />)
+  render(<WorkbenchApp />)
   await waitFor(() => expect(connectivity).toHaveBeenCalledOnce())
 
   expect(await screen.findByRole('heading', {
@@ -209,7 +181,7 @@ test('reset preserves the selected layout preset', async () => {
     }
   })
 
-  render(<App />)
+  render(<WorkbenchApp />)
   const research = screen.getByRole('button', { name: 'Research' })
   fireEvent.click(research)
   fireEvent.click(screen.getByRole('button', { name: 'Reset layout' }))
@@ -219,7 +191,7 @@ test('reset preserves the selected layout preset', async () => {
 
 test('later-phase controls stay disabled while the browser surface is recoverable', () => {
   Object.defineProperty(window, 'jobos', { configurable: true, value: undefined })
-  render(<App />)
+  render(<WorkbenchApp />)
 
   for (const name of [
     'New agent session',
@@ -249,7 +221,7 @@ test('exact Command shortcuts create and select sessions from the composer witho
     get: vi.fn().mockResolvedValue({ conversationId: 'conv-1', position: 1, title: 'Session 1', createdAt: '', entries: [], activeTurn: null, connection: 'online', latestEventId: 0, jobContext: emptyJobContext }),
     create, archive: vi.fn(), send: vi.fn(), cancel: vi.fn(), retry: vi.fn(), subscribe: vi.fn(() => () => undefined)
   } } })
-  render(<App />)
+  render(<WorkbenchApp />)
   const composer = await screen.findByRole('textbox', { name: 'Message the agent' })
   fireEvent.change(composer, { target: { value: 'keep this draft' } })
   const createEvent = new KeyboardEvent('keydown', { bubbles: true, cancelable: true, key: 'n', metaKey: true })
@@ -281,7 +253,7 @@ test('Command 1 through Command 5 map to visible positions and Command N announc
     get: vi.fn((id: string) => Promise.resolve({ ...summaries.find(item => item.conversationId === id)!, entries: [] })),
     create, archive: vi.fn(), send: vi.fn(), cancel: vi.fn(), retry: vi.fn(), subscribe: vi.fn(() => () => undefined)
   } } })
-  render(<App />)
+  render(<WorkbenchApp />)
   const composer = await screen.findByRole('textbox', { name: 'Message the agent' })
   await screen.findByRole('tab', { name: 'Session 5, Idle' })
   for (const key of ['1', '2', '3', '4', '5']) {
@@ -308,7 +280,7 @@ test('Command session shortcuts are suppressed while Settings or any modal is op
     get: vi.fn((id: string) => Promise.resolve({ ...summaries.find(item => item.conversationId === id)!, entries: [] })),
     create, archive: vi.fn(), send: vi.fn(), cancel: vi.fn(), retry: vi.fn(), subscribe: vi.fn(() => () => undefined)
   } } })
-  render(<App />)
+  render(<WorkbenchApp />)
   fireEvent.click(await screen.findByRole('tab', { name: 'Session 2, Idle' }))
   fireEvent.click(screen.getByRole('button', { name: 'Open settings' }))
   const settings = await screen.findByRole('dialog', { name: 'Settings' })
@@ -349,7 +321,7 @@ test('auth degradation is distinct from network unavailability', async () => {
     value: { connectivity: { get } }
   })
 
-  render(<App />)
+  render(<WorkbenchApp />)
   expect(await screen.findByText('Local service authentication failed')).not.toBeNull()
   fireEvent.focus(window)
   expect(await screen.findByText('Local service unavailable')).not.toBeNull()
@@ -404,7 +376,7 @@ test('real jobs render compactly and user selection and status use the shared br
     }
   })
 
-  render(<App />)
+  render(<WorkbenchApp />)
   const job = await screen.findByRole('button', { name: 'Select Example Co Product Builder' })
   fireEvent.click(job)
   await waitFor(() => expect(select).toHaveBeenCalledWith('conv_unavailable', 'job-1'))
@@ -551,7 +523,7 @@ test('saving dispatches job-hunter and reconciles a failure emitted before send 
     }
   } })
 
-  render(<App />)
+  render(<WorkbenchApp />)
   await screen.findByRole('tab', { name: `Select ${listing.title}` })
   fireEvent.click(screen.getByRole('button', { name: 'Save this job to JobOS' }))
 
@@ -814,7 +786,7 @@ test('clicking a job opens its listing in a new associated tab without disturbin
     { tabId: 'gmail', url: 'https://mail.google.com/', title: 'Gmail', associatedJobId: null }
   ])
 
-  render(<App />)
+  render(<WorkbenchApp />)
   fireEvent.click(await screen.findByRole('button', { name: 'Select Northstar Staff PM' }))
 
   await waitFor(() => expect(actions.create).toHaveBeenCalledWith(navigationJobs[1]!.canonicalUrl, navigationJobs[1]!.jobId))
@@ -832,7 +804,7 @@ test('a layout save failure does not suppress job listing navigation', async () 
   ])
   actions.workspaceSave.mockRejectedValue(new Error('disk unavailable'))
 
-  render(<App />)
+  render(<WorkbenchApp />)
   fireEvent.click(await screen.findByRole('button', { name: 'Select Northstar Staff PM' }))
 
   await waitFor(() => expect(actions.create).toHaveBeenCalledWith(navigationJobs[1]!.canonicalUrl, navigationJobs[1]!.jobId))
@@ -847,7 +819,7 @@ test('overlapping navigator selections only open the latest clicked job', async 
     resolveSelection.set(jobId, () => resolve({ ...emptyJobContext, selectedJobId: jobId }))
   }))
 
-  render(<App />)
+  render(<WorkbenchApp />)
   fireEvent.click(await screen.findByRole('button', { name: 'Select Example Co Product Builder' }))
   await waitFor(() => expect(resolveSelection.has('job-1')).toBe(true))
   fireEvent.click(screen.getByRole('button', { name: 'Select Northstar Staff PM' }))
@@ -867,7 +839,7 @@ test('clicking a job focuses its associated listing tab without creating a dupli
     { tabId: 'northstar', url: 'https://example.com/company', title: 'Northstar', associatedJobId: 'job-2' }
   ])
 
-  render(<App />)
+  render(<WorkbenchApp />)
   fireEvent.click(await screen.findByRole('button', { name: 'Select Northstar Staff PM' }))
 
   await waitFor(() => expect(actions.select).toHaveBeenCalledWith('northstar'))
@@ -881,7 +853,7 @@ test('clicking a job focuses its normalized-URL listing tab without creating a d
     { tabId: 'northstar', url: 'https://EXAMPLE.com/jobs/2#details', title: 'Northstar', associatedJobId: null }
   ])
 
-  render(<App />)
+  render(<WorkbenchApp />)
   fireEvent.click(await screen.findByRole('button', { name: 'Select Northstar Staff PM' }))
 
   await waitFor(() => expect(actions.select).toHaveBeenCalledWith('northstar'))
@@ -893,7 +865,7 @@ test('startup selection does not open a job listing tab', async () => {
     { tabId: 'gmail', url: 'https://mail.google.com/', title: 'Gmail', associatedJobId: null }
   ], 'job-2')
 
-  render(<App />)
+  render(<WorkbenchApp />)
 
   expect(await screen.findByText('Northstar · Staff PM')).not.toBeNull()
   expect(actions.create).not.toHaveBeenCalled()
@@ -905,7 +877,7 @@ test('a global MCP job selection cannot replace the active session job', async (
     { tabId: 'gmail', url: 'https://mail.google.com/', title: 'Gmail', associatedJobId: null }
   ], 'job-1')
 
-  render(<App />)
+  render(<WorkbenchApp />)
   await screen.findByRole('button', { name: 'Select Northstar Staff PM' })
   await act(async () => {
     actions.emitJobEvent({ eventId: 4, eventType: 'job_selected', origin: 'mcp', jobId: 'job-2' })
@@ -943,7 +915,7 @@ test('an MCP status event refreshes the navigator without a manual action', asyn
     }
   })
 
-  render(<App />)
+  render(<WorkbenchApp />)
   expect(await screen.findByDisplayValue('discovered')).not.toBeNull()
   await act(async () => {
     listener?.({ eventId: 8, eventType: 'job_status_changed', origin: 'mcp' })
@@ -970,7 +942,7 @@ test('filtering the list never clears the active job context', async () => {
     }
   })
 
-  render(<App />)
+  render(<WorkbenchApp />)
   fireEvent.click(await screen.findByRole('button', { name: 'Select Northstar Product Manager' }))
   expect(await screen.findByText('Northstar · Product Manager')).not.toBeNull()
 
@@ -1002,7 +974,7 @@ test('changing selected jobs preserves one mounted durable agent conversation an
     }
   } })
 
-  render(<App />)
+  render(<WorkbenchApp />)
   expect(await screen.findByText('Persistent response')).not.toBeNull()
   const composer = screen.getByRole('textbox', { name: 'Message the agent' })
   fireEvent.change(composer, { target: { value: 'Keep this draft' } })
@@ -1037,7 +1009,7 @@ test('primary panels resize, collapse, reopen, and reorder with keyboard alterna
     }
   })
 
-  render(<App />)
+  render(<WorkbenchApp />)
   const separator = await screen.findByRole('separator', { name: 'Resize Job navigation and Center workspace' })
   fireEvent.keyDown(separator, { key: 'ArrowRight' })
   expect(screen.getByText(/Job navigation 300 pixels/)).not.toBeNull()
@@ -1064,7 +1036,7 @@ test('an early layout action is rebased onto delayed startup restoration and per
     }
   })
 
-  render(<App />)
+  render(<WorkbenchApp />)
   fireEvent.click(screen.getByRole('button', { name: 'Research' }))
   expect(screen.getByRole('button', { name: 'Research' }).getAttribute('aria-pressed')).toBe('true')
 
@@ -1092,7 +1064,7 @@ test('a first action after failed startup hydration replays over remote state af
     }
   })
 
-  render(<App />)
+  render(<WorkbenchApp />)
   await act(async () => rejectInitialGet(new Error('startup unavailable')))
   await waitFor(() => expect(screen.getByText('Using safe default layout')).not.toBeNull())
 
@@ -1159,7 +1131,7 @@ test('a synthesized default tab is not replayed over authoritative browser state
     }
   })
 
-  render(<App />)
+  render(<WorkbenchApp />)
   await act(async () => rejectInitialGet(new Error('startup unavailable')))
   await waitFor(() => expect(restore).toHaveBeenCalledWith({ tabs: [], activeTabId: null }))
   expect(save).not.toHaveBeenCalled()
@@ -1207,7 +1179,7 @@ test('opening Settings detaches an active native browser surface before showing 
     }
   })
 
-  render(<App />)
+  render(<WorkbenchApp />)
   await screen.findByRole('tab', { name: 'Select Listing' })
   await waitFor(() => expect(setBounds).toHaveBeenCalledWith(expect.objectContaining({ visible: true })))
   setBounds.mockClear()
@@ -1269,7 +1241,7 @@ test('creating an additive session leaves the active native browser surface atta
     }
   })
 
-  render(<App />)
+  render(<WorkbenchApp />)
   await screen.findByRole('tab', { name: 'Select Listing' })
   await waitFor(() => expect(setBounds).toHaveBeenCalledWith(expect.objectContaining({ visible: true })))
   setBounds.mockClear()
@@ -1309,7 +1281,7 @@ test('browser tabs expose valid keyboard tab semantics, adjacent actions, and fo
     }
   })
 
-  render(<App />)
+  render(<WorkbenchApp />)
   const gmail = await screen.findByRole('tab', { name: 'Select Gmail' })
   const listing = screen.getByRole('tab', { name: 'Select Listing' })
   expect(gmail.querySelector('button')).toBeNull()
@@ -1380,7 +1352,7 @@ test.each([
     }
   })
 
-  render(<App />)
+  render(<WorkbenchApp />)
 
   await waitFor(() => {
     const messages = screen.getAllByText(expected)
@@ -1390,7 +1362,7 @@ test.each([
 
 test('layout changes preserve mounted content surface identities', async () => {
   Object.defineProperty(window, 'jobos', { configurable: true, value: undefined })
-  render(<App />)
+  render(<WorkbenchApp />)
   const center = screen.getByRole('main')
   const agent = screen.getByRole('complementary', { name: 'Agent chat' })
 
@@ -1403,7 +1375,7 @@ test('layout changes preserve mounted content surface identities', async () => {
 
 test('reordering aligns DOM, focus, and reading order without remounting surfaces', () => {
   Object.defineProperty(window, 'jobos', { configurable: true, value: undefined })
-  render(<App />)
+  render(<WorkbenchApp />)
   const jobs = screen.getByTestId('panel-jobs')
   const center = screen.getByTestId('panel-center')
   const agent = screen.getByTestId('panel-agent')
@@ -1424,7 +1396,7 @@ test('reordering aligns DOM, focus, and reading order without remounting surface
 
 test('collapse and reopen transfer focus and expose the controlled panel state', async () => {
   Object.defineProperty(window, 'jobos', { configurable: true, value: undefined })
-  render(<App />)
+  render(<WorkbenchApp />)
   const collapse = screen.getByRole('button', { name: 'Collapse Center workspace' })
   collapse.focus()
 
@@ -1445,7 +1417,7 @@ test('collapse and reopen transfer focus and expose the controlled panel state',
 
 test('pointer resizing tracks movement and every panel has a recovery affordance', () => {
   Object.defineProperty(window, 'jobos', { configurable: true, value: undefined })
-  render(<App />)
+  render(<WorkbenchApp />)
   const separator = screen.getByRole('separator', { name: 'Resize Job navigation and Center workspace' })
 
   fireEvent.pointerDown(separator, { clientX: 100, pointerId: 1 })
@@ -1468,7 +1440,7 @@ test('drag reordering shows an insertion preview before changing presentation on
     const x = panel === 'panel-jobs' ? 0 : panel === 'panel-center' ? 100 : panel === 'panel-agent' ? 200 : 0
     return DOMRect.fromRect({ x, y: 0, width: 100, height: 500 })
   })
-  render(<App />)
+  render(<WorkbenchApp />)
   const source = screen.getByTitle('Drag to reorder Agent chat; click for move controls')
   const target = screen.getByTestId('panel-jobs')
 
@@ -1518,7 +1490,7 @@ test('panel reordering detaches the native browser so the center panel can recei
     }
   } })
 
-  render(<App />)
+  render(<WorkbenchApp />)
   await screen.findByRole('tab', { name: 'Select Listing' })
   await waitFor(() => expect(setBounds).toHaveBeenCalledWith(expect.objectContaining({ visible: true })))
   setBounds.mockClear()
@@ -1557,7 +1529,7 @@ test('a delayed Browse action survives hydration and Reset Layout leaves Browse 
     workspace: { get, save }
   } })
 
-  render(<App />)
+  render(<WorkbenchApp />)
   fireEvent.click(screen.getByRole('button', { name: 'Browse' }))
   expect(await screen.findByRole('heading', { name: 'Browse' })).not.toBeNull()
   fireEvent.change(screen.getByRole('textbox', { name: 'Search saved jobs' }), { target: { value: 'platform' } })
@@ -1602,7 +1574,7 @@ test('Browse waits for native browser detach, keeps it hidden, and restores the 
     }
   } })
 
-  render(<App />)
+  render(<WorkbenchApp />)
   await screen.findByRole('tab', { name: 'Select Listing' })
   await waitFor(() => expect(setBounds).toHaveBeenCalledWith(expect.objectContaining({ visible: true })))
   const workbench = document.querySelector('.workbench')
@@ -1660,7 +1632,7 @@ test.each(['Research', 'Review'] as const)('a stale Browse detach cannot replace
     }
   } })
 
-  render(<App />)
+  render(<WorkbenchApp />)
   await screen.findByRole('tab', { name: 'Select Listing' })
   await waitFor(() => expect(setBounds).toHaveBeenCalledWith(expect.objectContaining({ visible: true })))
   setBounds.mockClear()
@@ -1680,7 +1652,7 @@ test.each(['Research', 'Review'] as const)('a stale Browse detach cannot replace
 
 test('Browse roundtrip preserves the selected document surface and chat DOM state', async () => {
   Object.defineProperty(window, 'jobos', { configurable: true, value: undefined })
-  render(<App />)
+  render(<WorkbenchApp />)
   const documentSurface = screen.getByRole('main')
   const agent = screen.getByRole('complementary', { name: 'Agent chat' })
   const composer = screen.getByRole('textbox', { name: 'Message the agent' }) as HTMLTextAreaElement
@@ -1714,7 +1686,7 @@ test('restored Browse waits for hydration and a successful invisible native-brow
     }
   } })
 
-  render(<App />)
+  render(<WorkbenchApp />)
   expect(screen.queryByRole('heading', { name: 'Browse' })).toBeNull()
   await act(async () => resolveWorkspace({ ...restoredWorkspace(4), activeTopLevelWorkspace: 'browse' }))
   await waitFor(() => expect(invisibleResolvers.length).toBeGreaterThanOrEqual(2))
@@ -1739,7 +1711,7 @@ test('restored Browse fails closed when native-browser detach rejects and can re
     }
   } })
 
-  render(<App />)
+  render(<WorkbenchApp />)
   expect(await screen.findByText('Browse could not open because the browser view could not be hidden.')).not.toBeNull()
   expect(screen.queryByRole('heading', { name: 'Browse' })).toBeNull()
   expect(document.querySelector('.workbench')).not.toBeNull()
@@ -1773,7 +1745,7 @@ test('Browse focus stays local until Open job commits selection and listing navi
     }
   } })
 
-  render(<App />)
+  render(<WorkbenchApp />)
   await screen.findByRole('button', { name: 'Select Alpha Builder' })
   fireEvent.click(screen.getByRole('button', { name: 'Browse' }))
   await screen.findByText('Detail one')
@@ -1806,7 +1778,7 @@ test('failed Open job navigation remains in Browse and is announced', async () =
     }
   } })
 
-  render(<App />)
+  render(<WorkbenchApp />)
   await screen.findByRole('button', { name: 'Select Alpha Builder' })
   fireEvent.click(screen.getByRole('button', { name: 'Browse' }))
   await screen.findByText('Detail')
