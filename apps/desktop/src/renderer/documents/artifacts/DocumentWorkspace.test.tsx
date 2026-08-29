@@ -5,6 +5,19 @@ import type { DocumentArtifact, JobArtifactsState, JobListItem, JobOsRendererBri
 import type { DocxExternalChangeEvent, DocxOpenResult } from '../../../shared/docxDocuments'
 import { DocumentWorkspace } from './DocumentWorkspace'
 
+const projectionCalls = vi.hoisted(() => ({ group: vi.fn() }))
+
+vi.mock('./artifactProjection', async importOriginal => {
+  const actual = await importOriginal<typeof import('./artifactProjection')>()
+  return {
+    ...actual,
+    projectArtifactDocuments: (artifacts: DocumentArtifact[]) => {
+      projectionCalls.group(artifacts)
+      return actual.projectArtifactDocuments(artifacts)
+    }
+  }
+})
+
 vi.mock('./PdfPreview', async () => {
   const React = await import('react')
   return {
@@ -171,6 +184,7 @@ afterEach(() => {
   cleanup()
   Object.defineProperty(window, 'jobos', { configurable: true, value: undefined })
   vi.restoreAllMocks()
+  projectionCalls.group.mockClear()
 })
 
 describe('trusted document workspace', () => {
@@ -258,6 +272,38 @@ describe('trusted document workspace', () => {
     await waitFor(() => expect(onViewChange).toHaveBeenLastCalledWith(
       'art_ABCDEFGHIJKLMNOPQRSTUVWX', 2, 1.1
     ))
+  })
+
+  it('reuses artifact grouping across page, zoom, export, dialog, agent-stream, and unrelated shell rerenders', async () => {
+    installDocuments()
+    installDocxDocuments()
+    const onViewChange = vi.fn()
+
+    function Shell({ agentStream, shellUpdate }: { agentStream: number; shellUpdate: number }) {
+      return (
+        <>
+          <span data-testid="agent-stream">Agent stream {agentStream}</span>
+          <span data-testid="shell-update">Shell update {shellUpdate}</span>
+          <DocumentWorkspace hydrated job={job} onOpenEditor={() => {}} onViewChange={onViewChange} restoredArtifactId={null} restoredPage={1} restoredZoom={1} />
+        </>
+      )
+    }
+
+    const view = render(<Shell agentStream={0} shellUpdate={0} />)
+    expect(await screen.findByText('PDF bytes 2 · page 1 at 100%')).not.toBeNull()
+    await screen.findByText('Page 1 of 3')
+    projectionCalls.group.mockClear()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Next page' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Zoom in' }))
+    fireEvent.click(screen.getByRole('button', { name: /^Export$/ }))
+    fireEvent.click(screen.getByRole('button', { name: 'New blank DOCX' }))
+    expect(screen.getByRole('dialog', { name: 'Create or choose a DOCX' })).not.toBeNull()
+
+    view.rerender(<Shell agentStream={1} shellUpdate={1} />)
+    expect(screen.getByTestId('agent-stream').textContent).toBe('Agent stream 1')
+    expect(screen.getByTestId('shell-update').textContent).toBe('Shell update 1')
+    expect(projectionCalls.group).not.toHaveBeenCalled()
   })
 
   it('approves the exact visible successful revision and shows its durable state', async () => {

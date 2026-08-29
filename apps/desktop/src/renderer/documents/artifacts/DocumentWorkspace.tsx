@@ -14,7 +14,6 @@ import {
 } from 'lucide-react'
 
 import type {
-  ArtifactMediaType,
   DocumentArtifact,
   DocumentKey,
   JobArtifactsState,
@@ -25,6 +24,17 @@ import type { DocxBinding, DocxOpenResult } from '../../../shared/docxDocuments'
 import { displayDocxFilename } from '../docx/editor/docxDisplay'
 import { DocxBytesPreview } from '../previews/DocxBytesPreview'
 import { OriginalDocxPreview } from '../previews/OriginalDocxPreview'
+import {
+  chooseArtifactPreview,
+  DOCX,
+  documentLabels,
+  documentOrder,
+  latestArtifactByFormat,
+  PDF,
+  projectArtifactDocuments,
+  selectArtifactRevision,
+  type LogicalRevision
+} from './artifactProjection'
 import { PdfPreview } from './PdfPreview'
 
 export type DocumentPreviewMode = 'pdf' | 'docx'
@@ -42,30 +52,6 @@ interface DocumentWorkspaceProps {
   onPreviewModeChange?: (mode: DocumentPreviewMode) => void
 }
 
-const PDF: ArtifactMediaType = 'application/pdf'
-const DOCX: ArtifactMediaType = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
-const documentOrder: DocumentKey[] = ['resume', 'cover_letter', 'references']
-const documentLabels: Record<DocumentKey, string> = {
-  resume: 'Resume',
-  cover_letter: 'Cover Letter',
-  references: 'References'
-}
-
-interface LogicalRevision {
-  documentKey: DocumentKey
-  documentLabel: string
-  sourceRevision: string
-  renderSequence: number
-  artifacts: DocumentArtifact[]
-  representative: DocumentArtifact
-}
-
-interface LogicalDocument {
-  documentKey: DocumentKey
-  documentLabel: string
-  revisions: LogicalRevision[]
-}
-
 const emptyState = (jobId = ''): JobArtifactsState => ({
   jobId,
   artifacts: [],
@@ -73,68 +59,6 @@ const emptyState = (jobId = ''): JobArtifactsState => ({
   lastSuccessfulArtifactId: null,
   approvedArtifactId: null
 })
-
-function latestByFormat(artifacts: DocumentArtifact[], mediaType: ArtifactMediaType) {
-  return artifacts
-    .filter(artifact => artifact.mediaType === mediaType)
-    .sort((left, right) => right.renderSequence - left.renderSequence)[0]
-}
-
-function revisionRepresentative(artifacts: DocumentArtifact[]) {
-  const succeeded = artifacts.filter(artifact => artifact.renderStatus === 'succeeded')
-  return latestByFormat(succeeded, PDF)
-    ?? latestByFormat(succeeded, DOCX)
-    ?? latestByFormat(artifacts, PDF)
-    ?? latestByFormat(artifacts, DOCX)
-}
-
-function buildDocuments(artifacts: DocumentArtifact[]): LogicalDocument[] {
-  return documentOrder.flatMap(documentKey => {
-    const matching = artifacts.filter(artifact => artifact.documentKey === documentKey)
-    if (!matching.length) return []
-    const grouped = new Map<string, DocumentArtifact[]>()
-    for (const artifact of matching) {
-      const revision = grouped.get(artifact.sourceRevision) ?? []
-      revision.push(artifact)
-      grouped.set(artifact.sourceRevision, revision)
-    }
-    const revisions = Array.from(grouped.entries()).map(([sourceRevision, variants]) => ({
-      documentKey,
-      documentLabel: variants[0]?.documentLabel ?? documentLabels[documentKey],
-      sourceRevision,
-      renderSequence: Math.max(...variants.map(artifact => artifact.renderSequence)),
-      artifacts: variants,
-      representative: revisionRepresentative(variants)!
-    })).sort((left, right) => right.renderSequence - left.renderSequence)
-    return [{
-      documentKey,
-      documentLabel: revisions[0]?.documentLabel ?? documentLabels[documentKey],
-      revisions
-    }]
-  })
-}
-
-function findRevision(documents: LogicalDocument[], artifactId: string | null) {
-  if (!artifactId) return null
-  for (const document of documents) {
-    const revision = document.revisions.find(item => item.artifacts.some(artifact => artifact.artifactId === artifactId))
-    if (revision) return { document, revision }
-  }
-  return null
-}
-
-function chooseLogicalPreview(next: JobArtifactsState, preferredId: string | null) {
-  const documents = buildDocuments(next.artifacts)
-  const preferred = findRevision(documents, preferredId)
-  if (preferred?.revision.representative.renderStatus === 'succeeded') return preferred
-  for (const document of documents) {
-    const revision = document.revisions.find(item => item.representative.renderStatus === 'succeeded')
-    if (revision) return { document, revision }
-  }
-  const document = documents[0]
-  const revision = document?.revisions[0]
-  return document && revision ? { document, revision } : null
-}
 
 export function DocumentWorkspace(props: DocumentWorkspaceProps) {
   const bridge = useRef(window.jobos?.documents).current
@@ -185,10 +109,10 @@ export function DocumentWorkspace(props: DocumentWorkspaceProps) {
 
   const stateMatchesJob = state.jobId === props.job?.jobId
   const documents = useMemo(
-    () => buildDocuments(stateMatchesJob ? state.artifacts : []),
+    () => projectArtifactDocuments(stateMatchesJob ? state.artifacts : []),
     [state.artifacts, stateMatchesJob]
   )
-  const activeSelection = useMemo(() => findRevision(documents, activeId), [activeId, documents])
+  const activeSelection = useMemo(() => selectArtifactRevision(documents, activeId), [activeId, documents])
   const activeDocument = activeSelection?.document ?? null
   const activeRevision = activeSelection?.revision ?? null
   const activeArtifact = activeRevision?.representative ?? null
@@ -202,8 +126,8 @@ export function DocumentWorkspace(props: DocumentWorkspaceProps) {
     .sort((left, right) => right.renderSequence - left.renderSequence)[0] ?? null
   const lastSuccessful = activeDocument?.revisions.find(revision => revision.representative.renderStatus === 'succeeded')?.representative ?? null
   const exportArtifacts = activeRevision?.artifacts.filter(artifact => artifact.renderStatus === 'succeeded') ?? []
-  const exportPdf = latestByFormat(exportArtifacts, PDF)
-  const exportDocx = latestByFormat(exportArtifacts, DOCX)
+  const exportPdf = latestArtifactByFormat(exportArtifacts, PDF)
+  const exportDocx = latestArtifactByFormat(exportArtifacts, DOCX)
   const activeBinding = activeDocument
     ? bindings.find(binding => binding.documentKey === activeDocument.documentKey) ?? null
     : null
@@ -219,10 +143,11 @@ export function DocumentWorkspace(props: DocumentWorkspaceProps) {
   const previewFilename = previewBinding ? displayDocxFilename(previewBinding) : null
 
   const choosePreview = useCallback((next: JobArtifactsState, preferredId: string | null) => {
-    const chosen = chooseLogicalPreview(next, preferredId)
+    const projection = chooseArtifactPreview(next.artifacts, preferredId)
+    const chosen = projection.selectedPreview
     const nextId = chosen?.revision.representative.artifactId ?? null
     const changed = selectedId.current !== nextId
-    const restoredLogicalRevision = findRevision(buildDocuments(next.artifacts), restoredArtifactId.current)
+    const restoredLogicalRevision = selectArtifactRevision(projection.documents, restoredArtifactId.current)
     const preservesRestoredRevision = Boolean(
       restoredLogicalRevision
       && chosen
@@ -524,12 +449,12 @@ export function DocumentWorkspace(props: DocumentWorkspaceProps) {
           && artifact.renderStatus === 'succeeded'
         ))
       : []
-    const viewedDocx = latestByFormat(
+    const viewedDocx = latestArtifactByFormat(
       activeRevision
         ? successfulDocx.filter(artifact => artifact.sourceRevision === activeRevision.sourceRevision)
         : successfulDocx,
       DOCX
-    ) ?? latestByFormat(successfulDocx, DOCX) ?? null
+    ) ?? latestArtifactByFormat(successfulDocx, DOCX) ?? null
 
     setEditorBusyKey(documentKey)
     setMessage(viewedDocx ? 'Opening this packet DOCX…' : 'Opening the original DOCX…')
