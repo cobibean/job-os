@@ -19,6 +19,7 @@
 - Do not change IPC channel names, preload bridge shapes, API/OpenAPI schemas, generated contracts, persistence payloads, profile semantics, browser security, or document trust rules.
 - Do not refactor `services/api/`, `services/mcp/`, `apps/desktop/src/main/`, `apps/desktop/src/preload/`, `packages/contracts/`, `packages/docx-engine/`, or `packages/docx-editor-core/` beyond a direct path consumer made necessary by a renderer move.
 - Do not add a state-management library, router, dependency container, generic bridge framework, broad barrel export, CSS-in-JS system, or new package dependency.
+- Do not keep heavy feature trees mounted when the current renderer unmounts them, duplicate bridge-backed controllers, or turn a current dynamic/separate bundle edge into eager application code.
 - Preserve the stable renderer HTML entrypoints `index.html`, `print.html`, and `docx-worker.html` at the renderer root.
 - Preserve `main.tsx` as the stable application entrypoint and `styles.css` as the stable stylesheet entrypoint.
 - Keep tests beside the implementation they prove. Replace old-path tests after the equivalent owner-level test passes; do not layer duplicate test suites indefinitely.
@@ -36,6 +37,7 @@
 - Refactor the renderer next.
 - Use the feature-owned shape proposed after the Electron main-process refactor.
 - Publish this plan so Hermes can pull it and implement it.
+- Apply the performance safeguards from the two-agent review before Hermes starts implementation.
 
 ### Verified facts at the planning baseline
 
@@ -48,6 +50,7 @@
 - `styles.css` is 2,182 lines and mixes every product owner in one cascade.
 - Renderer feature behavior is split horizontally across `components/`, `hooks/`, `document-editor/`, `agent-avatar/`, and root files.
 - The Electron main process now documents the same product owners and enforces its root/composition rules with an architecture test.
+- Two independent read-only reviewers used the same performance brief and returned `safe with plan amendments`. Their findings were confirmed against the current mount lifecycle and a fresh Vite manifest. This revision includes all four agreed amendments.
 
 ### Working assumptions Hermes must re-check
 
@@ -185,9 +188,11 @@ Do not create empty directories merely to match the tree. Create a directory in 
 5. Each feature may import generated/shared contracts and process-neutral code from `apps/desktop/src/shared`.
 6. Keep bridge access inside the owner that uses it. Do not build a generic renderer client layer around `window.jobos`.
 7. Cross-owner workflows belong to the product owner of the outcome and receive narrow dependencies from app composition. The save-from-browser workflow belongs to `jobs/`, even though it coordinates agent and browser capabilities.
-8. Tests use the same owner interface as production callers. Do not reach through an owner to assert private hook state.
-9. Avoid broad `index.ts` barrels. Import the explicit module that provides the needed interface.
-10. Root HTML files remain stable runtime assets; their script `src` values may point into an owner directory.
+8. Bridge-backed controllers have one live instance at their existing owner lifetime. Do not call `useBrowser`, `useSaveJobFromBrowser`, `useAgentSessions`, `useConnectedAgents`, `useJobs`, `useWorkspace`, `useConnectivity`, `useCareerProfileProduct`, or another bridge-owning controller in both composition and a leaf module. Pass narrow state and commands instead.
+9. Callbacks or adapters consumed by effects and subscriptions must retain stable identity or read changing values through a latest-value ref. Unrelated renderer updates must not restart IPC subscriptions, polling intervals, restoration, observers, or initial loads.
+10. Tests use the same owner interface as production callers. Do not reach through an owner to assert private hook state. Count active subscriptions/listeners after React StrictMode setup and cleanup rather than assuming an effect sets up only once in development.
+11. Avoid broad `index.ts` barrels. Import the explicit module that provides the needed interface.
+12. Root HTML files remain stable runtime assets; their script `src` values may point into an owner directory.
 
 ## 5. Stable entrypoints and path-sensitive consumers
 
@@ -332,7 +337,7 @@ Do not impose a line-count gate. Completion means the file reads as ordered comp
 
 ### 8.2 Feature-neutral workspace
 
-`workspace/WorkbenchLayout.tsx` already accepts feature nodes and should remain the primary layout interface. Deepen `CenterWorkspace.tsx` the same way:
+`workspace/WorkbenchLayout.tsx` already accepts feature nodes and should remain the primary layout interface. Deepen `CenterWorkspace.tsx` without changing the current asymmetric lifecycle:
 
 ```tsx
 interface CenterWorkspaceProps {
@@ -342,16 +347,19 @@ interface CenterWorkspaceProps {
 }
 
 export function CenterWorkspace({ activeSurface, browser, document }: CenterWorkspaceProps) {
-  return (
-    <section className="center-workspace">
-      <div hidden={activeSurface !== 'browser'}>{browser}</div>
-      <div hidden={activeSurface !== 'document'}>{document}</div>
-    </section>
-  )
+  return activeSurface === 'browser' ? browser : document
 }
 ```
 
-Preserve mounted identities if the current implementation relies on hidden surfaces rather than unmounting. Tests must prove the exact existing behavior before changing this seam.
+Preserve the current mixed lifecycle exactly:
+
+- `WorkbenchApp` invokes the browser controller and save-reconciliation controller once for the workbench lifetime.
+- `BrowserWorkspace` is presentation over the existing browser controller. Its DOM mounts only for the browser view.
+- `DocumentWorkspace` mounts only for the document view and unmounts when the browser becomes active.
+- The browser controller, browser persistence state, save-operation map, and agent reconciliation subscription do not remount during browser/document switches.
+- Leaving Documents unsubscribes document listeners and releases PDF tasks, canvases, payload buffers, object URLs, and portals.
+
+Do not keep both feature trees mounted with plain `hidden`. Do not conditionally mount the browser controller with `BrowserWorkspace`; that would repeat restore/subscription work and could lose in-flight save reconciliation. Characterization tests must prove the browser -> document -> browser lifecycle before extraction.
 
 `workspace/WorkspaceBar.tsx` must likewise receive the Installation Profile control as a `ReactNode` slot. `app/WorkbenchApp.tsx` composes `InstallationProfileMenu` into that slot, so workspace does not import an installation-profile implementation. Preserve the current navigation labels, profile placement, mode toggle, and reset behavior.
 
@@ -394,6 +402,8 @@ Extract the pure artifact grouping and selection rules from `DocumentWorkspace.t
 
 Keep asynchronous bridge sequencing in a feature controller and visible rendering in `DocumentWorkspace.tsx`. Tests must continue proving latest-wins behavior, job-change invalidation, last-successful fallback, exact viewed revision, approval, export, and editable-DOCX refresh.
 
+Preserve the current memo boundary around artifact grouping and sorting. Projection may recompute only when artifact or logical-selection inputs change. Page, zoom, export-menu, agent-stream, dialog, and unrelated shell updates must reuse the prior projection.
+
 ## 9. Ordered implementation tasks
 
 ### Task 1: Re-verify baseline and characterize fragile seams
@@ -413,6 +423,15 @@ pnpm --filter @jobos/desktop lint
 pnpm --filter @jobos/desktop build
 ```
 
+- [ ] Capture a Vite performance baseline:
+
+```bash
+pnpm --filter @jobos/desktop exec vite build --manifest
+```
+
+- [ ] Record the transformed-module count, warm build duration, every HTML entry's static and dynamic import closure, raw/gzip asset sizes, application CSS file count, and unresolved CSS imports. Preserve the manifest as implementation evidence, not as a committed build artifact.
+- [ ] Use the planning measurement as a cross-check: 2,341 transformed modules; index JS 701.13 kB raw / 204.04 kB gzip; eager shared JS 790.36 kB / 245.15 kB; application CSS 118.17 kB / 19.32 kB; dynamic PDF JS 426.36 kB / 127.09 kB; print JS 532.13 kB / 106.48 kB; PDF worker 1,262.39 kB raw. Warm local builds ranged from 362 to 479 ms, but machine timing is diagnostic rather than a hard gate.
+- [ ] Confirm the baseline topology: PDF.js is dynamic from the application entry; print and DOCX worker remain independent HTML entries; the application entry has no static dependency on `documentPrint`, `docxWorker`, `pagedjs`, or PDF.js.
 - [ ] If any command is red on unchanged baseline, record the exact failure and separate it from refactor regressions. Do not normalize a pre-existing failure by weakening a test.
 - [ ] Confirm the current renderer file inventory and every non-renderer path consumer with `rg` before moving files.
 
@@ -514,6 +533,7 @@ pnpm --filter @jobos/desktop exec vitest run src/renderer/app/architecture.test.
 - Create: `browser/BrowserWorkspace.tsx`
 - Create: `jobs/save-from-browser/saveJobPrompt.ts`
 - Create: `jobs/save-from-browser/useSaveJobFromBrowser.ts`
+- Create: `app/WorkbenchApp.lifecycle.test.tsx`
 - Create focused tests beside each module.
 - Modify: `app/WorkbenchApp.tsx`
 
@@ -521,10 +541,13 @@ pnpm --filter @jobos/desktop exec vitest run src/renderer/app/architecture.test.
 - [ ] Run the new pure protocol tests and confirm exact prompt/error behavior.
 - [ ] Extract the asynchronous save operation to `useSaveJobFromBrowser` behind narrow injected agent/browser dependencies.
 - [ ] Move one reconciliation scenario at a time from the oversized Workbench/App integration test to the controller test.
-- [ ] Extract native-browser presentation to `BrowserWorkspace` and keep `useBrowser` private to that owner.
-- [ ] Reduce `CenterWorkspace` to feature-neutral slot composition while preserving mounted surface identities.
+- [ ] Keep the `useBrowser` implementation owned by `browser/`, but instantiate it exactly once in `WorkbenchApp` for the workbench lifetime. Pass its narrow controller to `BrowserWorkspace` and the save workflow.
+- [ ] Reduce `CenterWorkspace` to feature-neutral conditional composition while preserving the mixed lifecycle in Section 8.2.
 - [ ] Replace `WorkspaceBar`'s direct `InstallationProfileMenu` import with a profile-control slot composed by `WorkbenchApp`.
 - [ ] Compose browser, document, and save workflow in `WorkbenchApp`.
+- [ ] Add a Research -> Review -> Research -> Browse -> Research lifecycle test. After StrictMode settles, assert one live browser listener, one live save-reconciliation listener, no repeated browser restore, document bridge work only while `DocumentWorkspace` is mounted, and complete listener cleanup after unmount.
+- [ ] Extend the PDF preview test to prove surface exit destroys the active `PDFDocumentLoadingTask` and unmounts its canvas.
+- [ ] Assert the Workbench lifecycle removes document payload state and any document export portal after returning to the browser view.
 - [ ] Run all browser-save, tab, document-view, job-selection, Browse, and workspace integration tests.
 - [ ] Commit only after old mixed definitions are removed and the new interface-level tests pass.
 
@@ -539,6 +562,7 @@ pnpm --filter @jobos/desktop exec vitest run src/renderer/app/architecture.test.
 - [ ] Keep cache integrity and bridge mutation logic in the product controller, not UI leaf modules.
 - [ ] Split work-arrangement, collaboration, complete-product, and settings code into their named Career Profile subowners.
 - [ ] Extract and test pure artifact projection/selection from `DocumentWorkspace`.
+- [ ] Add a rerender test proving page, zoom, export-menu, agent-stream, dialog, and unrelated shell changes do not rerun artifact grouping/sorting when artifact and logical-selection inputs are unchanged.
 - [ ] Separate artifact async controller state from rendering only when the existing latest-wins tests pass through the new interface.
 - [ ] Delete superseded private-function tests once interface tests provide equivalent proof.
 - [ ] Run all Career Profile and document workspace tests.
@@ -560,6 +584,7 @@ pnpm --filter @jobos/desktop exec vitest run src/renderer/app/architecture.test.
 - [ ] Keep chat CSS and Connected Agent settings CSS in separate co-located agent files if their current cascade positions differ.
 - [ ] Turn root `styles.css` into only ordered `@import` statements.
 - [ ] Run all CSS-source tests, theme tests, component tests, desktop build, and packaged-renderer verification.
+- [ ] Build with `--manifest` and confirm the packaged application emits exactly one application CSS asset, contains no unresolved `@import`, and does not duplicate owner rules. Stop for review if CSS grows by more than 2% or 10 KiB gzip, whichever is larger, without a measured explanation.
 - [ ] Compare representative before/after screenshots or perform an installed visual check on workbench, Browse, Settings, Career Profile, artifact preview, editable editor, and DOCX editor.
 - [ ] Treat any visual difference as a regression unless the user separately approves it.
 - [ ] Commit the CSS split separately.
@@ -611,8 +636,12 @@ pnpm public:check
 pnpm --filter @jobos/desktop build
 pnpm --filter @jobos/desktop build
 node scripts/verify-packaged-renderer.mjs
+pnpm --filter @jobos/desktop exec vite build --manifest
 ```
 
+- [ ] Compare the candidate Vite manifest and asset measurements with Task 1. PDF.js must remain dynamic. Print and DOCX-worker entries must not acquire application-owner imports. The application entry must not gain a static edge to `documentPrint`, `docxWorker`, `pagedjs`, or `pdfjs-dist`.
+- [ ] Stop for review if any initial entry closure or application CSS grows by more than 2% or 10 KiB gzip, whichever is larger, without a measured explanation. Report all size and topology changes even when they remain below the stop threshold.
+- [ ] Confirm the built renderer has one application CSS asset with no unresolved `@import`.
 - [ ] Commit the candidate before clean-clone verification because that gate tests committed `HEAD`.
 - [ ] Run:
 
@@ -673,13 +702,17 @@ The refactor is complete only when:
 - `components/`, `hooks/`, `document-editor/`, `agent-avatar/`, `diagnostics/`, `onboarding/`, and `theme/` no longer exist as root catch-all directories;
 - `App` is a setup gate and `WorkbenchApp` is the single cross-owner composition root;
 - workspace modules contain no browser/job/document/agent/Career Profile implementation;
+- browser and save controllers keep one workbench-lifetime instance while browser/document presentation remains mutually exclusive;
+- surface switching does not multiply subscriptions, restores, observers, polling, workers, canvases, payload buffers, object URLs, or portals;
 - save-from-browser, Career Profile product, and artifact selection are tested through narrow owner interfaces;
+- artifact grouping/sorting retains its current memo boundary across unrelated renderer updates;
 - styles are owner-local behind the stable ordered `styles.css` entrypoint;
 - all direct path consumers and current docs are updated;
+- the candidate Vite manifest preserves dynamic PDF loading, separate print/DOCX-worker entries, one built application stylesheet, and the approved size threshold;
 - focused, full, contracts, public, clean-clone, build-twice, and packaged-renderer checks pass;
 - real visual/workflow verification is complete or its precise residual gap is reported;
 - the implementation handoff distinguishes verified behavior from unverified risk and makes no deployment/release claim.
 
 ## 13. Starting prompt for Hermes
 
-Implement this plan from the current synchronized JobOS repository. First read `AGENTS.md`, this file, `apps/desktop/src/main/README.md`, and `docs/public/architecture.md`; then re-check the current branch/tree against the recorded planning baseline. The user has approved the renderer ownership refactor and behavior-preserving implementation. The product domains, non-goals, trust constraints, and verification gates are locked. You own small extraction and sequencing choices, but stop for Cobi if current evidence requires a user-visible change, contract/persistence change, security relaxation, or different ownership model. Work in independently testable commits, preserve unrelated/untracked work, and return the evidence package defined in Task 11. Implementation authorization does not by itself authorize pushing, merging, deployment, or release.
+Implement this plan from the current synchronized JobOS repository. First read `AGENTS.md`, this file, `apps/desktop/src/main/README.md`, and `docs/public/architecture.md`; then re-check the current branch/tree against the recorded planning baseline. The user has approved the renderer ownership refactor and behavior-preserving implementation. The product domains, lifecycle/cardinality rules, bundle gates, non-goals, trust constraints, and verification gates are locked. You own small extraction and sequencing choices, but stop for Cobi if current evidence requires a user-visible change, contract/persistence change, security relaxation, different ownership model, heavier mount lifetime, duplicated controller, or new eager bundle edge. Work in independently testable commits, preserve unrelated/untracked work, and return the evidence package defined in Task 11. Implementation authorization does not by itself authorize pushing, merging, deployment, or release.
