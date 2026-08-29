@@ -1,7 +1,7 @@
 import type { AnyExtension, Editor } from '@tiptap/core'
 import { PaginationPlus, type PaginationPlusOptions } from 'tiptap-pagination-plus'
 
-import type { DocumentSettings } from '../../shared/editableDocuments.js'
+import type { DocumentSettings } from '../../../../shared/editableDocuments.js'
 
 interface PaginationChain {
   updatePageWidth: (value: number) => PaginationChain

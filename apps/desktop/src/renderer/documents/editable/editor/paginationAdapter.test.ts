@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { defaultDocumentSettings } from '../../shared/editableDocumentSchema'
+import { defaultDocumentSettings } from '../../../../shared/editableDocumentSchema'
 import { escapePaginationText, paginationOptions } from './paginationAdapter'
 
 describe('JobOS pagination adapter', () => {

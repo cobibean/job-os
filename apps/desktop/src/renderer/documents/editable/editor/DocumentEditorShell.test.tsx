@@ -1,9 +1,9 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import type { JobOsRendererBridge } from '../../shared/contracts'
-import type { EditableDocument, SaveEditableDocumentRequest } from '../../shared/editableDocuments'
-import { createBlankDocument, defaultDocumentSettings, validateEditableContent } from '../../shared/editableDocumentSchema'
+import type { JobOsRendererBridge } from '../../../../shared/contracts'
+import type { EditableDocument, SaveEditableDocumentRequest } from '../../../../shared/editableDocuments'
+import { createBlankDocument, defaultDocumentSettings, validateEditableContent } from '../../../../shared/editableDocumentSchema'
 import { DocumentEditorShell } from './DocumentEditorShell'
 
 function editableDocument(): EditableDocument {

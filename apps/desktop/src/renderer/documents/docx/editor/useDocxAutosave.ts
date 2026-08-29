@@ -1,7 +1,7 @@
 import { buildPatchedDocx, type EditingDocument, type PmNode } from '@jobos/docx-editor-core'
 import { useCallback, useEffect, useRef, useState } from 'react'
 
-import type { DocxBinding } from '../../shared/docxDocuments'
+import type { DocxBinding } from '../../../../shared/docxDocuments'
 
 export type DocxSaveState = 'saved' | 'unsaved' | 'saving' | 'conflict' | 'error'
 

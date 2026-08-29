@@ -1,8 +1,8 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import type { DocumentArtifact, JobArtifactsState, JobListItem, JobOsRendererBridge } from '../../shared/contracts'
-import type { DocxExternalChangeEvent, DocxOpenResult } from '../../shared/docxDocuments'
+import type { DocumentArtifact, JobArtifactsState, JobListItem, JobOsRendererBridge } from '../../../shared/contracts'
+import type { DocxExternalChangeEvent, DocxOpenResult } from '../../../shared/docxDocuments'
 import { DocumentWorkspace } from './DocumentWorkspace'
 
 vi.mock('./PdfPreview', async () => {
@@ -15,13 +15,13 @@ vi.mock('./PdfPreview', async () => {
   }
 })
 
-vi.mock('../document-editor/DocxBytesPreview', () => ({
+vi.mock('../previews/DocxBytesPreview', () => ({
   DocxBytesPreview: ({ filename, label, sha256 }: { filename: string, label: string, sha256: string }) => (
     <div>{label} · {filename} · {sha256}</div>
   )
 }))
 
-vi.mock('../document-editor/OriginalDocxPreview', () => ({
+vi.mock('../previews/OriginalDocxPreview', () => ({
   OriginalDocxPreview: ({ artifactId, sourceFilename }: { artifactId: string, sourceFilename: string | null }) => (
     <div>Packet DOCX · {sourceFilename} · {artifactId}</div>
   )

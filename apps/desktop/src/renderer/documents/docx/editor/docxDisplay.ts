@@ -1,4 +1,4 @@
-import type { DocxBinding } from '../../shared/docxDocuments'
+import type { DocxBinding } from '../../../../shared/docxDocuments'
 
 export function displayDocxFilename(binding: DocxBinding): string {
   const appOwned = binding.canonicalPath

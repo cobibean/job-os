@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import type { DocxBinding } from '../../shared/docxDocuments'
+import type { DocxBinding } from '../../../../shared/docxDocuments'
 import { displayDocxFilename } from './docxDisplay'
 
 function binding(overrides: Partial<DocxBinding> = {}): DocxBinding {

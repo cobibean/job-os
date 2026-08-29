@@ -3,7 +3,7 @@ import { EditorContent, useEditor } from '@tiptap/react'
 import { AlignCenter, AlignJustify, AlignLeft, AlignRight, ArrowLeft, Bold, FileDown, History, Italic, RotateCcw, Save, Underline } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
-import type { DocxBinding, DocxExternalChangeEvent, DocxOpenResult, DocxRecoveryEntry } from '../../shared/docxDocuments'
+import type { DocxBinding, DocxExternalChangeEvent, DocxOpenResult, DocxRecoveryEntry } from '../../../../shared/docxDocuments'
 import { displayDocxFilename } from './docxDisplay'
 import { useDocxAutosave } from './useDocxAutosave'
 import { useDocxPageStyle, useDocxPagination } from './useDocxPagination'

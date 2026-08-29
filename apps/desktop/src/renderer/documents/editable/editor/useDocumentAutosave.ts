@@ -5,7 +5,7 @@ import type {
   DocumentSettings,
   EditableDocument,
   TiptapDocumentJson
-} from '../../shared/editableDocuments'
+} from '../../../../shared/editableDocuments'
 
 export type DocumentSaveState = 'saved' | 'unsaved' | 'saving' | 'conflict' | 'error'
 

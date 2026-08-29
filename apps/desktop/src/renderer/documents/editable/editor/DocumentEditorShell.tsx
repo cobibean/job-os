@@ -8,12 +8,12 @@ import type {
   EditableDocumentSnapshot,
   TiptapDocumentJson,
   TiptapNodeJson
-} from '../../shared/editableDocuments'
-import { plainText, resolveDocumentSuggestion, type DocumentSuggestion, unresolvedSuggestionCount } from '../../shared/editableDocumentSchema'
+} from '../../../../shared/editableDocuments'
+import { plainText, resolveDocumentSuggestion, type DocumentSuggestion, unresolvedSuggestionCount } from '../../../../shared/editableDocumentSchema'
 import { DocumentEditor } from './DocumentEditor'
 import { DocumentInspector } from './DocumentInspector'
 import { DocumentStatusBar } from './DocumentStatusBar'
-import { OriginalDocxPreview } from './OriginalDocxPreview'
+import { OriginalDocxPreview } from '../../previews/OriginalDocxPreview'
 import { useDocumentAutosave } from './useDocumentAutosave'
 
 interface DocumentEditorShellProps {

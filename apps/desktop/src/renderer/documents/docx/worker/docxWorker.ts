@@ -1,6 +1,6 @@
 import { applyStructuredOperations, buildPatchedDocx, parseDocxForEditing, serializeDocumentContext } from '@jobos/docx-editor-core'
 
-import type { DocxWorkerEnvelope, DocxWorkerResponse } from '../shared/docxWorker'
+import type { DocxWorkerEnvelope, DocxWorkerResponse } from '../../../../shared/docxWorker'
 
 declare global {
   interface Window {

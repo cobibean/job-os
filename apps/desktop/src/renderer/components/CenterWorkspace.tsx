@@ -6,7 +6,7 @@ import type { BrowserRestoreState, JobListItem } from '../../shared/contracts'
 import type { DocxOpenResult } from '../../shared/docxDocuments'
 import { useBrowser } from '../browser/useBrowser'
 import { browserRepairMessage, type BrowserRepairReason } from '../workspace/workspaceLayout'
-import { DocumentWorkspace, type DocumentPreviewMode } from './DocumentWorkspace'
+import { DocumentWorkspace, type DocumentPreviewMode } from '../documents/artifacts/DocumentWorkspace'
 
 function agentJobSavePrompt(tabId: string, sourceUrl: string): string {
   return [

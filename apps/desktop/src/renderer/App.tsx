@@ -9,7 +9,7 @@ import { hasCachedCareerProfile } from './career-profile/work-arrangement/useCar
 import { WorkspaceBar, type WorkspaceBarWorkspace } from './workspace/WorkspaceBar'
 import { BrowseWorkspace } from './jobs/browse/BrowseWorkspace'
 import { useAgentAvatarPreference } from './agents/avatar/useAgentAvatarPreference'
-import { DocxDocumentEditorShell } from './document-editor/DocxDocumentEditorShell'
+import { DocxDocumentEditorShell } from './documents/docx/editor/DocxDocumentEditorShell'
 import { useConnectivity } from './hooks/useConnectivity'
 import { useJobs } from './jobs/useJobs'
 import { useAgentSessions } from './agents/chat/useAgentSessions'

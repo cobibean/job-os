@@ -1,7 +1,7 @@
 import { EditorContent, useEditor } from '@tiptap/react'
 import { useEffect, useMemo } from 'react'
 
-import type { DocumentSettings, TiptapDocumentJson } from '../../shared/editableDocuments'
+import type { DocumentSettings, TiptapDocumentJson } from '../../../../shared/editableDocuments'
 import { createDocumentExtensions } from './extensions'
 import { applyPaginationSettings } from './paginationAdapter'
 import { DocumentRibbon } from './DocumentRibbon'

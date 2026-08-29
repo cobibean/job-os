@@ -1,7 +1,7 @@
 import { Previewer } from 'pagedjs'
 
-import type { EditableDocument } from '../shared/editableDocuments'
-import { renderEditableDocumentHtml } from '../shared/document-rendering/editableDocumentHtml'
+import type { EditableDocument } from '../../../../shared/editableDocuments'
+import { renderEditableDocumentHtml } from '../../../../shared/document-rendering/editableDocumentHtml'
 
 interface JobOsPrintBridge {
   onPayload(callback: (payload: { document: EditableDocument; allowUnresolvedSuggestions: boolean }) => void): void

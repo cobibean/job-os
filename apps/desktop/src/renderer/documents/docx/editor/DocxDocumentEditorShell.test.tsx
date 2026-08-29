@@ -3,8 +3,8 @@ import { readFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import type { JobOsRendererBridge } from '../../shared/contracts'
-import type { DocxBinding, DocxExternalChangeEvent, DocxOpenResult, DocxRecoveryEntry } from '../../shared/docxDocuments'
+import type { JobOsRendererBridge } from '../../../../shared/contracts'
+import type { DocxBinding, DocxExternalChangeEvent, DocxOpenResult, DocxRecoveryEntry } from '../../../../shared/docxDocuments'
 import { DocxDocumentEditorShell } from './DocxDocumentEditorShell'
 
 function binding(bytes: Uint8Array): DocxBinding {

@@ -1,8 +1,8 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import type { EditableDocument, EditableDocumentSnapshot } from '../../shared/editableDocuments'
-import { createBlankDocument, defaultDocumentSettings } from '../../shared/editableDocumentSchema'
+import type { EditableDocument, EditableDocumentSnapshot } from '../../../../shared/editableDocuments'
+import { createBlankDocument, defaultDocumentSettings } from '../../../../shared/editableDocumentSchema'
 import { DocumentInspector } from './DocumentInspector'
 
 function documentFixture(): EditableDocument {

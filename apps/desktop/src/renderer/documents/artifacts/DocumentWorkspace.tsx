@@ -20,11 +20,11 @@ import type {
   JobArtifactsState,
   JobListItem,
   PdfArtifactPayload
-} from '../../shared/contracts'
-import type { DocxBinding, DocxOpenResult } from '../../shared/docxDocuments'
-import { DocxBytesPreview } from '../document-editor/DocxBytesPreview'
-import { displayDocxFilename } from '../document-editor/docxDisplay'
-import { OriginalDocxPreview } from '../document-editor/OriginalDocxPreview'
+} from '../../../shared/contracts'
+import type { DocxBinding, DocxOpenResult } from '../../../shared/docxDocuments'
+import { displayDocxFilename } from '../docx/editor/docxDisplay'
+import { DocxBytesPreview } from '../previews/DocxBytesPreview'
+import { OriginalDocxPreview } from '../previews/OriginalDocxPreview'
 import { PdfPreview } from './PdfPreview'
 
 export type DocumentPreviewMode = 'pdf' | 'docx'

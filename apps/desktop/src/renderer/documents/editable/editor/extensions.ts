@@ -1,7 +1,7 @@
 import Placeholder from '@tiptap/extension-placeholder'
 
-import type { DocumentSettings } from '../../shared/editableDocuments.js'
-import { createCoreDocumentExtensions } from '../../shared/documentExtensions.js'
+import type { DocumentSettings } from '../../../../shared/editableDocuments.js'
+import { createCoreDocumentExtensions } from '../../../../shared/documentExtensions.js'
 import { createPaginationExtension } from './paginationAdapter.js'
 
 /** Renderer schema: shared canonical extensions plus UI-only placeholder and pagination behavior. */

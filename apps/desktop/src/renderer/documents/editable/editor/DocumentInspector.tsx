@@ -6,8 +6,8 @@ import type {
   EditableDocument,
   EditableDocumentSnapshot,
   TiptapDocumentJson
-} from '../../shared/editableDocuments'
-import { collectDocumentSuggestions, type DocumentSuggestion } from '../../shared/editableDocumentSchema'
+} from '../../../../shared/editableDocuments'
+import { collectDocumentSuggestions, type DocumentSuggestion } from '../../../../shared/editableDocumentSchema'
 
 interface DocumentInspectorProps {
   activeTab: 'format' | 'page' | 'history' | 'comments' | 'import'
