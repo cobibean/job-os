@@ -1,8 +1,8 @@
 import { Bot, CircleAlert, X } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 
-import type { AgentChatSelection } from '../../shared/contracts'
-import type { useConnectedAgents } from '../hooks/useConnectedAgents'
+import type { AgentChatSelection } from '../../../shared/contracts'
+import type { useConnectedAgents } from '../connected-agents/useConnectedAgents'
 
 interface NewAgentChatDialogProps {
   connectedAgents: ReturnType<typeof useConnectedAgents>

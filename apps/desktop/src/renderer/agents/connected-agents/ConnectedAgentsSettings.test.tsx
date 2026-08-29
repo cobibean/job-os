@@ -1,7 +1,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, expect, test, vi } from 'vitest'
 
-import type { useConnectedAgents } from '../hooks/useConnectedAgents'
+import type { useConnectedAgents } from './useConnectedAgents'
 import { authTerminalNotice, ConnectedAgentsSettings } from './ConnectedAgentsSettings'
 
 const agentId = `jagent_${'b'.repeat(32)}`

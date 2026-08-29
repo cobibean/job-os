@@ -1,7 +1,7 @@
 import { act, cleanup, renderHook, waitFor } from '@testing-library/react'
 import { afterEach, expect, test, vi } from 'vitest'
 
-import type { AgentConversationSnapshot, AgentSessionStreamUpdate, AgentSessionSummary, ConversationEvent } from '../../shared/contracts'
+import type { AgentConversationSnapshot, AgentSessionStreamUpdate, AgentSessionSummary, ConversationEvent } from '../../../shared/contracts'
 import { useAgentSessions } from './useAgentSessions'
 
 afterEach(() => { cleanup(); window.localStorage.clear() })

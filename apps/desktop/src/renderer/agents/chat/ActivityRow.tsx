@@ -1,7 +1,7 @@
 import { Check, ChevronRight, CircleAlert, LoaderCircle, Pause } from 'lucide-react'
 import { useId, useState } from 'react'
 
-import type { ActivityItem } from '../hooks/useAgentConversation'
+import type { ActivityItem } from './useAgentConversation'
 
 const hiddenDetailKeys = new Set(['activity_id', 'phase', 'type', 'redacted', 'redactions'])
 

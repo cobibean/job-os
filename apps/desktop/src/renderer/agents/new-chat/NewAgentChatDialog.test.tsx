@@ -1,7 +1,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, expect, test, vi } from 'vitest'
 
-import type { useConnectedAgents } from '../hooks/useConnectedAgents'
+import type { useConnectedAgents } from '../connected-agents/useConnectedAgents'
 import { NewAgentChatDialog } from './NewAgentChatDialog'
 
 const agentId = `jagent_${'a'.repeat(32)}`

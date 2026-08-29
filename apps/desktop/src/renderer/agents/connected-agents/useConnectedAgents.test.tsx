@@ -1,7 +1,7 @@
 import { act, cleanup, renderHook, waitFor } from '@testing-library/react'
 import { afterEach, expect, test, vi } from 'vitest'
 
-import type { ConnectedAgentsSnapshot } from '../../shared/contracts'
+import type { ConnectedAgentsSnapshot } from '../../../shared/contracts'
 import { useConnectedAgents } from './useConnectedAgents'
 
 const agentId = `jagent_${'a'.repeat(32)}`

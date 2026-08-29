@@ -1,7 +1,7 @@
 import { Moon, RotateCcw, Sun } from 'lucide-react'
 import type { TopLevelWorkspace } from '../workspaceLayout'
 import type { ThemeMode } from '../theme/themes'
-import { InstallationProfileMenu } from './InstallationProfileMenu'
+import { InstallationProfileMenu } from '../installation-profiles/InstallationProfileMenu'
 
 export type WorkspaceBarWorkspace = TopLevelWorkspace | 'career-profile'
 

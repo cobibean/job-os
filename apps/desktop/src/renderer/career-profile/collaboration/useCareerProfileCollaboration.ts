@@ -5,7 +5,7 @@ import type {
   CareerProfileChangeHistory,
   CareerProfileChangeProposal,
   CareerProfileChangeRevision
-} from '../../shared/contracts'
+} from '../../../shared/contracts'
 
 type CollaborationStatus = 'idle' | 'loading' | 'saving' | 'error'
 

@@ -1,7 +1,7 @@
 import { Check, ChevronRight, CircleAlert, LoaderCircle, Pause } from 'lucide-react'
 import { useEffect, useId, useRef, useState } from 'react'
 
-import type { ActivityItem } from '../hooks/useAgentConversation'
+import type { ActivityItem } from './useAgentConversation'
 import { ActivityRow } from './ActivityRow'
 
 interface AgentActivityGroupProps {

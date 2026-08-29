@@ -6,7 +6,7 @@ import type {
   CareerProfileEvidenceImportRequest,
   CareerProfileItemSnapshot,
   CareerProfileMutationResult
-} from '../../shared/contracts'
+} from '../../../shared/contracts'
 
 export type CareerProfileProductStatus = 'loading' | 'ready' | 'saving' | 'saved' | 'conflict' | 'error'
 export type CareerProfileProductDataSource = 'none' | 'live' | 'cache' | 'stale'

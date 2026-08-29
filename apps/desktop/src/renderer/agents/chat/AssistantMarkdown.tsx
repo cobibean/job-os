@@ -1,6 +1,6 @@
 import ReactMarkdown from 'react-markdown'
 
-import { safeExternalUrl } from '../../shared/externalLinks'
+import { safeExternalUrl } from '../../../shared/externalLinks'
 
 interface AssistantMarkdownProps {
   children: string

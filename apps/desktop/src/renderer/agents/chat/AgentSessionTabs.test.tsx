@@ -2,8 +2,8 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { readFileSync } from 'node:fs'
 import { afterEach, expect, test, vi } from 'vitest'
 
-import type { AgentSessionsController, AgentSessionViewState } from '../hooks/useAgentSessions'
-import { initialAgentConversationState } from '../hooks/useAgentConversation'
+import type { AgentSessionsController, AgentSessionViewState } from './useAgentSessions'
+import { initialAgentConversationState } from './useAgentConversation'
 import { AgentSessionTabs } from './AgentSessionTabs'
 
 afterEach(cleanup)

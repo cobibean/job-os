@@ -19,7 +19,7 @@
       "purpose": "Application icon source image"
     },
     {
-      "path": "apps/desktop/src/renderer/agent-avatar/assets/ninja.webp",
+      "path": "apps/desktop/src/renderer/agents/avatar/assets/ninja.webp",
       "sha256": "fdda11fba43840e786f8b21ebe1e591536a71d45d4b650b9cbd0ce93e97c988c",
       "classification": "project-asset",
       "publication": "keep",
@@ -27,7 +27,7 @@
       "purpose": "Selectable Ninja avatar in Agent Chat"
     },
     {
-      "path": "apps/desktop/src/renderer/agent-avatar/assets/crimson.webp",
+      "path": "apps/desktop/src/renderer/agents/avatar/assets/crimson.webp",
       "sha256": "f0fafbf347ee8cee843e5ed5c769c5de3de6b35ac8e472fe887cb0cfd30b90ce",
       "classification": "project-asset",
       "publication": "keep",
@@ -35,7 +35,7 @@
       "purpose": "Selectable Crimson avatar in Agent Chat"
     },
     {
-      "path": "apps/desktop/src/renderer/agent-avatar/assets/ember.webp",
+      "path": "apps/desktop/src/renderer/agents/avatar/assets/ember.webp",
       "sha256": "66766e999368ef6e919545538321f936f52d3f3b1e4c1e53a6252ecb29275116",
       "classification": "project-asset",
       "publication": "keep",
@@ -43,7 +43,7 @@
       "purpose": "Selectable Ember avatar in Agent Chat"
     },
     {
-      "path": "apps/desktop/src/renderer/agent-avatar/assets/forest.webp",
+      "path": "apps/desktop/src/renderer/agents/avatar/assets/forest.webp",
       "sha256": "4e79abde72afa2910780894107508e2a9d6384f55e644d2d3a2980d820d2d0f0",
       "classification": "project-asset",
       "publication": "keep",
@@ -51,7 +51,7 @@
       "purpose": "Selectable Forest avatar in Agent Chat"
     },
     {
-      "path": "apps/desktop/src/renderer/agent-avatar/assets/ivory.webp",
+      "path": "apps/desktop/src/renderer/agents/avatar/assets/ivory.webp",
       "sha256": "446f2826154597c88e561608615998f824662bf862045d57598a92da583df241",
       "classification": "project-asset",
       "publication": "keep",
@@ -59,7 +59,7 @@
       "purpose": "Selectable Ivory avatar in Agent Chat"
     },
     {
-      "path": "apps/desktop/src/renderer/agent-avatar/assets/midnight.webp",
+      "path": "apps/desktop/src/renderer/agents/avatar/assets/midnight.webp",
       "sha256": "8c7224113b04c88db36b566fd3ddf584d12576a661d6d98c0184a6ad6ed9b633",
       "classification": "project-asset",
       "publication": "keep",
@@ -67,7 +67,7 @@
       "purpose": "Selectable Midnight avatar in Agent Chat"
     },
     {
-      "path": "apps/desktop/src/renderer/agent-avatar/assets/mint.webp",
+      "path": "apps/desktop/src/renderer/agents/avatar/assets/mint.webp",
       "sha256": "3d8a4c753b22460235ca5d4bbada77cc84af9df9c97227087a23861d90e6ef4c",
       "classification": "project-asset",
       "publication": "keep",
@@ -75,7 +75,7 @@
       "purpose": "Selectable Mint avatar in Agent Chat"
     },
     {
-      "path": "apps/desktop/src/renderer/agent-avatar/assets/phantom.webp",
+      "path": "apps/desktop/src/renderer/agents/avatar/assets/phantom.webp",
       "sha256": "1fff467fa47c0c2e35aa63b125d711c0178aac02cbb322b60da69ced7e45a15f",
       "classification": "project-asset",
       "publication": "keep",
@@ -83,7 +83,7 @@
       "purpose": "Selectable Phantom avatar in Agent Chat"
     },
     {
-      "path": "apps/desktop/src/renderer/agent-avatar/assets/shadow.webp",
+      "path": "apps/desktop/src/renderer/agents/avatar/assets/shadow.webp",
       "sha256": "b1a3b07be8425cee93708f0ae50aeb48be486b01ee2962892134f2439c65f9a4",
       "classification": "project-asset",
       "publication": "keep",
@@ -91,7 +91,7 @@
       "purpose": "Selectable Shadow avatar in Agent Chat"
     },
     {
-      "path": "apps/desktop/src/renderer/agent-avatar/assets/starlight.webp",
+      "path": "apps/desktop/src/renderer/agents/avatar/assets/starlight.webp",
       "sha256": "e64e31a8a04a833145a33edd390a541a37b83d4ab9f5f1c904d566271ceb19bf",
       "classification": "project-asset",
       "publication": "keep",
@@ -99,7 +99,7 @@
       "purpose": "Selectable Starlight avatar in Agent Chat"
     },
     {
-      "path": "apps/desktop/src/renderer/agent-avatar/assets/venom.webp",
+      "path": "apps/desktop/src/renderer/agents/avatar/assets/venom.webp",
       "sha256": "c6317b9144bc7f6e99a30e7f3b1c070478a6b3d045f15aff454906a1ae0c2fcb",
       "classification": "project-asset",
       "publication": "keep",

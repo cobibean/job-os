@@ -1,8 +1,8 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, expect, test, vi } from 'vitest'
 
-import type { AgentConversationSnapshot, AgentSessionStreamUpdate, AgentSessionSummary, ConversationEvent } from '../../shared/contracts'
-import { useAgentSessions } from '../hooks/useAgentSessions'
+import type { AgentConversationSnapshot, AgentSessionStreamUpdate, AgentSessionSummary, ConversationEvent } from '../../../shared/contracts'
+import { useAgentSessions } from './useAgentSessions'
 import { AgentPanel } from './AgentPanel'
 
 afterEach(() => { cleanup(); window.localStorage.clear(); vi.restoreAllMocks() })

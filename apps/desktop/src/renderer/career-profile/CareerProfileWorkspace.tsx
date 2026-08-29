@@ -3,10 +3,10 @@ import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from 're
 import { createPortal } from 'react-dom'
 
 import { CAREER_PROFILE_ADDITIONAL_CONTEXT_LIMIT, careerProfileAdditionalContextLength, type CareerProfileArea, type CareerProfileBridge, type CareerProfileItemSnapshot, type WorkArrangementMode, type WorkArrangementStrength, type WorkArrangementValue } from '../../shared/contracts'
-import { useCareerProfile } from '../hooks/useCareerProfile'
-import { useCareerProfileCollaboration } from '../hooks/useCareerProfileCollaboration'
-import { useCareerProfileProduct } from '../hooks/useCareerProfileProduct'
-import { CareerProfileProductExperience } from './CareerProfileProductExperience'
+import { useCareerProfileCollaboration } from './collaboration/useCareerProfileCollaboration'
+import { CareerProfileProductExperience } from './product/CareerProfileProductExperience'
+import { useCareerProfileProduct } from './product/useCareerProfileProduct'
+import { useCareerProfile } from './work-arrangement/useCareerProfile'
 
 interface CareerProfileWorkspaceProps {
   active?: boolean

@@ -4,7 +4,7 @@ import type {
   AgentTurn,
   AgentTurnMutation,
   ConversationEvent
-} from '../../shared/contracts'
+} from '../../../shared/contracts'
 
 export interface AgentConversationState {
   conversationId: string | null

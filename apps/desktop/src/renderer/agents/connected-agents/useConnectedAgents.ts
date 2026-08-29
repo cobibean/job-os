@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 
-import type { ConnectedAgentModelsSnapshot, ConnectedAgentsSnapshot } from '../../shared/contracts'
+import type { ConnectedAgentModelsSnapshot, ConnectedAgentsSnapshot } from '../../../shared/contracts'
 
 export function useConnectedAgents() {
   const bridge = window.jobos?.connectedAgents

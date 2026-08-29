@@ -8,9 +8,9 @@ import type {
   CareerProfileCurrent,
   CareerProfileEvidence,
   CareerProfileItemSnapshot
-} from '../../shared/contracts'
-import { useCareerProfileProduct } from '../hooks/useCareerProfileProduct'
-import { CareerProfileWorkspace } from './CareerProfileWorkspace'
+} from '../../../shared/contracts'
+import { CareerProfileWorkspace } from '../CareerProfileWorkspace'
+import { useCareerProfileProduct } from './useCareerProfileProduct'
 
 const workArrangement = {
   profileRevision: 4,

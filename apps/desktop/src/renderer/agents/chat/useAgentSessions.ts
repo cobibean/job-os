@@ -7,7 +7,7 @@ import type {
   AgentSessionStreamUpdate,
   AgentSessionSummary,
   ConversationEvent
-} from '../../shared/contracts'
+} from '../../../shared/contracts'
 import {
   agentConversationReducer,
   initialAgentConversationState,

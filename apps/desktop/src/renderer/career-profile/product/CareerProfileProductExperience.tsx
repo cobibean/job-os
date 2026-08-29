@@ -44,8 +44,8 @@ import type {
   CareerProfileEvidenceMode,
   CareerProfileItemSnapshot,
   ConnectedCareerProfileAgent
-} from '../../shared/contracts'
-import type { CareerProfileProductController } from '../hooks/useCareerProfileProduct'
+} from '../../../shared/contracts'
+import type { CareerProfileProductController } from './useCareerProfileProduct'
 
 interface CareerProfileProductExperienceProps {
   active: boolean

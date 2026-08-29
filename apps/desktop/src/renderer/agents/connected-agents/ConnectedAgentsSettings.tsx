@@ -1,9 +1,9 @@
 import { Bot, Check, CircleAlert, LoaderCircle, Plug, RefreshCw, Unplug } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 
-import type { ConnectedAgentSummary } from '../../shared/contracts'
-import type { useConnectedAgents } from '../hooks/useConnectedAgents'
-import { SettingsSection } from './SettingsSection'
+import type { ConnectedAgentSummary } from '../../../shared/contracts'
+import type { useConnectedAgents } from './useConnectedAgents'
+import { SettingsSection } from '../../components/SettingsSection'
 
 function operationKey(label: string): string {
   return `${label}-${crypto.randomUUID()}`

@@ -1,7 +1,7 @@
 import { Circle, LoaderCircle, Plus, X } from 'lucide-react'
 import { useRef, type CSSProperties } from 'react'
 
-import type { AgentSessionsController, AgentSessionViewState } from '../hooks/useAgentSessions'
+import type { AgentSessionsController, AgentSessionViewState } from './useAgentSessions'
 
 export function visibleState(session: AgentSessionViewState): 'recovering' | 'quarantined' | 'working' | 'needs-you' | 'done' | 'failed' | 'interrupted' | 'idle' {
   if (session.summary.recoveryState === 'recovering') return 'recovering'

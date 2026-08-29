@@ -6,7 +6,7 @@ import type {
   WorkArrangementHistory,
   WorkArrangementMutationResult,
   WorkArrangementValue
-} from '../../shared/contracts'
+} from '../../../shared/contracts'
 
 export type CareerProfileStatus = 'loading' | 'ready' | 'saving' | 'saved' | 'conflict' | 'error'
 

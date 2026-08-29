@@ -1,7 +1,7 @@
 import { cleanup } from '@testing-library/react'
 import { afterEach, expect, test } from 'vitest'
 
-import type { AgentConversationSnapshot, ConversationEvent } from '../../shared/contracts'
+import type { AgentConversationSnapshot, ConversationEvent } from '../../../shared/contracts'
 import {
   agentConversationReducer,
   initialAgentConversationState,
