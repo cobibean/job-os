@@ -14,6 +14,7 @@ function renderBar(careerProfileEnabled: boolean) {
       onReset={vi.fn()}
       onToggleMode={vi.fn()}
       onWorkspaceChange={onWorkspaceChange}
+      profileControl={<button type="button">Personal profile</button>}
       themeMode="dark"
     />
   )
@@ -22,6 +23,7 @@ function renderBar(careerProfileEnabled: boolean) {
 
 test('keeps Career Profile out of live navigation while the API slice is dormant', () => {
   renderBar(false)
+  expect(screen.getByRole('button', { name: 'Personal profile' })).not.toBeNull()
   expect(screen.queryByRole('button', { name: 'Career Profile' })).toBeNull()
 })
 

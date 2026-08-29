@@ -37,9 +37,12 @@ export function useBrowser(
   workspaceHydrated: boolean,
   visible: boolean,
   layoutSignal: string,
-  onPersist: (state: BrowserRestoreState) => void | Promise<void>
+  onPersist: (state: BrowserRestoreState) => void | Promise<void>,
+  active = true
 ) {
   const bridge = useRef(window.jobos?.browser).current
+  const activeRef = useRef(active)
+  activeRef.current = active
   const [state, setState] = useState<BrowserState>(emptyState)
   const [message, setMessage] = useState('Browser ready')
   const [restorationReady, setRestorationReady] = useState(!bridge)
@@ -50,6 +53,7 @@ export function useBrowser(
   const requestedRestoreKey = useRef(JSON.stringify(restoredState))
 
   const acceptState = useCallback((next: BrowserState, explicit = false): Promise<void> => {
+    if (!activeRef.current) return Promise.resolve()
     setState(next)
     if (explicit) explicitBrowserAction.current = true
     if (!restored.current || !explicitBrowserAction.current) return Promise.resolve()
@@ -64,10 +68,13 @@ export function useBrowser(
     })
   }, [onPersist])
 
-  useEffect(() => bridge?.subscribe(next => { void acceptState(next).catch(() => undefined) }), [acceptState, bridge])
+  useEffect(() => {
+    if (!active) return undefined
+    return bridge?.subscribe(next => { void acceptState(next).catch(() => undefined) })
+  }, [acceptState, active, bridge])
 
   useEffect(() => {
-    if (!bridge || !workspaceHydrated || restored.current) return
+    if (!active || !bridge || !workspaceHydrated || restored.current) return
     restored.current = true
     persistedKey.current = JSON.stringify(restoredState)
     requestedRestoreKey.current = JSON.stringify(restoredState)
@@ -78,10 +85,10 @@ export function useBrowser(
     }).catch(error => {
       setMessage(error instanceof Error ? error.message : 'Browser restore failed')
     })
-  }, [acceptState, bridge, restoredState, workspaceHydrated])
+  }, [acceptState, active, bridge, restoredState, workspaceHydrated])
 
   useEffect(() => {
-    if (!bridge || !restored.current || explicitBrowserAction.current) return
+    if (!active || !bridge || !restored.current || explicitBrowserAction.current) return
     const requestedKey = JSON.stringify(restoredState)
     if (requestedKey === requestedRestoreKey.current) return
     requestedRestoreKey.current = requestedKey
@@ -89,7 +96,7 @@ export function useBrowser(
       setState(next)
       persistedKey.current = JSON.stringify(browserStateForPersistence(next))
     }).catch(error => setMessage(error instanceof Error ? error.message : 'Browser recovery failed'))
-  }, [bridge, restoredState])
+  }, [active, bridge, restoredState])
 
   const activeTab = useMemo(
     () => state.tabs.find(tab => tab.tabId === state.activeTabId) ?? null,
@@ -105,7 +112,7 @@ export function useBrowser(
         y: rect?.y ?? 0,
         width: rect?.width ?? 0,
         height: rect?.height ?? 0,
-        visible: visible && !activeTab?.error && Boolean(rect?.width && rect?.height)
+        visible: active && visible && !activeTab?.error && Boolean(rect?.width && rect?.height)
       })
     }
     updateBounds()
@@ -117,9 +124,10 @@ export function useBrowser(
       window.removeEventListener('resize', updateBounds)
       void bridge.setBounds({ x: 0, y: 0, width: 0, height: 0, visible: false })
     }
-  }, [activeTab?.error, bridge, layoutSignal, state.activeTabId, visible])
+  }, [active, activeTab?.error, bridge, layoutSignal, state.activeTabId, visible])
 
   const run = useCallback(async (operation: () => Promise<BrowserState>): Promise<boolean> => {
+    if (!activeRef.current) return false
     try {
       await acceptState(await operation(), true)
       setMessage('Browser ready')
@@ -138,6 +146,11 @@ export function useBrowser(
       : bridge.create(canonicalUrl, jobId))
   }, [bridge, run, state.tabs])
 
+  const reconcileExternalState = useCallback(
+    (next: BrowserState) => acceptState(next, true),
+    [acceptState]
+  )
+
   return {
     bridgeAvailable: Boolean(bridge),
     restorationReady,
@@ -145,7 +158,7 @@ export function useBrowser(
     activeTab,
     message,
     viewportRef,
-    reconcileExternalState: (next: BrowserState) => acceptState(next, true),
+    reconcileExternalState,
     openJobListing,
     create: (url?: string, jobId?: string | null) => bridge && run(() => bridge.create(url, jobId)),
     select: (tabId: string) => bridge && run(() => bridge.select(tabId)),
@@ -166,3 +179,5 @@ export function useBrowser(
     copyBlockedUrl: (tabId: string) => bridge && run(() => bridge.copyBlockedUrl(tabId))
   }
 }
+
+export type BrowserController = ReturnType<typeof useBrowser>

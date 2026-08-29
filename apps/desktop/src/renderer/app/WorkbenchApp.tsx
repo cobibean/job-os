@@ -1,9 +1,12 @@
 import { AgentPanel } from '../agents/chat/AgentPanel'
-import { CenterWorkspace, type JobListingRequest } from '../components/CenterWorkspace'
+import { BrowserWorkspace } from '../browser/BrowserWorkspace'
+import { useBrowser } from '../browser/useBrowser'
 import { JobNavigator } from '../jobs/navigator/JobNavigator'
+import { useSaveJobFromBrowser } from '../jobs/save-from-browser/useSaveJobFromBrowser'
 import { SettingsPanel } from './settings/SettingsPanel'
 import { StatusBar } from './status/StatusBar'
 import { WorkbenchLayout } from '../workspace/WorkbenchLayout'
+import { CenterWorkspace } from '../workspace/CenterWorkspace'
 import { CareerProfileWorkspace } from '../career-profile/CareerProfileWorkspace'
 import { hasCachedCareerProfile } from '../career-profile/work-arrangement/useCareerProfile'
 import { WorkspaceBar, type WorkspaceBarWorkspace } from '../workspace/WorkspaceBar'
@@ -25,6 +28,8 @@ import type {
   ConnectedAgentsSnapshot,
 } from '../../shared/contracts'
 import { NewAgentChatDialog } from '../agents/new-chat/NewAgentChatDialog'
+import { DocumentWorkspace } from '../documents/artifacts/DocumentWorkspace'
+import { InstallationProfileMenu } from '../installation-profiles/InstallationProfileMenu'
 
 export function requireDefaultConnectedAgent(snapshot: ConnectedAgentsSnapshot): ConnectedAgentSummary {
   const agent = snapshot.defaultConnectedAgentId
@@ -56,6 +61,13 @@ export function requireDefaultAgentModel(
     throw new Error('Default reasoning effort is unavailable. Update the agent defaults in Settings.')
   }
   return { modelId: model.modelId, reasoningEffort: agent.defaultReasoningEffort }
+}
+
+interface JobListingRequest {
+  requestId: number
+  jobId: string
+  canonicalUrl: string
+  onComplete?: (success: boolean) => void
 }
 
 export function WorkbenchApp() {
@@ -104,6 +116,7 @@ export function WorkbenchApp() {
   const [panelReorderActive, setPanelReorderActive] = useState(false)
   const [profileOverlayActive, setProfileOverlayActive] = useState(false)
   const nextJobListingRequestId = useRef(0)
+  const lastHandledJobListingRequestId = useRef(0)
   const latestNavigatorSelection = useRef(0)
   const browseTransitionGeneration = useRef(0)
   const panelReorderGeneration = useRef(0)
@@ -113,12 +126,51 @@ export function WorkbenchApp() {
   const expectedInstallationProfileId = useRef<string | null>(
     window.jobos?.installationProfiles?.expectedProfileId ?? null
   )
+  const profileChangedElsewhere = Boolean(
+    expectedInstallationProfileId.current
+    && connectivity.installationProfileId
+    && expectedInstallationProfileId.current !== connectivity.installationProfileId
+  )
   const activePreset = layoutState.workspace.selectedPreset
   const activeTopLevelWorkspace = layoutState.workspace.activeTopLevelWorkspace ?? activePreset
   const activeLayout = layoutState.workspace.layouts[activePreset]
   const browseVisible = activeTopLevelWorkspace === 'browse' && browseDetachState === 'ready'
   const browserTransitionPending = browseDetachState === 'preparing'
-  const nativeBrowserVisible = layoutState.hydrated && activeTopLevelWorkspace !== 'browse' && !careerProfileOpen && !browserTransitionPending && !activeLayout.collapsed.includes('center') && !settingsOpen && !settingsPreparing && !newChatOpen && !profileOverlayActive
+  const nativeBrowserVisible = layoutState.hydrated && !profileChangedElsewhere && !editingDocument && activeTopLevelWorkspace !== 'browse' && !careerProfileOpen && !browserTransitionPending && !activeLayout.collapsed.includes('center') && !settingsOpen && !settingsPreparing && !newChatOpen && !profileOverlayActive
+  const browser = useBrowser(
+    {
+      tabs: layoutState.workspace.browserTabs ?? [],
+      activeTabId: layoutState.workspace.activeBrowserTabId ?? null
+    },
+    layoutState.hydrated,
+    layoutState.workspace.activeCenterSurface === 'browser' && nativeBrowserVisible && !panelReorderActive,
+    `${activePreset}:${activeLayout.order.join(',')}:${activeLayout.collapsed.join(',')}`,
+    layoutState.updateBrowserState,
+    !profileChangedElsewhere
+  )
+  const saveJobFromBrowser = useSaveJobFromBrowser({
+    active: !profileChangedElsewhere,
+    agent: window.jobos?.agent,
+    browser: window.jobos?.browser ? {
+      getState: window.jobos.browser.getState,
+      reconcileExternalState: browser.reconcileExternalState
+    } : null,
+    jobs: window.jobos?.jobs,
+    onCreateSaveSession: createJoblessSession,
+    onJobSaved: async (jobId, conversationId) => {
+      if (!await jobState.selectJobForConversation(conversationId, jobId)) {
+        throw new Error('The job was saved, but JobOS could not attach it to the new agent session.')
+      }
+      setDocumentMutationGeneration(generation => generation + 1)
+    }
+  })
+
+  useEffect(() => {
+    const request = jobListingRequest
+    if (!request || !browser.restorationReady || request.requestId === lastHandledJobListingRequestId.current) return
+    lastHandledJobListingRequestId.current = request.requestId
+    void browser.openJobListing(request.jobId, request.canonicalUrl).then(success => request.onComplete?.(success))
+  }, [browser.openJobListing, browser.restorationReady, jobListingRequest])
 
   useEffect(() => {
     const bridge = window.jobos?.careerProfile
@@ -326,11 +378,6 @@ export function WorkbenchApp() {
     if (activeTopLevelWorkspace !== 'browse') await layoutState.selectTopLevelWorkspace('browse')
   }
 
-  const profileChangedElsewhere = Boolean(
-    expectedInstallationProfileId.current
-    && connectivity.installationProfileId
-    && expectedInstallationProfileId.current !== connectivity.installationProfileId
-  )
   if (profileChangedElsewhere) {
     return (
       <main className="profile-changed-elsewhere">
@@ -350,9 +397,11 @@ export function WorkbenchApp() {
         onReset={layoutState.reset}
         onToggleMode={theme.toggleMode}
         themeMode={theme.mode}
-        activeProfileName={connectivity.installationProfileName ?? 'Personal'}
-        onProfileOverlayClose={() => setProfileOverlayActive(false)}
-        prepareProfileOverlay={prepareProfileOverlay}
+        profileControl={<InstallationProfileMenu
+          activeProfileName={connectivity.installationProfileName ?? 'Personal'}
+          onOverlayClose={() => setProfileOverlayActive(false)}
+          prepareOverlay={prepareProfileOverlay}
+        />}
       />
       <div className="workspace-content">
       <div className="workbench-layer" hidden={browseVisible || careerProfileOpen}>
@@ -382,34 +431,26 @@ export function WorkbenchApp() {
         />}
         center={<CenterWorkspace
           activeSurface={layoutState.workspace.activeCenterSurface}
-          activeJob={jobState.selectedJob}
-          activeArtifactId={layoutState.workspace.activeArtifactId ?? null}
-          activeArtifactPage={layoutState.workspace.activeArtifactPage ?? 1}
-          activeArtifactZoom={layoutState.workspace.activeArtifactZoom ?? 1}
-          browserState={{
-            tabs: layoutState.workspace.browserTabs ?? [],
-            activeTabId: layoutState.workspace.activeBrowserTabId ?? null
-          }}
-          browserRepaired={Boolean(layoutState.workspace.repairedBrowser)}
-          browserRepairReasons={layoutState.workspace.browserRepairReasons ?? []}
-          browserVisible={nativeBrowserVisible && !panelReorderActive}
-          onCreateSaveSession={createJoblessSession}
-          documentMutationGeneration={documentMutationGeneration}
-          documentPreviewMode={documentPreviewMode}
-          jobListingRequest={jobListingRequest}
-          jobs={jobState.jobs}
-          layoutSignal={`${activePreset}:${activeLayout.order.join(',')}:${activeLayout.collapsed.join(',')}`}
-          onBrowserPersist={layoutState.updateBrowserState}
-          onDocumentPersist={layoutState.updateDocumentState}
-          onDocumentPreviewModeChange={setDocumentPreviewMode}
-          onJobSaved={async (jobId, conversationId) => {
-            if (!await jobState.selectJobForConversation(conversationId, jobId)) {
-              throw new Error('The job was saved, but JobOS could not attach it to the new agent session.')
-            }
-            setDocumentMutationGeneration(generation => generation + 1)
-          }}
-          onOpenEditor={setEditingDocument}
-          workspaceHydrated={layoutState.hydrated}
+          browser={<BrowserWorkspace
+            browser={browser}
+            browserRepaired={Boolean(layoutState.workspace.repairedBrowser)}
+            browserRepairReasons={layoutState.workspace.browserRepairReasons ?? []}
+            jobs={jobState.jobs}
+            onSaveJob={saveJobFromBrowser.saveJob}
+            saveStates={saveJobFromBrowser.saveStates}
+          />}
+          document={<DocumentWorkspace
+            job={jobState.selectedJob}
+            hydrated={layoutState.hydrated}
+            onViewChange={layoutState.updateDocumentState}
+            onOpenEditor={setEditingDocument}
+            onPreviewModeChange={setDocumentPreviewMode}
+            previewMode={documentPreviewMode}
+            refreshGeneration={documentMutationGeneration}
+            restoredArtifactId={layoutState.workspace.activeArtifactId ?? null}
+            restoredPage={layoutState.workspace.activeArtifactPage ?? 1}
+            restoredZoom={layoutState.workspace.activeArtifactZoom ?? 1}
+          />}
         />}
         jobs={<JobNavigator
           error={jobState.error}

@@ -23,11 +23,12 @@ export function PdfPreview({ bytes, page, zoom, onPageCount }: PdfPreviewProps) 
       canvas.style.height = '0'
     }
     import('pdfjs-dist').then(pdfjs => {
+      if (!active) return null
       pdfjs.GlobalWorkerOptions.workerSrc = pdfWorker
       task = pdfjs.getDocument({ data: new Uint8Array(bytes.slice(0)) })
       return task.promise
     }).then(async document => {
-      if (!active) return
+      if (!active || !document) return
       onPageCount(document.numPages)
       const pdfPage = await document.getPage(Math.min(page, document.numPages))
       if (!active || !canvasRef.current) return

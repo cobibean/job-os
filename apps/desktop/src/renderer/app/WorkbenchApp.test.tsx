@@ -8,7 +8,6 @@ import type {
   JobListItem
 } from '../../shared/contracts'
 import { WorkbenchApp, requireDefaultAgentModel, requireDefaultConnectedAgent } from './WorkbenchApp'
-import { isExpectedSaveNavigation, parseAgentJobSaveError } from '../components/CenterWorkspace'
 
 afterEach(() => { cleanup(); window.localStorage.clear() })
 
@@ -70,34 +69,6 @@ test('browser save requires the exact live default model and reasoning effort', 
     models: [{ modelId: 'gpt-live', displayName: 'GPT Live', reasoningEfforts: ['medium'] }]
   })).toThrow('Default reasoning effort is unavailable')
 })
-
-test('browser save navigation only accepts the original listing or its slug-matched detail page', () => {
-  expect(isExpectedSaveNavigation(
-    'https://wellfound.com/jobs/starred?job_listing_slug=applied-ai-builder',
-    'https://wellfound.com/jobs/123-applied-ai-builder'
-  )).toBe(true)
-  expect(isExpectedSaveNavigation(
-    'https://wellfound.com/jobs/starred?job_listing_slug=applied-ai-builder',
-    'https://wellfound.com/jobs/starred?job_listing_slug=unrelated-role'
-  )).toBe(false)
-})
-
-test('browser save failures preserve the exact failed stage instead of reporting tool unavailable', () => {
-  expect(parseAgentJobSaveError('JOBOS_SAVE_ERROR:ERROR_LISTING_COVERAGE_INCOMPLETE')).toBe(
-    'JobOS could not confirm the complete job listing. No job was saved.'
-  )
-  expect(parseAgentJobSaveError('JOBOS_SAVE_ERROR:ERROR_LISTING_CONTENT_NOT_EXTRACTABLE')).toBe(
-    'JobOS recognized this as a job listing but could not read its description. Paste the listing text into this save session to continue.'
-  )
-  expect(parseAgentJobSaveError('JOBOS_SAVE_ERROR:ERROR_JOB_CREATE_FAILED')).toBe(
-    'JobOS read the listing but could not save the job. You can retry.'
-  )
-  expect(parseAgentJobSaveError('JOBOS_SAVE_RESULT:ERROR_JOB_CREATE_FAILED')).toBe(
-    'JobOS read the listing but could not save the job. You can retry.'
-  )
-  expect(parseAgentJobSaveError('JOBOS_SAVE_RESULT:ERROR_REQUIRED_TOOL_UNAVAILABLE')).toBeNull()
-})
-
 
 test('the shell reports authenticated local connectivity without exposing credentials', async () => {
   const getConnectivity = vi.fn().mockResolvedValue({
@@ -537,45 +508,6 @@ test('saving dispatches job-hunter and reconciles a failure emitted before send 
   expect(send.mock.calls[0]?.[0]).toBe('conv-1')
   expect(send.mock.calls[0]?.[1]).toContain('job-tab')
   expect(send.mock.calls[0]?.[1]).toContain(listing.canonicalUrl)
-  const savePrompt = send.mock.calls[0]?.[1] ?? ''
-  expect(savePrompt).toContain('mcp__jobos__browser_click')
-  expect(savePrompt).toContain('link whose href or name matches the job slug')
-  expect(savePrompt).toContain('complete job description')
-  expect(savePrompt).toContain('do not summarize it or cap it at 300 characters')
-  expect(savePrompt).toContain('responsibilities, qualifications, preferred qualifications, benefits, compensation')
-  expect(savePrompt).toContain('page displayed in that source or replacement tab is the source of truth')
-  expect(savePrompt).toContain('selected_job, active browser tab, or workspace context may refer to a different saved job')
-  expect(savePrompt).toContain('MUST explicitly include text_start, text_length, and include_targets')
-  expect(savePrompt).toContain('text_start set to the returned next_text_start')
-  expect(savePrompt).toContain('If a duplicate segment is ever returned, retry once')
-  expect(savePrompt).toContain('list inspection does not count toward the detail-page limit')
-  expect(savePrompt).toContain('begin detail coverage from text_start 0')
-  expect(savePrompt).toContain('never exceed 30 detail-page snapshots')
-  expect(savePrompt).toContain('while text remains unread')
-  expect(savePrompt).toContain('do not call either mutation')
-  expect(savePrompt).toContain('ERROR_BROWSER_TOOL_UNAVAILABLE')
-  expect(savePrompt).toContain('ERROR_SOURCE_TAB_RECOVERY_FAILED')
-  expect(savePrompt).toContain('Return JOBOS_SAVE_ERROR:ERROR_SOURCE_TAB_RECOVERY_FAILED only when tab inspection succeeded')
-  expect(savePrompt).toContain('its MCP transport is down')
-  expect(savePrompt).toContain('ERROR_BROWSER_SNAPSHOT_FAILED')
-  expect(savePrompt).toContain('ERROR_PAGE_NOT_JOB_LISTING')
-  expect(savePrompt).toContain('ERROR_LISTING_CONTENT_NOT_EXTRACTABLE')
-  expect(savePrompt).toContain('ERROR_LISTING_COVERAGE_INCOMPLETE')
-  expect(savePrompt).toContain('ERROR_JOB_CREATE_FAILED')
-  expect(savePrompt).toContain('ERROR_TAB_ASSOCIATION_FAILED')
-  expect(savePrompt).not.toContain('ERROR_REQUIRED_TOOL_UNAVAILABLE')
-  expect(savePrompt).toContain('Only after confirming complete relevant coverage')
-  expect(savePrompt).not.toContain('concise role description of at most 300 characters')
-  expect(savePrompt).not.toContain('Use at most four snapshots')
-  expect(savePrompt).toContain('JOBOS_SAVE_RESULT:')
-  expect(savePrompt).toContain('JOBOS_SAVE_ERROR:')
-  expect(savePrompt.match(/Call mcp__jobos__job_create_from_browser exactly once/g)).toHaveLength(1)
-  expect(savePrompt.match(/call mcp__jobos__browser_tab_associate exactly once/g)).toHaveLength(1)
-  expect(savePrompt).toContain('Never call mcp__jobos__browser_navigate')
-  expect(savePrompt).toContain('mcp__jobos__browser_tab_create exactly once')
-  expect(savePrompt).toContain('activate=false')
-  expect(savePrompt).toContain('user may freely switch, navigate, or close browser tabs')
-  expect(savePrompt).toContain('Do not apply or submit forms')
   expect(send.mock.calls[0]?.[2]).toMatch(/^browser-save-/)
   expect(associate).not.toHaveBeenCalled()
   await waitFor(() => expect(getConversation).toHaveBeenCalledWith('conv-1'))

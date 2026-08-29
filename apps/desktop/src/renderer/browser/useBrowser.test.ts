@@ -164,3 +164,51 @@ test('openJobListing creates an associated tab when no listing is open', async (
   expect(create).toHaveBeenCalledWith('https://example.com/jobs/7', 'job-7')
   expect(select).not.toHaveBeenCalled()
 })
+
+test('unsubscribes, hides, and rejects browser actions when the controller becomes inactive', async () => {
+  const tab = browserTab('listing', 'https://example.com/jobs/7')
+  const restoreState: BrowserRestoreState = {
+    tabs: [{
+      tabId: tab.tabId,
+      url: tab.url,
+      title: tab.title,
+      faviconUrl: tab.faviconUrl,
+      associatedJobId: tab.associatedJobId
+    }],
+    activeTabId: tab.tabId
+  }
+  const restored = { tabs: [tab], activeTabId: tab.tabId, download: null, notice: null }
+  const unsubscribe = vi.fn()
+  const setBounds = vi.fn().mockResolvedValue(undefined)
+  const select = vi.fn().mockResolvedValue(restored)
+  Object.defineProperty(window, 'jobos', {
+    configurable: true,
+    value: { browser: {
+      restore: vi.fn().mockResolvedValue(restored),
+      subscribe: vi.fn(() => unsubscribe),
+      setBounds,
+      select,
+      create: vi.fn()
+    } }
+  })
+  const { result, rerender } = renderHook(
+    ({ active }: { active: boolean }) => useBrowser(restoreState, true, true, 'layout', vi.fn(), active),
+    { initialProps: { active: true } }
+  )
+  await waitFor(() => expect(result.current.restorationReady).toBe(true))
+  const cleanupCountBeforeDeactivation = unsubscribe.mock.calls.length
+
+  rerender({ active: false })
+  expect(unsubscribe).toHaveBeenCalledTimes(cleanupCountBeforeDeactivation + 1)
+  await waitFor(() => expect(setBounds).toHaveBeenLastCalledWith({
+    x: 0,
+    y: 0,
+    width: 0,
+    height: 0,
+    visible: false
+  }))
+  await act(async () => {
+    expect(await result.current.select(tab.tabId)).toBe(false)
+  })
+  expect(select).not.toHaveBeenCalled()
+})

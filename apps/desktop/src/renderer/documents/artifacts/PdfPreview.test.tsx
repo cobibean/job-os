@@ -67,3 +67,28 @@ test('reports a malformed PDF without rendering an annotation layer', async () =
   await waitFor(() => expect(view.getByRole('alert').textContent).toBe('Invalid PDF structure'))
   expect(view.container.querySelector('.annotationLayer')).toBeNull()
 })
+
+test('destroys the loading task and removes its canvas when the document surface exits', async () => {
+  const destroy = vi.fn()
+  const renderPage = vi.fn().mockReturnValue({ promise: Promise.resolve() })
+  getDocument.mockReturnValue({
+    destroy,
+    promise: Promise.resolve({
+      numPages: 1,
+      getPage: vi.fn().mockResolvedValue({
+        getViewport: vi.fn().mockReturnValue({ width: 100, height: 120 }),
+        render: renderPage
+      })
+    })
+  })
+  vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue({} as CanvasRenderingContext2D)
+
+  const view = render(<PdfPreview bytes={new Uint8Array([37, 80, 68, 70]).buffer} page={1} zoom={1} onPageCount={vi.fn()} />)
+  const canvas = view.getByLabelText('Resume PDF page 1')
+  await waitFor(() => expect(renderPage).toHaveBeenCalled())
+
+  view.unmount()
+
+  expect(destroy).toHaveBeenCalledOnce()
+  expect(canvas.isConnected).toBe(false)
+})
