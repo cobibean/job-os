@@ -2,7 +2,26 @@
 
 `main.tsx` is the stable renderer mount. It delegates setup and workbench composition to `app/`; product behavior lives with the owner that changes with it. The renderer root remains the stable Vite entry directory, not a home for feature implementation.
 
-The renderer is moving to the ownership model below in staged, behavior-preserving changes. Until those moves are complete, some implementation remains in legacy technical directories such as `components/`, `hooks/`, and `document-editor/`.
+The ownership refactor is complete. `app/App.tsx` is the setup gate, `app/WorkbenchApp.tsx` is the only cross-owner composition root, and the legacy root-level technical buckets have been removed. The architecture test enforces this final root shape:
+
+```text
+README.md
+main.tsx
+index.html
+print.html
+docx-worker.html
+env.d.ts
+pagedjs.d.ts
+styles.css
+app/
+agents/
+browser/
+career-profile/
+documents/
+installation-profiles/
+jobs/
+workspace/
+```
 
 | Owner | Owns | Does not own |
 | --- | --- | --- |
@@ -40,7 +59,7 @@ The renderer is moving to the ownership model below in staged, behavior-preservi
 | `main.tsx` | Mounts `<App />` and imports `styles.css` before the retained editor package stylesheet. |
 | `print.html` | Remains the print renderer loaded by the main-process PDF exporter. |
 | `docx-worker.html` | Remains the DOCX worker renderer loaded by the main-process worker manager. |
-| `styles.css` | Remains the single application stylesheet entry imported by `main.tsx`; its target form is an ordered owner-style import manifest. |
+| `styles.css` | Is the single application stylesheet entry imported by `main.tsx` and is an ordered owner-style import manifest. |
 
 The corresponding packaged files remain `dist/renderer/index.html`, `dist/renderer/print.html`, and `dist/renderer/docx-worker.html`. The HTML files stay at the renderer root even when their script modules move into a document owner.
 
