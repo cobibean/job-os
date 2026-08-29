@@ -427,24 +427,60 @@ export function useCareerProfileProduct(bridge: CareerProfileBridge) {
       : 'Baseline restored. This archive is now the start of a new Career Profile timeline.')
   }, [])
 
+  const listConnectedAgents = useCallback(() => bridge.listConnectedAgents(), [bridge])
+  const getAgentContext = useCallback((agentId: string) => bridge.getCareerProfileContext(agentId), [bridge])
+  const updateAgentContext = useCallback((
+    agentId: string,
+    request: Parameters<CareerProfileBridge['updateCareerProfileContext']>[1]
+  ) => bridge.updateCareerProfileContext(agentId, request), [bridge])
+  const previewAgentContext = useCallback((agentId: string) => bridge.previewCareerProfileContext(agentId), [bridge])
+  const exportProfile = useCallback((request: Parameters<CareerProfileBridge['exportCareerProfile']>[0]) => (
+    bridge.exportCareerProfile(request)
+  ), [bridge])
+  const chooseArchive = useCallback(() => bridge.chooseCareerProfileArchive(), [bridge])
+  const restoreBaseline = useCallback(async (
+    request: Parameters<CareerProfileBridge['restoreCareerProfile']>[0],
+    onRestored: () => Promise<boolean>
+  ) => {
+    const result = await bridge.restoreCareerProfile(request)
+    invalidatePersistentCache()
+    if (!await onRestored()) throw new Error('authoritative profile refresh failed')
+    confirmBaselineRestored(result.unavailableEvidenceIds.length)
+    return result
+  }, [bridge, confirmBaselineRestored, invalidatePersistentCache])
+  const getChangeHistory = useCallback(() => bridge.getCareerProfileChangeHistory(), [bridge])
+  const undoChange = useCallback((
+    revisionId: string,
+    request: Parameters<CareerProfileBridge['undoCareerProfileChange']>[1]
+  ) => bridge.undoCareerProfileChange(revisionId, request), [bridge])
+
   return {
+    chooseArchive,
     confirmBaselineRestored,
     current,
     dataSource,
     dismissItemConflict,
+    exportProfile,
+    getAgentContext,
+    getChangeHistory,
     importEvidence,
     invalidatePersistentCache,
     itemConflict,
     keepItemConflict,
+    listConnectedAgents,
     load,
     message,
     preserveBothItemConflict,
+    previewAgentContext,
     readOnly: dataSource !== 'live',
     reapplyItemConflict,
     removeEvidence,
     removeItem,
+    restoreBaseline,
     saveItem,
-    status
+    status,
+    undoChange,
+    updateAgentContext
   }
 }
 
