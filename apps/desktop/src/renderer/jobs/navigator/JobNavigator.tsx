@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { ArrowDown, ArrowUp, BriefcaseBusiness, ChevronRight, Search, UserRound } from 'lucide-react'
 
-import type { JobDetail, JobListItem, JobSortMode, JobStatus } from '../../shared/contracts'
+import type { JobDetail, JobListItem, JobSortMode, JobStatus } from '../../../shared/contracts'
 import { CANONICAL_STATUS_GROUPS, STATUS_TRANSITIONS, statusOptionLabel } from '../jobStatus'
 
 interface JobNavigatorProps {

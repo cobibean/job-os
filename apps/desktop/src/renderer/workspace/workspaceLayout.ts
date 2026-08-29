@@ -3,7 +3,7 @@ export type LayoutPreset = 'research' | 'review' | 'agent-focus'
 export type TopLevelWorkspace = LayoutPreset | 'browse'
 export type BrowseMode = 'list' | 'swipe'
 export type CenterSurface = 'browser' | 'document'
-export type BrowserRepairReason = import('../shared/contracts').BrowserRepairReason
+export type BrowserRepairReason = import('../../shared/contracts').BrowserRepairReason
 
 export interface PanelLayout {
   order: PanelId[]
@@ -18,7 +18,7 @@ export interface WorkspaceSnapshot {
   selectedJobId: string | null
   activeCenterSurface: CenterSurface
   repairedPresets: LayoutPreset[]
-  browserTabs?: import('../shared/contracts').BrowserTabMetadata[]
+  browserTabs?: import('../../shared/contracts').BrowserTabMetadata[]
   activeBrowserTabId?: string | null
   repairedBrowser?: boolean
   browserRepairReasons?: BrowserRepairReason[]
@@ -30,7 +30,7 @@ export interface WorkspaceSnapshot {
   browseFocusJobId: string | null
   browseQuery: string
   browseStatusGroup: string
-  browseSortMode: import('../shared/contracts').JobSortMode
+  browseSortMode: import('../../shared/contracts').JobSortMode
   browseRailWidth: number
 }
 

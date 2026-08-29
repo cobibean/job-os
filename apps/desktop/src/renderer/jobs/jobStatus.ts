@@ -1,4 +1,4 @@
-import type { JobStatus } from '../shared/contracts'
+import type { JobStatus } from '../../shared/contracts'
 
 export const CANONICAL_STATUS_GROUPS = [
   'Inbox', 'Considering', 'Applied', 'Interviewing', 'Closed', 'Inactive'

@@ -2,10 +2,10 @@ import { ArrowLeft, ArrowRight, BriefcaseBusiness, ExternalLink, Search } from '
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties, ReactNode } from 'react'
 
-import type { BrowseMode } from '../workspaceLayout'
-import type { JobSortMode, JobStatus } from '../../shared/contracts'
+import type { BrowseMode } from '../../workspace/workspaceLayout'
+import type { JobSortMode, JobStatus } from '../../../shared/contracts'
 import { CANONICAL_STATUS_GROUPS, STATUS_TRANSITIONS, statusLabel, statusOptionLabel } from '../jobStatus'
-import { useBrowseJobs } from '../hooks/useBrowseJobs'
+import { useBrowseJobs } from './useBrowseJobs'
 
 interface BrowseWorkspaceProps {
   activeJobId: string | null

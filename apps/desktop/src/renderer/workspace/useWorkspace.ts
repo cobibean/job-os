@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 
-import type { BrowseMode, LayoutPreset, PanelId, TopLevelWorkspace, WorkspaceSnapshot } from '../workspaceLayout'
+import type { BrowseMode, LayoutPreset, PanelId, TopLevelWorkspace, WorkspaceSnapshot } from './workspaceLayout'
 import type { AgentSessionJobContext, JobSortMode } from '../../shared/contracts'
 import type { BrowserRestoreState } from '../../shared/contracts'
 import type { WorkspaceSnapshot as BridgeWorkspaceSnapshot } from '../../shared/contracts'
@@ -11,7 +11,7 @@ import {
   resetActivePreset,
   resizeAdjacentPanels,
   setPanelCollapsed
-} from '../workspaceLayout'
+} from './workspaceLayout'
 
 type WorkspaceUpdate = (current: WorkspaceSnapshot) => WorkspaceSnapshot
 

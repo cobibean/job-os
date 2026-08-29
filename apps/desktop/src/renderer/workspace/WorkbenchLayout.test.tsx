@@ -1,7 +1,7 @@
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, expect, test, vi } from 'vitest'
 
-import { canonicalWorkspace } from '../workspaceLayout'
+import { canonicalWorkspace } from './workspaceLayout'
 import { WorkbenchLayout } from './WorkbenchLayout'
 
 afterEach(() => {

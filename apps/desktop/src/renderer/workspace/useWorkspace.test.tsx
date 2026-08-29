@@ -2,7 +2,7 @@ import { act, renderHook, waitFor } from '@testing-library/react'
 import { afterEach, expect, test, vi } from 'vitest'
 
 import type { AgentSessionJobContext } from '../../shared/contracts'
-import { canonicalWorkspace } from '../workspaceLayout'
+import { canonicalWorkspace } from './workspaceLayout'
 import { useWorkspace } from './useWorkspace'
 
 afterEach(() => {

@@ -1,8 +1,8 @@
 import { ArrowLeft, ArrowRight, GripVertical, PanelLeftClose } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 
-import type { PanelId, WorkspaceSnapshot } from '../workspaceLayout'
-import { panelNames } from '../workspaceLayout'
+import type { PanelId, WorkspaceSnapshot } from './workspaceLayout'
+import { panelNames } from './workspaceLayout'
 
 interface WorkbenchLayoutProps {
   workspace: WorkspaceSnapshot

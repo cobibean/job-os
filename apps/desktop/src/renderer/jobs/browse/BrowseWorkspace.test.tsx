@@ -2,10 +2,10 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { useState } from 'react'
 import { afterEach, expect, test, vi } from 'vitest'
 
-import type { BrowseMode } from '../workspaceLayout'
-import type { JobDetail, JobListItem, JobSortMode } from '../../shared/contracts'
+import type { BrowseMode } from '../../workspace/workspaceLayout'
+import type { JobDetail, JobListItem, JobSortMode } from '../../../shared/contracts'
 import { BrowseWorkspace } from './BrowseWorkspace'
-import { filterAndSortBrowseJobs } from '../hooks/useBrowseJobs'
+import { filterAndSortBrowseJobs } from './useBrowseJobs'
 
 afterEach(cleanup)
 

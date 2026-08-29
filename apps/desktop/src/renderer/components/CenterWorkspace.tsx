@@ -4,8 +4,8 @@ import { ArrowLeft, ArrowRight, BriefcaseBusiness, Check, Download, Globe2, Load
 
 import type { BrowserRestoreState, JobListItem } from '../../shared/contracts'
 import type { DocxOpenResult } from '../../shared/docxDocuments'
-import { useBrowser } from '../hooks/useBrowser'
-import { browserRepairMessage, type BrowserRepairReason } from '../workspaceLayout'
+import { useBrowser } from '../browser/useBrowser'
+import { browserRepairMessage, type BrowserRepairReason } from '../workspace/workspaceLayout'
 import { DocumentWorkspace, type DocumentPreviewMode } from './DocumentWorkspace'
 
 function agentJobSavePrompt(tabId: string, sourceUrl: string): string {

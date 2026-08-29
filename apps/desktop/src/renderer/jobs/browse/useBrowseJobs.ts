@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
-import type { JobDetail, JobListItem, JobSortMode, JobStatus } from '../../shared/contracts'
+import type { JobDetail, JobListItem, JobSortMode, JobStatus } from '../../../shared/contracts'
 import { CANONICAL_STATUS_GROUPS, STATUS_TRANSITIONS } from '../jobStatus'
 
 const groupOrder = new Map<string, number>(CANONICAL_STATUS_GROUPS.map((group, index) => [group, index]))
