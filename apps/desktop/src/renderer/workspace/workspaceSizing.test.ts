@@ -1,8 +1,9 @@
-import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { expect, test } from 'vitest'
 
-const styles = readFileSync(resolve(process.cwd(), 'src/renderer/styles.css'), 'utf8')
+import { resolveStylesheetImports } from '../app/styles/styleTestUtils'
+
+const styles = resolveStylesheetImports(resolve(process.cwd(), 'src/renderer/styles.css')).source
 
 function declarationsFor(selector: string) {
   const escapedSelector = selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')

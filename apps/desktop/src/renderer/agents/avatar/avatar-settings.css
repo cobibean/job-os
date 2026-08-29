@@ -1,0 +1,23 @@
+.agent-avatar-option {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-md);
+  color: var(--text);
+  background: var(--surface);
+  text-align: left;
+  cursor: pointer;
+  transition: border-color var(--motion-fast), background var(--motion-fast);
+}
+.agent-avatar-option > .agent-avatar { grid-column: 1 / -1; justify-self: center; }
+.agent-avatar-option > strong { overflow: hidden; font-size: var(--text-sm); font-weight: var(--weight-medium); text-overflow: ellipsis; white-space: nowrap; }
+.agent-avatar-option:hover { border-color: var(--border-strong); background: var(--surface-hover); }
+.agent-avatar-option.selected { border-color: var(--accent-border-strong); background: var(--accent-tint); }
+.agent-avatar-option .theme-check { align-self: start; margin-top: 2px; }
+@media (max-width: 1120px) {
+  .agent-avatar-grid { grid-template-columns: 1fr; }
+}

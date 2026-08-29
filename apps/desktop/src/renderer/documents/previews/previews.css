@@ -1,0 +1,8 @@
+.original-docx-preview { min-height: 100%; display: grid; min-width: 0; grid-template-rows: auto minmax(0, 1fr); background: var(--surface-inset); }
+.original-docx-status { display: flex; align-items: center; gap: 8px; min-height: 38px; padding: 8px 14px; border-bottom: 1px solid var(--border-soft); color: var(--muted); background: var(--surface-raised); font-size: var(--text-xs); }
+.original-docx-status small { margin-left: auto; color: var(--quiet); }
+.original-docx-preview.error .original-docx-status { color: var(--danger-text); }
+.original-docx-pages { min-width: 0; overflow: auto; padding: 24px; }
+.original-docx-pages .docx-wrapper { min-height: 100%; padding: 0; background: transparent; }
+.original-docx-pages .docx { margin: 0 auto 24px; color: #15191f; background: #fff; box-shadow: 0 12px 34px var(--shadow-color); }
+.original-docx-pages a[aria-disabled='true'] { color: inherit; text-decoration: underline dotted; cursor: not-allowed; }

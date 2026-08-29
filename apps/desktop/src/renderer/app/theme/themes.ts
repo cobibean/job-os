@@ -6,7 +6,7 @@
  * danger/warn) are derived with color math so every theme stays internally
  * consistent. Adding a new theme = adding one entry to THEMES below.
  *
- * Token names must stay in sync with the `:root` block in styles.css.
+ * Token names must stay in sync with the `:root` block in app/styles/foundation.css.
  */
 
 export type ThemeMode = 'light' | 'dark'

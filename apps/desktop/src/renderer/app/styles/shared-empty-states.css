@@ -1,0 +1,14 @@
+.navigator-empty, .workspace-empty, .agent-empty {
+  align-self: center;
+  justify-self: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  color: var(--muted);
+}
+
+.navigator-empty { max-width: 198px; gap: 8px; margin: 48px auto 0; }
+.navigator-empty svg { color: var(--quiet); }
+.navigator-empty h2, .agent-empty h2 { margin: 4px 0 0; color: var(--text-soft); font-size: var(--text-lg); font-weight: var(--weight-medium); }
+.navigator-empty p, .agent-empty p { margin: 0; font-size: var(--text-sm); line-height: 1.55; }

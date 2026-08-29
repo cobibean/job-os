@@ -1,10 +1,11 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
-import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { afterEach, expect, test, vi } from 'vitest'
 
 import type { AgentSessionsController, AgentSessionViewState } from './useAgentSessions'
 import { initialAgentConversationState } from './useAgentConversation'
 import { AgentSessionTabs } from './AgentSessionTabs'
+import { resolveStylesheetImports } from '../../app/styles/styleTestUtils'
 
 afterEach(cleanup)
 
@@ -87,7 +88,7 @@ test('compact-width markup keeps every tab reachable with one roving tab stop', 
   for (const tab of screen.getAllByRole('tab')) {
     expect(tab.getAttribute('title')).toMatch(/^Session \d — Idle$/)
   }
-  const styles = readFileSync('src/renderer/styles.css', 'utf8')
+  const styles = resolveStylesheetImports(resolve(process.cwd(), 'src/renderer/styles.css')).source
   expect(styles).toMatch(/grid-template-columns:\s*repeat\(var\(--agent-session-count\), minmax\(36px, 1fr\)\)/)
   expect(styles).toMatch(/\.agent-session-tab\s*\{[^}]*min-width:\s*36px;[^}]*min-height:\s*40px;/s)
   expect(styles).toMatch(/@media \(max-width: 720px\), \(min-resolution: 2dppx\)/)
