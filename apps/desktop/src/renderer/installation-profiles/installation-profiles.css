@@ -1,0 +1,16 @@
+.installation-profile-control { position: relative; -webkit-app-region: no-drag; }
+.installation-profile-trigger { display: inline-flex; align-items: center; gap: 5px; max-width: 180px; min-height: 24px; padding: 3px 8px; border: 1px solid var(--border); border-radius: 7px; background: var(--surface-raised); color: var(--text-secondary); font-size: var(--text-xs); line-height: 1; }
+.installation-profile-trigger span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.installation-profile-menu { position: absolute; z-index: 80; top: calc(100% + 7px); left: 0; min-width: 224px; padding: 6px; border: 1px solid var(--border); border-radius: 9px; background: var(--surface-raised); box-shadow: var(--shadow-lg); }
+.installation-profile-menu button { width: 100%; display: flex; align-items: center; justify-content: space-between; padding: 9px 10px; border: 0; border-radius: 5px; background: transparent; color: var(--text-primary); line-height: 1.2; text-align: left; white-space: nowrap; }
+.installation-profile-menu button:hover, .installation-profile-menu button:focus-visible { background: var(--surface-hover); }
+.installation-profile-separator { height: 1px; margin: 5px 0; background: var(--border); }
+.profile-dialog-backdrop, .profile-switching-overlay { position: fixed; z-index: 200; inset: 0; display: grid; place-items: center; background: rgb(0 0 0 / 55%); -webkit-app-region: no-drag; }
+.profile-dialog { width: min(440px, calc(100vw - 32px)); padding: 22px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface-raised); box-shadow: var(--shadow-lg); }
+.profile-dialog h2 { margin: 0 0 10px; }
+.profile-dialog p { color: var(--text-secondary); line-height: 1.5; }
+.profile-dialog label { display: grid; gap: 6px; margin-top: 18px; }
+.profile-dialog input { padding: 9px 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); color: var(--text-primary); }
+.profile-dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 20px; }
+.profile-dialog-error { color: var(--danger) !important; }
+.profile-switching-overlay { gap: 8px; align-content: center; color: white; }

@@ -1,0 +1,9 @@
+.demo-badge { display: inline-flex; margin-left: 7px; padding: 1px 6px; border-radius: 999px; background: var(--accent-tint); color: var(--accent-text); font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; }
+.diagnostics-panel dl { display: grid; gap: 7px; margin: 10px 0; }
+.diagnostics-panel dl div { display: flex; justify-content: space-between; gap: 18px; }
+.diagnostics-panel dt { color: var(--muted); }
+.diagnostics-panel dd { margin: 0; font-weight: 600; }
+.diagnostics-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.demo-reset { display: grid; gap: 8px; margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border); }
+.demo-reset p { margin: 0; }
+.remove-demo-button { margin-top: 8px; }

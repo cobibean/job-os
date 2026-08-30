@@ -1,0 +1,20 @@
+.status-bar {
+  display: grid;
+  grid-template-columns: 280px 1fr;
+  align-items: center;
+  border-top: 1px solid var(--border);
+  background: var(--bg);
+}
+
+.settings-button { width: 36px; height: 34px; margin-left: 14px; }
+.connection-state { justify-self: end; display: inline-flex; align-items: center; gap: 7px; margin-right: 22px; color: var(--muted); font-size: var(--text-xs); }
+.connection-state.connected { color: var(--green); }
+.connection-state.disconnected, .connection-state.degraded { color: var(--danger); }
+.api-version { padding-left: 6px; color: var(--quiet); }
+
+.spin { animation: spin 900ms linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { scroll-behavior: auto !important; transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; }
+}

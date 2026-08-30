@@ -50,7 +50,7 @@ These rules exist in current code and require direct remediation.
 
 - `apps/desktop/src/main/career-profile/careerProfile.ts`, `validateValue()`
 - `apps/desktop/src/main/career-profile/careerProfile.test.ts`
-- `apps/desktop/src/renderer/components/CareerProfileWorkspace.tsx`
+- `apps/desktop/src/renderer/career-profile/CareerProfileWorkspace.tsx`
 - renderer Career Profile tests
 
 **Current behavior**

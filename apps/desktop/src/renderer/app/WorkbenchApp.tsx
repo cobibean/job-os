@@ -1,0 +1,545 @@
+import { AgentPanel } from '../agents/chat/AgentPanel'
+import { BrowserWorkspace } from '../browser/BrowserWorkspace'
+import { useBrowser } from '../browser/useBrowser'
+import { JobNavigator } from '../jobs/navigator/JobNavigator'
+import { useSaveJobFromBrowser } from '../jobs/save-from-browser/useSaveJobFromBrowser'
+import { SettingsPanel } from './settings/SettingsPanel'
+import { StatusBar } from './status/StatusBar'
+import { WorkbenchLayout } from '../workspace/WorkbenchLayout'
+import { CenterWorkspace } from '../workspace/CenterWorkspace'
+import { CareerProfileWorkspace } from '../career-profile/CareerProfileWorkspace'
+import { hasCachedCareerProfile } from '../career-profile/work-arrangement/useCareerProfile'
+import { WorkspaceBar, type WorkspaceBarWorkspace } from '../workspace/WorkspaceBar'
+import { BrowseWorkspace } from '../jobs/browse/BrowseWorkspace'
+import { useAgentAvatarPreference } from '../agents/avatar/useAgentAvatarPreference'
+import { DocxDocumentEditorShell } from '../documents/docx/editor/DocxDocumentEditorShell'
+import { useConnectivity } from './runtime/useConnectivity'
+import { useJobs } from '../jobs/useJobs'
+import { useAgentSessions } from '../agents/chat/useAgentSessions'
+import { useConnectedAgents } from '../agents/connected-agents/useConnectedAgents'
+import { useWorkspace } from '../workspace/useWorkspace'
+import { useTheme } from './theme/useTheme'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import type { DocxOpenResult } from '../../shared/docxDocuments'
+import type {
+  AgentChatSelection,
+  ConnectedAgentModelsSnapshot,
+  ConnectedAgentSummary,
+  ConnectedAgentsSnapshot,
+} from '../../shared/contracts'
+import { NewAgentChatDialog } from '../agents/new-chat/NewAgentChatDialog'
+import { DocumentWorkspace } from '../documents/artifacts/DocumentWorkspace'
+import { InstallationProfileMenu } from '../installation-profiles/InstallationProfileMenu'
+
+export function requireDefaultConnectedAgent(snapshot: ConnectedAgentsSnapshot): ConnectedAgentSummary {
+  const agent = snapshot.defaultConnectedAgentId
+    ? snapshot.agents.find(item => item.id === snapshot.defaultConnectedAgentId)
+    : undefined
+  if (
+    !agent ||
+    agent.lifecycle !== 'connected' ||
+    !agent.health.providerAvailable ||
+    !agent.health.toolsAvailable
+  ) {
+    throw new Error('Default Connected Agent is unavailable. Choose a ready default in Settings.')
+  }
+  return agent
+}
+
+export function requireDefaultAgentModel(
+  agent: ConnectedAgentSummary,
+  catalog: ConnectedAgentModelsSnapshot
+): { modelId: string; reasoningEffort: string } {
+  if (!catalog.live || !agent.defaultModelId) {
+    throw new Error('Default model is unavailable. Choose a live model in Connected Agents settings.')
+  }
+  const model = catalog.models.find(item => item.modelId === agent.defaultModelId)
+  if (!model) {
+    throw new Error('Default model is unavailable. Choose a live model in Connected Agents settings.')
+  }
+  if (!agent.defaultReasoningEffort || !model.reasoningEfforts.includes(agent.defaultReasoningEffort)) {
+    throw new Error('Default reasoning effort is unavailable. Update the agent defaults in Settings.')
+  }
+  return { modelId: model.modelId, reasoningEffort: agent.defaultReasoningEffort }
+}
+
+interface JobListingRequest {
+  requestId: number
+  jobId: string
+  canonicalUrl: string
+  onComplete?: (success: boolean) => void
+}
+
+export function WorkbenchApp() {
+  const connectivity = useConnectivity()
+  const agentSessions = useAgentSessions()
+  const connectedAgents = useConnectedAgents()
+  const createJoblessSession = useCallback(async () => {
+    const snapshot = connectedAgents.snapshot ?? await connectedAgents.refresh()
+    if (!snapshot) return null
+    const agent = requireDefaultConnectedAgent(snapshot)
+    const catalog = await connectedAgents.loadModels(agent.id, true)
+    const model = requireDefaultAgentModel(agent, catalog)
+    const selection: AgentChatSelection = {
+      connectedAgentId: agent.id,
+      modelId: model.modelId,
+      reasoningEffort: model.reasoningEffort,
+      expectedProfileRevision: snapshot.registryRevision,
+      expectedAgentRegistryRevision: snapshot.registryRevision,
+      idempotencyKey: `desktop-save-chat-${crypto.randomUUID()}`
+    }
+    return agentSessions.createJobless(selection)
+  }, [agentSessions.createJobless, connectedAgents])
+  const activeJobContext = agentSessions.activeSession?.summary.jobContext ?? null
+  const jobState = useJobs(
+    agentSessions.activeId,
+    activeJobContext,
+    agentSessions.updateJobContext
+  )
+  const layoutState = useWorkspace(
+    agentSessions.activeId,
+    activeJobContext,
+    agentSessions.updateJobContext
+  )
+  const theme = useTheme()
+  const agentAvatar = useAgentAvatarPreference()
+  const [settingsOpen, setSettingsOpen] = useState(false)
+  const [newChatOpen, setNewChatOpen] = useState(false)
+  const [settingsPreparing, setSettingsPreparing] = useState(false)
+  const [careerProfileEnabled, setCareerProfileEnabled] = useState(false)
+  const [careerProfileOpen, setCareerProfileOpen] = useState(false)
+  const [browseDetachState, setBrowseDetachState] = useState<'idle' | 'preparing' | 'ready' | 'error'>('idle')
+  const [jobListingRequest, setJobListingRequest] = useState<JobListingRequest | null>(null)
+  const [documentMutationGeneration, setDocumentMutationGeneration] = useState(0)
+  const [documentPreviewMode, setDocumentPreviewMode] = useState<'pdf' | 'docx'>('pdf')
+  const [editingDocument, setEditingDocument] = useState<DocxOpenResult | null>(null)
+  const [panelReorderActive, setPanelReorderActive] = useState(false)
+  const [profileOverlayActive, setProfileOverlayActive] = useState(false)
+  const nextJobListingRequestId = useRef(0)
+  const lastHandledJobListingRequestId = useRef(0)
+  const latestNavigatorSelection = useRef(0)
+  const browseTransitionGeneration = useRef(0)
+  const panelReorderGeneration = useRef(0)
+  const navigatorSelectionQueue = useRef<Promise<unknown>>(Promise.resolve())
+  const prepareClose = useRef<() => Promise<boolean>>(async () => true)
+  const prepareProfileSwitch = useRef<() => Promise<boolean>>(async () => true)
+  const expectedInstallationProfileId = useRef<string | null>(
+    window.jobos?.installationProfiles?.expectedProfileId ?? null
+  )
+  const profileChangedElsewhere = Boolean(
+    expectedInstallationProfileId.current
+    && connectivity.installationProfileId
+    && expectedInstallationProfileId.current !== connectivity.installationProfileId
+  )
+  const activePreset = layoutState.workspace.selectedPreset
+  const activeTopLevelWorkspace = layoutState.workspace.activeTopLevelWorkspace ?? activePreset
+  const activeLayout = layoutState.workspace.layouts[activePreset]
+  const browseVisible = activeTopLevelWorkspace === 'browse' && browseDetachState === 'ready'
+  const browserTransitionPending = browseDetachState === 'preparing'
+  const nativeBrowserVisible = layoutState.hydrated && !profileChangedElsewhere && !editingDocument && activeTopLevelWorkspace !== 'browse' && !careerProfileOpen && !browserTransitionPending && !activeLayout.collapsed.includes('center') && !settingsOpen && !settingsPreparing && !newChatOpen && !profileOverlayActive
+  const browser = useBrowser(
+    {
+      tabs: layoutState.workspace.browserTabs ?? [],
+      activeTabId: layoutState.workspace.activeBrowserTabId ?? null
+    },
+    layoutState.hydrated,
+    layoutState.workspace.activeCenterSurface === 'browser' && nativeBrowserVisible && !panelReorderActive,
+    `${activePreset}:${activeLayout.order.join(',')}:${activeLayout.collapsed.join(',')}`,
+    layoutState.updateBrowserState,
+    !profileChangedElsewhere
+  )
+  const saveJobFromBrowser = useSaveJobFromBrowser({
+    active: !profileChangedElsewhere,
+    agent: window.jobos?.agent,
+    browser: window.jobos?.browser ? {
+      getState: window.jobos.browser.getState,
+      reconcileExternalState: browser.reconcileExternalState
+    } : null,
+    jobs: window.jobos?.jobs,
+    onCreateSaveSession: createJoblessSession,
+    onJobSaved: async (jobId, conversationId) => {
+      if (!await jobState.selectJobForConversation(conversationId, jobId)) {
+        throw new Error('The job was saved, but JobOS could not attach it to the new agent session.')
+      }
+      setDocumentMutationGeneration(generation => generation + 1)
+    }
+  })
+
+  useEffect(() => {
+    const request = jobListingRequest
+    if (!request || !browser.restorationReady || request.requestId === lastHandledJobListingRequestId.current) return
+    lastHandledJobListingRequestId.current = request.requestId
+    void browser.openJobListing(request.jobId, request.canonicalUrl).then(success => request.onComplete?.(success))
+  }, [browser.openJobListing, browser.restorationReady, jobListingRequest])
+
+  useEffect(() => {
+    const bridge = window.jobos?.careerProfile
+    if (!bridge) return
+    let active = true
+    void bridge.availability()
+      .then(result => { if (active) setCareerProfileEnabled(result.enabled) })
+      .catch(async () => {
+        const cached = await hasCachedCareerProfile(bridge)
+        if (active) setCareerProfileEnabled(cached)
+      })
+    return () => { active = false }
+  }, [])
+
+  const changePanelReorderInteraction = useCallback(async (active: boolean) => {
+    if (!active) {
+      panelReorderGeneration.current += 1
+      setPanelReorderActive(false)
+      return true
+    }
+    const generation = panelReorderGeneration.current + 1
+    panelReorderGeneration.current = generation
+    setPanelReorderActive(true)
+    if (nativeBrowserVisible && window.jobos?.browser) {
+      try {
+        await window.jobos.browser.setBounds({ x: 0, y: 0, width: 0, height: 0, visible: false })
+      } catch {
+        if (generation === panelReorderGeneration.current) setPanelReorderActive(false)
+        return false
+      }
+    }
+    if (generation !== panelReorderGeneration.current) return false
+    return true
+  }, [nativeBrowserVisible])
+
+  prepareProfileSwitch.current = async () => {
+    if (!await prepareClose.current()) return false
+    try {
+      await layoutState.flush()
+    } catch {
+      return false
+    }
+    return !Object.values(agentSessions.sessions).some(session => (
+      session.conversation.activeTurn !== null
+      || session.summary.recoveryState === 'recovering'
+      || session.operation !== null
+    ))
+  }
+
+  useEffect(() => window.jobos?.lifecycle?.subscribePrepareClose(
+    reason => reason === 'profile-switch' ? prepareProfileSwitch.current() : prepareClose.current()
+  ), [])
+
+  useEffect(() => setDocumentPreviewMode('pdf'), [jobState.selectedJobId])
+
+  useEffect(() => {
+    const handleAgentShortcut = (event: KeyboardEvent) => {
+      if (!document.querySelector('.agent-panel')) return
+      if (!event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) return
+      const key = event.key.toLowerCase()
+      if (key !== 'n' && !/^[1-5]$/.test(event.key)) return
+      if (settingsOpen || settingsPreparing || document.querySelector('[aria-modal="true"], dialog[open], [role="dialog"], [role="alertdialog"]')) {
+        event.preventDefault()
+        return
+      }
+      if (key === 'n') {
+        event.preventDefault()
+        setNewChatOpen(true)
+        return
+      }
+      const index = Number(event.key) - 1
+      if (!agentSessions.order[index]) return
+      event.preventDefault()
+      agentSessions.selectByIndex(index)
+      requestAnimationFrame(() => document.querySelector<HTMLTextAreaElement>('#agent-message')?.focus())
+    }
+    window.addEventListener('keydown', handleAgentShortcut)
+    return () => window.removeEventListener('keydown', handleAgentShortcut)
+  }, [agentSessions.order, agentSessions.selectByIndex, settingsOpen, settingsPreparing])
+
+  const showPublishedDocument = useCallback(() => {
+    setDocumentMutationGeneration(generation => generation + 1)
+    return layoutState.showDocument()
+  }, [layoutState.showDocument])
+
+  const openSettings = async () => {
+    if (settingsOpen || settingsPreparing) return
+    const browser = window.jobos?.browser
+    if (!browser) {
+      setSettingsOpen(true)
+      return
+    }
+    setSettingsPreparing(true)
+    try {
+      await browser.setBounds({ x: 0, y: 0, width: 0, height: 0, visible: false })
+      setSettingsOpen(true)
+    } catch {
+      // Keep the panel closed rather than rendering it beneath an attached native browser view.
+    } finally {
+      setSettingsPreparing(false)
+    }
+  }
+
+  const prepareProfileOverlay = async () => {
+    if (profileOverlayActive) return true
+    try {
+      await window.jobos?.browser?.setBounds({ x: 0, y: 0, width: 0, height: 0, visible: false })
+      setProfileOverlayActive(true)
+      return true
+    } catch {
+      return false
+    }
+  }
+
+  const selectJobFromNavigator = (jobId: string, openInResearch = false, canonicalUrl?: string): Promise<boolean> => {
+    const selectionRequest = latestNavigatorSelection.current + 1
+    latestNavigatorSelection.current = selectionRequest
+    const job = jobState.jobs.find(candidate => candidate.jobId === jobId)
+    const listingUrl = canonicalUrl ?? job?.canonicalUrl
+    if (!listingUrl) return Promise.resolve(false)
+    const operation = navigatorSelectionQueue.current.then(async () => {
+      if (selectionRequest !== latestNavigatorSelection.current) return false
+      if (!await jobState.selectJob(jobId)) return false
+      try {
+        await layoutState.showBrowser()
+      } catch {
+        // The visible workspace update already succeeded; navigation should not depend on persistence.
+      }
+      if (selectionRequest !== latestNavigatorSelection.current) return false
+      const opened = await new Promise<boolean>(resolve => {
+        nextJobListingRequestId.current += 1
+        setJobListingRequest({
+          requestId: nextJobListingRequestId.current,
+          jobId,
+          canonicalUrl: listingUrl,
+          onComplete: resolve
+        })
+      })
+      if (!opened || selectionRequest !== latestNavigatorSelection.current) return false
+      if (openInResearch) {
+        try {
+          await layoutState.selectPreset('research')
+        } catch {
+          // The local workspace transition has already committed.
+        }
+        setBrowseDetachState('idle')
+      }
+      return true
+    })
+    navigatorSelectionQueue.current = operation.catch(() => undefined)
+    return operation
+  }
+
+  const detachBrowserForBrowse = useCallback(async (generation: number) => {
+    setBrowseDetachState('preparing')
+    try {
+      await window.jobos?.browser?.setBounds({ x: 0, y: 0, width: 0, height: 0, visible: false })
+      if (generation !== browseTransitionGeneration.current) {
+        setBrowseDetachState(current => current === 'preparing' ? 'idle' : current)
+        return false
+      }
+      setBrowseDetachState('ready')
+      return true
+    } catch {
+      if (generation !== browseTransitionGeneration.current) {
+        setBrowseDetachState(current => current === 'preparing' ? 'idle' : current)
+        return false
+      }
+      setBrowseDetachState('error')
+      return false
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!layoutState.hydrated || activeTopLevelWorkspace !== 'browse' || browseDetachState !== 'idle') return
+    const generation = browseTransitionGeneration.current + 1
+    browseTransitionGeneration.current = generation
+    void detachBrowserForBrowse(generation)
+  }, [activeTopLevelWorkspace, browseDetachState, detachBrowserForBrowse, layoutState.hydrated])
+
+  const changeTopLevelWorkspace = async (workspaceId: WorkspaceBarWorkspace) => {
+    if (workspaceId === 'career-profile') {
+      if (!careerProfileEnabled || careerProfileOpen) return
+      browseTransitionGeneration.current += 1
+      setBrowseDetachState('idle')
+      try {
+        await window.jobos?.browser?.setBounds({ x: 0, y: 0, width: 0, height: 0, visible: false })
+      } catch {
+        return
+      }
+      setCareerProfileOpen(true)
+      return
+    }
+    setCareerProfileOpen(false)
+    if (workspaceId !== 'browse') {
+      browseTransitionGeneration.current += 1
+      setBrowseDetachState(current => current === 'preparing' ? current : 'idle')
+      await layoutState.selectTopLevelWorkspace(workspaceId)
+      return
+    }
+    if (browseDetachState === 'preparing' || browseVisible) return
+    const generation = browseTransitionGeneration.current + 1
+    browseTransitionGeneration.current = generation
+    if (!await detachBrowserForBrowse(generation) || generation !== browseTransitionGeneration.current) return
+    if (activeTopLevelWorkspace !== 'browse') await layoutState.selectTopLevelWorkspace('browse')
+  }
+
+  if (profileChangedElsewhere) {
+    return (
+      <main className="profile-changed-elsewhere">
+        <h1>JobOS switched to “{connectivity.installationProfileName ?? 'another profile'}” on another device.</h1>
+        <p>Restart JobOS to continue safely.</p>
+        <button onClick={() => { void window.jobos?.installationProfiles.restart() }} type="button">Restart JobOS</button>
+      </main>
+    )
+  }
+
+  return (
+    <div className="app-shell" data-layout={activePreset} data-workspace={activeTopLevelWorkspace}>
+      <WorkspaceBar
+        activeWorkspace={careerProfileOpen ? 'career-profile' : activeTopLevelWorkspace}
+        careerProfileEnabled={careerProfileEnabled}
+        onWorkspaceChange={workspaceId => { void changeTopLevelWorkspace(workspaceId) }}
+        onReset={layoutState.reset}
+        onToggleMode={theme.toggleMode}
+        themeMode={theme.mode}
+        profileControl={<InstallationProfileMenu
+          activeProfileName={connectivity.installationProfileName ?? 'Personal'}
+          onOverlayClose={() => setProfileOverlayActive(false)}
+          prepareOverlay={prepareProfileOverlay}
+        />}
+      />
+      <div className="workspace-content">
+      <div className="workbench-layer" hidden={browseVisible || careerProfileOpen}>
+      {editingDocument ? (
+        <DocxDocumentEditorShell
+          opened={editingDocument}
+          jobLabel={jobState.selectedJob
+            ? `${jobState.selectedJob.company} · ${jobState.selectedJob.title}`
+            : 'Selected job'}
+          onPrepareClose={handler => { prepareClose.current = handler }}
+          onExit={() => {
+            setDocumentPreviewMode('docx')
+            setEditingDocument(null)
+            setDocumentMutationGeneration(generation => generation + 1)
+          }}
+        />
+      ) : (
+      <WorkbenchLayout
+        agent={<AgentPanel
+          agentLabel={connectedAgents.snapshot?.agents.find(agent => agent.id === agentSessions.activeSession?.summary.binding?.connectedAgentId)?.displayName}
+          avatarId={agentAvatar.avatarId}
+          apiState={connectivity.state}
+          contextLabel={jobState.selectedJob ? `${jobState.selectedJob.company} · ${jobState.selectedJob.title}` : 'No active job'}
+          onArtifactRendered={showPublishedDocument}
+          onNewChat={() => setNewChatOpen(true)}
+          sessions={agentSessions}
+        />}
+        center={<CenterWorkspace
+          activeSurface={layoutState.workspace.activeCenterSurface}
+          browser={<BrowserWorkspace
+            browser={browser}
+            browserRepaired={Boolean(layoutState.workspace.repairedBrowser)}
+            browserRepairReasons={layoutState.workspace.browserRepairReasons ?? []}
+            jobs={jobState.jobs}
+            onSaveJob={saveJobFromBrowser.saveJob}
+            saveStates={saveJobFromBrowser.saveStates}
+          />}
+          document={<DocumentWorkspace
+            job={jobState.selectedJob}
+            hydrated={layoutState.hydrated}
+            onViewChange={layoutState.updateDocumentState}
+            onOpenEditor={setEditingDocument}
+            onPreviewModeChange={setDocumentPreviewMode}
+            previewMode={documentPreviewMode}
+            refreshGeneration={documentMutationGeneration}
+            restoredArtifactId={layoutState.workspace.activeArtifactId ?? null}
+            restoredPage={layoutState.workspace.activeArtifactPage ?? 1}
+            restoredZoom={layoutState.workspace.activeArtifactZoom ?? 1}
+          />}
+        />}
+        jobs={<JobNavigator
+          error={jobState.error}
+          feedback={jobState.feedback}
+          jobs={jobState.jobs}
+          loading={jobState.loading}
+          onMove={jobState.reorder}
+          onReorder={jobState.reorderTo}
+          onQueryChange={jobState.setQuery}
+          onSelect={selectJobFromNavigator}
+          onSortChange={jobState.changeSort}
+          onStatusChange={jobState.changeStatus}
+          onRemoveDemo={jobState.removeDemo}
+          onStatusGroupChange={jobState.setStatusGroup}
+          query={jobState.query}
+          selectedJobId={jobState.selectedJobId}
+          selectedJobDetail={jobState.selectedJobDetail}
+          sortMode={jobState.sortMode}
+          statusGroup={jobState.statusGroup}
+        />}
+        onCollapse={layoutState.collapse}
+        onMove={layoutState.move}
+        onReorderInteractionChange={changePanelReorderInteraction}
+        onResize={layoutState.resize}
+        workspace={layoutState.workspace}
+      />
+      )}
+      </div>
+      {careerProfileEnabled ? (
+        <div className="career-profile-layer" hidden={!careerProfileOpen}>
+          <CareerProfileWorkspace
+            active={careerProfileOpen}
+            hasActiveTurn={Boolean(agentSessions.activeSession?.summary.activeTurn)}
+            online={connectivity.state === 'connected'}
+          />
+        </div>
+      ) : null}
+      {browseVisible ? (
+        <BrowseWorkspace
+          activeJobId={jobState.selectedJobId}
+          focusJobId={layoutState.workspace.browseFocusJobId}
+          mode={layoutState.workspace.browseMode}
+          onOpenJob={(jobId, canonicalUrl) => selectJobFromNavigator(jobId, true, canonicalUrl)}
+          onUpdate={layoutState.updateBrowseState}
+          query={layoutState.workspace.browseQuery}
+          railWidth={layoutState.workspace.browseRailWidth}
+          sortMode={layoutState.workspace.browseSortMode}
+          statusGroup={layoutState.workspace.browseStatusGroup}
+        />
+      ) : null}
+      {activeTopLevelWorkspace === 'browse' && browseDetachState === 'error' ? (
+        <div className="browse-startup-error" role="alert">
+          <p>Browse could not open because the browser view could not be hidden.</p>
+          <button onClick={() => {
+            const generation = browseTransitionGeneration.current + 1
+            browseTransitionGeneration.current = generation
+            void detachBrowserForBrowse(generation)
+          }} type="button">Retry Browse</button>
+        </div>
+      ) : null}
+      </div>
+      <p aria-live="polite" className="layout-announcement">{layoutState.announcement}</p>
+      <StatusBar apiVersion={connectivity.apiVersion} message={connectivity.message} onOpenSettings={() => { void openSettings() }} state={connectivity.state} />
+      {settingsOpen ? (
+        <SettingsPanel
+          activeAgentAvatarId={agentAvatar.avatarId}
+          activeThemeId={theme.themeId}
+          careerProfileBridge={window.jobos.careerProfile}
+          connectedAgentsState={connectedAgents}
+          onConnectedAgentsChanged={agentSessions.refreshAvailability}
+          mode={theme.mode}
+          onClose={() => setSettingsOpen(false)}
+          onSelectAgentAvatar={agentAvatar.selectAvatar}
+          onSelectTheme={theme.selectTheme}
+        />
+      ) : null}
+      {newChatOpen ? (
+        <NewAgentChatDialog
+          atMaximum={agentSessions.atMaximum}
+          connectedAgents={connectedAgents}
+          onArchiveCurrent={() => {
+            if (agentSessions.activeId) void agentSessions.archive(agentSessions.activeId).then(archived => {
+              if (archived) setNewChatOpen(false)
+            })
+          }}
+          onClose={() => setNewChatOpen(false)}
+          onCreate={agentSessions.create}
+        />
+      ) : null}
+    </div>
+  )
+}

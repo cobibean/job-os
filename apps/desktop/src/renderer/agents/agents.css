@@ -1,0 +1,82 @@
+/* Connected Agents — intentionally compact V1 */
+.settings-section-heading { display: flex; align-items: start; justify-content: space-between; gap: 16px; }
+.settings-section-heading h3 { margin: 3px 0 4px; color: var(--text); font-size: var(--text-lg); }
+.settings-section-heading p { max-width: 620px; margin: 0; color: var(--muted); font-size: var(--text-sm); line-height: 1.5; }
+.settings-eyebrow { color: var(--accent); font-size: 10px; font-weight: var(--weight-bold); letter-spacing: .12em; text-transform: uppercase; }
+.settings-icon-button { display: grid; width: 34px; height: 34px; place-items: center; border: 1px solid var(--border); border-radius: 10px; color: var(--muted); background: var(--surface-raised); }
+.settings-callout { display: flex; align-items: center; gap: 8px; margin: 12px 0 0; padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; color: var(--muted); background: var(--surface-inset); font-size: var(--text-sm); }
+.settings-callout.error { border-color: var(--danger-border); color: var(--danger-text); background: var(--danger-tint); }
+.connected-agents-settings { border-top: 1px solid var(--border-soft); }
+.connected-agents-onboarding { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 14px; margin-top: 16px; padding: 16px; border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--border)); border-radius: 16px; background: linear-gradient(135deg, color-mix(in srgb, var(--accent) 9%, var(--surface-raised)), var(--surface-raised)); }
+.connected-agents-onboarding p { margin: 3px 0 0; color: var(--muted); font-size: var(--text-sm); }
+.connected-agents-orb { display: grid; width: 48px; height: 48px; place-items: center; border-radius: 16px; color: var(--accent); background: var(--accent-soft); }
+.connected-agents-onboarding button,
+.connected-agent-actions button,
+.connected-agent-add,
+.connected-agent-inspector > button { display: inline-flex; align-items: center; justify-content: center; gap: 7px; min-height: 34px; padding: 0 11px; border: 1px solid var(--border-strong); border-radius: 9px; color: var(--text); background: var(--surface-raised); font: inherit; font-size: var(--text-xs); font-weight: var(--weight-bold); }
+.connected-agents-layout { display: grid; grid-template-columns: minmax(190px, .8fr) minmax(260px, 1.2fr); gap: 14px; margin-top: 16px; }
+.connected-agent-roster { display: grid; align-content: start; gap: 6px; }
+.connected-agent-roster > [role="listitem"] > button { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 9px; width: 100%; padding: 11px; border: 1px solid transparent; border-radius: 11px; color: var(--text); text-align: left; background: transparent; }
+.connected-agent-roster > [role="listitem"] > button:hover,
+.connected-agent-roster > [role="listitem"] > button.selected { border-color: var(--border); background: var(--surface-raised); }
+.connected-agent-roster > [role="listitem"] > button span:nth-child(2) { display: grid; min-width: 0; gap: 2px; }
+.connected-agent-roster small { overflow: hidden; color: var(--muted); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.connected-agent-dot { width: 8px; height: 8px; border-radius: 999px; background: var(--warn); box-shadow: 0 0 0 3px var(--warn-tint); }
+.connected-agent-dot.ready { background: var(--green); box-shadow: 0 0 0 3px var(--green-tint); }
+.connected-agent-default { display: inline-flex; align-items: center; gap: 3px; color: var(--accent); font-size: 9px; font-weight: var(--weight-bold); }
+.connected-agent-roster .connected-agent-add { grid-template-columns: auto 1fr; border-style: dashed; color: var(--accent); }
+.connected-agent-inspector { display: grid; gap: 11px; padding: 15px; border: 1px solid var(--border); border-radius: 14px; background: var(--surface-raised); }
+.connected-agent-title { display: flex; align-items: start; justify-content: space-between; gap: 12px; }
+.connected-agent-title span:first-child { color: var(--quiet); font-size: 9px; font-weight: var(--weight-bold); letter-spacing: .1em; }
+.connected-agent-title h4 { margin: 2px 0 0; font-size: var(--text-lg); }
+.status-pill { padding: 4px 7px; border-radius: 999px; color: var(--green-text); background: var(--green-tint); font-size: 9px; font-weight: var(--weight-bold); text-transform: capitalize; }
+.status-pill.disconnected { color: var(--danger-text); background: var(--danger-tint); }
+.connected-agent-health,
+.connected-agent-account { margin: 0; color: var(--muted); font-size: var(--text-xs); }
+.connected-agent-inspector label,
+.new-chat-dialog label { display: grid; gap: 5px; color: var(--muted); font-size: var(--text-xs); font-weight: var(--weight-bold); }
+.connected-agent-inspector select,
+.new-chat-dialog select { width: 100%; min-height: 38px; padding: 0 10px; border: 1px solid var(--border); border-radius: 9px; color: var(--text); background: var(--surface-inset); font: inherit; }
+.connected-agent-actions { display: flex; flex-wrap: wrap; gap: 7px; padding-top: 2px; }
+.connected-agent-actions .danger-link { margin-left: auto; color: var(--danger-text); }
+.connected-agent-auth { display: flex; align-items: start; gap: 10px; padding: 11px; border-radius: 10px; background: var(--accent-soft); }
+.connected-agent-auth p { margin: 2px 0; color: var(--muted); font-size: 10px; }
+.connected-agent-auth code { color: var(--text); font-size: var(--text-md); letter-spacing: .08em; }
+.settings-dialog-backdrop,
+.new-chat-backdrop { position: fixed; z-index: 80; inset: 0; display: grid; place-items: center; padding: 20px; background: color-mix(in srgb, var(--bg) 72%, transparent); backdrop-filter: blur(8px); }
+.settings-dialog,
+.new-chat-dialog { width: min(480px, 100%); padding: 20px; border: 1px solid var(--border-strong); border-radius: 18px; background: var(--surface-raised); box-shadow: var(--shadow-lg); }
+.settings-dialog h4 { margin: 0; font-size: var(--text-lg); }
+.settings-dialog p { color: var(--muted); line-height: 1.5; }
+.settings-dialog > div { display: flex; justify-content: end; gap: 8px; }
+.settings-dialog button,
+.new-chat-dialog button { min-height: 36px; padding: 0 12px; border: 1px solid var(--border); border-radius: 9px; color: var(--text); background: var(--surface-inset); font: inherit; }
+.settings-dialog button.danger { border-color: var(--danger-border); color: white; background: var(--danger); }
+.new-chat-dialog { display: grid; gap: 14px; }
+.new-chat-dialog > header { display: flex; align-items: start; justify-content: space-between; gap: 14px; }
+.new-chat-dialog h2 { margin: 3px 0 4px; font-size: 22px; }
+.new-chat-dialog header p { margin: 0; color: var(--muted); font-size: var(--text-sm); line-height: 1.45; }
+.new-chat-dialog header > button { width: 34px; min-height: 34px; padding: 0; }
+.new-chat-dialog footer { display: flex; justify-content: end; gap: 8px; padding-top: 4px; }
+.new-chat-dialog footer button:last-child { border-color: var(--accent); color: var(--on-accent); background: var(--accent); }
+.new-chat-limit { display: flex; align-items: start; gap: 11px; padding: 14px; border-radius: 12px; color: var(--warn-text); background: var(--warn-tint); }
+.new-chat-limit p { margin: 3px 0 10px; font-size: var(--text-sm); }
+.new-chat-receipt { display: flex; align-items: center; gap: 10px; padding: 11px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface-inset); }
+.new-chat-receipt span { display: grid; gap: 2px; }
+.new-chat-receipt small { color: var(--muted); }
+.agent-binding { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 7px; padding: 6px 10px; border-bottom: 1px solid var(--border-soft); color: var(--muted); background: var(--surface-inset); font-size: 10px; }
+.agent-binding strong { color: var(--text); }
+.agent-binding span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.agent-binding small { color: var(--quiet); }
+
+@media (max-width: 720px) {
+  .connected-agents-layout { grid-template-columns: minmax(0, 1fr); }
+  .connected-agents-onboarding { grid-template-columns: auto minmax(0, 1fr); }
+  .connected-agents-onboarding button { grid-column: 1 / -1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .connected-agent-dot { box-shadow: none; }
+  .settings-dialog-backdrop,
+  .new-chat-backdrop { backdrop-filter: none; }
+}

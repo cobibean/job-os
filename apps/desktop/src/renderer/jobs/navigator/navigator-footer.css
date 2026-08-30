@@ -1,0 +1,22 @@
+.profile-row {
+  height: 70px;
+  display: grid;
+  grid-template-columns: 36px 1fr auto;
+  align-items: center;
+  gap: 10px;
+  margin: 0 18px;
+  border-top: 1px solid var(--border);
+}
+
+.profile-avatar {
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--muted);
+  border-radius: 50%;
+}
+
+.profile-copy { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.profile-copy strong { font-size: var(--text-sm); font-weight: var(--weight-medium); }
+.profile-copy small { color: var(--quiet); font-size: var(--text-xs); }
