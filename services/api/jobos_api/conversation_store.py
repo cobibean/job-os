@@ -321,8 +321,7 @@ class ConversationStore:
                 and conversation["lock_reason"] is None
             )
             if not is_legacy_compatibility_chat and (
-                conversation["creation_state"] != "ready"
-                or conversation["lock_reason"] is not None
+                conversation["creation_state"] != "ready" or conversation["lock_reason"] is not None
             ):
                 connection.rollback()
                 raise ConversationBusy(
@@ -602,11 +601,11 @@ class ConversationStore:
         career_profile_context: CareerProfileContextStore | None = None,
         career_profile_agent_id: str | None = None,
     ) -> bool:
-        """Atomically append one terminal assistant-only continuation."""
+        """Atomically create or append one assistant-only continuation."""
         if not re.fullmatch(r"turn_[A-Za-z0-9_-]{8,200}", turn_id):
             raise ValueError("Invalid continuation turn id")
-        if status not in {"completed", "failed", "interrupted"}:
-            raise ValueError("Continuation must be terminal")
+        if status not in {"running", "completed", "failed", "interrupted"}:
+            raise ValueError("Invalid continuation status")
         safe_detail = _conversation_detail(event_type, detail)
         message_id = f"msg_{secrets.token_urlsafe(16)}"
         context = {"agent_continuation": True}
@@ -617,6 +616,17 @@ class ConversationStore:
                 "SELECT 1 FROM conversation_turns WHERE turn_id = ? AND conversation_id = ?",
                 (turn_id, self.conversation_id),
             ).fetchone():
+                connection.rollback()
+                return False
+            if (
+                status == "running"
+                and connection.execute(
+                    """SELECT 1 FROM conversation_turns
+                   WHERE conversation_id = ? AND status IN ('queued', 'running', 'waiting')
+                   LIMIT 1""",
+                    (self.conversation_id,),
+                ).fetchone()
+            ):
                 connection.rollback()
                 return False
             continuation_id = detail.get("continuation_id")
@@ -723,11 +733,17 @@ class ConversationStore:
                     binding[7] if binding else None,
                 ),
             )
+            turn_summary = (
+                "Agent continuing completed background work"
+                if status == "running"
+                else "Agent completed background work"
+            )
             connection.execute(
-                "INSERT INTO conversation_events(conversation_id, turn_id, event_type, state, summary, detail_json) VALUES (?, ?, 'turn', 'working', 'Agent completed background work', ?)",
+                "INSERT INTO conversation_events(conversation_id, turn_id, event_type, state, summary, detail_json) VALUES (?, ?, 'turn', 'working', ?, ?)",
                 (
                     self.conversation_id,
                     turn_id,
+                    turn_summary,
                     json.dumps(
                         {"context": context, "source_turn_id": None},
                         separators=(",", ":"),
@@ -741,7 +757,7 @@ class ConversationStore:
                     self.conversation_id,
                     turn_id,
                     event_type[:50],
-                    status,
+                    "working" if status == "running" else status,
                     sanitize_summary(summary),
                     json.dumps(safe_detail, separators=(",", ":"), sort_keys=True),
                     source_event_id[:256] if source_event_id else None,
@@ -990,10 +1006,14 @@ class ConversationStore:
         with connect_sqlite(self._path) as connection:
             connection.execute("BEGIN IMMEDIATE")
             active = connection.execute(
-                "SELECT turn_id FROM conversation_turns WHERE conversation_id = ? AND status IN ('queued','running','waiting') ORDER BY created_at, rowid",
+                "SELECT turn_id, context_json FROM conversation_turns WHERE conversation_id = ? AND status IN ('queued','running','waiting') ORDER BY created_at, rowid",
                 (self.conversation_id,),
             ).fetchall()
-            for (turn_id,) in active:
+            for turn_id, context_json in active:
+                context = json.loads(context_json) if context_json else {}
+                is_agent_continuation = (
+                    isinstance(context, dict) and context.get("agent_continuation") is True
+                )
                 connection.execute(
                     "UPDATE conversation_turns SET status = 'interrupted', updated_at = CURRENT_TIMESTAMP WHERE turn_id = ? AND conversation_id = ? AND status IN ('queued','running','waiting')",
                     (turn_id, self.conversation_id),
@@ -1003,9 +1023,17 @@ class ConversationStore:
                     (
                         self.conversation_id,
                         turn_id,
-                        "Turn interrupted by API restart; retry to continue",
+                        (
+                            "Background continuation interrupted by API restart"
+                            if is_agent_continuation
+                            else "Turn interrupted by API restart; retry to continue"
+                        ),
                         json.dumps(
-                            {"actionable": True, "reason": "api_restart", "retry": True},
+                            {
+                                "actionable": True,
+                                "reason": "api_restart",
+                                "retry": not is_agent_continuation,
+                            },
                             separators=(",", ":"),
                             sort_keys=True,
                         ),

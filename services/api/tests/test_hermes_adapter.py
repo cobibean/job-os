@@ -18,7 +18,7 @@ from jobos_api.career_profile import (
 )
 from jobos_api.conversations import ConversationService, RetryTurnRequest, SendMessageRequest
 from jobos_api.hermes_adapter import HermesWebSocketGateway, _prompt_with_context
-from jobos_api.state_store import JobOsStateStore
+from jobos_api.state_store import ConversationBusy, JobOsStateStore
 
 TOKEN = "protected-dashboard-token-value"
 
@@ -438,9 +438,9 @@ def test_prompt_context_accepts_only_exact_typed_complete_profile_snapshot():
         {"career_profile_context": {**snapshot, "unexpected": "omit me"}},
         "conv_complete_profile_prompt_extra",
     )
-    serialized_with_extra = prompt_with_extra.split(
-        "<jobos_untrusted_context>\n", 1
-    )[1].split("\n</jobos_untrusted_context>", 1)[0]
+    serialized_with_extra = prompt_with_extra.split("<jobos_untrusted_context>\n", 1)[1].split(
+        "\n</jobos_untrusted_context>", 1
+    )[0]
     assert json.loads(serialized_with_extra)["career_profile_context"] is None
 
 
@@ -753,6 +753,24 @@ def test_service_records_late_continuation_without_disturbing_active_user_turn(t
                     )
                 )
             )
+            for _ in range(50):
+                interim = conversation.conversation_snapshot()
+                interim_active = interim["active_turn"]
+                if isinstance(interim_active, dict) and str(interim_active["turn_id"]).startswith(
+                    "turn_cont_"
+                ):
+                    break
+                await asyncio.sleep(0.01)
+            else:
+                raise AssertionError("Stock Hermes continuation never acquired JobOS ownership")
+            with pytest.raises(ConversationBusy):
+                conversation.create_turn(
+                    text="Racing user follow-up",
+                    context={},
+                    idempotency_key="racing-user-after-stock-marker",
+                    actor_id="device-a",
+                )
+
             socket.incoming.put_nowait(json.dumps(event("message.start", "live-1")))
             socket.incoming.put_nowait(json.dumps(event("message.start", "live-1")))
             socket.incoming.put_nowait(
@@ -789,8 +807,7 @@ def test_service_records_late_continuation_without_disturbing_active_user_turn(t
         continuation = [
             entry
             for entry in typed_entries
-            if entry["type"] == "turn"
-            and entry["context"].get("agent_continuation") is True
+            if entry["type"] == "turn" and entry["context"].get("agent_continuation") is True
         ]
         assert len(continuation) == 1
         continuation_id = continuation[0]["turn_id"]
@@ -813,9 +830,10 @@ def test_service_records_late_continuation_without_disturbing_active_user_turn(t
         source_record = conversation.turn_record(str(source["turn_id"]))
         assert continuation_record is not None
         assert source_record is not None
-        assert continuation_record["career_profile_snapshot_id"] == source_record[
-            "career_profile_snapshot_id"
-        ]
+        assert (
+            continuation_record["career_profile_snapshot_id"]
+            == source_record["career_profile_snapshot_id"]
+        )
         assert continuation_record["career_profile_revision"] == 1
         active_record = conversation.turn_record(str(active["turn_id"]))
         assert active_record is not None
@@ -825,9 +843,7 @@ def test_service_records_late_continuation_without_disturbing_active_user_turn(t
 
 
 def test_async_continuation_marker_does_not_capture_metadata_bearing_turn(tmp_path):
-    gateway = HermesWebSocketGateway(
-        url="ws://127.0.0.1:9119/api/ws", token=TOKEN, cwd=tmp_path
-    )
+    gateway = HermesWebSocketGateway(url="ws://127.0.0.1:9119/api/ws", token=TOKEN, cwd=tmp_path)
     gateway._live_session_id = "live-1"
     gateway._active_turn_id = "turn-newer-b"
 
@@ -856,7 +872,13 @@ def test_async_continuation_marker_does_not_capture_metadata_bearing_turn(tmp_pa
         )
     )
 
-    assert marker is None
+    assert marker is not None
+    assert marker.event_type == "status"
+    assert marker.state == "working"
+    assert marker.detail["agent_continuation"] is True
+    assert marker.detail["continuation_id"] == "delegation-stale-1234"
+    assert marker.turn_id is not None
+    assert marker.turn_id.startswith("turn_cont_")
     assert ordinary_start is not None
     assert ordinary_complete is not None
     assert ordinary_complete.turn_id == "turn-newer-b"
@@ -866,9 +888,7 @@ def test_async_continuation_marker_does_not_capture_metadata_bearing_turn(tmp_pa
 
 
 def test_async_continuation_marker_without_expected_start_does_not_capture_completion(tmp_path):
-    gateway = HermesWebSocketGateway(
-        url="ws://127.0.0.1:9119/api/ws", token=TOKEN, cwd=tmp_path
-    )
+    gateway = HermesWebSocketGateway(url="ws://127.0.0.1:9119/api/ws", token=TOKEN, cwd=tmp_path)
     gateway._live_session_id = "live-1"
     gateway._active_turn_id = "turn-newer-b"
 
@@ -895,6 +915,86 @@ def test_async_continuation_marker_without_expected_start_does_not_capture_compl
     assert ordinary_complete.detail.get("agent_continuation") is not True
     assert gateway._pending_async_continuation_id == "delegation-requeued-1234"
     assert gateway._pending_async_continuation_stage == "awaiting_start"
+
+
+def test_stock_async_continuation_owns_stream_and_tool_frames(tmp_path):
+    gateway = HermesWebSocketGateway(url="ws://127.0.0.1:9119/api/ws", token=TOKEN, cwd=tmp_path)
+    gateway._live_session_id = "live-1"
+
+    marker = gateway.normalize_frame(
+        event(
+            "status.update",
+            "live-1",
+            {
+                "kind": "process",
+                "text": "[ASYNC DELEGATION COMPLETE — delegation-stream-1234]\nReady",
+            },
+        )
+    )
+    started = gateway.normalize_frame(event("message.start", "live-1"))
+    delta = gateway.normalize_frame(event("message.delta", "live-1", {"delta": "Working"}))
+    tool = gateway.normalize_frame(
+        event(
+            "tool.start",
+            "live-1",
+            {
+                "event_id": "continuation-tool-start",
+                "tool_id": "continuation-tool",
+                "name": "web_search",
+                "status": "working",
+            },
+        )
+    )
+    completed = gateway.normalize_frame(
+        event(
+            "message.complete",
+            "live-1",
+            {"status": "complete", "text": "Finished"},
+        )
+    )
+
+    assert marker is not None
+    assert marker.turn_id is not None
+    continuation_turn_id = marker.turn_id
+    for frame in (started, delta, tool, completed):
+        assert frame is not None
+        assert frame.turn_id == continuation_turn_id
+        assert frame.detail["agent_continuation"] is True
+        assert frame.detail["continuation_id"] == "delegation-stream-1234"
+
+
+def test_stock_async_continuation_interrupts_the_attached_session(tmp_path, monkeypatch):
+    async def scenario():
+        gateway = HermesWebSocketGateway(
+            url="ws://127.0.0.1:9119/api/ws", token=TOKEN, cwd=tmp_path
+        )
+        gateway._live_session_id = "live-1"
+        calls = []
+
+        async def request(method, params):
+            calls.append((method, params))
+            return {"status": "interrupted"}
+
+        monkeypatch.setattr(gateway, "_request", request)
+        marker = gateway.normalize_frame(
+            event(
+                "status.update",
+                "live-1",
+                {
+                    "kind": "process",
+                    "text": "[ASYNC DELEGATION COMPLETE — delegation-stop-1234]\nReady",
+                },
+            )
+        )
+        assert marker is not None
+        assert marker.turn_id is not None
+
+        await gateway.interrupt_turn(marker.turn_id)
+        return calls, gateway
+
+    calls, gateway = asyncio.run(scenario())
+    assert calls == [("session.interrupt", {"session_id": "live-1"})]
+    assert gateway._active_continuation_turn_id is None
 
 
 def test_verified_live_attachment_fast_path_preserves_state_and_rotated_id(tmp_path):
@@ -1184,6 +1284,59 @@ def test_gateway_streams_connectivity_transitions_and_mid_turn_disconnect_termin
     assert terminal[0].detail == {"actionable": True, "reason": "transport_lost", "retry": True}
 
 
+def test_stock_continuation_transport_loss_emits_non_retryable_terminal(tmp_path):
+    async def scenario():
+        def responder(request):
+            return [
+                result(
+                    request,
+                    {
+                        "stored_session_id": "stored-1",
+                        "session_id": "live-1",
+                        "info": {"profile_name": "job-hunter", "cwd": str(tmp_path)},
+                    },
+                )
+            ]
+
+        socket = FakeWebSocket(responder)
+        gateway = HermesWebSocketGateway(
+            url="ws://127.0.0.1:9119/api/ws",
+            token=TOKEN,
+            cwd=tmp_path,
+            request_timeout=1,
+            connector=FakeConnector(socket),
+        )
+        await gateway.start()
+        await gateway.create_or_resume_conversation(None)
+        socket.incoming.put_nowait(
+            json.dumps(
+                event(
+                    "status.update",
+                    "live-1",
+                    {
+                        "kind": "process",
+                        "text": "[ASYNC DELEGATION COMPLETE — deleg_transport_1234]\nReady",
+                    },
+                )
+            )
+        )
+        socket.incoming.put_nowait(None)
+        stream = gateway.stream_events()
+        observed = [await asyncio.wait_for(anext(stream), 1) for _ in range(5)]
+        await gateway.close()
+        return observed
+
+    observed = asyncio.run(scenario())
+    terminal = [
+        item
+        for item in observed
+        if item.detail.get("agent_continuation") is True and item.state == "failed"
+    ]
+    assert len(terminal) == 1
+    assert terminal[0].detail["reason"] == "transport_lost"
+    assert terminal[0].detail["retry"] is False
+
+
 def test_recovery_resume_interrupts_without_requiring_in_memory_active_turn(tmp_path):
     async def scenario():
         def responder(request):
@@ -1377,7 +1530,7 @@ def test_async_delegation_completion_stays_separate_from_a_new_user_turn(tmp_pat
     gateway._live_session_id = "live-1"
     gateway._active_turn_id = "turn-new-user"
 
-    assert gateway.normalize_frame(
+    continuation_start = gateway.normalize_frame(
         event(
             "message.start",
             "live-1",
@@ -1386,8 +1539,8 @@ def test_async_delegation_completion_stays_separate_from_a_new_user_turn(tmp_pat
                 "continuation_id": "delegation-unit-1234",
             },
         )
-    ) is None
-    assert gateway.normalize_frame(
+    )
+    continuation_delta = gateway.normalize_frame(
         event(
             "message.delta",
             "live-1",
@@ -1397,7 +1550,7 @@ def test_async_delegation_completion_stays_separate_from_a_new_user_turn(tmp_pat
                 "continuation_id": "delegation-unit-1234",
             },
         )
-    ) is None
+    )
     user_completion = gateway.normalize_frame(
         event(
             "message.complete",
@@ -1418,8 +1571,12 @@ def test_async_delegation_completion_stays_separate_from_a_new_user_turn(tmp_pat
         )
     )
 
+    assert continuation_start is not None
+    assert continuation_delta is not None
     assert continuation is not None
     assert continuation.turn_id is not None
+    assert continuation_start.turn_id == continuation.turn_id
+    assert continuation_delta.turn_id == continuation.turn_id
     assert continuation.turn_id != "turn-new-user"
     assert continuation.detail["agent_continuation"] is True
     assert continuation.source_event_id is not None

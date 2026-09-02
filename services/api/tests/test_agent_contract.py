@@ -573,26 +573,20 @@ def test_tool_review_endpoint_is_authenticated_and_scoped_to_exact_waiting_turn(
         review_url = f"/v1/conversations/{conversation_id}/turns/{turn_id}/review"
 
         for _ in range(100):
-            current = client.get(
-                f"/v1/conversations/{conversation_id}", headers=headers()
-            ).json()
+            current = client.get(f"/v1/conversations/{conversation_id}", headers=headers()).json()
             if current["active_turn"] and current["active_turn"]["status"] == "waiting":
                 break
             time.sleep(0.01)
         else:
             pytest.fail("turn did not enter the waiting review state")
 
-        current = client.get(
-            f"/v1/conversations/{conversation_id}", headers=headers()
-        ).json()
+        current = client.get(f"/v1/conversations/{conversation_id}", headers=headers()).json()
         waiting_event = next(
             entry
             for entry in reversed(current["entries"])
             if entry["type"] == "status" and entry["state"] == "waiting"
         )
-        assert waiting_event["detail"]["approval_id"] == (
-            "approval_aB3dE5gH7jK9mN2pQ4rS6tUv"
-        )
+        assert waiting_event["detail"]["approval_id"] == ("approval_aB3dE5gH7jK9mN2pQ4rS6tUv")
 
         unauthorized = client.post(
             review_url,
@@ -641,6 +635,94 @@ def test_cancel_is_idempotent_and_retry_appends_linked_turn(tmp_path):
     assert gateway.interruptions == [turn_id]
     assert retry.status_code == 201
     assert retry.json()["source_turn_id"] == turn_id
+
+
+def test_cancelled_stock_continuation_never_offers_prompt_retry(tmp_path):
+    async def scenario():
+        store = JobOsStateStore(tmp_path / "jobos.db")
+        store.initialize()
+        conversation = store.conversation_store(store.first_active_conversation_id())
+        turn_id = "turn_stock_continuation_cancel_1234"
+        assert conversation.record_agent_continuation(
+            turn_id=turn_id,
+            status="running",
+            event_type="status",
+            summary="Agent continuing completed background work",
+            detail={
+                "agent_continuation": True,
+                "continuation_id": "deleg_stock_cancel_1234",
+            },
+        )
+        gateway = FakeGateway()
+        service = ConversationService(conversation, gateway)
+
+        cancelled = await service.cancel(turn_id)
+        return cancelled, conversation.conversation_snapshot(), gateway
+
+    cancelled, snapshot, gateway = asyncio.run(scenario())
+    assert cancelled is not None
+    assert cancelled.status == "interrupted"
+    assert gateway.interruptions == ["turn_stock_continuation_cancel_1234"]
+    entries = snapshot["entries"]
+    assert isinstance(entries, list)
+    terminal = next(
+        entry
+        for entry in entries
+        if entry["turn_id"] == "turn_stock_continuation_cancel_1234"
+        and entry["state"] == "interrupted"
+    )
+    assert terminal["detail"]["retry"] is False
+
+
+def test_unconfirmed_stock_continuation_cancel_enters_recovery_quarantine(tmp_path):
+    async def scenario():
+        store = JobOsStateStore(tmp_path / "jobos.db")
+        store.initialize()
+        store.save_stored_session_id("stored-stock-continuation")
+        conversation = store.conversation_store(store.first_active_conversation_id())
+        turn_id = "turn_stock_continuation_quarantine_1234"
+        assert conversation.record_agent_continuation(
+            turn_id=turn_id,
+            status="running",
+            event_type="status",
+            summary="Agent continuing completed background work",
+            detail={
+                "agent_continuation": True,
+                "continuation_id": "deleg_stock_quarantine_1234",
+            },
+        )
+        service = ConversationService(conversation, InterruptFailureGateway())
+
+        cancelled = await service.cancel(turn_id)
+        quarantined = service.snapshot()
+        cleaned = await service.retry(
+            turn_id,
+            RetryTurnRequest(idempotency_key="cleanup-stock-continuation"),
+            actor_id="device-a",
+        )
+        return cancelled, quarantined, cleaned, service.snapshot(), conversation
+
+    cancelled, quarantined, cleaned, recovered, conversation = asyncio.run(scenario())
+    assert cancelled is not None
+    assert cancelled.status == "failed"
+    assert quarantined.recovery_state == "quarantined"
+    assert quarantined.active_turn is None
+    assert cleaned is not None
+    assert cleaned.status == "failed"
+    assert recovered.recovery_state == "ready"
+    assert recovered.active_turn is None
+    assert conversation.recovery_turn_id() is None
+    entries = quarantined.entries
+    terminal = next(
+        entry
+        for entry in entries
+        if entry["turn_id"] == "turn_stock_continuation_quarantine_1234"
+        and entry["state"] == "failed"
+    )
+    detail = terminal["detail"]
+    assert isinstance(detail, dict)
+    assert detail["retry"] is False
+    assert detail["reason"] == "transport_lost"
 
 
 def test_cancel_settles_locally_when_interrupt_transport_fails_and_remains_idempotent(
@@ -1142,9 +1224,7 @@ def test_definitive_pre_submit_failure_can_retry_without_remote_cleanup(tmp_path
             async def submit_turn(self, text, context):
                 self.attempts += 1
                 if self.attempts <= 2:
-                    raise DefinitivePreSubmitError(
-                        "Hermes session isolation could not be verified"
-                    )
+                    raise DefinitivePreSubmitError("Hermes session isolation could not be verified")
                 await super().submit_turn(text, context)
 
         gateway = PreSubmitFailureGateway()
@@ -1362,6 +1442,44 @@ def test_restart_reattaches_and_interrupts_remote_before_terminalizing_or_retryi
     assert gateway.interruptions[0] == created["turn_id"]
     assert snapshot["active_turn"] is None
     assert retry.status_code == 201
+
+
+def test_api_restart_recovers_stock_continuation_without_prompt_retry(tmp_path):
+    database = tmp_path / "jobos.db"
+    store = JobOsStateStore(database)
+    store.initialize()
+    conversation = store.conversation_store(store.first_active_conversation_id())
+    turn_id = "turn_stock_continuation_restart_1234"
+    assert conversation.record_agent_continuation(
+        turn_id=turn_id,
+        status="running",
+        event_type="status",
+        summary="Agent continuing completed background work",
+        detail={
+            "agent_continuation": True,
+            "continuation_id": "deleg_stock_restart_1234",
+        },
+    )
+    store.save_stored_session_id("stored-stock-continuation")
+    gateway = FakeGateway()
+
+    with make_client(tmp_path, gateway) as client:
+        snapshot = client.get("/v1/conversations/current", headers=headers()).json()
+        retry = client.post(
+            turn_url(client, turn_id, "retry"),
+            headers=headers(),
+            json={"idempotency_key": "restart-stock-continuation-retry"},
+        )
+
+    assert gateway.interruptions == [turn_id]
+    assert snapshot["active_turn"] is None
+    terminal = next(
+        entry
+        for entry in snapshot["entries"]
+        if entry["turn_id"] == turn_id and entry["state"] == "interrupted"
+    )
+    assert terminal["detail"]["retry"] is False
+    assert retry.status_code == 409
 
 
 def test_unconfirmed_restart_cleanup_quarantines_overlap_and_stop_retries_recovery(tmp_path):
@@ -1796,9 +1914,7 @@ def test_manager_list_isolates_failed_health_probe_and_keeps_unbound_chat_ready(
             item for item in summaries if item.conversation_id == unbound.conversation_id
         )
         bound_summary = next(
-            item
-            for item in summaries
-            if item.conversation_id == str(bound["conversation_id"])
+            item for item in summaries if item.conversation_id == str(bound["conversation_id"])
         )
         assert unbound_summary.binding is None
         assert unbound_summary.availability.state == "ready"
@@ -2174,11 +2290,10 @@ def test_manager_detaches_active_agent_turn_before_account_replacement(tmp_path)
         conversation_id = str(created["conversation_id"])
         scoped = store.conversation_store(conversation_id)
         scoped.complete_provisioning("(FAKE)-replacement-provider-session")
+
         class CancellationFailureFactory(RecordingGatewayFactory):
             def create(self, conversation_id):
-                gateway = InterruptFailureGateway(
-                    session_scope=f"-{conversation_id}"
-                )
+                gateway = InterruptFailureGateway(session_scope=f"-{conversation_id}")
                 self.gateways[conversation_id] = gateway
                 return gateway
 
@@ -2193,9 +2308,7 @@ def test_manager_detaches_active_agent_turn_before_account_replacement(tmp_path)
         )
 
         original_gateway = factory.gateways[conversation_id]
-        assert store.lock_connected_agent_chats(
-            agent_id, "AUTH_ACCOUNT_REPLACEMENT_REQUIRED"
-        ) == 1
+        assert store.lock_connected_agent_chats(agent_id, "AUTH_ACCOUNT_REPLACEMENT_REQUIRED") == 1
         await manager.detach_connected_agent(agent_id)
         replay = await manager.replay_bound(
             conversation_id=conversation_id,
@@ -2237,9 +2350,12 @@ def test_manager_does_not_start_locked_provider_sessions_but_keeps_history_reada
             actor_id="device-a",
         )
         scoped.save_stored_session_id("(FAKE)-locked-provider-session")
-        assert store.lock_connected_agent_chats(
-            f"jagent_{'c' * 32}", "AUTH_ACCOUNT_REPLACEMENT_REQUIRED"
-        ) == 1
+        assert (
+            store.lock_connected_agent_chats(
+                f"jagent_{'c' * 32}", "AUTH_ACCOUNT_REPLACEMENT_REQUIRED"
+            )
+            == 1
+        )
 
         factory = RecordingGatewayFactory()
         manager = ConversationManager(store, factory)
@@ -2509,9 +2625,7 @@ def test_normalized_event_envelope_is_durable_across_store_restart(tmp_path):
         ]
         assert [entry["sequence"] for entry in normalized] == [1, 2]
         assert all(entry["profile_id"] == "jprof_test" for entry in normalized)
-        assert all(
-            entry["conversation_id"] == service.conversation_id for entry in normalized
-        )
+        assert all(entry["conversation_id"] == service.conversation_id for entry in normalized)
         assert [entry["timestamp"] for entry in normalized] == [
             "2026-08-24T20:00:00Z",
             "2026-08-24T20:00:01Z",

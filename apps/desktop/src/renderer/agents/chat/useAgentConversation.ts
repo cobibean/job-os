@@ -347,7 +347,9 @@ export function projectConversation(entries: ConversationEvent[]): ProjectedConv
         ...base,
         kind: 'error',
         label: entry.summary,
-        retryable: entry.detail.retry === true || entry.detail.actionable === true,
+        retryable: entry.detail.retry === false
+          ? false
+          : entry.detail.retry === true || entry.detail.actionable === true,
         detail: entry.detail
       }
       continue

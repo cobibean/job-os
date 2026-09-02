@@ -12,6 +12,7 @@ from typing import Literal, Protocol, cast
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from .agent_gateway import (
+    AgentBusyError,
     AgentContext,
     AgentGateway,
     AmbiguousDeliveryError,
@@ -76,9 +77,7 @@ class ConversationJobContext(ConversationModel):
 
 class CreateConversationRequest(ConversationModel):
     selected_job_id: str | None = Field(default=None, max_length=512)
-    connected_agent_id: str | None = Field(
-        default=None, pattern=r"^jagent_[a-f0-9]{32}$"
-    )
+    connected_agent_id: str | None = Field(default=None, pattern=r"^jagent_[a-f0-9]{32}$")
     model_id: str | None = Field(default=None, min_length=1, max_length=256)
     reasoning_effort: str | None = Field(default=None, min_length=1, max_length=64)
     idempotency_key: str | None = Field(default=None, min_length=8, max_length=200)
@@ -178,6 +177,7 @@ class ConversationService:
         self._connection_task: asyncio.Task[None] | None = None
         self._recovery_turn_id: str | None = None
         self._isolated_session_ids: set[str] = set()
+        self._pending_agent_continuations: dict[str, GatewayEvent] = {}
         self._submission_lock = asyncio.Lock()
         self._turn_scope_lock = asyncio.Lock()
         self._event_consumer_restart_delay = 1.0
@@ -243,6 +243,11 @@ class ConversationService:
         if not isinstance(active, dict):
             return
         turn_id = str(active["turn_id"])
+        turn = self.store.turn_record(turn_id)
+        turn_context = turn.get("context") if turn is not None else None
+        is_agent_continuation = (
+            isinstance(turn_context, dict) and turn_context.get("agent_continuation") is True
+        )
         stored_session_id = self.store.stored_session_id()
         if not stored_session_id:
             self._restore_session_after_isolated_turn(turn_id)
@@ -258,7 +263,11 @@ class ConversationService:
                 event_type="status",
                 state="waiting",
                 summary="Remote turn cleanup must be confirmed before new work can start",
-                detail={"actionable": True, "recovery_pending": True, "retry": True},
+                detail={
+                    "actionable": True,
+                    "recovery_pending": True,
+                    "retry": not is_agent_continuation,
+                },
                 source_event_id=f"startup-recovery-pending:{turn_id}",
             )
             self.store.transition_active_turn_status(
@@ -270,7 +279,11 @@ class ConversationService:
             "interrupted",
             event_type="status",
             summary="Turn interrupted during safe API restart recovery",
-            detail={"actionable": True, "reason": "api_restart", "retry": True},
+            detail={
+                "actionable": True,
+                "reason": "api_restart",
+                "retry": not is_agent_continuation,
+            },
             source_event_id=f"startup-recovery-complete:{turn_id}",
         )
         if won:
@@ -364,15 +377,30 @@ class ConversationService:
     async def retry(
         self, turn_id: str, command: RetryTurnRequest, *, actor_id: str
     ) -> TurnMutationResponse | None:
-        await self._ensure_recovery_clear()
         source = self.store.turn_record(turn_id)
         if source is None:
             return None
+        source_context = source.get("context")
+        recovery_turn_id = self._recovery_turn_id or self.store.recovery_turn_id()
+        if isinstance(source_context, dict) and source_context.get("agent_continuation") is True:
+            if recovery_turn_id != turn_id:
+                raise ValueError("Background continuation turns cannot be retried directly")
+            await self._ensure_recovery_clear()
+            current = self.store.turn_record(turn_id)
+            source_turn_id_value = source.get("source_turn_id")
+            return TurnMutationResponse(
+                turn_id=turn_id,
+                message_id=str(source["message_id"]),
+                source_turn_id=(
+                    str(source_turn_id_value) if source_turn_id_value is not None else None
+                ),
+                status=str(current["status"]) if current else str(source["status"]),
+            )
+        if recovery_turn_id is not None and recovery_turn_id != turn_id:
+            raise ConversationBusy("Another turn requires remote cleanup")
+        await self._ensure_recovery_clear()
         if source["status"] not in {"failed", "interrupted"}:
             raise ValueError("Only failed or interrupted turns can be retried")
-        source_context = source.get("context")
-        if isinstance(source_context, dict) and source_context.get("agent_continuation") is True:
-            raise ValueError("Background continuation turns cannot be retried directly")
         created = self.store.create_conversation_turn(
             text=str(source["text"]),
             context=source["context"],
@@ -398,9 +426,7 @@ class ConversationService:
         async with self._turn_scope_lock:
             return await self._cancel_under_lease(turn_id)
 
-    async def review(
-        self, turn_id: str, command: ReviewTurnRequest
-    ) -> TurnMutationResponse | None:
+    async def review(self, turn_id: str, command: ReviewTurnRequest) -> TurnMutationResponse | None:
         turn = self.store.turn_record(turn_id)
         if turn is None:
             return None
@@ -428,6 +454,11 @@ class ConversationService:
             if turn is None:
                 return None
             if turn["status"] in {"running", "queued", "waiting"}:
+                turn_context = turn.get("context")
+                is_agent_continuation = (
+                    isinstance(turn_context, dict)
+                    and turn_context.get("agent_continuation") is True
+                )
                 transport_confirmed = True
                 recovery_turn_id = self._recovery_turn_id or self.store.recovery_turn_id()
                 try:
@@ -452,6 +483,37 @@ class ConversationService:
                         source_turn_id=turn.get("source_turn_id"),
                         status=str(current["status"]) if current else "waiting",
                     )
+                if not transport_confirmed and is_agent_continuation:
+                    self._recovery_turn_id = turn_id
+                    self.store.mark_recovery_turn(turn_id)
+                    won = self.store.settle_active_turn(
+                        turn_id,
+                        "failed",
+                        event_type="error",
+                        summary="Background work cleanup must be confirmed before new work",
+                        detail={
+                            "actionable": True,
+                            "reason": "transport_lost",
+                            "recovery_pending": True,
+                            "retry": False,
+                            "transport_confirmed": False,
+                        },
+                        source_event_id=f"continuation-cancel-recovery:{turn_id}",
+                        cancel_requested=True,
+                        quarantine=True,
+                    )
+                    if won:
+                        self._restore_session_after_isolated_turn(turn_id)
+                    current = self.store.turn_record(turn_id)
+                    source_turn_id_value = turn.get("source_turn_id")
+                    return TurnMutationResponse(
+                        turn_id=turn_id,
+                        message_id=str(turn["message_id"]),
+                        source_turn_id=(
+                            str(source_turn_id_value) if source_turn_id_value is not None else None
+                        ),
+                        status=str(current["status"]) if current else "failed",
+                    )
                 won = self.store.settle_active_turn(
                     turn_id,
                     "interrupted",
@@ -463,13 +525,15 @@ class ConversationService:
                     ),
                     detail={
                         "actionable": True,
-                        "retry": True,
+                        "retry": not is_agent_continuation,
                         "transport_confirmed": transport_confirmed,
                     },
                     cancel_requested=True,
                 )
                 if won:
                     self._restore_session_after_isolated_turn(turn_id)
+                    if not is_agent_continuation:
+                        self._start_next_pending_agent_continuation()
                 if won and recovery_turn_id == turn_id:
                     self._recovery_turn_id = None
         current = self.store.turn_record(turn_id)
@@ -487,10 +551,7 @@ class ConversationService:
             context = turn["context"]
             assert isinstance(context, dict)
             career_profile = None
-            if (
-                self.career_profile_context is None
-                and self.career_profile_principal is not None
-            ):
+            if self.career_profile_context is None and self.career_profile_principal is not None:
                 snapshot = self.store.bound_career_profile_snapshot(
                     turn_id, principal=self.career_profile_principal
                 )
@@ -598,9 +659,7 @@ class ConversationService:
                         else None
                     ),
                     model_id=(
-                        str(binding["model_id"])
-                        if binding.get("model_id") is not None
-                        else None
+                        str(binding["model_id"]) if binding.get("model_id") is not None else None
                     ),
                     reasoning_effort=(
                         str(binding["reasoning_effort"])
@@ -616,13 +675,25 @@ class ConversationService:
                     # repair a stale JobOS-to-agent session attachment and submit
                     # once more. This is deliberately bounded to one retry: an
                     # ambiguous submission must still enter recovery quarantine.
-                    logger.info(
-                        "Reattaching agent session after definitive pre-submit rejection"
-                    )
-                    await self.gateway.create_or_resume_conversation(
-                        self.store.stored_session_id()
-                    )
+                    logger.info("Reattaching agent session after definitive pre-submit rejection")
+                    await self.gateway.create_or_resume_conversation(self.store.stored_session_id())
                     await self.gateway.submit_turn(str(turn["text"]), agent_context)
+        except AgentBusyError:
+            current = self.store.turn_record(turn_id)
+            if current and current["cancel_requested"]:
+                return
+            self.store.settle_active_turn(
+                turn_id,
+                "failed",
+                event_type="error",
+                summary="Background agent work is still finishing",
+                detail={
+                    "actionable": True,
+                    "reason": "continuation_busy",
+                    "retry": True,
+                },
+            )
+            self._restore_session_after_isolated_turn(turn_id)
         except DefinitivePreSubmitError as error:
             logger.warning(
                 "Agent turn was rejected before prompt submission (%s, code=%s)",
@@ -694,22 +765,29 @@ class ConversationService:
                 continue
             turn_id = event.turn_id
             if turn_id and self.store.turn_record(turn_id) is None:
-                if (
-                    event.detail.get("agent_continuation") is True
-                    and event.state in {"completed", "failed", "interrupted"}
-                    and event.event_type in {"assistant_message", "error"}
-                ):
-                    self.store.record_agent_continuation(
-                        turn_id=turn_id,
-                        status=event.state,
-                        event_type=event.event_type,
-                        summary=event.summary,
-                        detail=self._event_detail(event),
-                        source_event_id=event.source_event_id,
-                        career_profile_principal=self.career_profile_principal,
-                        career_profile_context=self.career_profile_context,
-                        career_profile_agent_id=self.career_profile_agent_id,
-                    )
+                if event.detail.get("agent_continuation") is True:
+                    if event.state in {
+                        "completed",
+                        "failed",
+                        "interrupted",
+                    } and event.event_type in {"assistant_message", "error"}:
+                        self.store.record_agent_continuation(
+                            turn_id=turn_id,
+                            status=event.state,
+                            event_type=event.event_type,
+                            summary=event.summary,
+                            detail=self._event_detail(event),
+                            source_event_id=event.source_event_id,
+                            career_profile_principal=self.career_profile_principal,
+                            career_profile_context=self.career_profile_context,
+                            career_profile_agent_id=self.career_profile_agent_id,
+                        )
+                    else:
+                        active = self.store.conversation_snapshot().get("active_turn")
+                        if isinstance(active, dict) and active.get("turn_id") != turn_id:
+                            self._pending_agent_continuations[turn_id] = event
+                        else:
+                            self._start_agent_continuation(event)
                 continue
             is_terminal = bool(
                 turn_id
@@ -728,6 +806,7 @@ class ConversationService:
                 )
                 if won:
                     self._restore_session_after_isolated_turn(str(turn_id))
+                    self._start_next_pending_agent_continuation()
                 continue
             continuation_ids = (
                 tuple(_continuation_ids(event.detail))
@@ -759,6 +838,29 @@ class ConversationService:
                 and event.state == "working"
             ):
                 self.store.transition_active_turn_status(turn_id, "running", expected=("waiting",))
+
+    def _start_agent_continuation(self, event: GatewayEvent) -> bool:
+        if event.turn_id is None:
+            return False
+        return self.store.record_agent_continuation(
+            turn_id=event.turn_id,
+            status="running",
+            event_type=event.event_type,
+            summary=event.summary,
+            detail=self._event_detail(event),
+            source_event_id=event.source_event_id,
+            career_profile_principal=self.career_profile_principal,
+            career_profile_context=self.career_profile_context,
+            career_profile_agent_id=self.career_profile_agent_id,
+        )
+
+    def _start_next_pending_agent_continuation(self) -> None:
+        if self.store.conversation_snapshot().get("active_turn") is not None:
+            return
+        for turn_id, event in tuple(self._pending_agent_continuations.items()):
+            self._pending_agent_continuations.pop(turn_id, None)
+            if self._start_agent_continuation(event):
+                return
 
     @staticmethod
     def _event_detail(

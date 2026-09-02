@@ -442,6 +442,12 @@ export function useAgentSessions() {
   const retry = useCallback(async (conversationId: string, turnId: string) => {
     const session = stateRef.current.sessions[conversationId]
     if (!session || session.conversation.activeTurn || !window.jobos?.agent || !beginOperation(conversationId, 'retry')) return
+    const cleanupOnly = session.summary.recoveryState === 'quarantined' && projectConversation(session.conversation.entries).some(item => (
+      item.kind === 'agent-turn'
+      && item.turnId === turnId
+      && item.terminal?.detail.agent_continuation === true
+      && item.terminal.detail.reason === 'transport_lost'
+    ))
     try {
       const mutation = await window.jobos.agent.retry(conversationId, turnId, identifier('retry-'))
       updateState(current => {
@@ -450,7 +456,7 @@ export function useAgentSessions() {
           ...currentSession, summary: { ...currentSession.summary, recoveryState: 'ready' }
         } } } : current
       })
-      mutateConversation(conversationId, { type: 'mutation', mutation, status: 'running' })
+      if (!cleanupOnly) mutateConversation(conversationId, { type: 'mutation', mutation, status: 'running' })
     } catch (error) {
       mutateConversation(conversationId, { type: 'failure', message: safeError(error, 'Turn could not be retried') })
     } finally {

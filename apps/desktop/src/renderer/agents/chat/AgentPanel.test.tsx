@@ -300,6 +300,46 @@ test('runtime transport quarantine updates the tab and close gate until ready st
   expect(screen.queryByRole('button', { name: 'Confirm cleanup and retry turn' })).toBeNull()
 })
 
+test('quarantined stock continuation offers cleanup without resurrecting a retry turn', async () => {
+  const continuationTurnId = 'turn_cont_0123456789abcdef0123456789abcdef'
+  const entries = [
+    event(1, {
+      turnId: continuationTurnId,
+      type: 'turn',
+      state: 'working',
+      summary: 'Agent continuing completed background work',
+      detail: { context: { agent_continuation: true } }
+    }),
+    event(2, {
+      turnId: continuationTurnId,
+      type: 'error',
+      state: 'failed',
+      summary: 'Background work cleanup must be confirmed before new work',
+      detail: {
+        actionable: true,
+        agent_continuation: true,
+        continuation_id: 'deleg_stock_cleanup_1234',
+        reason: 'transport_lost',
+        retry: false
+      }
+    })
+  ]
+  const quarantinedSummary = { ...summary(1), recoveryState: 'quarantined' as const }
+  const { agent } = install(
+    [quarantinedSummary],
+    [{ ...snapshot(1, entries), recoveryState: 'quarantined' }]
+  )
+  agent.retry.mockResolvedValue({ turnId: continuationTurnId, status: 'failed' })
+
+  render(<Harness />)
+  const cleanupButton = await screen.findByRole('button', { name: 'Confirm agent cleanup' })
+  expect(screen.queryByRole('button', { name: 'Retry turn' })).toBeNull()
+  fireEvent.click(cleanupButton)
+  await waitFor(() => expect(agent.retry).toHaveBeenCalledOnce())
+  await waitFor(() => expect(screen.queryByRole('button', { name: 'Confirm agent cleanup' })).toBeNull())
+  expect(screen.queryByText('Working')).toBeNull()
+})
+
 test('drafts survive switching and two sessions may send independently', async () => {
   const { agent } = install([summary(1), summary(2)])
   render(<Harness />)

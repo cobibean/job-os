@@ -96,9 +96,7 @@ class QueueFactory:
 
 
 def test_router_fails_closed_for_unregistered_provider_and_incomplete_binding():
-    router = AgentRuntimeRouter(
-        {("hermes", AGENT_ID): QueueFactory()}, profile_id=PROFILE_ID
-    )
+    router = AgentRuntimeRouter({("hermes", AGENT_ID): QueueFactory()}, profile_id=PROFILE_ID)
 
     with pytest.raises(ConnectionError, match="provider is unavailable"):
         router.create("conv_codex", sealed_binding(provider="codex"))
@@ -260,5 +258,73 @@ def test_cancellation_is_scoped_to_the_current_chat_and_turn():
         )
         await first.close()
         await second.close()
+
+    asyncio.run(scenario())
+
+
+def test_router_preserves_stock_hermes_continuation_ownership_after_foreground_terminal():
+    async def scenario() -> None:
+        factory = QueueFactory()
+        router = AgentRuntimeRouter({("hermes", AGENT_ID): factory}, profile_id=PROFILE_ID)
+        routed = router.create("conv_stock_continuation", sealed_binding())
+        await routed.start()
+        await routed.create_or_resume_conversation(None)
+        provider = factory.gateways["conv_stock_continuation"]
+        foreground = trusted_context("conv_stock_continuation", "turn_foreground_1234")
+        await routed.submit_turn("foreground", foreground)
+        stream = routed.stream_events()
+        await asyncio.wait_for(anext(stream), 1)
+
+        continuation_turn_id = "turn_cont_0123456789abcdef0123456789abcdef"
+        continuation_detail = {
+            "agent_continuation": True,
+            "continuation_id": "deleg_stock_1234",
+        }
+        await provider.events.put(
+            GatewayEvent(
+                event_type="status",
+                state="working",
+                summary="Agent continuing completed background work",
+                detail=continuation_detail,
+                turn_id=continuation_turn_id,
+            )
+        )
+        marker = await asyncio.wait_for(anext(stream), 1)
+        assert marker.turn_id == continuation_turn_id
+
+        await provider.events.put(
+            GatewayEvent(
+                event_type="assistant_message",
+                state="completed",
+                summary="Foreground complete",
+                detail={"text": "Foreground complete"},
+                turn_id=foreground.turn_id,
+            )
+        )
+        completed = await asyncio.wait_for(anext(stream), 1)
+        assert completed.turn_id == foreground.turn_id
+
+        with pytest.raises(RuntimeError, match="background continuation"):
+            await routed.submit_turn(
+                "must wait",
+                trusted_context("conv_stock_continuation", "turn_user_race_1234"),
+            )
+
+        await provider.events.put(
+            GatewayEvent(
+                event_type="assistant_message",
+                state="completed",
+                summary="Continuation complete",
+                detail={**continuation_detail, "text": "Continuation complete"},
+                turn_id=continuation_turn_id,
+            )
+        )
+        continuation_completed = await asyncio.wait_for(anext(stream), 1)
+        assert continuation_completed.turn_id == continuation_turn_id
+
+        next_context = trusted_context("conv_stock_continuation", "turn_after_cont_1234")
+        await routed.submit_turn("now continue", next_context)
+        assert provider.submissions[-1] == ("now continue", next_context)
+        await routed.close()
 
     asyncio.run(scenario())

@@ -208,6 +208,28 @@ test.each(['failed', 'interrupted'] as const)('projects a terminal assistant com
   }))
 })
 
+test('treats explicit retry false as authoritative over actionable cleanup', () => {
+  const [turn] = projectConversation([
+    event(1),
+    event(2, {
+      type: 'error',
+      state: 'failed',
+      summary: 'Background continuation transport closed',
+      detail: {
+        actionable: true,
+        agent_continuation: true,
+        continuation_id: 'deleg_transport_1234',
+        reason: 'transport_lost',
+        retry: false
+      }
+    })
+  ])
+
+  expect(turn).toEqual(expect.objectContaining({
+    terminal: expect.objectContaining({ retryable: false })
+  }))
+})
+
 test('clears a resolved waiting notice when the turn later completes', () => {
   const [turn] = projectConversation([
     event(1, { type: 'status', state: 'waiting', summary: 'Choose one', detail: { actionable: true } }),

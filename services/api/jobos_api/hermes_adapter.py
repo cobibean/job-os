@@ -13,6 +13,7 @@ import websockets
 
 from .activity import ActivityNormalizer
 from .agent_gateway import (
+    AgentBusyError,
     AgentContext,
     AmbiguousDeliveryError,
     ConnectionState,
@@ -237,6 +238,7 @@ class HermesWebSocketGateway:
         self._stored_session_id: str | None = None
         self._live_session_id: str | None = None
         self._active_turn_id: str | None = None
+        self._active_continuation_turn_id: str | None = None
         self._session_isolation_state = "unverified"
         self._session_isolation_event = asyncio.Event()
         self._attaching_session = False
@@ -410,9 +412,7 @@ class HermesWebSocketGateway:
             self._attaching_session = False
             self._pending_session_info.clear()
             self._pending_continuation_frames = []
-            raise AmbiguousDeliveryError(
-                "Hermes session attachment outcome is unknown"
-            ) from error
+            raise AmbiguousDeliveryError("Hermes session attachment outcome is unknown") from error
         except Exception:
             self._attaching_session = False
             self._pending_session_info.clear()
@@ -446,6 +446,7 @@ class HermesWebSocketGateway:
         self._pending_async_continuation_stage = None
         self._pending_async_continuation_blocking_turn_id = None
         self._pending_async_continuation_start_count = 0
+        self._active_continuation_turn_id = None
 
     def _record_session_verification(self, verified: bool) -> None:
         if self._session_isolation_state in {"failed", "verified"}:
@@ -509,6 +510,8 @@ class HermesWebSocketGateway:
         if not self._live_session_id:
             raise DefinitivePreSubmitError("Hermes session is not attached")
         await self._require_session_verification()
+        if self._active_continuation_turn_id is not None:
+            raise AgentBusyError("A background continuation is active")
         self._clear_pending_async_continuation()
         self._active_turn_id = context.turn_id
         bounded_context = {
@@ -546,14 +549,17 @@ class HermesWebSocketGateway:
                 break
 
     async def interrupt_turn(self, turn_id: str) -> None:
-        if not self._live_session_id or self._active_turn_id != turn_id:
+        owns_foreground = self._active_turn_id == turn_id
+        owns_continuation = self._active_continuation_turn_id == turn_id
+        if not self._live_session_id or not (owns_foreground or owns_continuation):
             return
         await self._request("session.interrupt", {"session_id": self._live_session_id})
-        self._active_turn_id = None
+        if owns_foreground:
+            self._active_turn_id = None
+        if owns_continuation:
+            self._clear_pending_async_continuation()
 
-    async def respond_to_review(
-        self, turn_id: str, approval_id: str, *, approved: bool
-    ) -> None:
+    async def respond_to_review(self, turn_id: str, approval_id: str, *, approved: bool) -> None:
         raise ValueError("This provider does not expose JobOS tool reviews")
 
     async def recover_active_turn(self, stored_session_id: str, turn_id: str) -> None:
@@ -621,6 +627,8 @@ class HermesWebSocketGateway:
             pass
         finally:
             lost_turn_id = self._active_turn_id
+            lost_continuation_turn_id = self._active_continuation_turn_id
+            lost_continuation_id = self._pending_async_continuation_id
             if lost_turn_id is not None and not self._closed:
                 await self._events.put(
                     GatewayEvent(
@@ -633,6 +641,22 @@ class HermesWebSocketGateway:
                             "retry": True,
                         },
                         turn_id=lost_turn_id,
+                    )
+                )
+            if lost_continuation_turn_id is not None and not self._closed:
+                await self._events.put(
+                    GatewayEvent(
+                        event_type="error",
+                        state="failed",
+                        summary=safe_error_summary("Hermes continuation transport closed"),
+                        detail={
+                            "actionable": True,
+                            "agent_continuation": True,
+                            "continuation_id": lost_continuation_id or "unknown",
+                            "reason": "transport_lost",
+                            "retry": False,
+                        },
+                        turn_id=lost_continuation_turn_id,
                     )
                 )
             self._set_connection_state("offline")
@@ -762,15 +786,30 @@ class HermesWebSocketGateway:
                 str(frame.get("text") or ""),
             )
             if marker is not None:
-                # Hermes emits this trusted process-status frame before it
-                # attempts the synthetic completion turn. The attempt can be
-                # requeued behind an active user turn, so only arm the identity
-                # until the exact metadata-free message.start arrives.
+                # Stock Hermes emits this trusted process-status frame before it
+                # attempts the synthetic completion turn. Preserve the parsed
+                # delegation identity as JobOS-owned lifecycle state immediately;
+                # the router can then block a racing user submit even when a
+                # foreground turn is still settling.
                 self._clear_pending_async_continuation()
-                self._pending_async_continuation_id = marker.group(1)
+                continuation_id = marker.group(1)
+                continuation_digest = hashlib.sha256(continuation_id.encode()).hexdigest()[:32]
+                continuation_turn_id = f"turn_cont_{continuation_digest}"
+                self._pending_async_continuation_id = continuation_id
                 self._pending_async_continuation_stage = "awaiting_start"
                 self._pending_async_continuation_blocking_turn_id = self._active_turn_id
-                return None
+                self._active_continuation_turn_id = continuation_turn_id
+                safe_detail = redact_detail(frame)
+                safe_detail["agent_continuation"] = True
+                safe_detail["continuation_id"] = continuation_id
+                return GatewayEvent(
+                    event_type="status",
+                    state="working",
+                    summary="Agent continuing completed background work",
+                    detail=safe_detail,
+                    turn_id=continuation_turn_id,
+                    source_event_id=f"async_delegation:{continuation_digest}:marker",
+                )
         continuation_id = frame.get("continuation_id")
         is_explicit_continuation = frame.get("display_kind") == "async_delegation_complete"
         if self._pending_async_continuation_id is not None:
@@ -780,98 +819,74 @@ class HermesWebSocketGateway:
             }
             blocking_turn_is_active = (
                 self._pending_async_continuation_blocking_turn_id is not None
-                and self._active_turn_id
-                == self._pending_async_continuation_blocking_turn_id
+                and self._active_turn_id == self._pending_async_continuation_blocking_turn_id
             )
             if self._pending_async_continuation_stage == "awaiting_start":
                 if not blocking_turn_is_active and is_metadata_free_start:
                     self._pending_async_continuation_stage = "awaiting_terminal"
                     self._pending_async_continuation_start_count = 1
-                    return None
-                # Hermes emits the marker before checking whether the session is
-                # busy. Preserve it while the already-running JobOS turn settles;
-                # that turn's frames continue through ordinary normalization.
+                    continuation_id = self._pending_async_continuation_id
+                    is_explicit_continuation = True
+                # Stock Hermes emits the marker before checking whether the
+                # session is busy. Preserve it while the already-running JobOS
+                # turn settles; that turn's frames remain ordinary foreground
+                # frames until Hermes emits the continuation's message.start.
             elif self._pending_async_continuation_stage == "awaiting_terminal":
-                if is_metadata_free_start:
-                    if self._pending_async_continuation_start_count < 2:
-                        self._pending_async_continuation_start_count += 1
-                        return None
+                has_conflicting_identity = (
+                    frame.get("display_kind") is not None
+                    and frame.get("display_kind") != "async_delegation_complete"
+                ) or (
+                    frame.get("continuation_id") is not None
+                    and frame.get("continuation_id") != self._pending_async_continuation_id
+                )
+                if has_conflicting_identity:
                     self._clear_pending_async_continuation()
                 else:
-                    is_metadata_free_terminal = (
-                        frame_type in {"message.complete", "error"}
-                        and frame.get("display_kind") is None
-                        and frame.get("continuation_id") is None
-                    )
-                    if is_metadata_free_terminal:
-                        continuation_id = self._pending_async_continuation_id
-                        is_explicit_continuation = True
-                    elif frame_type in {"message.start", "message.complete", "error"}:
-                        self._clear_pending_async_continuation()
+                    if is_metadata_free_start:
+                        self._pending_async_continuation_start_count += 1
+                    continuation_id = self._pending_async_continuation_id
+                    is_explicit_continuation = True
             else:
                 self._clear_pending_async_continuation()
+
+        continuation_turn_id = None
+        continuation_digest = None
         if is_explicit_continuation:
             if not isinstance(continuation_id, str) or not re.fullmatch(
                 r"[A-Za-z0-9_-]{8,200}", continuation_id
             ):
                 return None
-            if frame_type not in {"message.complete", "error"}:
-                return None
-            self._clear_pending_async_continuation()
             continuation_digest = hashlib.sha256(continuation_id.encode()).hexdigest()[:32]
-            turn_id = f"turn_cont_{continuation_digest}"
-            source_event_id = f"async_delegation:{continuation_digest}:terminal"
-            safe_detail = redact_detail(frame)
-            safe_detail["agent_continuation"] = True
-            safe_detail["continuation_id"] = continuation_id
-            if frame_type == "error":
-                return GatewayEvent(
-                    event_type="error",
-                    state="failed",
-                    summary=safe_error_summary(safe_detail.get("message") or "Hermes error"),
-                    detail={**safe_detail, "actionable": True},
-                    turn_id=turn_id,
-                    source_event_id=source_event_id,
-                )
-            safe_text = sanitize_assistant_text(
-                str(frame.get("text") or frame.get("delta") or "")
-            )
-            safe_detail["text"] = safe_text
-            status = str(frame.get("status", ""))
-            return GatewayEvent(
-                event_type="assistant_message",
-                state={
-                    "complete": "completed",
-                    "completed": "completed",
-                    "interrupted": "interrupted",
-                    "error": "failed",
-                }.get(status, "completed"),
-                summary=safe_text[:1000],
-                detail=safe_detail,
-                turn_id=turn_id,
-                source_event_id=source_event_id,
-            )
-        if frame_type != "session.info" and self._active_turn_id is None:
+            continuation_turn_id = f"turn_cont_{continuation_digest}"
+            frame["agent_continuation"] = True
+            frame["continuation_id"] = continuation_id
+
+        event_turn_id = continuation_turn_id or self._active_turn_id
+        if frame_type != "session.info" and event_turn_id is None:
             # A resumed Hermes session can keep emitting after JobOS restarts, but
             # without an active JobOS turn those events have no safe transcript
             # owner. Dropping them prevents token deltas from becoming orphaned
             # one-token messages and keeps stale tool/status activity quarantined.
             return None
-        event_id = None
+        event_id = (
+            f"async_delegation:{continuation_digest}:terminal"
+            if continuation_digest is not None and frame_type in {"message.complete", "error"}
+            else None
+        )
         if frame_type == "session.info":
             return None
         if frame_type.startswith("tool."):
             try:
                 return replace(
                     self._activity.normalize(frame),
-                    turn_id=self._active_turn_id,
+                    turn_id=event_turn_id,
                     source_event_id=None,
                 )
             except ValueError:
                 return None
         status = str(frame.get("status", ""))
         if frame_type in {"message.start", "message.delta", "message.complete"}:
-            turn_id = self._active_turn_id
+            turn_id = event_turn_id
             if frame_type == "message.complete" and turn_id is None:
                 return None
             text = frame.get("text") or frame.get("delta") or ""
@@ -894,6 +909,9 @@ class HermesWebSocketGateway:
                     "interrupted": "interrupted",
                     "error": "failed",
                 }.get(status, "completed")
+            if continuation_turn_id is not None and state in {"failed", "interrupted"}:
+                safe_detail["actionable"] = True
+                safe_detail["retry"] = False
             event = GatewayEvent(
                 event_type="assistant_message",
                 state=state,
@@ -903,7 +921,10 @@ class HermesWebSocketGateway:
                 source_event_id=event_id,
             )
             if frame_type == "message.complete":
-                self._active_turn_id = None
+                if continuation_turn_id is not None:
+                    self._clear_pending_async_continuation()
+                else:
+                    self._active_turn_id = None
             return event
         if frame_type in {
             "status.update",
@@ -936,7 +957,7 @@ class HermesWebSocketGateway:
                 state="waiting" if waiting else "working",
                 summary=safe_message[:500],
                 detail=safe_detail,
-                turn_id=self._active_turn_id,
+                turn_id=event_turn_id,
                 source_event_id=event_id,
             )
         if frame_type in {"file.changed", "render.start", "render.complete", "artifact.render"}:
@@ -947,15 +968,18 @@ class HermesWebSocketGateway:
                 state="completed" if complete else "working",
                 summary="Updated file" if is_file else "Rendered artifact",
                 detail=redact_detail(frame),
-                turn_id=self._active_turn_id,
+                turn_id=event_turn_id,
                 source_event_id=event_id,
                 activity_id=str(event_id) if event_id else None,
             )
         if frame_type == "error":
-            turn_id = self._active_turn_id
+            turn_id = event_turn_id
             if turn_id is None:
                 return None
             safe_detail = redact_detail(frame)
+            if continuation_turn_id is not None:
+                safe_detail["agent_continuation"] = True
+                safe_detail["retry"] = False
             event = GatewayEvent(
                 event_type="error",
                 state="failed",
@@ -964,7 +988,10 @@ class HermesWebSocketGateway:
                 turn_id=turn_id,
                 source_event_id=event_id,
             )
-            self._active_turn_id = None
+            if continuation_turn_id is not None:
+                self._clear_pending_async_continuation()
+            else:
+                self._active_turn_id = None
             return event
         return None
 

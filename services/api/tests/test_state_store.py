@@ -929,6 +929,50 @@ def test_terminal_agent_continuation_does_not_replace_active_user_turn(tmp_path)
     assert active_turn["turn_id"] == active["turn_id"]
 
 
+def test_running_agent_continuation_owns_conversation_until_terminal(tmp_path):
+    store = JobOsStateStore(tmp_path / "jobos.db")
+    store.initialize()
+    conversation = store.conversation_store(store.first_active_conversation_id())
+    turn_id = "turn_agent_continuation_running_1234"
+
+    assert conversation.record_agent_continuation(
+        turn_id=turn_id,
+        status="running",
+        event_type="status",
+        summary="Agent continuing completed background work",
+        detail={
+            "type": "status.update",
+            "agent_continuation": True,
+            "continuation_id": "deleg_stock_running_1234",
+        },
+        source_event_id="async_delegation:stock:marker",
+    )
+
+    snapshot = conversation.conversation_snapshot()
+    active_turn = snapshot["active_turn"]
+    assert isinstance(active_turn, dict)
+    assert active_turn["turn_id"] == turn_id
+    assert active_turn["status"] == "running"
+    persisted = conversation.turn_record(turn_id)
+    assert persisted is not None
+    context = persisted["context"]
+    assert isinstance(context, dict)
+    assert context["agent_continuation"] is True
+
+    assert conversation.settle_active_turn(
+        turn_id,
+        "completed",
+        event_type="assistant_message",
+        summary="Background work finished",
+        detail={
+            "text": "Background work finished",
+            "agent_continuation": True,
+            "continuation_id": "deleg_stock_running_1234",
+        },
+    )
+    assert conversation.conversation_snapshot()["active_turn"] is None
+
+
 def test_completed_assistant_text_uses_transcript_bound_while_summary_stays_concise(tmp_path):
     database = tmp_path / "jobos.db"
     store = JobOsStateStore(database)

@@ -36,6 +36,10 @@ class DefinitivePreSubmitError(RuntimeError):
     """The provider rejected work before the prompt could be submitted."""
 
 
+class AgentBusyError(RuntimeError):
+    """The provider is already running autonomous work for this conversation."""
+
+
 @dataclass(frozen=True)
 class AgentContext:
     turn_id: str
@@ -186,9 +190,7 @@ class AgentRuntimeRouter:
             if isinstance(raw_sequences, dict)
             else {}
         )
-        provider = cast(
-            ConnectedAgentProvider, binding.provider or self._compatibility_provider
-        )
+        provider = cast(ConnectedAgentProvider, binding.provider or self._compatibility_provider)
         factory = (
             self._adapters.get((provider, binding.connected_agent_id))
             if binding.connected_agent_id is not None
@@ -248,6 +250,7 @@ class _RoutedAgentGateway:
         self._provider: ConnectedAgentProvider = provider
         self._session_identity = binding.connected_agent_id or f"compatibility:{provider}"
         self._active_turn_id: str | None = None
+        self._active_continuation_turn_ids: set[str] = set()
         self._sequences = dict(initial_sequences)
         self._terminal_turns: set[str] = set()
         self._source_event_ids: set[tuple[str, str]] = set()
@@ -286,6 +289,7 @@ class _RoutedAgentGateway:
 
     async def detach_conversation(self) -> None:
         self._active_turn_id = None
+        self._active_continuation_turn_ids.clear()
         await self._gateway.detach_conversation()
 
     def _validate_turn(self, context: AgentContext) -> None:
@@ -310,6 +314,8 @@ class _RoutedAgentGateway:
             raise ValueError("Trusted turn binding does not match the routed conversation")
         if self._active_turn_id is not None and self._active_turn_id != context.turn_id:
             raise RuntimeError("A provider turn is already active for this conversation")
+        if self._active_continuation_turn_ids:
+            raise AgentBusyError("A background continuation is active")
 
     async def submit_turn(self, text: str, context: AgentContext) -> None:
         self._validate_turn(context)
@@ -339,17 +345,20 @@ class _RoutedAgentGateway:
             yield event
 
     async def interrupt_turn(self, turn_id: str) -> None:
-        if self._active_turn_id != turn_id:
+        owns_user_turn = self._active_turn_id == turn_id
+        owns_continuation = turn_id in self._active_continuation_turn_ids
+        if not (owns_user_turn or owns_continuation):
             return
         try:
             await self._gateway.interrupt_turn(turn_id)
+            self._terminal_turns.add(turn_id)
         finally:
-            if self._active_turn_id == turn_id:
+            if owns_user_turn and self._active_turn_id == turn_id:
                 self._active_turn_id = None
+            if owns_continuation:
+                self._active_continuation_turn_ids.discard(turn_id)
 
-    async def respond_to_review(
-        self, turn_id: str, approval_id: str, *, approved: bool
-    ) -> None:
+    async def respond_to_review(self, turn_id: str, approval_id: str, *, approved: bool) -> None:
         if self._active_turn_id != turn_id:
             raise ValueError("Turn is not active for this conversation")
         await self._gateway.respond_to_review(turn_id, approval_id, approved=approved)
@@ -363,6 +372,8 @@ class _RoutedAgentGateway:
         )
         self._active_turn_id = turn_id
         await self._gateway.recover_active_turn(stored_session_id, turn_id)
+        self._terminal_turns.add(turn_id)
+        self._active_continuation_turn_ids.discard(turn_id)
         if self._active_turn_id == turn_id:
             self._active_turn_id = None
 
@@ -421,6 +432,11 @@ class _RoutedAgentGateway:
         forced_kind: NormalizedEventKind | None = None,
     ) -> GatewayEvent | None:
         kind = forced_kind or self._kind(event)
+        is_continuation = event.detail.get("agent_continuation") is True
+        if is_continuation and event.turn_id is not None:
+            if event.turn_id in self._terminal_turns:
+                return None
+            self._active_continuation_turn_ids.add(event.turn_id)
         turn_id = event.turn_id or self._active_turn_id
         if kind == "connection_changed" or event.event_type == "reconciliation":
             if turn_id is None:
@@ -440,7 +456,12 @@ class _RoutedAgentGateway:
                     "timestamp": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
                 }
             )
-        if turn_id is None or turn_id != self._active_turn_id:
+        owns_continuation = bool(
+            is_continuation
+            and turn_id is not None
+            and turn_id in self._active_continuation_turn_ids
+        )
+        if turn_id is None or (turn_id != self._active_turn_id and not owns_continuation):
             return None
         source_event_id = event.source_event_id
         if source_event_id is not None:
@@ -460,7 +481,10 @@ class _RoutedAgentGateway:
             source_event_id = f"jobos:{hashlib.sha256(material.encode()).hexdigest()}"
         if kind in {"turn_completed", "turn_cancelled", "turn_failed", "recovery_required"}:
             self._terminal_turns.add(turn_id)
-            self._active_turn_id = None
+            if owns_continuation:
+                self._active_continuation_turn_ids.discard(turn_id)
+            elif self._active_turn_id == turn_id:
+                self._active_turn_id = None
         return GatewayEvent(
             event_type=event.event_type,
             state=event.state,
@@ -513,9 +537,7 @@ class OfflineAgentGateway:
     async def interrupt_turn(self, turn_id: str) -> None:
         return None
 
-    async def respond_to_review(
-        self, turn_id: str, approval_id: str, *, approved: bool
-    ) -> None:
+    async def respond_to_review(self, turn_id: str, approval_id: str, *, approved: bool) -> None:
         raise ConnectionError("Agent gateway is not configured")
 
     async def recover_active_turn(self, stored_session_id: str, turn_id: str) -> None:
