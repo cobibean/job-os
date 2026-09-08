@@ -4,7 +4,7 @@ import json
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import Literal, Protocol, cast
+from typing import Literal, Protocol, cast, runtime_checkable
 
 ConnectionState = Literal["online", "connecting", "offline"]
 ConnectedAgentProvider = Literal["hermes", "codex"]
@@ -160,6 +160,13 @@ class AgentGatewayFactory(Protocol):
     def create(self, conversation_id: str) -> AgentGateway: ...
 
 
+@runtime_checkable
+class BoundAgentGatewayFactory(Protocol):
+    """Providers that need immutable chat settings before session creation."""
+
+    def create_bound(self, conversation_id: str, binding: RuntimeBinding) -> AgentGateway: ...
+
+
 class AgentRuntimeRouter:
     """Resolve an immutable chat binding to one isolated provider gateway."""
 
@@ -200,7 +207,11 @@ class AgentRuntimeRouter:
             raise ConnectionError("Connected Agent provider is unavailable")
         return _RoutedAgentGateway(
             router=self,
-            gateway=factory.create(conversation_id),
+            gateway=(
+                factory.create_bound(conversation_id, binding)
+                if isinstance(factory, BoundAgentGatewayFactory)
+                else factory.create(conversation_id)
+            ),
             profile_id=self._profile_id,
             conversation_id=conversation_id,
             binding=binding,

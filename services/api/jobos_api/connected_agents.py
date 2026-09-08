@@ -79,7 +79,14 @@ class HermesConnectedAgentRuntime:
                 {
                     "model_id": agent.default_model_id,
                     "display_name": agent.default_model_id,
-                    "reasoning_efforts": [agent.default_reasoning_effort],
+                    # Stock Hermes agent/reasoning_effort.py CODEX_ASTRA_EFFORTS.
+                    # Do not advertise internal aliases (minimal/ultra) that the
+                    # provider clamps, or invent capabilities for unknown models.
+                    "reasoning_efforts": (
+                        ["low", "medium", "high", "xhigh", "max"]
+                        if agent.default_model_id in {"gpt-6-astra", "gpt-6-astra-900k"}
+                        else [agent.default_reasoning_effort]
+                    ),
                 }
             ],
         }

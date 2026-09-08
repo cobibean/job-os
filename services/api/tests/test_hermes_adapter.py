@@ -17,7 +17,11 @@ from jobos_api.career_profile import (
     principal_for_device,
 )
 from jobos_api.conversations import ConversationService, RetryTurnRequest, SendMessageRequest
-from jobos_api.hermes_adapter import HermesWebSocketGateway, _prompt_with_context
+from jobos_api.hermes_adapter import (
+    HermesGatewayFactory,
+    HermesWebSocketGateway,
+    _prompt_with_context,
+)
 from jobos_api.state_store import ConversationBusy, JobOsStateStore
 
 TOKEN = "protected-dashboard-token-value"
@@ -71,6 +75,119 @@ class FakeConnector:
     async def __call__(self, url, **kwargs):
         self.calls.append((url, kwargs))
         return self.socket
+
+
+@pytest.mark.parametrize("effort", ["low", "medium", "high", "xhigh", "max"])
+def test_routed_hermes_pins_chat_model_and_effort_and_verifies_resume(tmp_path, effort):
+    from jobos_api.agent_gateway import AgentRuntimeRouter
+
+    async def scenario():
+        def responder(request):
+            method = request["method"]
+            if method in {"session.create", "session.resume"}:
+                return [
+                    result(
+                        request,
+                        {
+                            "stored_session_id": "stored-1",
+                            "session_id": "live-1",
+                            "info": {"profile_name": "job-hunter", "cwd": str(tmp_path)},
+                        },
+                    )
+                ]
+            if method == "config.get":
+                return [result(request, {"value": effort})]
+            return [result(request, {"status": "streaming"})]
+
+        factory = HermesGatewayFactory(url="ws://127.0.0.1:9119/api/ws", token=TOKEN, cwd=tmp_path)
+        router = AgentRuntimeRouter({"hermes": factory}, profile_id="profile-1")
+        binding = {
+            "connected_agent_id": "jagent_fake",
+            "provider": "hermes",
+            "model_id": "gpt-6-astra",
+            "reasoning_effort": effort,
+            "binding_state": "bound",
+        }
+        routed = router.create("conv_test", binding)
+        gateway = routed._gateway
+        socket = FakeWebSocket(responder)
+        gateway._connector = FakeConnector(socket)
+        other = router.create("conv_other", {**binding, "reasoning_effort": "medium"})
+        assert other._gateway is not gateway
+        assert other._gateway._reasoning_effort == "medium"
+        context = AgentContext(
+            conversation_id="conv_test", turn_id="turn_12345678", selected_job_id=None, workspace={}
+        )
+        await gateway.create_or_resume_conversation(None)
+        await gateway.submit_turn("(FAKE) First turn", context)
+        assert socket.requests[0]["params"]["model"] == "gpt-6-astra"
+        assert socket.requests[0]["params"]["reasoning_effort"] == effort
+        await gateway.detach_conversation()
+        await gateway.create_or_resume_conversation("stored-1")
+        await gateway.submit_turn("(FAKE) Resumed turn", context)
+        methods = [request["method"] for request in socket.requests]
+        assert methods == [
+            "session.create",
+            "config.get",
+            "prompt.submit",
+            "session.resume",
+            "config.get",
+            "prompt.submit",
+        ]
+        assert all(
+            request["params"].get("session_id") == "live-1"
+            for request in socket.requests
+            if request["method"] == "config.get"
+        )
+        await gateway.close()
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("reported", ["medium", None])
+def test_reasoning_mismatch_prevents_prompt_without_global_mutation(tmp_path, reported):
+    async def scenario():
+        def responder(request):
+            if request["method"] == "config.get":
+                return [result(request, {"value": reported})]
+            return [
+                result(
+                    request,
+                    {
+                        "stored_session_id": "stored-1",
+                        "session_id": "live-1",
+                        "info": {"profile_name": "job-hunter", "cwd": str(tmp_path)},
+                    },
+                )
+            ]
+
+        socket = FakeWebSocket(responder)
+        gateway = HermesWebSocketGateway(
+            url="ws://127.0.0.1:9119/api/ws",
+            token=TOKEN,
+            cwd=tmp_path,
+            model_id="gpt-6-astra",
+            reasoning_effort="max",
+            connector=FakeConnector(socket),
+        )
+        await gateway.create_or_resume_conversation("stored-1")
+        with pytest.raises(DefinitivePreSubmitError, match="reasoning"):
+            await gateway.submit_turn(
+                "(FAKE) Must not send",
+                AgentContext(
+                    conversation_id="conv_test",
+                    turn_id="turn_12345678",
+                    selected_job_id=None,
+                    workspace={},
+                ),
+            )
+        assert [request["method"] for request in socket.requests] == [
+            "session.resume",
+            "config.get",
+        ]
+        await gateway.close()
+
+    asyncio.run(scenario())
 
 
 def test_concurrent_start_shares_one_inflight_connection(tmp_path):

@@ -4,6 +4,7 @@ import asyncio
 from datetime import UTC, datetime
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 from jobos_api.agent_gateway import (
     AmbiguousDeliveryError,
@@ -289,6 +290,19 @@ def test_provider_runtime_routes_hermes_to_its_fixed_profile_model(tmp_path):
     }
 
 
+@pytest.mark.parametrize("model_id", ["gpt-6-astra", "gpt-6-astra-900k"])
+def test_hermes_astra_catalog_exposes_only_real_wire_efforts(tmp_path, model_id):
+    _, registry, _, _, _ = setup_app(tmp_path)
+    record = registry.load().connected_agents[0].model_copy(update={"default_model_id": model_id})
+    models = asyncio.run(HermesConnectedAgentRuntime(configured=True).list_models(record))
+    assert models["models"][0]["reasoning_efforts"] == ["low", "medium", "high", "xhigh", "max"]
+    assert record.default_reasoning_effort == "medium"
+    assert asyncio.run(HermesConnectedAgentRuntime(configured=False).list_models(record)) == {
+        "live": False,
+        "models": [],
+    }
+
+
 def test_app_startup_repairs_completed_offline_hermes_migration_for_new_chat(tmp_path):
     registry_path = tmp_path / "installation-profiles.json"
     state_path = (tmp_path / "state" / "jobos.db").absolute()
@@ -571,9 +585,10 @@ def test_account_replacement_durably_locks_prior_agent_chats(tmp_path):
             ),
         )
         assert created.status_code == 201, created.text
-        assert state_store.lock_connected_agent_chats(
-            AGENT_ID, "AUTH_ACCOUNT_REPLACEMENT_REQUIRED"
-        ) == 1
+        assert (
+            state_store.lock_connected_agent_chats(AGENT_ID, "AUTH_ACCOUNT_REPLACEMENT_REQUIRED")
+            == 1
+        )
         summaries = client.get("/v1/conversations", headers=auth())
 
     locked = next(
@@ -1032,9 +1047,7 @@ def test_auth_routes_require_direct_user_and_return_safe_transaction(tmp_path):
         blocked_agent_read = client.get(
             f"/v1/connected-agent-auth/{transaction_id}", headers=agent_headers
         )
-        cancel = client.delete(
-            f"/v1/connected-agent-auth/{transaction_id}", headers=auth()
-        )
+        cancel = client.delete(f"/v1/connected-agent-auth/{transaction_id}", headers=auth())
 
     assert unauthenticated.status_code == 401
     assert blocked_agent.status_code == 403

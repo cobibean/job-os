@@ -20,6 +20,7 @@ from .agent_gateway import (
     DefinitivePreSubmitError,
     DefinitiveSessionCreationError,
     GatewayEvent,
+    RuntimeBinding,
 )
 from .browser_policy import browser_title_contains_credentials
 from .career_profile_context import CareerProfileContextSnapshot
@@ -195,11 +196,18 @@ class HermesGatewayFactory:
         self._request_timeout = request_timeout
 
     def create(self, conversation_id: str) -> "HermesWebSocketGateway":
+        return self.create_bound(conversation_id, RuntimeBinding.from_mapping({}))
+
+    def create_bound(
+        self, conversation_id: str, binding: RuntimeBinding
+    ) -> "HermesWebSocketGateway":
         return HermesWebSocketGateway(
             url=self._url,
             token=self._token,
             cwd=self._cwd,
             request_timeout=self._request_timeout,
+            model_id=binding.model_id,
+            reasoning_effort=binding.reasoning_effort,
         )
 
 
@@ -215,6 +223,8 @@ class HermesWebSocketGateway:
         profile: str = "job-hunter",
         request_timeout: float = 10,
         connector: Any = websockets.connect,
+        model_id: str | None = None,
+        reasoning_effort: str | None = None,
     ) -> None:
         self._require_loopback(url)
         if profile != "job-hunter":
@@ -226,6 +236,8 @@ class HermesWebSocketGateway:
         except (OSError, RuntimeError) as error:
             raise ValueError("Hermes working directory is not approved") from error
         self._profile = profile
+        self._model_id = model_id
+        self._reasoning_effort = reasoning_effort
         self._request_timeout = request_timeout
         self._connector = connector
         self._socket: Any = None
@@ -480,6 +492,12 @@ class HermesWebSocketGateway:
                     "source": "jobos",
                     "cwd": str(self._cwd),
                     "close_on_disconnect": False,
+                    **({"model": self._model_id} if self._model_id is not None else {}),
+                    **(
+                        {"reasoning_effort": self._reasoning_effort}
+                        if self._reasoning_effort is not None
+                        else {}
+                    ),
                 },
             )
         except _HermesRpcError as error:
@@ -512,6 +530,29 @@ class HermesWebSocketGateway:
         await self._require_session_verification()
         if self._active_continuation_turn_id is not None:
             raise AgentBusyError("A background continuation is active")
+        if self._reasoning_effort is not None:
+            # Read the session's effective pin on every turn, including cold resume.
+            # Never use config.set: stock Hermes falls back to a GLOBAL write if
+            # a session disappears. Creation overrides are session-only by design.
+            try:
+                effective = await self._request(
+                    "config.get",
+                    {"session_id": self._live_session_id, "key": "reasoning"},
+                )
+            except Exception as error:
+                raise DefinitivePreSubmitError(
+                    "Hermes conversation reasoning could not be verified"
+                ) from error
+            if effective.get("value") != self._reasoning_effort:
+                raise DefinitivePreSubmitError(
+                    "Hermes conversation reasoning does not match the selected effort"
+                )
+        # The read-back above yields to transport events. A continuation can start
+        # while it is in flight; never erase that ownership and submit over it.
+        if self._active_continuation_turn_id is not None:
+            raise AgentBusyError("A background continuation is active")
+        if not self._live_session_id or self._session_isolation_state != "verified":
+            raise DefinitivePreSubmitError("Hermes session is no longer attached")
         self._clear_pending_async_continuation()
         self._active_turn_id = context.turn_id
         bounded_context = {
