@@ -1,7 +1,8 @@
+from dataclasses import replace
 from datetime import UTC, datetime
 
 import pytest
-from job_repository_contract import exercise_repository_contract
+from job_repository_contract import command, exercise_repository_contract
 from jobos_api.private_adapters.job_hunter import create_job_hunter_services
 
 job_hunter_models = pytest.importorskip(
@@ -64,3 +65,33 @@ def test_real_job_hunter_adapter_records_direct_application(tmp_path):
     assert [(event["from_value"], event["to_value"]) for event in transitions] == [
         ("discovered", "applied")
     ]
+
+
+def test_external_ingest_preserves_existing_browser_source_and_status(tmp_path):
+    database = tmp_path / "jobs.db"
+    storage = JobStorage(database)
+    adapter, _ = create_job_hunter_services(database, tmp_path)
+    browser = replace(command("synthetic-browser"), listing_capture_method=None)
+    created = adapter.create_job(browser)
+    original = storage.get_job(created.job_id)
+    assert original.source_system == "jobos_browser"
+    assert original.source_metadata["capture_method"] == "browser"
+    assert original.listing_capture_method == "jobos_browser"
+    adapter.update_status(created.job_id, "shortlisted")
+
+    duplicate = adapter.create_job(
+        replace(
+            browser,
+            job_id="synthetic-external",
+            ingestion_source="external",
+            listing_capture_method="api",
+        )
+    )
+    persisted = storage.get_job(created.job_id)
+    assert duplicate.job_id == created.job_id
+    assert duplicate.status == "shortlisted"
+    assert persisted.source_system == original.source_system
+    assert persisted.source_key == original.source_key
+    assert persisted.listing_capture_method == "api"
+    assert persisted.source_metadata["capture_method"] == "api"
+    assert len(adapter.list_jobs()) == 1

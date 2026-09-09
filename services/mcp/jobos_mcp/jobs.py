@@ -4,7 +4,7 @@ import base64
 import re
 from contextvars import ContextVar
 from math import log2
-from typing import Any
+from typing import Any, Literal
 from urllib.parse import quote
 from uuid import uuid4
 
@@ -347,7 +347,28 @@ class JobOsMcpClient:
         description_text: str,
         application_url: str,
         idempotency_key: str | None = None,
+        ingestion_source: Literal["browser", "external"] = "browser",
+        full_listing_text: str | None = None,
+        analysis_text: str | None = None,
+        listing_completeness: Literal["unknown", "partial", "complete"] | None = None,
+        listing_source_url: str | None = None,
+        listing_captured_at: str | None = None,
+        listing_verified_at: str | None = None,
+        listing_capture_method: str | None = None,
+        listing_sha256: str | None = None,
+        listing_evidence: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
+        provenance = {
+            "full_listing_text": full_listing_text,
+            "analysis_text": analysis_text,
+            "listing_completeness": listing_completeness,
+            "listing_source_url": listing_source_url,
+            "listing_captured_at": listing_captured_at,
+            "listing_verified_at": listing_verified_at,
+            "listing_capture_method": listing_capture_method,
+            "listing_sha256": listing_sha256,
+            "listing_evidence": listing_evidence,
+        }
         return await self._request(
             "POST",
             "/v1/jobs",
@@ -358,6 +379,8 @@ class JobOsMcpClient:
                 "location_text": location_text,
                 "description_text": description_text,
                 "application_url": application_url,
+                **({"ingestion_source": ingestion_source} if ingestion_source != "browser" else {}),
+                **{key: value for key, value in provenance.items() if value is not None},
                 "origin": "mcp",
                 "idempotency_key": self._key(idempotency_key),
             },

@@ -1327,6 +1327,15 @@
             "title": "Idempotency Key",
             "type": "string"
           },
+          "ingestion_source": {
+            "default": "browser",
+            "enum": [
+              "browser",
+              "external"
+            ],
+            "title": "Ingestion Source",
+            "type": "string"
+          },
           "listing_capture_method": {
             "anyOf": [
               {

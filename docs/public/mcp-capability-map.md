@@ -14,7 +14,7 @@ Connected clients can also read this document as the MCP resource `jobos://capab
 
 ## External clients (ChatGPT and other remote MCP callers)
 
-The OAuth-protected external server exposes **all 44 existing tools plus five external helpers**. It is not a curated subset. Its live schemas omit `turn_id`; `conversation_id` is optional. Internal stdio MCP retains its existing exact active-turn and selected-job checks.
+The OAuth-protected external server exposes **all 45 shared tools plus five external helpers**. It is not a curated subset. Its live schemas omit `turn_id`; `conversation_id` is optional. Internal stdio MCP retains its existing exact active-turn and selected-job checks.
 
 - Ordinary job, Career Profile, and explicit-document operations need no JobOS conversation or active turn. Browser, workspace selection and publication operations transparently resolve a durable external context; responses include its real `conversation_id`.
 - `external_session` explicitly resolves that same shared context. It survives API/MCP restarts, starts no internal agent, creates no fake turn, and does not consume any of the five desktop chat slots. The single-owner connector shares its default selection across external clients. Optional explicit IDs must identify an external context, never an internal desktop chat.
@@ -65,6 +65,16 @@ Take this branch only when the user supplies a résumé, portfolio, citation, or
 
 **Completion criterion:** the requested profile slice is represented in the current profile or visibly awaiting user review, and the agent has told the user which outcome occurred.
 
+## Workflow: ingest a sourced job without the JobOS browser
+
+1. Gather the listing with your own research tools or user-supplied source text. `job_ingest` saves supplied fields; it does not fetch URLs or need a live desktop browser.
+2. Call `job_ingest` with required `company_name`, `title`, `canonical_url`, `location_text`, `description_text`, `application_url`, `listing_source_url`, and `listing_capture_method` (for example `web_extract`, `api`, or `manual`). Text must be nonblank; URLs must be HTTP(S) without embedded credentials. Do not invent missing facts. Supply `full_listing_text` for the source listing and keep commentary in optional `analysis_text`.
+3. Include truthful provenance: optional ISO-8601 `listing_captured_at` / `listing_verified_at`, `listing_evidence` JSON object, and 64-character hexadecimal `listing_sha256`. `listing_completeness` defaults to `unknown`; use `partial` for excerpts. Only claim `complete` or a verification timestamp when the source coverage supports it. Omitted capture time records ingestion time, not evidence of a historical fetch. Storage may classify unverified source text as `partial`; it does not become verified merely because it was saved.
+4. Read returned `job.job_id` and `created`. The shared `POST /v1/jobs` validation, canonical deduplication and idempotency path is used, with `ingestion_source=external`. Reuse `idempotency_key` only for an identical retry; replay returns the original result, so inspect for current state. New-key reimports refresh the canonical record under provider merge rules without resetting status or replacing a complete listing with a partial one. URL variants recognized by the provider deduplicate; unrelated URLs are not guaranteed to match.
+5. If the user wants to consider it, call `job_update_status(job_id, target_status="shortlisted")`, then `job_inspect(job_id)` and verify `status_group="Considering"`. Ingest itself neither shortlists nor selects a job. External callers need no conversation, active turn, browser tab or `external_session` for this flow; internal callers retain their normal scope arguments.
+
+The legacy `job_create_from_browser` tool and its required arguments remain unchanged. Direct API callers that omit `ingestion_source` retain browser attribution. The optional JobHunter adapter records external ingest separately from browser captures and preserves existing source identity when deduplicating. Its existing quality gate additionally requires listing-like text, capture/verification timestamps and evidence with `schema_version=1`, `coverage="complete"`, `end_of_listing_seen=true`, and `verified_text_sha256` matching the full listing before retaining `complete`. Pass those only when actually observed; inspect the returned completeness rather than assuming a caller claim is accepted.
+
 ## Workflow: inspect and save a job from the browser
 
 1. Use `browser_tabs_inspect` to identify the intended live tab.
@@ -113,6 +123,7 @@ Snapshot targets are short-lived page references, not durable selectors.
 | `job_list` | Lists jobs using JobOS filtering and ordering. |
 | `job_inspect` | Inspects one normalized JobOS job record. |
 | `job_create_from_browser` | Saves a listing inspected from the live JobOS browser through canonical ingest. |
+| `job_ingest` | Saves sourced listing fields and provenance without a JobOS browser; preserves duplicate status. |
 | `job_select` | Selects the current conversation's active job context. |
 | `job_reorder` | Replaces the complete manual job order. |
 | `job_update_status` | Changes a job status through the shared transition command. |

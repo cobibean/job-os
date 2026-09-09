@@ -673,6 +673,7 @@ async def test_mcp_server_exposes_public_v1_parity_tools_while_retaining_job_too
         "job_list",
         "job_inspect",
         "job_create_from_browser",
+        "job_ingest",
         "job_select",
         "job_reorder",
         "job_update_status",

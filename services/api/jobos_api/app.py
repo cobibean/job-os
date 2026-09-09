@@ -3732,12 +3732,17 @@ def create_app(
     ) -> BrowserJobCreateResponse:
         require_trusted_mcp(identity, command.origin, mcp_token)
         payload = command.model_dump(mode="json", exclude={"idempotency_key"})
-        request_hash = mutation_hash("job.create_from_browser", payload)
+        browser_source = command.ingestion_source == "browser"
+        command_name = "job.create_from_browser" if browser_source else "job.ingest"
+        if browser_source:
+            # Preserve replay compatibility with requests predating ingestion_source.
+            payload.pop("ingestion_source")
+        request_hash = mutation_hash(command_name, payload)
         try:
             replay = mutation_replay(
                 identity=identity,
                 target="jobs",
-                command_name="job.create_from_browser",
+                command_name=command_name,
                 idempotency_key=command.idempotency_key,
                 request_hash=request_hash,
             )
@@ -3750,6 +3755,7 @@ def create_app(
         saved = jobs.create_job(
             CreateJobCommand(
                 job_id=command_job_id,
+                ingestion_source=command.ingestion_source,
                 company_name=command.company_name,
                 title=command.title,
                 canonical_url=str(command.canonical_url),
@@ -3781,12 +3787,16 @@ def create_app(
         record_mutation(
             identity=identity,
             target="jobs",
-            command_name="job.create_from_browser",
+            command_name=command_name,
             origin=command.origin,
             idempotency_key=command.idempotency_key,
             request_hash=request_hash,
             result=result.model_dump(mode="json"),
-            label="Saved job from browser" if result.created else "Opened saved browser job",
+            label=(
+                ("Saved job from browser" if result.created else "Opened saved browser job")
+                if browser_source
+                else ("Ingested job" if result.created else "Refreshed ingested job")
+            ),
             job_id=normalized.job_id,
             detail={"created": result.created},
         )

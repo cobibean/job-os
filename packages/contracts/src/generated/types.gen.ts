@@ -703,6 +703,10 @@ export type BrowserJobCreateRequest = {
      */
     idempotency_key?: string;
     /**
+     * Ingestion Source
+     */
+    ingestion_source?: 'browser' | 'external';
+    /**
      * Listing Capture Method
      */
     listing_capture_method?: string | null;

@@ -145,7 +145,12 @@ class JobHunterJobRepository:
     def create_job(self, command: CreateJobCommand) -> JobRecord:
         try:
             parameters = inspect.signature(self._facade.add_job).parameters
-            if "job_id" in parameters:
+            browser_source = command.ingestion_source == "browser"
+            if not browser_source and (self._storage is None or self._model_type is None):
+                raise Unavailable(
+                    "The selected provider cannot preserve external ingest provenance"
+                )
+            if "job_id" in parameters and browser_source:
                 result = self._facade.add_job(
                     job_id=command.job_id,
                     company_name=command.company_name,
@@ -167,12 +172,16 @@ class JobHunterJobRepository:
                 )
                 return _job_record(result["job"])
 
+            source_system = "jobos_browser" if browser_source else "jobos_ingest"
+            capture_method = command.listing_capture_method or (
+                "jobos_browser" if browser_source else "external"
+            )
             candidate: dict[str, object] = {
                 "job_id": command.job_id,
                 "canonical_url": command.canonical_url,
-                "source_system": "jobos_browser",
+                "source_system": source_system,
                 "source_job_id": None,
-                "source_key": "jobos_browser",
+                "source_key": source_system,
                 "company_name": command.company_name,
                 "title": command.title,
                 "job_text": command.full_listing_text or command.description_text,
@@ -187,10 +196,12 @@ class JobHunterJobRepository:
                 "listing_source_url": command.listing_source_url or command.canonical_url,
                 "listing_captured_at": command.listing_captured_at or command.observed_at,
                 "listing_verified_at": command.listing_verified_at,
-                "listing_capture_method": command.listing_capture_method or "jobos_browser",
+                "listing_capture_method": capture_method,
                 "listing_sha256": command.listing_sha256,
                 "listing_evidence": mutable_evidence(command.listing_evidence),
-                "source_metadata": {"capture_method": "browser"},
+                "source_metadata": {
+                    "capture_method": "browser" if browser_source else capture_method,
+                },
             }
             accepted = inspect.signature(self._model_type).parameters
             model = self._model_type(

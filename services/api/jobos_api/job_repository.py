@@ -111,6 +111,7 @@ class CreateJobCommand:
     location_text: str
     description_text: str
     application_url: str
+    ingestion_source: Literal["browser", "external"] = "browser"
     observed_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     full_listing_text: str | None = None
     analysis_text: str | None = None

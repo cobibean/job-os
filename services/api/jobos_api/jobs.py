@@ -84,6 +84,7 @@ class BrowserJobCreateRequest(BaseModel):
     listing_capture_method: str | None = Field(default=None, max_length=100)
     listing_sha256: str | None = Field(default=None, pattern=r"^[0-9a-fA-F]{64}$")
     listing_evidence: dict[str, object] = Field(default_factory=dict)
+    ingestion_source: Literal["browser", "external"] = "browser"
     origin: Literal["user", "mcp"] = "user"
     idempotency_key: str = Field(default_factory=lambda: str(uuid4()), min_length=1, max_length=128)
 

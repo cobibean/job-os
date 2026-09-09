@@ -419,6 +419,55 @@ def create_server(client: JobOsMcpClient, *, artifact_root: Path | None = None) 
             idempotency_key=idempotency_key,
         )
 
+    @server.tool(name="job_ingest", structured_output=True)
+    async def job_ingest(
+        conversation_id: ConversationId,
+        turn_id: TurnId,
+        company_name: str,
+        title: str,
+        canonical_url: str,
+        location_text: str,
+        description_text: str,
+        application_url: str,
+        listing_source_url: str,
+        listing_capture_method: str,
+        full_listing_text: str | None = None,
+        analysis_text: str | None = None,
+        listing_completeness: Literal["unknown", "partial", "complete"] = "unknown",
+        listing_captured_at: str | None = None,
+        listing_verified_at: str | None = None,
+        listing_sha256: str | None = None,
+        listing_evidence: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> dict[str, Any]:
+        """Ingest sourced listing text without the JobOS browser; no fetching is performed.
+
+        Supply the actual source URL and capture method (e.g. web_extract, api, manual).
+        Use unknown/partial for unverified or incomplete text. Only claim complete and
+        supply verified_at when supported by evidence. Returns canonical job and created;
+        duplicates preserve status. Use job_update_status separately to shortlist.
+        """
+        client.scope_turn(conversation_id, turn_id)
+        return await client.create_job(
+            company_name=company_name,
+            title=title,
+            canonical_url=canonical_url,
+            location_text=location_text,
+            description_text=description_text,
+            application_url=application_url,
+            ingestion_source="external",
+            full_listing_text=full_listing_text,
+            analysis_text=analysis_text,
+            listing_completeness=listing_completeness,
+            listing_source_url=listing_source_url,
+            listing_captured_at=listing_captured_at,
+            listing_verified_at=listing_verified_at,
+            listing_capture_method=listing_capture_method,
+            listing_sha256=listing_sha256,
+            listing_evidence=listing_evidence,
+            idempotency_key=idempotency_key,
+        )
+
     @server.tool(name="job_select", structured_output=True)
     async def job_select(
         conversation_id: ConversationId,

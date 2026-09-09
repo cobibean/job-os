@@ -56,9 +56,9 @@ async def test_complete_catalog_and_context_free_reads(api):
         )
         original = {tool.name for tool in await internal.list_tools()}
         exposed = {tool.name: tool for tool in await external.list_tools()}
-        assert len(original) == 44
+        assert len(original) == 45
         assert original <= exposed.keys()
-        assert len(exposed) == 49
+        assert len(exposed) == 50
         for tool in exposed.values():
             assert "turn_id" not in tool.inputSchema.get("properties", {})
             assert "conversation_id" not in tool.inputSchema.get("required", [])
