@@ -6,6 +6,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 MCP_RUNTIME_DEVICE_ID = "jobos-mcp-runtime"
+EXTERNAL_MCP_DEVICE_ID = "jobos-external-mcp"
 
 
 class DeviceCredential(BaseModel):
@@ -67,6 +68,7 @@ class Settings(BaseModel):
 
     device_token: str = Field(min_length=16, max_length=4096, repr=False)
     mcp_token: str = Field(min_length=16, max_length=4096, repr=False)
+    external_mcp_token: str | None = Field(default=None, min_length=16, max_length=4096, repr=False)
     device_id: str = Field(default="primary-device", min_length=1, max_length=100)
     device_credentials: tuple[DeviceCredential, ...] = Field(default=(), repr=False)
     state_db_path: Path
@@ -153,11 +155,13 @@ class Settings(BaseModel):
         device_ids = [
             self.device_id,
             MCP_RUNTIME_DEVICE_ID,
+            EXTERNAL_MCP_DEVICE_ID,
             *(item.device_id for item in self.device_credentials),
         ]
         tokens = [
             self.device_token,
             self.mcp_token,
+            *([self.external_mcp_token] if self.external_mcp_token else []),
             *(item.token for item in self.device_credentials),
             *([self.career_profile_agent_token] if self.career_profile_agent_token else []),
         ]
@@ -166,14 +170,9 @@ class Settings(BaseModel):
         if len(set(tokens)) != len(tokens):
             raise ValueError("device credentials must be unique")
         remote_ids = {item.device_id for item in self.device_credentials}
-        if (
-            len(set(self.career_profile_owner_device_ids))
-            != len(self.career_profile_owner_device_ids)
-            or any(
-                device_id not in remote_ids
-                for device_id in self.career_profile_owner_device_ids
-            )
-        ):
+        if len(set(self.career_profile_owner_device_ids)) != len(
+            self.career_profile_owner_device_ids
+        ) or any(device_id not in remote_ids for device_id in self.career_profile_owner_device_ids):
             raise ValueError("Career Profile owner devices must be authorized remote devices")
         return self
 
@@ -181,6 +180,9 @@ class Settings(BaseModel):
         return {
             self.device_id: self.device_token,
             MCP_RUNTIME_DEVICE_ID: self.mcp_token,
+            **(
+                {EXTERNAL_MCP_DEVICE_ID: self.external_mcp_token} if self.external_mcp_token else {}
+            ),
             **{item.device_id: item.token for item in self.device_credentials},
         }
 

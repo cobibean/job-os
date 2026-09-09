@@ -8622,6 +8622,106 @@ export type EventsStreamV1EventsStreamGetResponses = {
     200: unknown;
 };
 
+export type ExternalArtifactReadV1ExternalMcpArtifactsArtifactIdGetData = {
+    body?: never;
+    headers?: {
+        /**
+         * X-Jobos-Mcp-Token
+         */
+        'X-JobOS-MCP-Token'?: string | null;
+    };
+    path: {
+        /**
+         * Artifact Id
+         */
+        artifact_id: string;
+    };
+    query?: {
+        /**
+         * Byte Start
+         */
+        byte_start?: number;
+        /**
+         * Byte Length
+         */
+        byte_length?: number;
+    };
+    url: '/v1/external-mcp/artifacts/{artifact_id}';
+};
+
+export type ExternalArtifactReadV1ExternalMcpArtifactsArtifactIdGetErrors = {
+    /**
+     * Device authentication required
+     */
+    401: ApiErrorResponse;
+    /**
+     * Request validation failed
+     */
+    422: ApiErrorResponse;
+    /**
+     * Internal server error
+     */
+    500: ApiErrorResponse;
+};
+
+export type ExternalArtifactReadV1ExternalMcpArtifactsArtifactIdGetError = ExternalArtifactReadV1ExternalMcpArtifactsArtifactIdGetErrors[keyof ExternalArtifactReadV1ExternalMcpArtifactsArtifactIdGetErrors];
+
+export type ExternalArtifactReadV1ExternalMcpArtifactsArtifactIdGetResponses = {
+    /**
+     * Response External Artifact Read V1 External Mcp Artifacts  Artifact Id  Get
+     *
+     * Successful Response
+     */
+    200: {
+        [key: string]: unknown;
+    };
+};
+
+export type ExternalArtifactReadV1ExternalMcpArtifactsArtifactIdGetResponse = ExternalArtifactReadV1ExternalMcpArtifactsArtifactIdGetResponses[keyof ExternalArtifactReadV1ExternalMcpArtifactsArtifactIdGetResponses];
+
+export type ExternalMcpSessionV1ExternalMcpSessionPostData = {
+    body?: never;
+    headers?: {
+        /**
+         * X-Jobos-Mcp-Token
+         */
+        'X-JobOS-MCP-Token'?: string | null;
+    };
+    path?: never;
+    query?: never;
+    url: '/v1/external-mcp/session';
+};
+
+export type ExternalMcpSessionV1ExternalMcpSessionPostErrors = {
+    /**
+     * Device authentication required
+     */
+    401: ApiErrorResponse;
+    /**
+     * Request validation failed
+     */
+    422: ApiErrorResponse;
+    /**
+     * Internal server error
+     */
+    500: ApiErrorResponse;
+};
+
+export type ExternalMcpSessionV1ExternalMcpSessionPostError = ExternalMcpSessionV1ExternalMcpSessionPostErrors[keyof ExternalMcpSessionV1ExternalMcpSessionPostErrors];
+
+export type ExternalMcpSessionV1ExternalMcpSessionPostResponses = {
+    /**
+     * Response External Mcp Session V1 External Mcp Session Post
+     *
+     * Successful Response
+     */
+    200: {
+        [key: string]: unknown;
+    };
+};
+
+export type ExternalMcpSessionV1ExternalMcpSessionPostResponse = ExternalMcpSessionV1ExternalMcpSessionPostResponses[keyof ExternalMcpSessionV1ExternalMcpSessionPostResponses];
+
 export type HealthV1HealthGetData = {
     body?: never;
     path?: never;

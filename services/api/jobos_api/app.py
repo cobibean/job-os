@@ -293,7 +293,7 @@ from jobos_api.responses import (
     HealthResponse,
     VersionResponse,
 )
-from jobos_api.settings import MCP_RUNTIME_DEVICE_ID, Settings
+from jobos_api.settings import EXTERNAL_MCP_DEVICE_ID, MCP_RUNTIME_DEVICE_ID, Settings
 from jobos_api.state_store import (
     ConversationBusy,
     ConversationLimit,
@@ -662,9 +662,7 @@ def create_app(
             )
         }
         if codex_client is not None and codex_vault is not None:
-            provider_controls["codex"] = CodexConnectedAgentRuntime(
-                codex_client, codex_vault
-            )
+            provider_controls["codex"] = CodexConnectedAgentRuntime(codex_client, codex_vault)
         selected_connected_agent_runtime = ProviderConnectedAgentRuntime(
             cast(dict[Any, ConnectedAgentRuntimeControl], provider_controls)
         )
@@ -814,6 +812,7 @@ def create_app(
         connected_agent_binding_unavailability=connected_agent_binding_unavailability,
     )
     if codex_client is not None and codex_vault is not None and selected_auth_broker is None:
+
         async def lock_replaced_account_chats(agent_id: str) -> None:
             connected_agents.lock_chats_for_account_replacement(agent_id)
             await conversation_manager.detach_connected_agent(agent_id)
@@ -1167,9 +1166,16 @@ def create_app(
         mcp_token: Annotated[str | None, Header(alias="X-JobOS-MCP-Token")] = None,
     ) -> DeviceIdentity:
         identity = device_authenticator.authenticate(credentials)
-        is_mcp_principal = identity.device_id == MCP_RUNTIME_DEVICE_ID
-        has_valid_mcp_header = mcp_token is not None and hmac.compare_digest(
-            mcp_token, settings.mcp_token
+        is_mcp_principal = identity.device_id in {MCP_RUNTIME_DEVICE_ID, EXTERNAL_MCP_DEVICE_ID}
+        expected = (
+            settings.external_mcp_token
+            if identity.device_id == EXTERNAL_MCP_DEVICE_ID
+            else settings.mcp_token
+        )
+        has_valid_mcp_header = (
+            mcp_token is not None
+            and expected is not None
+            and hmac.compare_digest(mcp_token, expected)
         )
         if (is_mcp_principal and not has_valid_mcp_header) or (
             not is_mcp_principal and mcp_token is not None
@@ -1186,7 +1192,7 @@ def create_app(
         agent_token: Annotated[str | None, Header(alias="X-JobOS-Agent-Token")] = None,
     ) -> DeviceIdentity:
         if (
-            identity.device_id == MCP_RUNTIME_DEVICE_ID
+            identity.device_id in {MCP_RUNTIME_DEVICE_ID, EXTERNAL_MCP_DEVICE_ID}
             or agent_header_id is not None
             or agent_token is not None
         ):
@@ -1353,13 +1359,20 @@ def create_app(
         origin: str | None,
         mcp_token: str | None,
     ) -> None:
+        expected = (
+            settings.external_mcp_token
+            if identity.device_id == EXTERNAL_MCP_DEVICE_ID
+            else settings.mcp_token
+        )
         trusted_runtime = (
-            identity.device_id == MCP_RUNTIME_DEVICE_ID
+            identity.device_id in {MCP_RUNTIME_DEVICE_ID, EXTERNAL_MCP_DEVICE_ID}
             and mcp_token is not None
-            and hmac.compare_digest(mcp_token, settings.mcp_token)
+            and expected is not None
+            and hmac.compare_digest(mcp_token, expected)
         )
         if (origin == "mcp" and not trusted_runtime) or (
-            origin != "mcp" and identity.device_id == MCP_RUNTIME_DEVICE_ID
+            origin != "mcp"
+            and identity.device_id in {MCP_RUNTIME_DEVICE_ID, EXTERNAL_MCP_DEVICE_ID}
         ):
             raise HTTPException(
                 status_code=403,
@@ -1402,12 +1415,95 @@ def create_app(
         "jobos_mcp_mutation_scope", default=None
     )
 
+    def require_external_context(conversation_id: str) -> None:
+        if not any(
+            row["conversation_id"] == conversation_id
+            and row["owner_device_id"] == EXTERNAL_MCP_DEVICE_ID
+            for row in state_store.list_active_conversations(include_external=True)
+        ):
+            raise HTTPException(status_code=404, detail="External context not found")
+
+    @app.post("/v1/external-mcp/session", tags=["external-mcp"])
+    def external_mcp_session(
+        identity: Annotated[DeviceIdentity, Depends(authenticated_device)],
+    ) -> dict[str, object]:
+        """Resolve the connector's durable context without starting an agent or turn."""
+        if identity.device_id != EXTERNAL_MCP_DEVICE_ID:
+            raise HTTPException(status_code=403, detail="External MCP credential required")
+        existing = next(
+            (
+                row
+                for row in state_store.list_active_conversations(include_external=True)
+                if row["owner_device_id"] == EXTERNAL_MCP_DEVICE_ID
+            ),
+            None,
+        )
+        context = existing or state_store.create_conversation(
+            actor_id=EXTERNAL_MCP_DEVICE_ID, idempotency_key="external-mcp-default-context-v1"
+        )
+        return {
+            "conversation_id": context["conversation_id"],
+            "active_turn": None,
+            "context_kind": "external-client",
+            "shared_default": True,
+        }
+
     @app.middleware("http")
     async def enforce_mcp_conversation_job_scope(
         request: Request, call_next: Callable[[Request], Any]
     ) -> Response:
         """Fence every valid MCP credential to one exact active turn."""
         supplied_mcp_token = request.headers.get("x-jobos-mcp-token")
+        # Only the dedicated external credential can enter this boundary. A caller
+        # controlled mode header or the internal runtime credential never bypasses turns.
+        external_token = settings.external_mcp_token
+        auth_scheme, _, auth_token = request.headers.get("authorization", "").partition(" ")
+        if (
+            external_token
+            and auth_scheme.casefold() == "bearer"
+            and hmac.compare_digest(auth_token, external_token)
+        ):
+            if supplied_mcp_token is None or not hmac.compare_digest(
+                supplied_mcp_token, external_token
+            ):
+                return error_response(
+                    request,
+                    status_code=403,
+                    code="external_mcp_required",
+                    message="External MCP credential required",
+                    retryable=False,
+                )
+            if request.query_params.get("turn_id") is not None:
+                return error_response(
+                    request,
+                    status_code=422,
+                    code="external_turn_not_supported",
+                    message="External MCP does not use JobOS turns",
+                    retryable=False,
+                )
+            conversation_id = request.query_params.get("conversation_id")
+            if conversation_id is not None:
+                try:
+                    require_external_context(conversation_id)
+                except HTTPException:
+                    return error_response(
+                        request,
+                        status_code=404,
+                        code="conversation_not_found",
+                        message="External context not found",
+                        retryable=False,
+                    )
+            scope_token = mcp_mutation_scope.set(
+                {
+                    "profile_id": settings.installation_profile_id,
+                    "external_client": True,
+                    **({"conversation_id": conversation_id} if conversation_id else {}),
+                }
+            )
+            try:
+                return await call_next(request)
+            finally:
+                mcp_mutation_scope.reset(scope_token)
         if supplied_mcp_token is None or not hmac.compare_digest(
             supplied_mcp_token, settings.mcp_token
         ):
@@ -1778,7 +1874,10 @@ def create_app(
             "page.snapshot",
             "document.inspect",
         }
-        if command.origin == "mcp":
+        if identity.device_id == EXTERNAL_MCP_DEVICE_ID:
+            require_external_context(str(command.conversation_id))
+            target_device_id = settings.device_id
+        elif command.origin == "mcp":
             try:
                 scoped_service = conversation_manager.get(str(command.conversation_id))
             except ConversationNotFound as error:
@@ -3103,9 +3202,7 @@ def create_app(
         except (ConnectedAgentConflict, InstallationProfileConflict) as error:
             raise HTTPException(status_code=409, detail=str(error)) from error
 
-    @app.post(
-        "/v1/connected-agents/{agent_id}/auth/device-code", tags=["agent"]
-    )
+    @app.post("/v1/connected-agents/{agent_id}/auth/device-code", tags=["agent"])
     async def connected_agent_auth_start(
         agent_id: str,
         command: StartAuthRequest,
@@ -3381,6 +3478,9 @@ def create_app(
             conversation_service(conversation_id, identity)
             return identity.device_id
 
+        if identity.device_id == EXTERNAL_MCP_DEVICE_ID:
+            require_external_context(conversation_id)
+            return settings.device_id
         conversation_manager.get(conversation_id)
         owner = next(
             (
@@ -3421,7 +3521,10 @@ def create_app(
         command: ConversationDocumentViewRequest,
         identity: Annotated[DeviceIdentity, Depends(authenticated_device)],
     ) -> ConversationJobContextMutation:
-        conversation_service(conversation_id, identity)
+        if identity.device_id == EXTERNAL_MCP_DEVICE_ID:
+            require_external_context(conversation_id)
+        else:
+            conversation_service(conversation_id, identity)
         try:
             context = state_store.save_conversation_document_view(
                 conversation_id,
@@ -3747,7 +3850,10 @@ def create_app(
         state = state_store.job_workspace_state()
         selected_job_id = None
         if conversation_id is not None:
-            conversation_service(conversation_id, identity)
+            if identity.device_id == EXTERNAL_MCP_DEVICE_ID:
+                require_external_context(conversation_id)
+            else:
+                conversation_service(conversation_id, identity)
             selected_job_id = state_store.conversation_job_context(
                 conversation_id, identity.device_id
             )["selected_job_id"]
@@ -5421,6 +5527,32 @@ def create_app(
                 "X-Content-SHA256": headers.sha256,
             },
         )
+
+    @app.get("/v1/external-mcp/artifacts/{artifact_id}", tags=["external-mcp"])
+    def external_artifact_read(
+        artifact_id: str,
+        identity: Annotated[DeviceIdentity, Depends(authenticated_device)],
+        byte_start: Annotated[int, Query(ge=0)] = 0,
+        byte_length: Annotated[int, Query(ge=1, le=65_536)] = 65_536,
+    ) -> dict[str, object]:
+        if identity.device_id != EXTERNAL_MCP_DEVICE_ID:
+            raise HTTPException(status_code=403, detail="External MCP credential required")
+        record = state_store.get_document_artifact(artifact_id)
+        if record is None:
+            raise HTTPException(status_code=404, detail="Artifact not found")
+        payload = registered_artifact_payload(record)
+        chunk = payload[byte_start : byte_start + byte_length]
+        return {
+            "artifact_id": artifact_id,
+            "sha256": hashlib.sha256(payload).hexdigest(),
+            "size_bytes": len(payload),
+            "byte_start": byte_start,
+            "byte_length": len(chunk),
+            "has_more": byte_start + len(chunk) < len(payload),
+            "media_type": record["media_type"],
+            "encoding": "base64",
+            "content": base64.b64encode(chunk).decode("ascii"),
+        }
 
     @app.get("/v1/artifacts/{artifact_id}/content", tags=["documents"])
     def artifact_content(

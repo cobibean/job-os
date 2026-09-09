@@ -273,6 +273,8 @@ def test_version_and_openapi_describe_the_shared_workspace_contract(tmp_path):
         "error_schema": "jobos-error-v1",
     }
     assert set(openapi.json()["paths"]) == {
+        "/v1/external-mcp/session",
+        "/v1/external-mcp/artifacts/{artifact_id}",
         "/v1/health",
         "/v1/version",
         "/v1/device-session",

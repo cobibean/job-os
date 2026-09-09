@@ -395,6 +395,9 @@ def build_service_environment(
         "JOBOS_JOBS_DB_PATH": str(config.jobs_db_path),
         "JOBOS_LOCAL_ARTIFACT_ROOT": str(config.local_artifact_root),
     }
+    for key in ("JOBOS_EXTERNAL_MCP_TOKEN", "JOBOS_EXTERNAL_MCP_TOKEN_FILE"):
+        if value := source.get(key):
+            environment[key] = value
     if config.job_hunter_db_path:
         environment["JOBOS_JOB_HUNTER_DB_PATH"] = str(config.job_hunter_db_path)
     if config.artifact_roots:
@@ -541,9 +544,7 @@ def installed_codex_paths(
             raise ValueError("installed JobOS Codex runtime is incomplete") from error
         return candidate
 
-    app_server = installed_resource(
-        Path("Contents/Resources/codex-runtime/bin/codex-app-server")
-    )
+    app_server = installed_resource(Path("Contents/Resources/codex-runtime/bin/codex-app-server"))
     receipt_path = installed_resource(
         Path("Contents/Resources/codex-runtime/JOBOS_CODEX_RUNTIME_RECEIPT.json")
     )

@@ -12,15 +12,34 @@ Connected clients can also read this document as the MCP resource `jobos://capab
 4. Re-read state after mutations and verify the requested result with the corresponding read tool.
 5. Treat unavailable, conflict, review-required, and authorization responses as real product state. Report them plainly instead of bypassing them.
 
+## External clients (ChatGPT and other remote MCP callers)
+
+The OAuth-protected external server exposes **all 44 existing tools plus five external helpers**. It is not a curated subset. Its live schemas omit `turn_id`; `conversation_id` is optional. Internal stdio MCP retains its existing exact active-turn and selected-job checks.
+
+- Ordinary job, Career Profile, and explicit-document operations need no JobOS conversation or active turn. Browser, workspace selection and publication operations transparently resolve a durable external context; responses include its real `conversation_id`.
+- `external_session` explicitly resolves that same shared context. It survives API/MCP restarts, starts no internal agent, creates no fake turn, and does not consume any of the five desktop chat slots. The single-owner connector shares its default selection across external clients. Optional explicit IDs must identify an external context, never an internal desktop chat.
+- Existing browser and `document_file_*` tools still address the configured desktop. They report `desktop_unavailable` if it is offline. Optional backend capabilities, revision checks and existing Career Profile authority modes remain unchanged.
+- Authentication is a separate, opt-in API identity with a unique `JOBOS_EXTERNAL_MCP_TOKEN` (or owner-only `JOBOS_EXTERNAL_MCP_TOKEN_FILE`). An internal MCP credential plus a caller-selected mode/header cannot bypass turn fencing. Public defaults remain loopback. External file handling requires the MCP service and API to share the app-owned artifact root.
+
+### Remote résumé / cover-letter publication
+
+1. Inspect the job and Career Profile. Supply only confirmed career facts.
+2. Call `document_generate(job_id, document_key, document_label, markdown)`. Plain text, `#`/`##`/`###` headings and `-` bullets are supported. This creates the source and a matched PDF/DOCX pair server-side in the publication inbox, publishes both by default, then checks their registered hashes and shared source revision. No Mac filesystem access is needed.
+3. Inspect the returned `documents` or call `document_list`. Generation also returns opaque `files.md/pdf/docx.file_id` values and checksums. Use `publish=false` to generate without registering the files.
+4. To upload existing content instead, use `file_upload(job_id, content, format, encoding)` and pass returned `source_file_id` and `artifact_file_id` to `document_publish` once per format. `encoding` is `text` or `base64`; supported file formats are `txt`, `md`, `json`, `pdf`, `docx`. Use the same source ID for a paired publication.
+5. Use `file_read` for inbox files or `artifact_read` for registered artifacts. Both provide bounded chunks and checksums; `artifact_read` revalidates the registered bytes. They do not expose arbitrary local paths or public download URLs.
+
+**Limits:** uploads/generated files are at most 2,000,000 bytes each; reads return at most 65,536 bytes per call. Generation accepts up to 100,000 UTF-8 bytes, uses a bundled font, and explicitly rejects unsupported characters rather than dropping them. This is basic text-based generation, not desktop-template fidelity, rich Markdown, image layout, PDF editing or OCR. PDF/DOCX transfers use base64; text reads are for UTF-8 source files, not binary text extraction. PDF and DOCX have the same content revision, not necessarily identical pagination. Inbox files are immutable and content-addressed; there is no automatic retention/deletion policy. If paired publication stops after the PDF, retry identical generation arguments: deterministic bytes and per-format idempotency keys reuse the first publication.
+
 ## Core operating model
 
-- **Conversation scope:** Browser, workspace, and most document operations require the chat's real `conversation_id`. One conversation keeps its own selected job and document projection.
+- **Conversation scope:** Internal MCP requires the real `conversation_id` and active `turn_id`. External MCP resolves context as described above. One conversation keeps its own selected job and document projection.
 - **Job scope:** Inspect or select the relevant job before doing job-specific document work.
 - **Optimistic concurrency:** Career Profile and document mutations use revisions or hashes. On conflict, re-read current state, reconcile intent, and retry from the new state.
 - **Idempotency:** Reuse the same idempotency key only when retrying the same logical mutation. Use a new key for a new user intent.
 - **User authority:** JobOS decides whether a Career Profile edit applies directly or becomes a proposal. The connected agent cannot approve its own proposal, change trust settings, erase Evidence permanently, or reset/restore/delete the profile.
 - **Evidence is optional:** User-provided career facts may be recorded without supporting documents. Evidence adds provenance when the user wants it; it is never a prerequisite for a claim or profile record.
-- **Publication boundary:** Finished PDF/DOCX publication must use the JobOS-owned directory returned by `document_publication_prepare`.
+- **Publication boundary:** Finished PDF/DOCX publication uses the JobOS-owned inbox. Internal agents write into the directory returned by `document_publication_prepare`; external callers use opaque file IDs and server-side generation.
 
 ## Workflow: build a Career Profile through conversation
 
@@ -55,7 +74,7 @@ Take this branch only when the user supplies a résumé, portfolio, citation, or
 5. Select it for the current conversation with `job_select` when subsequent work should use that job.
 6. Verify with `job_inspect` or `job_list`.
 
-## Workflow: create and publish a résumé or cover letter
+## Internal workflow: create and publish a résumé or cover letter
 
 1. Confirm the conversation's active job with `job_inspect` and `job_select` as needed.
 2. Inspect relevant Career Profile context with `career_profile_get` or `career_profile_search`.

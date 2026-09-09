@@ -2258,7 +2258,7 @@ class JobOsStateStore:
         return str(conversations[0]["conversation_id"])
 
     def list_active_conversations(
-        self, *, owner_device_id: str | None = None
+        self, *, owner_device_id: str | None = None, include_external: bool = False
     ) -> list[dict[str, object]]:
         # Kept as a compatibility argument and historical actor attribution only.
         # Every authorized device sees the same profile-wide conversation set.
@@ -2273,8 +2273,10 @@ class JobOsStateStore:
                        binding_state, creation_state, lock_reason,
                        created_at, updated_at
                 FROM conversations WHERE archived_at IS NULL
+                  AND (? OR owner_device_id != 'jobos-external-mcp')
                 ORDER BY position
-                """
+                """,
+                (include_external,),
             ).fetchall()
         return [dict(row) for row in rows]
 
@@ -2411,14 +2413,17 @@ class JobOsStateStore:
             compatibility_unbound = connected_agent_id is None
             count = int(
                 connection.execute(
-                    "SELECT COUNT(*) FROM conversations WHERE archived_at IS NULL"
+                    "SELECT COUNT(*) FROM conversations WHERE archived_at IS NULL "
+                    "AND owner_device_id != 'jobos-external-mcp'"
                 ).fetchone()[0]
             )
-            if count >= MAX_ACTIVE_CONVERSATIONS:
+            if count >= MAX_ACTIVE_CONVERSATIONS and actor_id != "jobos-external-mcp":
                 connection.rollback()
                 raise ConversationLimit("Maximum 5 sessions")
-            position = count + 1
-            title = f"Session {position}"
+            # External context is not a desktop chat slot; reserve an out-of-band position.
+            external = actor_id == "jobos-external-mcp"
+            position = MAX_ACTIVE_CONVERSATIONS + 1 if external else count + 1
+            title = "External MCP context" if external else f"Session {position}"
             connection.execute(
                 """
                 INSERT INTO conversations(
@@ -2639,7 +2644,8 @@ class JobOsStateStore:
             )
             remaining = connection.execute(
                 """SELECT conversation_id, position FROM conversations
-                   WHERE archived_at IS NULL AND position > ? ORDER BY position""",
+                   WHERE archived_at IS NULL AND owner_device_id != 'jobos-external-mcp'
+                   AND position > ? ORDER BY position""",
                 (position,),
             ).fetchall()
             for remaining_id, old_position in remaining:
@@ -2678,7 +2684,8 @@ class JobOsStateStore:
                 raise ConversationNotFound("Conversation not found")
             count = int(
                 connection.execute(
-                    "SELECT COUNT(*) FROM conversations WHERE archived_at IS NULL"
+                    "SELECT COUNT(*) FROM conversations WHERE archived_at IS NULL "
+                    "AND owner_device_id != 'jobos-external-mcp'"
                 ).fetchone()[0]
             )
             if count <= 1:
@@ -2708,7 +2715,8 @@ class JobOsStateStore:
             remaining = connection.execute(
                 """
                 SELECT conversation_id, position FROM conversations
-                WHERE archived_at IS NULL AND position > ?
+                WHERE archived_at IS NULL AND owner_device_id != 'jobos-external-mcp'
+                   AND position > ?
                 ORDER BY position
                 """,
                 (position,),
@@ -2759,7 +2767,8 @@ class JobOsStateStore:
             remaining = connection.execute(
                 """
                 SELECT conversation_id, position FROM conversations
-                WHERE archived_at IS NULL AND position > ?
+                WHERE archived_at IS NULL AND owner_device_id != 'jobos-external-mcp'
+                   AND position > ?
                 ORDER BY position
                 """,
                 (position,),

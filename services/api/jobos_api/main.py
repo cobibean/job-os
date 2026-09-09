@@ -7,6 +7,7 @@ from fastapi.responses import JSONResponse
 
 from jobos_api.app import create_app
 from jobos_api.artifact_repository import ArtifactStorageError
+from jobos_api.external_mcp_config import external_mcp_token
 from jobos_api.local_config import (
     LocalConfigError,
     config_path,
@@ -23,12 +24,14 @@ from jobos_api.settings import (
 
 
 def settings_from_environment() -> Settings:
+    external_token = external_mcp_token(os.environ)
     token = os.environ.get("JOBOS_DEVICE_TOKEN", "")
     mcp_token = os.environ.get("JOBOS_MCP_TOKEN", "")
     if not token and not mcp_token:
         configured_path = Path(os.environ.get("JOBOS_CONFIG_PATH", config_path(default_data_dir())))
         configured = settings_from_config(configured_path)
         updates: dict[str, object] = {
+            "external_mcp_token": external_token,
             "career_profile_enabled": os.environ.get("JOBOS_CAREER_PROFILE_ENABLED") == "1",
             "career_profile_owner_device_ids": parse_device_ids(
                 os.environ.get("JOBOS_CAREER_PROFILE_OWNER_DEVICE_IDS_JSON")
@@ -51,7 +54,7 @@ def settings_from_environment() -> Settings:
         ):
             if value := os.environ.get(environment_name):
                 updates[field_name] = value
-        return configured.model_copy(update=updates)
+        return Settings.model_validate({**configured.model_dump(), **updates})
     if not token or not mcp_token:
         raise LocalConfigError(
             "JOBOS_DEVICE_TOKEN and JOBOS_MCP_TOKEN must be configured together."
@@ -72,6 +75,7 @@ def settings_from_environment() -> Settings:
     return Settings(
         device_token=token,
         mcp_token=mcp_token,
+        external_mcp_token=external_token,
         device_id=os.environ.get("JOBOS_DEVICE_ID", "primary-device"),
         device_credentials=parse_device_credentials(
             os.environ.get("JOBOS_DEVICE_CREDENTIALS_JSON")

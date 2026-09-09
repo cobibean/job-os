@@ -121,6 +121,7 @@ class JobOsMcpClient:
         base_url: str,
         device_token: str,
         mcp_token: str,
+        external: bool = False,
         agent_id: str = "trusted-local-mcp",
         agent_token: str | None = None,
         transport: httpx.AsyncBaseTransport | None = None,
@@ -128,6 +129,7 @@ class JobOsMcpClient:
         if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,99}", agent_id):
             raise ValueError("Invalid Career Profile agent ID")
         _ = device_token  # Kept for construction compatibility; MCP uses a distinct principal.
+        self.external = external
         self._conversation_scope: ContextVar[str | None] = ContextVar(
             "jobos_mcp_conversation_id", default=None
         )
@@ -151,14 +153,26 @@ class JobOsMcpClient:
         await self._client.aclose()
 
     def scope_conversation(self, conversation_id: str) -> None:
-        if not re.fullmatch(r"conv_[A-Za-z0-9_-]{1,128}", conversation_id):
+        if not isinstance(conversation_id, str) or not re.fullmatch(
+            r"conv_[A-Za-z0-9_-]{1,128}", conversation_id
+        ):
             raise ValueError("Invalid conversation ID")
         self._conversation_scope.set(conversation_id)
 
-    def scope_turn(self, conversation_id: str, turn_id: str) -> None:
-        if not re.fullmatch(r"conv_[A-Za-z0-9_-]{1,128}", conversation_id):
+    def scope_turn(self, conversation_id: str | None, turn_id: str | None) -> None:
+        if self.external:
+            if turn_id is not None:
+                raise ValueError("External clients do not use JobOS turns")
+            if conversation_id is not None:
+                self._conversation_id(conversation_id)
+            self._conversation_scope.set(conversation_id)
+            self._turn_scope.set(None)
+            return
+        if not isinstance(conversation_id, str) or not re.fullmatch(
+            r"conv_[A-Za-z0-9_-]{1,128}", conversation_id
+        ):
             raise ValueError("Invalid conversation ID")
-        if not re.fullmatch(r"turn_[A-Za-z0-9_-]{8,200}", turn_id):
+        if not isinstance(turn_id, str) or not re.fullmatch(r"turn_[A-Za-z0-9_-]{8,200}", turn_id):
             raise ValueError("Invalid turn ID")
         self._conversation_scope.set(conversation_id)
         self._turn_scope.set(turn_id)
@@ -756,11 +770,12 @@ class JobOsMcpClient:
         conversation_id = self._conversation_scope.get()
         turn_id = self._turn_scope.get()
         if conversation_id is not None or turn_id is not None:
-            if conversation_id is None or turn_id is None:
+            if not self.external and (conversation_id is None or turn_id is None):
                 raise ValueError("Conversation and turn correlation must be supplied together")
             params = dict(kwargs.pop("params", {}) or {})
             params["conversation_id"] = conversation_id
-            params["turn_id"] = turn_id
+            if turn_id is not None:
+                params["turn_id"] = turn_id
             kwargs["params"] = params
         try:
             response = await self._client.request(method, path, **kwargs)
@@ -788,9 +803,8 @@ class JobOsMcpClient:
             message = _safe_error_message(message)
             if not isinstance(retryable, bool):
                 retryable = response.status_code in {408, 425, 429, 502, 503, 504}
-            if (
-                not isinstance(correlation_id, str)
-                or not re.fullmatch(r"[A-Za-z0-9_-]{8,64}", correlation_id)
+            if not isinstance(correlation_id, str) or not re.fullmatch(
+                r"[A-Za-z0-9_-]{8,64}", correlation_id
             ):
                 header_id = response.headers.get("x-correlation-id", "")
                 correlation_id = (

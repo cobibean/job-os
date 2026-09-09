@@ -70,6 +70,24 @@ def local_runtime_mapping(tmp_path: Path) -> dict[str, object]:
     return value
 
 
+def test_external_token_file_is_forwarded_only_when_opted_in(tmp_path):
+    config = RuntimeServiceConfig.from_mapping(local_runtime_mapping(tmp_path))
+    path = str(tmp_path / "synthetic-external-token")
+    environment = build_service_environment(
+        config, device_token="synthetic-device-token", mcp_token="synthetic-internal-token",
+        hermes_dashboard_token=None,
+        base_environment={"JOBOS_EXTERNAL_MCP_TOKEN_FILE": path},
+    )
+    assert environment["JOBOS_EXTERNAL_MCP_TOKEN_FILE"] == path
+    assert "JOBOS_EXTERNAL_MCP_TOKEN" not in environment
+    default = build_service_environment(
+        config, device_token="synthetic-device-token", mcp_token="synthetic-internal-token",
+        hermes_dashboard_token=None, base_environment={},
+    )
+    assert "JOBOS_EXTERNAL_MCP_TOKEN_FILE" not in default
+    assert "JOBOS_EXTERNAL_MCP_TOKEN" not in default
+
+
 def legacy_private_runtime_mapping(tmp_path: Path) -> dict[str, object]:
     value = runtime_mapping(tmp_path)
     for field in (
