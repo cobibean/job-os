@@ -150,8 +150,9 @@ class OwnerOAuthProvider:
             "Cache-Control": "no-store",
             # no-referrer makes browsers submit this form with Origin: null.
             "Referrer-Policy": "same-origin",
+            # Browsers also apply form-action to the post-login OAuth redirect.
             "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; "
-            "form-action 'self'; frame-ancestors 'none'",
+            "form-action 'self' https://chatgpt.com; frame-ancestors 'none'",
             "X-Content-Type-Options": "nosniff",
         }
         if request.method == "GET":

@@ -63,6 +63,13 @@ def authorize(client: TestClient):
     login = client.get(response.headers["location"])
     assert login.status_code == 200
     assert login.headers["referrer-policy"] == "same-origin"
+    # Chromium applies form-action to the OAuth redirect after the password POST.
+    directives = {
+        parts[0]: parts[1:]
+        for directive in login.headers["content-security-policy"].split(";")
+        if (parts := directive.split())
+    }
+    assert directives["form-action"] == ["'self'", "https://chatgpt.com"]
     request_id = parse_qs(urlparse(str(login.url)).query)["request"][0]
     denied = client.post(
         "/connect", data={"request": request_id, "password": "wrong"}, follow_redirects=False
