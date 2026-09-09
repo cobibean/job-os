@@ -100,9 +100,9 @@ def decode_upload(content: str, encoding: str) -> bytes:
 
 def generate_pair(markdown: str) -> tuple[bytes, bytes]:
     """Simple text, # headings and - bullets, not HTML or a browser renderer."""
+    import reportlab
     from docx import Document
     from docx.shared import Inches, Pt
-    from reportlab import rl_config
     from reportlab.lib.styles import ParagraphStyle
     from reportlab.pdfbase import pdfmetrics
     from reportlab.pdfbase.ttfonts import TTFont
@@ -110,7 +110,7 @@ def generate_pair(markdown: str) -> tuple[bytes, bytes]:
 
     if not markdown.strip() or len(markdown.encode("utf-8")) > 100_000:
         raise ValueError("Markdown must contain 1 to 100000 UTF-8 bytes")
-    font = TTFont("JobOSVera", str(Path(rl_config.TTFSearchPath[0]) / "Vera.ttf"))
+    font = TTFont("JobOSVera", str(Path(reportlab.__file__).parent / "fonts" / "Vera.ttf"))
     # Locate the font shipped by ReportLab, independent of host font installations.
     pdfmetrics.registerFont(font)
     if any(ord(c) not in font.face.charToGlyph for c in markdown if not c.isspace()):

@@ -297,7 +297,11 @@ def test_external_context_is_durable_and_does_not_consume_chat_slots(tmp_path):
         assert browser.json()["code"] == "desktop_unavailable"
 
 
-def test_document_generation_is_deterministic_and_rejects_unsupported_text():
+def test_document_generation_is_deterministic_and_rejects_unsupported_text(monkeypatch, tmp_path):
+    from reportlab import rl_config
+
+    # System font search order differs across macOS and Linux CI.
+    monkeypatch.setattr(rl_config, "TTFSearchPath", [str(tmp_path)])
     text = "# (FAKE) Candidate\n- Synthetic résumé experience"
     assert generate_pair(text) == generate_pair(text)
     with pytest.raises(ValueError, match="unsupported"):
