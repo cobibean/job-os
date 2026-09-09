@@ -148,7 +148,8 @@ class OwnerOAuthProvider:
     async def connect(self, request: Request) -> Response:
         headers = {
             "Cache-Control": "no-store",
-            "Referrer-Policy": "no-referrer",
+            # no-referrer makes browsers submit this form with Origin: null.
+            "Referrer-Policy": "same-origin",
             "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; "
             "form-action 'self'; frame-ancestors 'none'",
             "X-Content-Type-Options": "nosniff",

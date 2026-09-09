@@ -62,13 +62,25 @@ def authorize(client: TestClient):
     assert response.status_code in (302, 303)
     login = client.get(response.headers["location"])
     assert login.status_code == 200
+    assert login.headers["referrer-policy"] == "same-origin"
     request_id = parse_qs(urlparse(str(login.url)).query)["request"][0]
     denied = client.post(
         "/connect", data={"request": request_id, "password": "wrong"}, follow_redirects=False
     )
     assert denied.status_code == 403
+    for origin in ("null", "https://other.example"):
+        blocked = client.post(
+            "/connect",
+            data={"request": request_id, "password": PASSWORD},
+            headers={"Origin": origin},
+            follow_redirects=False,
+        )
+        assert blocked.status_code == 403
     accepted = client.post(
-        "/connect", data={"request": request_id, "password": PASSWORD}, follow_redirects=False
+        "/connect",
+        data={"request": request_id, "password": PASSWORD},
+        headers={"Origin": BASE},
+        follow_redirects=False,
     )
     assert accepted.status_code == 303, accepted.text
     query = parse_qs(urlparse(accepted.headers["location"]).query)
