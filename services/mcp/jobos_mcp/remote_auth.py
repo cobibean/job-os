@@ -173,15 +173,6 @@ class OwnerOAuthProvider:
                 '<button type="submit">Connect JobOS</button></form>',
                 headers=headers,
             )
-            response.set_cookie(
-                "jobos_connect",
-                self._key(request_id),
-                max_age=600,
-                secure=True,
-                httponly=True,
-                samesite="lax",
-                path="/connect",
-            )
             return response
         if len(await request.body()) > 4096:
             return Response("Request too large", 413)
@@ -190,8 +181,8 @@ class OwnerOAuthProvider:
             return Response("Invalid request origin", 403)
         form = await request.form()
         request_id, password = str(form.get("request", "")), str(form.get("password", ""))
-        if not hmac.compare_digest(request.cookies.get("jobos_connect", ""), self._key(request_id)):
-            return Response("Restart the connection in ChatGPT.", 403)
+        # Each submission authenticates with the owner password and an expiring,
+        # one-use OAuth request. No ambient browser-cookie session is needed.
         if not hmac.compare_digest(hashlib.sha256(password.encode()).digest(), self.owner_hash):
             return Response(
                 "Incorrect connection password. Go back and try again.", 403, headers=headers
@@ -221,7 +212,6 @@ class OwnerOAuthProvider:
         response = RedirectResponse(
             urlunsplit(target._replace(query=urlencode(query))), status_code=303, headers=headers
         )
-        response.delete_cookie("jobos_connect", path="/connect")
         return response
 
     async def load_authorization_code(self, client, authorization_code):

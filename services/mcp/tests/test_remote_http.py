@@ -76,6 +76,9 @@ def authorize(client: TestClient):
             follow_redirects=False,
         )
         assert blocked.status_code == 403
+    # Privacy settings and parallel OAuth windows may drop/replace browser cookies.
+    # This password-authenticated flow must not depend on ambient cookie state.
+    client.cookies.clear()
     accepted = client.post(
         "/connect",
         data={"request": request_id, "password": PASSWORD},
@@ -172,11 +175,11 @@ def test_external_redirects_cannot_register(tmp_path):
         assert response.status_code == 400
 
 
-def test_owner_login_requires_browser_binding_and_tokens_can_be_revoked(tmp_path):
+def test_owner_login_requires_real_request_and_tokens_can_be_revoked(tmp_path):
     with TestClient(app_for(tmp_path), base_url=BASE) as client:
         assert (
             client.post("/connect", data={"request": "fake", "password": PASSWORD}).status_code
-            == 403
+            == 400
         )
         info, code = authorize(client)
         tokens = exchange(client, info, code).json()
