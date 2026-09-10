@@ -23,6 +23,7 @@ from jobos_mcp.jobs import JobOsMcpClient
 from jobos_mcp.remote_auth import OwnerOAuthProvider
 from jobos_mcp.remote_http import create_http_app
 from starlette.testclient import TestClient
+from test_catalog import discover
 from test_remote_http import BASE, PASSWORD, authorize, exchange
 
 
@@ -139,7 +140,8 @@ def test_authenticated_remote_jobs_profile_and_files(tmp_path, job_provider):
                     "structuredContent"
                 ]
 
-            catalog = rpc("tools/list", {})["tools"]
+            metadata, catalog = discover(remote, tokens["access_token"])
+            assert metadata["tool_count"] == 50
             assert len(catalog) == 50
             assert all(
                 "turn_id" not in item["inputSchema"].get("properties", {}) for item in catalog

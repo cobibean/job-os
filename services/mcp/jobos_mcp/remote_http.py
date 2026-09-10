@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import logging
 import stat
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -29,6 +30,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse
 from starlette.routing import Route
 
+from jobos_mcp.catalog import DiscoveryLogging, catalog_metadata, logger, observe_catalog
 from jobos_mcp.remote_auth import OwnerOAuthProvider
 
 
@@ -48,14 +50,25 @@ def create_http_app(server: FastMCP, provider: OwnerOAuthProvider) -> Starlette:
         allowed_origins=[provider.base_url],
     )
     mcp_app = server.streamable_http_app()
+    observe_catalog(server)
 
     @asynccontextmanager
     async def lifespan(app):
+        # Tool registration is complete before startup. Version is diagnostic metadata,
+        # not a promise that an external client will refresh its saved catalog.
+        metadata = catalog_metadata(await server.list_tools(), server.instructions)
+        server._mcp_server.version = "catalog-" + str(metadata["catalog_revision"])
         async with mcp_app.router.lifespan_context(mcp_app):
             yield
 
     async def health(request: Request):
-        return JSONResponse({"status": "ready", "service": "jobos-remote-mcp"})
+        return JSONResponse(
+            {
+                "status": "ready",
+                "service": "jobos-remote-mcp",
+                **catalog_metadata(await server.list_tools(), server.instructions),
+            }
+        )
 
     routes = create_auth_routes(
         provider,
@@ -72,7 +85,10 @@ def create_http_app(server: FastMCP, provider: OwnerOAuthProvider) -> Starlette:
         Route("/connect", provider.connect, methods=["GET", "POST"]),
         Route("/healthz", health),
         Route(
-            "/mcp", RequireAuthMiddleware(mcp_app, ["jobos"], build_resource_metadata_url(resource))
+            "/mcp",
+            RequireAuthMiddleware(
+                DiscoveryLogging(mcp_app), ["jobos"], build_resource_metadata_url(resource)
+            ),
         ),
     ]
     return Starlette(
@@ -114,6 +130,10 @@ def main() -> None:
     )
     server = create_external_server(client, artifact_root=Path(config["artifact_root"]))
     app = create_http_app(server, provider)
+    # Enable only the bounded discovery logger, not SDK/debug or HTTP access logs.
+    logger.addHandler(logging.StreamHandler())
+    logger.setLevel(logging.INFO)
+    logger.propagate = False
     try:
         # TLS terminates at the forwarding service. Never bind this listener publicly.
         uvicorn.run(

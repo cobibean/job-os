@@ -40,6 +40,29 @@ External calls do not require an active internal JobOS agent turn. Context-depen
 
 Remote document helpers accept text and generate a matched PDF/DOCX on the JobOS host, then publish through the existing document pipeline. File-transfer helpers cover bounded source/binary content; the caller does not need access to a Mac-local path. Generated documents use a simple layout rather than a new template/design system. Existing document-edit tools retain their own fidelity behavior.
 
+## Updating tools on an existing connection
+
+A server implementation fix that keeps the same tool name, description, schemas, and annotations is not a catalog update: deploy the fix and exercise the existing tool. Adding/removing tools or changing their descriptors or server instructions changes the catalog. An unchanged tool count alone does not establish an unchanged catalog.
+
+For a **developer-mode connection**, deploy the server update, open the existing connection in ChatGPT settings, choose **Refresh**, and verify the changed tools in that connection. For **published apps**, metadata is a reviewed snapshot: scan the server, submit the updated version, and publish the approved version. A server deploy or developer Refresh does not itself replace the published snapshot. See [OpenAI's connection/update guide](https://developers.openai.com/apps-sdk/deploy/connect-chatgpt).
+
+JobOS provides bounded diagnostics for this distinction:
+
+- `/healthz` includes `catalog_revision` (a SHA-256 fingerprint) and `tool_count`. The fingerprint covers every served tool descriptor field and the server instructions, with stable object-key/tool ordering. It does not fingerprint implementation code, credentials, or job data.
+- MCP `initialize` returns `serverInfo.version` as `catalog-<catalog_revision>` for the startup catalog. Register tools before startup; live registry mutation is not a supported update workflow. This version is diagnostic metadata, **not a cache-invalidation command**.
+- The HTTP entrypoint emits one `jobos_mcp.discovery` INFO event when a successful `tools/list` handler result reaches a completed ASGI response send. Fields are limited to method, HTTP status, the actual response catalog revision/count, and a generated `discovery_id`. The same ID is returned in `X-JobOS-Discovery-ID`. General access logs remain disabled; embedders must enable this logger explicitly.
+- These events do not record request IDs, headers, tokens, URLs/querystrings, client/user identity, tool descriptors, arguments, or results. They do not buffer general tool results. Auth rejection, malformed requests, and failed/incomplete sends do not produce a completed-discovery event.
+
+To accept a catalog update:
+
+1. Record the endpoint's health revision/count. With existing OAuth credentials, run `initialize` → `notifications/initialized` → `tools/list`; compare initialization metadata and the full catalog (including any pagination). JobOS currently returns its complete catalog without a cursor.
+2. Refresh the **existing** developer connection, or complete the published-version review workflow. Correlate the operation's time with discovery events and, where available, the returned discovery ID. A manual probe also creates an event; logs do not identify a caller as ChatGPT.
+3. Verify that the existing ChatGPT connection exposes the added/changed tool and can invoke the intended safe workflow. Endpoint health and generic MCP tests are necessary but not sufficient acceptance.
+
+If the endpoint serves the expected revision but the connection remains stale, preserve the nonsecret revision/count and event timing, and report the client-side visibility failure separately. No event means no completed discovery was observed by this logger, not proof that no request was attempted. An event proves only what the server sent to its ASGI transport, **not that ChatGPT received, accepted, or used it**. Recreating a connection can be a recovery step, but is not proof that in-place updates work. The stale-client cause remains unresolved; these diagnostics do not guarantee refresh or prevent recurrence. OAuth reconnect is an authentication operation, not a guaranteed catalog refresh.
+
+The transport remains stateless Streamable HTTP; JobOS does not advertise tool-list-change notifications or introduce a cache/transport workaround.
+
 ## Acceptance
 
 Verify the OAuth metadata and unauthenticated `401` first, then complete a real login and confirm MCP `tools/list`. Exercise job reads, a reversible Career Profile edit, and server-side generation/publication of a synthetic PDF/DOCX pair. Confirm registration/readback and hashes, rather than treating a successful HTTP connection as a successful file workflow. Keep fixtures out of the owner's real career facts.
