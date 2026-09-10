@@ -32,7 +32,8 @@ TITLE_POLICY_FIXTURES = json.loads(
 )
 
 
-def test_publish_request_preserves_custom_existing_labels_and_fixes_references_label():
+@pytest.mark.parametrize("document_key", ["resume", "cover_letter", "references"])
+def test_publish_request_preserves_custom_labels_for_every_document_type(document_key):
     common = {
         "source_filename": "source.docx",
         "source_base64": base64.b64encode(b"source").decode(),
@@ -42,13 +43,14 @@ def test_publish_request_preserves_custom_existing_labels_and_fixes_references_l
         "idempotency_key": "publish-label-contract",
     }
     request = ArtifactPublishRequest.model_validate(
-        {"document_key": "resume", "document_label": "Tailored Resume", **common}
+        {"document_key": document_key, "document_label": "  Custom agent version  ", **common}
     )
-    assert request.document_label == "Tailored Resume"
-    with pytest.raises(ValueError, match="References"):
-        ArtifactPublishRequest.model_validate(
-            {"document_key": "references", "document_label": "Reference Sheet", **common}
-        )
+    assert request.document_label == "Custom agent version"
+    for invalid in ("", "   ", "x" * 81):
+        with pytest.raises(ValueError):
+            ArtifactPublishRequest.model_validate(
+                {"document_key": document_key, "document_label": invalid, **common}
+            )
 
 
 def test_publish_request_reserves_content_addressed_filename_prefix():

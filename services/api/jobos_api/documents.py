@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any, Literal, Protocol
 from uuid import uuid4
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from jobos_api.artifact_repository import (
     ALLOWED_MEDIA_TYPES,
@@ -136,12 +136,6 @@ class ArtifactPublishRequest(BaseModel):
         if not stripped:
             raise ValueError("document label must not be blank")
         return stripped
-
-    @model_validator(mode="after")
-    def fixed_document_label(self) -> ArtifactPublishRequest:
-        if self.document_key == "references" and self.document_label != "References":
-            raise ValueError("document label must be References")
-        return self
 
     @field_validator("source_filename", "artifact_filename")
     @classmethod

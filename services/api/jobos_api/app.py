@@ -1026,13 +1026,40 @@ def create_app(
 
     @app.exception_handler(RequestValidationError)
     async def request_validation_error_handler(
-        request: Request, _: RequestValidationError
+        request: Request, error: RequestValidationError
     ) -> JSONResponse:
+        message = "Request validation failed"
+        # Publication callers need corrective guidance, never echoed document bytes,
+        # unknown keys, validator exceptions, or other caller-controlled values.
+        route = request.scope.get("route")
+        if getattr(route, "path", None) == "/v1/jobs/{job_id}/artifacts/publish":
+            guidance = {
+                "document_key": "expected resume, cover_letter, or references",
+                "document_label": "expected a nonblank label of at most 80 characters",
+                "source_filename": "expected a plain filename fitting the 234-byte storage limit",
+                "artifact_filename": "expected a plain filename fitting the 234-byte storage limit",
+                "source_base64": "expected nonempty base64 text, at most 28000000 characters",
+                "artifact_base64": "expected nonempty base64 text, at most 28000000 characters",
+                "origin": "expected user or mcp",
+                "idempotency_key": "expected a string of 1 to 128 characters",
+            }
+            problems = []
+            for issue in error.errors():
+                location = issue.get("loc", ())
+                field = location[1] if len(location) == 2 and location[0] == "body" else None
+                problem = (
+                    f"{field}: {guidance[field]}"
+                    if field in guidance
+                    else "request: unexpected field or invalid request structure"
+                )
+                if problem not in problems:
+                    problems.append(problem)
+            message += "; " + "; ".join(problems[:3])
         return error_response(
             request,
             status_code=422,
             code="request_validation_failed",
-            message="Request validation failed",
+            message=message,
             retryable=False,
         )
 

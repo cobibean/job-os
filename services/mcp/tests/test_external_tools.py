@@ -138,7 +138,10 @@ def test_external_auth_cannot_be_selected_by_internal_header(api):
 
 
 @pytest.mark.anyio
-async def test_remote_generate_publish_read_and_select_without_active_turn(api, monkeypatch):
+@pytest.mark.parametrize("document_key", ["resume", "cover_letter", "references"])
+async def test_remote_generate_publish_read_and_select_without_active_turn(
+    api, monkeypatch, document_key
+):
     settings, app, _ = api
     client = JobOsMcpClient(
         base_url="http://test",
@@ -182,7 +185,7 @@ async def test_remote_generate_publish_read_and_select_without_active_turn(api, 
             await tool(
                 "document_generate",
                 job_id=job_id,
-                document_key="resume",
+                document_key=document_key,
                 document_label="Synthetic resume",
                 markdown=content,
             )
@@ -191,7 +194,7 @@ async def test_remote_generate_publish_read_and_select_without_active_turn(api, 
         result = await tool(
             "document_generate",
             job_id=job_id,
-            document_key="resume",
+            document_key=document_key,
             document_label="Synthetic resume",
             markdown=content,
         )
@@ -219,12 +222,31 @@ async def test_remote_generate_publish_read_and_select_without_active_turn(api, 
         replay = await tool(
             "document_generate",
             job_id=job_id,
-            document_key="resume",
+            document_key=document_key,
             document_label="Synthetic resume",
             markdown=content,
         )
         assert len(replay["documents"]["artifacts"]) == 2
         assert replay["files"] == files
+        assert all(a["document_label"] == "Synthetic resume" for a in artifacts)
+        second = await tool(
+            "document_generate",
+            job_id=job_id,
+            document_key=document_key,
+            document_label="Synthetic alternative",
+            markdown=content + "\nAlternative version.",
+        )
+        reread = await tool("document_list", job_id=job_id)
+        assert len(reread["artifacts"]) == 4
+        assert {a["artifact_id"] for a in artifacts} <= {
+            a["artifact_id"] for a in reread["artifacts"]
+        }
+        assert {a["document_label"] for a in reread["artifacts"]} == {
+            "Synthetic resume",
+            "Synthetic alternative",
+        }
+        assert second["published"] is True
+        assert reread["approved_artifact_id"] == replay["documents"]["approved_artifact_id"]
         upload = await tool("file_upload", job_id=job_id, content="synthetic source", format="txt")
         read = await tool(
             "file_read", job_id=job_id, file_id=upload["file_id"], encoding="text", byte_length=9
@@ -233,6 +255,64 @@ async def test_remote_generate_publish_read_and_select_without_active_turn(api, 
         assert read["has_more"] is True
     finally:
         await client.aclose()
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("label", ["", "   ", "x" * 81])
+async def test_publication_validation_is_actionable_over_mcp(api, label):
+    from mcp.server.fastmcp.exceptions import ToolError
+
+    settings, app, _ = api
+    client = JobOsMcpClient(
+        base_url="http://test",
+        device_token="unused",
+        mcp_token=EXTERNAL,
+        external=True,
+        transport=httpx.ASGITransport(app=app),
+    )
+    server = create_external_server(client, artifact_root=settings.resolved_local_artifact_root())
+    try:
+        created = await server._tool_manager.call_tool(
+            "job_ingest",
+            {
+                "company_name": "(FAKE) Example Company",
+                "title": "(FAKE) Engineer",
+                "canonical_url": "https://example.com/jobs/synthetic",
+                "location_text": "Remote",
+                "description_text": "Synthetic role",
+                "application_url": "https://example.com/apply/synthetic",
+                "listing_source_url": "https://example.com/jobs/synthetic",
+                "listing_capture_method": "web_extract",
+            },
+        )
+        with pytest.raises(ToolError, match="document_label: expected a nonblank label"):
+            await server._tool_manager.call_tool(
+                "document_generate",
+                {
+                    "job_id": created["job"]["job_id"],
+                    "document_key": "references",
+                    "document_label": label,
+                    "markdown": "Synthetic document.",
+                    "publish": True,
+                },
+            )
+    finally:
+        await client.aclose()
+
+
+def test_publication_validation_does_not_echo_input(api):
+    _, _, client = api
+    secret = "synthetic-private-document-content"
+    response = client.post(
+        "/v1/jobs/synthetic/artifacts/publish",
+        headers={"Authorization": f"Bearer {EXTERNAL}", "X-JobOS-MCP-Token": EXTERNAL},
+        json={"document_key": secret, "document_label": {"private": secret}, secret: secret},
+    )
+    assert response.status_code == 422
+    assert (
+        "document_key: expected resume, cover_letter, or references" in response.json()["message"]
+    )
+    assert secret not in response.text
 
 
 def test_file_bounds_tampering_and_symlinks(tmp_path):

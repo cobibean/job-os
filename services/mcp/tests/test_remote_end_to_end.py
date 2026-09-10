@@ -28,7 +28,8 @@ from test_remote_http import BASE, PASSWORD, authorize, exchange
 
 
 @pytest.mark.parametrize("job_provider", ["sqlite", "job-hunter"])
-def test_authenticated_remote_jobs_profile_and_files(tmp_path, job_provider):
+@pytest.mark.parametrize("document_key", ["resume", "cover_letter", "references"])
+def test_authenticated_remote_jobs_profile_and_files(tmp_path, job_provider, document_key):
     internal, external, device = (
         "synthetic-internal-token",
         "synthetic-external-token",
@@ -287,8 +288,8 @@ def test_authenticated_remote_jobs_profile_and_files(tmp_path, job_provider):
             generated = tool(
                 "document_generate",
                 job_id=job_id,
-                document_key="resume",
-                document_label="Synthetic remote resume",
+                document_key=document_key,
+                document_label="Synthetic remote document",
                 markdown=(
                     "# Synthetic Candidate\n## Skills\n- Python\n## Experience\nBuilt examples."
                 ),
