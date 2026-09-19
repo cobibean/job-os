@@ -34,7 +34,7 @@ function controller(count = 3): AgentSessionsController {
     order,
     activeId: 'conv_1',
     sessions: Object.fromEntries(order.map((id, index) => [id, session(index + 1)])),
-    activeSession: session(1), activeConversation: null, announcement: '', creating: false,
+    activeSession: session(1), activeConversation: null, announcement: '', restoring: false, creating: false,
     available: true,
     atMaximum: count === 5,
     select: vi.fn(() => true), selectByIndex: vi.fn(() => true), create: vi.fn(async () => true),

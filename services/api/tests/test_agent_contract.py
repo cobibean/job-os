@@ -1,5 +1,6 @@
 import asyncio
 import json
+import sqlite3
 import time
 
 import pytest
@@ -444,12 +445,35 @@ def test_new_session_is_additive_and_archive_rejects_active_work(tmp_path):
         )
 
     assert blocked.status_code == 409
-    assert blocked.json()["detail"] == "The final session cannot be archived"
+    assert blocked.json()["detail"] == "Finish or recover active work before archiving this session"
     assert added.status_code == 201
     assert archived.status_code == 204
     assert restored.status_code == 200
     assert restored.json()["conversation_id"] == added.json()["conversation_id"]
     assert restored.json()["entries"] == []
+
+
+def test_final_chat_archive_preserves_history_and_empty_state_after_restart(tmp_path):
+    with make_client(tmp_path, FakeGateway()) as client:
+        conversation = client.get("/v1/conversations/current", headers=headers()).json()
+        conversation_id = conversation["conversation_id"]
+        turn = send_message(client).json()
+        client.post(turn_url(client, turn["turn_id"], "cancel"), headers=headers())
+        assert client.delete(
+            f"/v1/conversations/{conversation_id}", headers=headers()
+        ).status_code == 204
+        assert client.get("/v1/conversations", headers=headers()).json() == {"conversations": []}
+    with make_client(tmp_path, FakeGateway()) as client:
+        assert client.get("/v1/conversations", headers=headers()).json() == {"conversations": []}
+        created = client.post("/v1/conversations", headers=headers())
+        assert created.status_code == 201
+        assert created.json()["position"] == 1
+        assert created.json()["conversation_id"] != conversation_id
+    with sqlite3.connect(tmp_path / "jobos.db") as connection:
+        assert connection.execute(
+            "SELECT COUNT(*) FROM conversation_events WHERE conversation_id = ?",
+            (conversation_id,),
+        ).fetchone()[0] > 0
 
 
 def test_message_validation_idempotency_and_running_turn_serialization(tmp_path):

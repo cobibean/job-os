@@ -80,6 +80,37 @@ test('renders accessible tabs and routes additive creation through the New Chat 
   expect(screen.queryByRole('alertdialog')).toBeNull()
 })
 
+test('initial hydration stays a loading state rather than claiming no chats', async () => {
+  const { agent } = install()
+  const pending = deferred<AgentSessionSummary[]>()
+  agent.list.mockReturnValue(pending.promise)
+  render(<Harness />)
+  expect(screen.getByText('Restoring conversation…')).not.toBeNull()
+  expect(screen.queryByRole('heading', { name: 'No open chats' })).toBeNull()
+  expect((screen.getByRole('button', { name: 'New agent session' }) as HTMLButtonElement).disabled).toBe(true)
+  await act(async () => pending.resolve([]))
+  expect(screen.getByRole('heading', { name: 'No open chats' })).not.toBeNull()
+})
+
+test('closing the final chat shows New chat without restoring or creating a replacement', async () => {
+  const { agent } = install()
+  const onNewChat = vi.fn()
+  render(<Harness onNewChat={onNewChat} />)
+  await screen.findByRole('heading', { name: 'Fresh conversation' })
+  fireEvent.click(screen.getByRole('button', { name: 'Close Session 1' }))
+  await screen.findByRole('heading', { name: 'No open chats' })
+  expect(agent.archive).toHaveBeenCalledWith('conv_1')
+  expect(agent.create).not.toHaveBeenCalled()
+  expect(screen.queryByRole('tab')).toBeNull()
+  expect(screen.queryByRole('textbox', { name: 'Message the agent' })).toBeNull()
+  expect(screen.queryByText('Restoring conversation…')).toBeNull()
+  expect(screen.queryByText('Agent offline')).toBeNull()
+  fireEvent.click(screen.getByRole('button', { name: 'New chat' }))
+  expect(onNewChat).toHaveBeenCalledOnce()
+  fireEvent.click(screen.getByRole('button', { name: 'New agent session' }))
+  expect(onNewChat).toHaveBeenCalledTimes(2)
+})
+
 test('keeps session binding metadata in the header above the flexible chat body', async () => {
   install()
   render(<Harness />)
@@ -410,7 +441,7 @@ test('tool review requires an explicit turn-scoped approve or decline', async ()
   expect(agent.review).toHaveBeenCalledTimes(1)
 })
 
-test('close compacts visible positions while last and running sessions cannot close', async () => {
+test('close compacts visible positions while running sessions cannot close', async () => {
   const running = { turnId: 'turn-2', status: 'running' as const, cancelRequested: false }
   const { agent } = install([summary(1), summary(2, running), summary(3)])
   render(<Harness />)

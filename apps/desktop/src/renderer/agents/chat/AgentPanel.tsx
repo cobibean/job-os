@@ -68,6 +68,7 @@ function ConnectionNotice({ apiState, connection }: { apiState: ConnectivityStat
 export function AgentPanel({ agentLabel, avatarId, contextLabel, apiState = 'connected', onArtifactRendered, onNewChat, sessions }: AgentPanelProps) {
   const conversation = sessions.activeConversation ?? {
     ...initialAgentConversationState,
+    restoring: sessions.restoring,
     items: [],
     draft: '',
     operationPending: false
@@ -239,13 +240,14 @@ export function AgentPanel({ agentLabel, avatarId, contextLabel, apiState = 'con
           tabIndex={selected ? -1 : undefined}
         >
         {selected && <>
-        <ConnectionNotice apiState={apiState} connection={conversation.connection} />
+        {activeId && <ConnectionNotice apiState={apiState} connection={conversation.connection} />}
         {conversation.restoring && <div className="agent-restore"><LoaderCircle aria-hidden="true" className="spin" size={17} /> Restoring conversation…</div>}
         {!conversation.restoring && conversation.items.length === 0 && !conversation.error && (
           <section className="agent-empty">
             <AgentAvatar avatarId={avatarId} size="empty" />
-            <h2>Fresh conversation</h2>
-            <p>Ask the agent to research, tailor, or review. The selected job is included automatically.</p>
+            <h2>{activeId ? 'Fresh conversation' : 'No open chats'}</h2>
+            <p>{activeId ? 'Ask the agent to research, tailor, or review. The selected job is included automatically.' : 'Start a new chat when you’re ready.'}</p>
+            {!activeId && <button className="agent-empty-new-chat" disabled={!sessions.available || sessions.creating} onClick={onNewChat} type="button">New chat</button>}
           </section>
         )}
         {conversation.items.length > 0 && (
@@ -354,7 +356,7 @@ export function AgentPanel({ agentLabel, avatarId, contextLabel, apiState = 'con
         </>}
       </div>
       })}
-      {!isPinnedToBottom && (
+      {activeId && !isPinnedToBottom && (
         <button aria-label="Jump to latest" className="jump-to-latest" onClick={() => scrollToLatest(true)} type="button">
           <ArrowDown aria-hidden="true" size={13} /> Jump to latest
         </button>
@@ -367,7 +369,7 @@ export function AgentPanel({ agentLabel, avatarId, contextLabel, apiState = 'con
         </div>
       )}
 
-      <form className="composer" onSubmit={event => { event.preventDefault(); if (canSend && activeId) void sessions.send(activeId) }}>
+      {activeId && <form className="composer" onSubmit={event => { event.preventDefault(); if (canSend && activeId) void sessions.send(activeId) }}>
         <label className="sr-only" htmlFor="agent-message">Message the agent</label>
         <textarea
           aria-describedby="composer-status"
@@ -399,7 +401,7 @@ export function AgentPanel({ agentLabel, avatarId, contextLabel, apiState = 'con
             </button>
           </div>
         </div>
-      </form>
+      </form>}
       <p aria-atomic="true" aria-live="polite" className="sr-only">{sessions.announcement || announcement}</p>
     </aside>
   )
