@@ -47,15 +47,14 @@ export function AgentSessionTabs({ controller, onNewChat }: AgentSessionTabsProp
   }
   const activeIndex = controller.activeId ? controller.order.indexOf(controller.activeId) : -1
   const activeSession = controller.activeId ? controller.sessions[controller.activeId] : undefined
-  const cannotClose = controller.order.length === 1
-    || controller.creating
+  const cannotClose = !activeSession || controller.creating
     || activeSession?.summary.recoveryState === 'recovering'
     || activeSession?.summary.recoveryState === 'quarantined'
     || Boolean(activeSession?.conversation.activeTurn)
     || activeSession?.operation !== null
-  const closeTitle = controller.order.length === 1
-    ? 'At least one session must remain'
-    : activeSession?.summary.recoveryState === 'recovering'
+  const closeTitle = !activeSession
+    ? 'No open session'
+    : activeSession.summary.recoveryState === 'recovering'
         ? 'Wait for remote recovery to finish before closing'
         : activeSession?.summary.recoveryState === 'quarantined'
           ? 'Recover quarantined remote work before closing'
@@ -124,7 +123,7 @@ export function AgentSessionTabs({ controller, onNewChat }: AgentSessionTabsProp
         <button
           aria-label="New agent session"
           className="agent-session-add"
-          disabled={!controller.available || controller.creating}
+          disabled={!controller.available || controller.restoring || controller.creating}
           onClick={() => onNewChat?.()}
           title={controller.atMaximum ? 'Maximum 5 sessions' : 'New agent session (⌘N)'}
           type="button"

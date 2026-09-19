@@ -155,6 +155,7 @@ export function useAgentSessions() {
       } })
   const [announcement, setAnnouncement] = useState('')
   const [creating, setCreating] = useState(false)
+  const [restoring, setRestoring] = useState(available)
   const stateRef = useRef(state)
   const earlyUpdates = useRef(new Map<string, AgentSessionStreamUpdate[]>())
   const archivedIds = useRef(new Set<string>())
@@ -210,6 +211,7 @@ export function useAgentSessions() {
         earlyUpdates.current.delete(summary.conversationId)
       }
       updateState(() => restoredState)
+      setRestoring(false)
       if (replayAnnouncement) setAnnouncement(replayAnnouncement)
       if (activeId) window.localStorage.setItem(ACTIVE_CONVERSATION_KEY, activeId)
       await Promise.all(sorted.map(async summary => {
@@ -296,7 +298,7 @@ export function useAgentSessions() {
     conversationId: string | null
   }> => {
     const bridge = window.jobos?.agent
-    if (!bridge) return Promise.resolve({ handled: false, conversationId: null })
+    if (!bridge || restoring) return Promise.resolve({ handled: false, conversationId: null })
     const task = createQueue.current.then(async () => {
       if (stateRef.current.order.length >= MAX_SESSIONS) {
         setAnnouncement('Maximum 5 sessions.')
@@ -334,7 +336,7 @@ export function useAgentSessions() {
     })
     createQueue.current = task.then(() => undefined, () => undefined)
     return task
-  }, [updateState])
+  }, [restoring, updateState])
 
   const create = useCallback(async (selection?: AgentChatSelection): Promise<boolean> => (
     await createSession(selection)
@@ -467,7 +469,7 @@ export function useAgentSessions() {
   const archive = useCallback(async (conversationId: string) => {
     const current = stateRef.current
     const session = current.sessions[conversationId]
-    if (!session || current.order.length <= 1 || creating || session.summary.recoveryState === 'recovering' || session.summary.recoveryState === 'quarantined' || session.conversation.activeTurn || session.operation || !window.jobos?.agent) return false
+    if (!session || creating || session.summary.recoveryState === 'recovering' || session.summary.recoveryState === 'quarantined' || session.conversation.activeTurn || session.operation || !window.jobos?.agent) return false
     if (!beginOperation(conversationId, 'archive')) return false
     try {
       await window.jobos.agent.archive(conversationId)
@@ -540,6 +542,7 @@ export function useAgentSessions() {
     activeSession,
     activeConversation,
     announcement,
+    restoring,
     creating,
     available,
     atMaximum: state.order.length >= MAX_SESSIONS,

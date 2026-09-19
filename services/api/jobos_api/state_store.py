@@ -2682,15 +2682,6 @@ class JobOsStateStore:
             if row is None:
                 connection.rollback()
                 raise ConversationNotFound("Conversation not found")
-            count = int(
-                connection.execute(
-                    "SELECT COUNT(*) FROM conversations WHERE archived_at IS NULL "
-                    "AND owner_device_id != 'jobos-external-mcp'"
-                ).fetchone()[0]
-            )
-            if count <= 1:
-                connection.rollback()
-                raise ConversationBusy("The final session cannot be archived")
             active = connection.execute(
                 """
                 SELECT 1 FROM conversation_turns WHERE conversation_id = ?

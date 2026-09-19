@@ -40,6 +40,41 @@ function install(summaries: AgentSessionSummary[], snapshots = summaries.map(ite
   return { agent, emit: (update: AgentSessionStreamUpdate) => listener(update) }
 }
 
+test('archives the final chat, ignores late events, restores empty, and can create again', async () => {
+  const { agent, emit } = install([summary(1)])
+  const first = renderHook(() => useAgentSessions())
+  await waitFor(() => expect(first.result.current.activeConversation?.restoring).toBe(false))
+  act(() => first.result.current.select('conv_1'))
+  await act(async () => { expect(await first.result.current.archive('conv_1')).toBe(true) })
+  act(() => emit({ kind: 'event', conversationId: 'conv_1', recoveryState: 'ready', event: event(2, 'completed') }))
+  expect(first.result.current.order).toEqual([])
+  expect(first.result.current.activeId).toBeNull()
+  expect(first.result.current.activeConversation).toBeNull()
+  expect(window.localStorage.getItem('jobos.agent.activeConversationId')).toBeNull()
+  expect(agent.create).not.toHaveBeenCalled()
+  first.unmount()
+  agent.list.mockResolvedValue([])
+  const second = renderHook(() => useAgentSessions())
+  await waitFor(() => expect(second.result.current.restoring).toBe(false))
+  expect(agent.list).toHaveBeenCalledTimes(2)
+  expect(second.result.current.order).toEqual([])
+  expect(agent.create).not.toHaveBeenCalled()
+  agent.create.mockResolvedValue(snapshot(2))
+  await act(async () => { expect(await second.result.current.create()).toBe(true) })
+  expect(second.result.current.activeId).toBe('conv_2')
+})
+
+test('a failed final archive leaves the chat available', async () => {
+  const { agent } = install([summary(1)])
+  agent.archive.mockRejectedValue(new Error('Offline'))
+  const { result } = renderHook(() => useAgentSessions())
+  await waitFor(() => expect(result.current.activeConversation?.restoring).toBe(false))
+  await act(async () => { expect(await result.current.archive('conv_1')).toBe(false) })
+  expect(result.current.order).toEqual(['conv_1'])
+  expect(result.current.activeId).toBe('conv_1')
+  expect(result.current.sessions.conv_1?.operation).toBeNull()
+})
+
 test('subscribes before hydration and reconciles early scoped events exactly once', async () => {
   const pending = deferred<AgentConversationSnapshot>()
   const { agent, emit } = install([summary(1)])

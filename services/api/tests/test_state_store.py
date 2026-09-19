@@ -1864,7 +1864,7 @@ def test_conversation_event_collection_is_profile_wide(tmp_path):
     assert [entry["event"]["summary"] for entry in b_events] == ["Only A", "Only B"]
 
 
-def test_profile_wide_positions_cap_compaction_and_final_guard_preserve_attribution(tmp_path):
+def test_profile_wide_positions_cap_compaction_and_empty_state_preserve_attribution(tmp_path):
     store = JobOsStateStore(tmp_path / "cap.db")
     store.initialize(owner_device_id="device-a")
     a_created = [store.create_conversation(actor_id="device-a") for _ in range(2)]
@@ -1901,11 +1901,16 @@ def test_profile_wide_positions_cap_compaction_and_final_guard_preserve_attribut
     assert store.create_conversation(actor_id="device-b")["position"] == 5
     for item in list(store.list_active_conversations(owner_device_id="device-a"))[1:]:
         store.archive_conversation(str(item["conversation_id"]), actor_id="device-b")
-    with pytest.raises(ConversationBusy, match="final session"):
-        store.archive_conversation(
-            store.first_active_conversation_id("device-a"), actor_id="device-a"
-        )
-    assert len(store.list_active_conversations(owner_device_id="device-b")) == 1
+    final_id = store.first_active_conversation_id("device-a")
+    store.archive_conversation(final_id, actor_id="device-a")
+    assert store.list_active_conversations(owner_device_id="device-b") == []
+    store.initialize(owner_device_id="device-a")
+    assert store.list_active_conversations(owner_device_id="device-a") == []
+    with sqlite3.connect(tmp_path / "cap.db") as connection:
+        assert connection.execute(
+            "SELECT archived_at FROM conversations WHERE conversation_id = ?", (final_id,)
+        ).fetchone()[0] is not None
+    assert store.create_conversation(actor_id="device-b")["position"] == 1
     assert {item["conversation_id"] for item in a_created}.issubset(
         {item["conversation_id"] for item in visible_a}
     )
