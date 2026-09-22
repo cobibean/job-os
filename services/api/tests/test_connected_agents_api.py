@@ -14,6 +14,7 @@ from jobos_api.agent_gateway import (
 from jobos_api.app import create_app
 from jobos_api.connected_agent_auth import SafeAuthTransaction
 from jobos_api.connected_agents import (
+    ConnectedAgentModelsResponse,
     HermesConnectedAgentRuntime,
     ProviderConnectedAgentRuntime,
 )
@@ -301,6 +302,29 @@ def test_hermes_astra_catalog_exposes_only_real_wire_efforts(tmp_path, model_id)
         "live": False,
         "models": [],
     }
+
+
+@pytest.mark.parametrize("model_id", ["gpt-6-astra", "gpt-6-astra-900k", "gpt-6-sol"])
+def test_hermes_sol_catalog_preserves_defaults_and_existing_astra_choices(tmp_path, model_id):
+    _, registry, _, _, _ = setup_app(tmp_path)
+    record = registry.load().connected_agents[0].model_copy(update={"default_model_id": model_id})
+    before = record.model_dump()
+
+    catalog = ConnectedAgentModelsResponse.model_validate(
+        asyncio.run(HermesConnectedAgentRuntime(configured=True).list_models(record))
+    )
+    options = {item.model_id: item for item in catalog.models}
+
+    assert catalog.live is True
+    assert catalog.models[0].model_id == model_id
+    assert len(catalog.models) == len(options) == 3
+    assert set(options) == {"gpt-6-astra", "gpt-6-astra-900k", "gpt-6-sol"}
+    assert options["gpt-6-sol"].reasoning_efforts == [
+        "none", "low", "medium", "high", "xhigh", "max"
+    ]
+    for astra in ("gpt-6-astra", "gpt-6-astra-900k"):
+        assert options[astra].reasoning_efforts == ["low", "medium", "high", "xhigh", "max"]
+    assert record.model_dump() == before
 
 
 def test_app_startup_repairs_completed_offline_hermes_migration_for_new_chat(tmp_path):

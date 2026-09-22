@@ -45,8 +45,18 @@ class UnavailableConnectedAgentRuntime:
         return {"verified": False}
 
 
+# Wire-level efforts supported by stock Hermes on the OpenAI Codex route.
+# Keep unknown profile models limited to their configured default; do not infer
+# cross-provider capabilities or change the profile's model/provider globally.
+_HERMES_CODEX_MODEL_EFFORTS = {
+    "gpt-6-astra": ["low", "medium", "high", "xhigh", "max"],
+    "gpt-6-astra-900k": ["low", "medium", "high", "xhigh", "max"],
+    "gpt-6-sol": ["none", "low", "medium", "high", "xhigh", "max"],
+}
+
+
 class HermesConnectedAgentRuntime:
-    """Expose the fixed model owned by the configured Hermes profile."""
+    """Expose supported per-session choices without changing profile defaults."""
 
     def __init__(self, *, configured: bool) -> None:
         self.configured = configured
@@ -73,21 +83,24 @@ class HermesConnectedAgentRuntime:
             or agent.default_reasoning_effort is None
         ):
             return {"live": False, "models": []}
+        model_ids = [agent.default_model_id]
+        if agent.default_model_id in _HERMES_CODEX_MODEL_EFFORTS:
+            # Retain Astra when Sol becomes the saved default so existing chats
+            # remain valid. Keep the configured context variant first as well.
+            model_ids = list(dict.fromkeys([*model_ids, *_HERMES_CODEX_MODEL_EFFORTS]))
         return {
             "live": True,
             "models": [
                 {
-                    "model_id": agent.default_model_id,
-                    "display_name": agent.default_model_id,
-                    # Stock Hermes agent/reasoning_effort.py CODEX_ASTRA_EFFORTS.
-                    # Do not advertise internal aliases (minimal/ultra) that the
-                    # provider clamps, or invent capabilities for unknown models.
-                    "reasoning_efforts": (
-                        ["low", "medium", "high", "xhigh", "max"]
-                        if agent.default_model_id in {"gpt-6-astra", "gpt-6-astra-900k"}
-                        else [agent.default_reasoning_effort]
+                    "model_id": model_id,
+                    "display_name": model_id,
+                    "reasoning_efforts": list(
+                        _HERMES_CODEX_MODEL_EFFORTS.get(
+                            model_id, [agent.default_reasoning_effort]
+                        )
                     ),
                 }
+                for model_id in model_ids
             ],
         }
 
