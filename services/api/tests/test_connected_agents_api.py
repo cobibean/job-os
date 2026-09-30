@@ -304,7 +304,9 @@ def test_hermes_astra_catalog_exposes_only_real_wire_efforts(tmp_path, model_id)
     }
 
 
-@pytest.mark.parametrize("model_id", ["gpt-6-astra", "gpt-6-astra-900k", "gpt-6-sol"])
+@pytest.mark.parametrize(
+    "model_id", ["gpt-6-astra", "gpt-6-astra-900k", "gpt-6-sol", "gpt-6.1-sol"]
+)
 def test_hermes_sol_catalog_preserves_defaults_and_existing_astra_choices(tmp_path, model_id):
     _, registry, _, _, _ = setup_app(tmp_path)
     record = registry.load().connected_agents[0].model_copy(update={"default_model_id": model_id})
@@ -317,13 +319,13 @@ def test_hermes_sol_catalog_preserves_defaults_and_existing_astra_choices(tmp_pa
 
     assert catalog.live is True
     assert catalog.models[0].model_id == model_id
-    assert len(catalog.models) == len(options) == 3
-    assert set(options) == {"gpt-6-astra", "gpt-6-astra-900k", "gpt-6-sol"}
+    assert len(catalog.models) == len(options) == 4
+    assert set(options) == {"gpt-6-astra", "gpt-6-astra-900k", "gpt-6-sol", "gpt-6.1-sol"}
     assert options["gpt-6-sol"].reasoning_efforts == [
         "none", "low", "medium", "high", "xhigh", "max"
     ]
-    for astra in ("gpt-6-astra", "gpt-6-astra-900k"):
-        assert options[astra].reasoning_efforts == ["low", "medium", "high", "xhigh", "max"]
+    for model in ("gpt-6-astra", "gpt-6-astra-900k", "gpt-6.1-sol"):
+        assert options[model].reasoning_efforts == ["low", "medium", "high", "xhigh", "max"]
     assert record.model_dump() == before
 
 
