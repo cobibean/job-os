@@ -187,6 +187,7 @@ class ProposalDecisionRequest(StrictModel):
     idempotency_key: IdempotencyKey
     proposal_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
     decision: Literal["accept", "reject"]
+    reviewed_current_item_revision: int | None = Field(default=None, ge=1)
 
 
 class ProposalDecisionResult(StrictModel):
@@ -776,14 +777,10 @@ class CareerProfileCollaborationStore:
 
                 proposal = self._get_proposal_in_connection(connection, proposal_id)
                 if proposal.status != "pending":
-                    raise CareerProfileCollaborationConflict(
-                        "This proposal was already decided"
-                    )
+                    raise CareerProfileCollaborationConflict("This proposal was already decided")
                 if not hmac.compare_digest(
                     command.proposal_sha256, proposal.proposal_sha256
-                ) or not hmac.compare_digest(
-                    proposal.proposal_sha256, _proposal_digest(proposal)
-                ):
+                ) or not hmac.compare_digest(proposal.proposal_sha256, _proposal_digest(proposal)):
                     raise CareerProfileCollaborationConflict(
                         "The proposal payload changed and must be regenerated"
                     )
@@ -799,7 +796,20 @@ class CareerProfileCollaborationStore:
                         and proposal.operation == "item.create"
                         and proposal.before is None
                     )
-                    if proposal.base_profile_revision != head and not migration_create:
+                    reviewed_revision = command.reviewed_current_item_revision
+                    if reviewed_revision is not None:
+                        current_target = self._active_item_in_connection(
+                            connection, proposal.target_id
+                        )
+                        if (
+                            proposal.operation != "item.update"
+                            or current_target is None
+                            or current_target.item_revision != reviewed_revision
+                        ):
+                            raise CareerProfileCollaborationConflict(
+                                "The reviewed item changed or was removed. Review it again."
+                            )
+                    elif proposal.base_profile_revision != head and not migration_create:
                         current_target = self._active_item_in_connection(
                             connection, proposal.target_id
                         )
@@ -815,7 +825,14 @@ class CareerProfileCollaborationStore:
                     (command.decision + "ed", decided_at, principal, proposal_id),
                 )
                 if command.decision == "accept":
-                    self._apply_proposal(connection, complete, proposal, principal, head)
+                    self._apply_proposal(
+                        connection,
+                        complete,
+                        proposal,
+                        principal,
+                        head,
+                        reviewed_current_item_revision=command.reviewed_current_item_revision,
+                    )
                 profile = complete._current_in_connection(  # noqa: SLF001
                     connection
                 )
@@ -1383,6 +1400,8 @@ class CareerProfileCollaborationStore:
         proposal: CareerProfileChangeProposal,
         principal: str,
         head: int,
+        *,
+        reviewed_current_item_revision: int | None = None,
     ) -> None:
         current = self._active_item_in_connection(connection, proposal.target_id)
         if proposal.operation == "item.create":
@@ -1400,23 +1419,32 @@ class CareerProfileCollaborationStore:
                 current is None
                 or proposal.before is None
                 or proposal.after is None
-                or current.model_dump(mode="json")
-                != proposal.before.model_dump(mode="json")
+                or (
+                    current.item_revision != reviewed_current_item_revision
+                    if reviewed_current_item_revision is not None
+                    else current != proposal.before
+                )
             ):
                 raise CareerProfileCollaborationConflict(
                     "The proposed item changed and must be regenerated"
                 )
-            accepted = proposal.after.model_copy(update={"review_status": "accepted"})
+            accepted = proposal.after.model_copy(
+                update={
+                    "review_status": "accepted",
+                    "item_revision": current.item_revision + 1,
+                    "created_at": current.created_at,
+                    "updated_at": _now(),
+                }
+            )
             self._write_item(connection, accepted)
-            before_json = proposal.before.model_dump(mode="json")
+            before_json = current.model_dump(mode="json")
             after_json = accepted.model_dump(mode="json")
             operation = "item.upsert"
         else:
             if (
                 current is None
                 or proposal.before is None
-                or current.model_dump(mode="json")
-                != proposal.before.model_dump(mode="json")
+                or current.model_dump(mode="json") != proposal.before.model_dump(mode="json")
             ):
                 raise CareerProfileCollaborationConflict(
                     "The proposed item changed and must be regenerated"

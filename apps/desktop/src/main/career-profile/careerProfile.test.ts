@@ -242,6 +242,7 @@ describe('Career Profile desktop client', () => {
           decision: 'accept',
           expected_profile_revision: 2,
           idempotency_key: 'proposal-decision-1',
+          reviewed_current_item_revision: 2,
           proposal_sha256: 'a'.repeat(64)
         })
         return new Response(JSON.stringify({
@@ -273,6 +274,7 @@ describe('Career Profile desktop client', () => {
       decision: 'accept',
       expectedProfileRevision: 2,
       idempotencyKey: 'proposal-decision-1',
+      reviewedCurrentItemRevision: 2,
       proposalSha256: 'a'.repeat(64)
     })).resolves.toMatchObject({ profileRevision: 3, proposal: { status: 'accepted' } })
     await expect(client().getCareerProfileChangeHistory()).resolves.toMatchObject({

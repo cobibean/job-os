@@ -3749,6 +3749,10 @@ export type ProposalDecisionRequest = {
      * Proposal Sha256
      */
     proposal_sha256: string;
+    /**
+     * Reviewed Current Item Revision
+     */
+    reviewed_current_item_revision?: number | null;
 };
 
 /**

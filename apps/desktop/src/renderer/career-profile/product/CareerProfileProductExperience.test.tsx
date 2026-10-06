@@ -56,6 +56,47 @@ const complete: CareerProfileCurrent = {
   sourceEvidence: [evidence]
 }
 
+test('reviews current versus proposed data, binds confirmation to its version, and keeps failures pending', async () => {
+  const proposal = {
+    after: { ...skill, itemRevision: 2, value: { kind: 'skill', name: 'Proposed TypeScript' } },
+    before: skill,
+    agentDisplayName: 'Job Hunter', agentId: 'job-hunter', baseProfileRevision: 1,
+    createdAt: skill.createdAt, evidenceIds: [], operation: 'item.update' as const,
+    proposalId: 'cpp_fakeproposal123456', proposalSha256: 'a'.repeat(64),
+    reason: 'Synthetic pending skill', reviewReason: 'Review every change',
+    status: 'pending' as const, targetId: skill.itemId
+  }
+  const latest = { ...skill, itemRevision: 3, value: { kind: 'skill', name: 'Current Python' } }
+  const getCareerProfile = vi.fn().mockResolvedValue({ ...complete, items: [latest] })
+  const decideCareerProfileProposal = vi.fn().mockRejectedValue(new Error('profile revision changed'))
+  const api = bridge({ getCareerProfile, decideCareerProfileProposal,
+    listCareerProfileProposals: vi.fn().mockResolvedValue([proposal]) })
+  render(<CareerProfileWorkspace bridge={api} hasActiveTurn={false} />)
+  const review = await screen.findByRole('region', { name: 'Agent changes to review' })
+  expect(within(review).getByText('Current saved entry')).not.toBeNull()
+  expect(within(review).getByText('Current Python')).not.toBeNull()
+  expect(within(review).getByText('Proposed TypeScript')).not.toBeNull()
+  fireEvent.click(within(review).getByRole('button', { name: 'Review replacement' }))
+  expect(decideCareerProfileProposal).not.toHaveBeenCalled()
+  expect(within(review).getByRole('alert').textContent).toContain('Newer content and evidence links')
+  // A refresh invalidates the old confirmation rather than silently rebinding it.
+  getCareerProfile.mockResolvedValue({ ...complete, profileRevision: 5, items: [{ ...latest, itemRevision: 4 }] })
+  fireEvent.focus(window)
+  await waitFor(() => expect(within(review).queryByRole('button', { name: 'Confirm replacement' })).toBeNull())
+  fireEvent.click(within(review).getByRole('button', { name: 'Review replacement' }))
+  fireEvent.click(within(review).getByRole('button', { name: 'Confirm replacement' }))
+  await waitFor(() => expect(decideCareerProfileProposal).toHaveBeenCalledWith(proposal.proposalId,
+    expect.objectContaining({ decision: 'accept', expectedProfileRevision: 5, reviewedCurrentItemRevision: 4, proposalSha256: proposal.proposalSha256 })))
+  expect(await within(review).findByRole('alert')).not.toBeNull()
+  expect(within(review).getByRole('button', { name: 'Review replacement' })).not.toBeNull()
+  expect(within(review).getByRole('button', { name: 'Keep current — reject change' })).not.toBeNull()
+  decideCareerProfileProposal.mockResolvedValue({ profileRevision: 6, proposal: { ...proposal, status: 'accepted' } })
+  vi.mocked(api.listCareerProfileProposals).mockResolvedValue([])
+  fireEvent.click(within(review).getByRole('button', { name: 'Review replacement' }))
+  fireEvent.click(within(review).getByRole('button', { name: 'Confirm replacement' }))
+  await waitFor(() => expect(screen.queryByRole('region', { name: 'Agent changes to review' })).toBeNull())
+})
+
 function savedProfile(overrides: Partial<CareerProfileCurrent>): CareerProfileCurrent {
   return { ...complete, ...overrides }
 }

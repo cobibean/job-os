@@ -7197,6 +7197,18 @@
             "pattern": "^[a-f0-9]{64}$",
             "title": "Proposal Sha256",
             "type": "string"
+          },
+          "reviewed_current_item_revision": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reviewed Current Item Revision"
           }
         },
         "required": [

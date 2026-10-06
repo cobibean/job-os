@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import type {
   CareerProfileBridge,
+  CareerProfileCurrent,
   CareerProfileChangeHistory,
   CareerProfileChangeProposal,
   CareerProfileChangeRevision
@@ -27,6 +28,8 @@ export function useCareerProfileCollaboration(
   const [history, setHistory] = useState<CareerProfileChangeHistory | null>(null)
   const [status, setStatus] = useState<CollaborationStatus>('idle')
   const [message, setMessage] = useState('')
+  const [currentProfile, setCurrentProfile] = useState<CareerProfileCurrent | null>(null)
+  const [decisionError, setDecisionError] = useState<{ proposalId: string, message: string } | null>(null)
   const pendingKeys = useRef(new Map<string, string>())
   const mounted = useRef(true)
   const refreshSequence = useRef(0)
@@ -51,9 +54,13 @@ export function useCareerProfileCollaboration(
         bridge.listCareerProfileProposals(),
         bridge.getCareerProfileChangeHistory()
       ])
+      const nextProfile = nextProposals.some(proposal => proposal.status === 'pending')
+        ? await bridge.getCareerProfile()
+        : null
       if (!mounted.current || sequence !== refreshSequence.current) return
       setProposals(nextProposals.filter(proposal => proposal.status === 'pending'))
       setHistory(nextHistory)
+      setCurrentProfile(nextProfile)
       setStatus('idle')
     } catch {
       if (!mounted.current || sequence !== refreshSequence.current) return
@@ -89,21 +96,24 @@ export function useCareerProfileCollaboration(
 
   const decide = useCallback(async (
     proposal: CareerProfileChangeProposal,
-    decision: 'accept' | 'reject'
+    decision: 'accept' | 'reject',
+    reviewed?: { profileRevision: number, itemRevision: number }
   ) => {
     if (!online || status === 'saving') return false
-    const expectedProfileRevision = history?.profileRevision ?? proposal.baseProfileRevision
-    const signature = `proposal:${proposal.proposalId}:${decision}:${proposal.proposalSha256}:${expectedProfileRevision}`
+    const expectedProfileRevision = reviewed?.profileRevision ?? currentProfile?.profileRevision ?? history?.profileRevision ?? proposal.baseProfileRevision
+    const signature = `proposal:${proposal.proposalId}:${decision}:${proposal.proposalSha256}:${expectedProfileRevision}:${reviewed?.itemRevision ?? 'exact'}`
     const idempotencyKey = pendingKeys.current.get(signature) ?? requestId('career_proposal')
     pendingKeys.current.set(signature, idempotencyKey)
     setStatus('saving')
     setMessage('')
+    setDecisionError(null)
     try {
       await bridge.decideCareerProfileProposal(proposal.proposalId, {
         decision,
         expectedProfileRevision,
         idempotencyKey,
-        proposalSha256: proposal.proposalSha256
+        proposalSha256: proposal.proposalSha256,
+        ...(reviewed ? { reviewedCurrentItemRevision: reviewed.itemRevision } : {})
       })
       pendingKeys.current.delete(signature)
       setProposals(current => current.filter(candidate => candidate.proposalId !== proposal.proposalId))
@@ -115,12 +125,12 @@ export function useCareerProfileCollaboration(
       const stale = /revision|stale|changed|regenerat|payload/i.test(errorText(error))
       await refresh()
       setStatus('error')
-      setMessage(stale
-        ? 'This proposal is out of date and cannot replace newer profile data. Ask the agent to regenerate it.'
-        : 'JobOS could not save that decision. Nothing was changed—try again.')
+      setDecisionError({ proposalId: proposal.proposalId, message: stale
+        ? 'The saved entry or proposal changed. Review the latest comparison again before confirming.'
+        : 'JobOS could not save that decision. The proposal is still pending—review and try again.' })
       return false
     }
-  }, [bridge, history, onProfileChanged, online, refresh, status])
+  }, [bridge, currentProfile, history, onProfileChanged, online, refresh, status])
 
   const undo = useCallback(async (revision: CareerProfileChangeRevision) => {
     if (!history || !online || status === 'saving') return false
@@ -152,6 +162,8 @@ export function useCareerProfileCollaboration(
 
   return {
     decide,
+    currentProfile,
+    decisionError,
     directRevision,
     history,
     message,

@@ -416,6 +416,110 @@ def test_direct_edit_and_retry_receipt_roll_back_together(
         assert current.items == []
 
 
+@pytest.mark.parametrize("removed", [False, True])
+def test_reviewed_stale_replacement_is_version_bound_and_undoable(tmp_path: Path, removed: bool):
+    app = create_app(configured_settings(tmp_path / "jobos.db"))
+    with TestClient(app) as client:
+        set_direct_mode(client)
+        created = client.post(
+            "/v1/career-profile/agent-edits",
+            headers=agent_headers(),
+            json=agent_edit(
+                revision=0,
+                key="reviewed-create-0001",
+                value={"kind": "skill", "name": "React"},
+                reason="Synthetic skill",
+            ),
+        ).json()["profile"]["items"][0]
+        client.patch(
+            f"/v1/career-profile/agents/{AGENT_ID}",
+            headers=user_headers(),
+            json={"trust_mode": "review"},
+        )
+        proposal = client.post(
+            "/v1/career-profile/agent-edits",
+            headers=agent_headers(),
+            json=agent_edit(
+                revision=1,
+                key="reviewed-propose-0001",
+                operation="item.update",
+                target_id=created["item_id"],
+                value={"kind": "skill", "name": "TypeScript"},
+                reason="Synthetic proposal",
+            ),
+        ).json()["proposal"]
+        set_direct_mode(client)
+        current = client.post(
+            "/v1/career-profile/agent-edits",
+            headers=agent_headers(),
+            json=agent_edit(
+                revision=1,
+                key="reviewed-newer-0001",
+                operation="item.update",
+                target_id=created["item_id"],
+                value={"kind": "skill", "name": "Python"},
+                reason="Newer synthetic edit",
+            ),
+        ).json()["profile"]["items"][0]
+        route = f"/v1/career-profile/proposals/{proposal['proposal_id']}/decision"
+        command = {
+            "expected_profile_revision": 2,
+            "idempotency_key": "reviewed-accept-0001",
+            "proposal_sha256": proposal["proposal_sha256"],
+            "decision": "accept",
+        }
+        assert client.post(route, headers=user_headers(), json=command).status_code == 409
+        command["reviewed_current_item_revision"] = 2
+        for overrides in [
+            {"expected_profile_revision": 1},
+            {"reviewed_current_item_revision": 1},
+            {"proposal_sha256": "0" * 64},
+        ]:
+            assert (
+                client.post(
+                    route, headers=user_headers(), json={**command, **overrides}
+                ).status_code
+                == 409
+            )
+        assert client.post(route, headers=agent_headers(), json=command).status_code == 403
+        if removed:
+            response = client.request(
+                "DELETE",
+                f"/v1/career-profile/items/{created['item_id']}",
+                headers=user_headers(),
+                json={"expected_profile_revision": 2, "idempotency_key": "reviewed-remove-0001"},
+            )
+            assert response.status_code == 200, response.text
+            command["expected_profile_revision"] = 3
+            assert client.post(route, headers=user_headers(), json=command).status_code == 409
+            pending = client.get("/v1/career-profile/proposals", headers=user_headers()).json()[
+                "proposals"
+            ]
+            assert pending[0]["status"] == "pending"
+            return
+        accepted = client.post(route, headers=user_headers(), json=command)
+        assert accepted.status_code == 200, accepted.text
+        result = accepted.json()
+        assert result["proposal"]["before"] == proposal["before"]
+        assert result["proposal"]["after"] == proposal["after"]
+        written = result["profile"]["items"][0]
+        assert written["item_revision"] == 3
+        assert written["value"]["name"] == "TypeScript"
+        revision = client.get("/v1/career-profile/history", headers=user_headers()).json()[
+            "revisions"
+        ][0]
+        assert revision["before"] == current
+        assert revision["after"] == written
+        undone = client.post(
+            f"/v1/career-profile/history/{revision['revision_id']}/undo",
+            headers=user_headers(),
+            json={"expected_profile_revision": 3, "idempotency_key": "reviewed-undo-0001"},
+        )
+        assert undone.status_code == 200, undone.text
+        assert undone.json()["items"][0]["value"] == current["value"]
+        assert undone.json()["items"][0]["item_revision"] == 4
+
+
 def test_undo_restores_value_as_a_new_attributed_item_revision(tmp_path: Path):
     app = create_app(configured_settings(tmp_path / "jobos.db"))
 

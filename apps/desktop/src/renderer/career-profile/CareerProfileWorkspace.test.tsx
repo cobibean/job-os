@@ -397,6 +397,7 @@ test('uses the latest loaded profile revision when accepting an exact zero-Evide
     proposal: { ...proposal, status: 'accepted' }
   })
   const api = bridge({
+    getCareerProfile: vi.fn().mockResolvedValue({ authorityEpoch: 1, profileRevision: 2, items: [proposal.before], sourceEvidence: [] }),
     listCareerProfileProposals: vi.fn().mockResolvedValue([proposal]),
     decideCareerProfileProposal
   })
@@ -404,7 +405,7 @@ test('uses the latest loaded profile revision when accepting an exact zero-Evide
 
   expect(await screen.findByRole('heading', { name: /Review Job Hunter’s change/i })).not.toBeNull()
   expect(screen.getByText(/No Evidence attached — that’s okay/i)).not.toBeNull()
-  expect(screen.getByText(/intermediate/)).not.toBeNull()
+  expect(screen.getAllByText(/intermediate/).length).toBeGreaterThan(0)
   expect(screen.getByText(/advanced/)).not.toBeNull()
   expect(screen.getAllByText('Level')).toHaveLength(2)
   expect(screen.queryByText(/"level":/)).toBeNull()

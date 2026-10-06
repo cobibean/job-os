@@ -128,6 +128,7 @@ export interface CareerProfileChangeProposal {
 }
 
 export interface CareerProfileProposalDecisionRequest {
+  reviewedCurrentItemRevision?: number
   decision: 'accept' | 'reject'
   expectedProfileRevision: number
   idempotencyKey: string

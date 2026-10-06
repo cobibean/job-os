@@ -818,7 +818,10 @@ export function createMainCareerProfileClient(
         decision: requestBody.decision,
         expected_profile_revision: validateRevision(requestBody.expectedProfileRevision),
         idempotency_key: validateIdempotencyKey(requestBody.idempotencyKey),
-        proposal_sha256: validateProposalDigest(requestBody.proposalSha256)
+        proposal_sha256: validateProposalDigest(requestBody.proposalSha256),
+        ...(requestBody.reviewedCurrentItemRevision === undefined ? {} : {
+          reviewed_current_item_revision: validateExistingRevision(requestBody.reviewedCurrentItemRevision)
+        })
       }
       const response = await request(
         config,
