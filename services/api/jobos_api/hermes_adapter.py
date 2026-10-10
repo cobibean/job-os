@@ -189,7 +189,7 @@ class _HermesRpcError(RuntimeError):
 class HermesGatewayFactory:
     """Shared Hermes configuration that creates independent WebSocket adapters."""
 
-    def __init__(self, *, url: str, token: str, cwd: Path, request_timeout: float = 10) -> None:
+    def __init__(self, *, url: str, token: str, cwd: Path, request_timeout: float = 120) -> None:
         self._url = url
         self._token = token
         self._cwd = cwd
@@ -221,7 +221,7 @@ class HermesWebSocketGateway:
         token: str,
         cwd: Path,
         profile: str = "job-hunter",
-        request_timeout: float = 10,
+        request_timeout: float = 120,
         connector: Any = websockets.connect,
         model_id: str | None = None,
         reasoning_effort: str | None = None,
@@ -379,6 +379,7 @@ class HermesWebSocketGateway:
                             "profile": self._profile,
                             "source": "jobos",
                             "close_on_disconnect": False,
+                            "omit_messages": True,
                         },
                     )
                     created = False
@@ -391,6 +392,26 @@ class HermesWebSocketGateway:
                 result = await self._create_session()
                 created = True
             immediately_verified = self._validate_session_result(result)
+            resume_info = result.get("info")
+            if (
+                stored_session_id
+                and not created
+                and isinstance(resume_info, dict)
+                and ("cwd" not in resume_info or "profile_name" not in resume_info)
+            ):
+                # Stock Hermes' live-unpersisted resume omits cwd. Read the
+                # exact live attachment through its supported activate method;
+                # never infer scope from our request or bypass verification.
+                resume_live = result.get("session_id")
+                if not isinstance(resume_live, str) or not resume_live:
+                    raise RuntimeError("Hermes returned an invalid session response")
+                refreshed = await self._request(
+                    "session.activate", {"session_id": resume_live, "omit_messages": True}
+                )
+                if refreshed.get("session_id") != resume_live:
+                    raise self._unsafe_session_response()
+                immediately_verified = self._validate_session_result(refreshed)
+                result = refreshed
             stored = (
                 result.get("session_key")
                 or result.get("resumed")

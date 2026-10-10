@@ -1308,6 +1308,7 @@ def test_adapter_resumes_stored_identity_after_fresh_transport(tmp_path, durable
             "profile": "job-hunter",
             "source": "jobos",
             "close_on_disconnect": False,
+            "omit_messages": True,
         }
 
     asyncio.run(scenario())
@@ -2385,6 +2386,7 @@ def test_persisted_resume_waits_for_job_hunter_info_then_submits_and_completes(t
             "profile": "job-hunter",
             "source": "jobos",
             "close_on_disconnect": False,
+            "omit_messages": True,
         }
         assert socket.requests[1]["params"]["session_id"] == "live-resumed"
         assert store.turn_record(sent.turn_id)["status"] == "completed"
@@ -2704,3 +2706,164 @@ def test_stable_token_query_rejects_non_loopback_urls_without_disclosure(tmp_pat
         HermesWebSocketGateway(url=url, token=TOKEN, cwd=tmp_path)
     assert TOKEN not in str(caught.value)
     assert "stale-secret" not in str(caught.value)
+
+
+@pytest.mark.parametrize("missing", ["cwd", "profile_name"])
+def test_warm_resume_refreshes_incomplete_scope_from_exact_live_session(tmp_path, missing):
+    async def scenario():
+        def responder(request):
+            if request["method"] == "session.resume":
+                info = {"profile_name": "job-hunter", "cwd": str(tmp_path)}
+                info.pop(missing)
+                return [
+                    result(
+                        request,
+                        {"session_id": "live-1", "stored_session_id": "minted-1", "info": info},
+                    )
+                ]
+            if request["method"] == "session.activate":
+                assert request["params"] == {"session_id": "live-1", "omit_messages": True}
+                return [
+                    result(
+                        request,
+                        {
+                            "session_id": "live-1",
+                            "session_key": "canonical-1",
+                            "info": {"profile_name": "job-hunter", "cwd": str(tmp_path)},
+                        },
+                    )
+                ]
+            if request["method"] == "prompt.submit":
+                return [result(request, {"status": "streaming"})]
+            raise AssertionError(request["method"])
+
+        socket = FakeWebSocket(responder)
+        gateway = HermesWebSocketGateway(
+            url="ws://127.0.0.1:9119/api/ws",
+            token=TOKEN,
+            cwd=tmp_path,
+            request_timeout=0.01,
+            connector=FakeConnector(socket),
+        )
+        assert await gateway.create_or_resume_conversation("minted-1") == ("canonical-1", "live-1")
+        await gateway.submit_turn(
+            "follow-up",
+            AgentContext(
+                turn_id="turn-1", conversation_id="conv_test", selected_job_id=None, workspace={}
+            ),
+        )
+        assert await gateway.create_or_resume_conversation("canonical-1") == (
+            "canonical-1",
+            "live-1",
+        )
+        assert [r["method"] for r in socket.requests] == [
+            "session.resume",
+            "session.activate",
+            "prompt.submit",
+        ]
+        assert socket.requests[0]["params"]["omit_messages"] is True
+        await gateway.close()
+
+    asyncio.run(scenario())
+
+
+def test_default_rpc_budget_matches_hermes_client(tmp_path):
+    factory = HermesGatewayFactory(url="ws://127.0.0.1:9119/api/ws", token=TOKEN, cwd=tmp_path)
+    assert factory.create("conv-1")._request_timeout == 120
+    from jobos_api.settings import Settings
+
+    assert Settings.model_fields["hermes_request_timeout"].default == 120
+
+
+@pytest.mark.parametrize("unsafe", ["live", "cwd", "profile"])
+def test_resume_refresh_does_not_bypass_scope_checks(tmp_path, unsafe):
+    async def scenario():
+        def responder(request):
+            if request["method"] == "session.resume":
+                return [
+                    result(
+                        request,
+                        {
+                            "session_id": "live-1",
+                            "stored_session_id": "stored-1",
+                            "info": {"profile_name": "job-hunter"},
+                        },
+                    )
+                ]
+            assert request["method"] == "session.activate"
+            return [
+                result(
+                    request,
+                    {
+                        "session_id": "other-live" if unsafe == "live" else "live-1",
+                        "session_key": "stored-1",
+                        "info": {
+                            "profile_name": "wrong-profile"
+                            if unsafe == "profile"
+                            else "job-hunter",
+                            "cwd": str(tmp_path / "other") if unsafe == "cwd" else str(tmp_path),
+                        },
+                    },
+                )
+            ]
+
+        socket = FakeWebSocket(responder)
+        gateway = HermesWebSocketGateway(
+            url="ws://127.0.0.1:9119/api/ws",
+            token=TOKEN,
+            cwd=tmp_path,
+            request_timeout=0.01,
+            connector=FakeConnector(socket),
+        )
+        try:
+            with pytest.raises(RuntimeError):
+                await gateway.create_or_resume_conversation("stored-1")
+                await gateway.submit_turn(
+                    "must not submit", AgentContext("turn-1", None, {}, "conv_test")
+                )
+            assert all(r["method"] != "prompt.submit" for r in socket.requests)
+        finally:
+            await gateway.close()
+
+    asyncio.run(scenario())
+
+
+def test_slow_resume_over_real_websocket_survives_old_api_deadline(tmp_path):
+    import websockets
+
+    async def scenario():
+        async def handler(socket):
+            await socket.send(json.dumps(event("gateway.ready", None, {})))
+            async for raw in socket:
+                request = json.loads(raw)
+                assert request["method"] == "session.resume"
+                assert request["params"]["omit_messages"] is True
+                await asyncio.sleep(5.1)
+                await socket.send(
+                    json.dumps(
+                        result(
+                            request,
+                            {
+                                "session_id": "live-slow",
+                                "session_key": "stored-slow",
+                                "info": {"profile_name": "job-hunter", "cwd": str(tmp_path)},
+                            },
+                        )
+                    )
+                )
+
+        async with websockets.serve(handler, "127.0.0.1", 0) as server:
+            port = server.sockets[0].getsockname()[1]
+            gateway = HermesWebSocketGateway(
+                url=f"ws://127.0.0.1:{port}/api/ws", token=TOKEN, cwd=tmp_path
+            )
+            try:
+                assert await gateway.create_or_resume_conversation("stored-slow") == (
+                    "stored-slow",
+                    "live-slow",
+                )
+                assert gateway._session_isolation_state == "verified"
+            finally:
+                await gateway.close()
+
+    asyncio.run(scenario())

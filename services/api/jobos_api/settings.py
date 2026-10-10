@@ -86,7 +86,7 @@ class Settings(BaseModel):
     hermes_default_reasoning_effort: str | None = Field(
         default=None, min_length=1, max_length=64
     )
-    hermes_request_timeout: float = Field(default=5.0, gt=0, le=30)
+    hermes_request_timeout: float = Field(default=120.0, gt=0, le=180)
     codex_app_server_path: Path | None = None
     codex_home_path: Path | None = None
     codex_publication_root: Path | None = None

@@ -97,7 +97,7 @@ def settings_from_environment() -> Settings:
         hermes_default_reasoning_effort=os.environ.get(
             "JOBOS_HERMES_DEFAULT_REASONING_EFFORT"
         ),
-        hermes_request_timeout=float(os.environ.get("JOBOS_HERMES_REQUEST_TIMEOUT", "5")),
+        hermes_request_timeout=float(os.environ.get("JOBOS_HERMES_REQUEST_TIMEOUT", "120")),
         codex_app_server_path=(
             Path(value) if (value := os.environ.get("JOBOS_CODEX_APP_SERVER_PATH")) else None
         ),

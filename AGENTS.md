@@ -24,6 +24,7 @@ JobOS is a source-first, local-first desktop workbench. Public defaults must run
 - Preserve path containment, symlink resistance, checksums, atomic writes, migration locking, and redaction at filesystem and API boundaries.
 - Regenerate OpenAPI and TypeScript contracts whenever public schemas change.
 - Keep source-first and packaged-app claims truthful; packaging support is not implied by source portability.
+- For agent-chat lifecycle changes, verify a second turn, warm resume with incomplete metadata, and post-restart continuation. A healthy WebSocket or one successful prompt is not follow-up acceptance. Preserve authoritative scope checks; inspect API startup overrides when changing adapter deadlines.
 
 ## Verification
 
