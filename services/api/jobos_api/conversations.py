@@ -29,6 +29,20 @@ logger = logging.getLogger(__name__)
 
 BROWSER_SAVE_IDEMPOTENCY_PREFIX = "browser-save-"
 FRESH_AGENT_SESSION_CONTEXT_KEY = "_fresh_agent_session"
+_DEFINITIVE_SUBMISSION_FAILURES = {
+    "AGENT_REASONING_MISMATCH": (
+        "reasoning_mismatch",
+        "The agent reasoning setting does not match this chat. No message was sent.",
+    ),
+    "AGENT_REASONING_UNVERIFIED": (
+        "reasoning_unverified",
+        "Agent reasoning could not be verified. Retry when the agent is ready.",
+    ),
+    "AGENT_SUBMISSION_STALE": (
+        "submission_stale",
+        "This turn is no longer authorized for submission. Check this chat's access, then retry.",
+    ),
+}
 
 
 class ConversationModel(BaseModel):
@@ -660,6 +674,22 @@ class ConversationService:
                     return
                 selected_job = context.get("selected_job")
                 binding = self.store.binding()
+
+                def submission_guard() -> bool:
+                    try:
+                        return self.store.prepare_turn_submission(
+                            turn_id,
+                            stored_id,
+                            stored_id,
+                            career_profile_context=self.career_profile_context,
+                            career_profile_agent_id=self.career_profile_agent_id,
+                        )
+                    except Exception as error:
+                        raise DefinitivePreSubmitError(
+                            "Turn access could not be verified before submission",
+                            code="AGENT_SUBMISSION_STALE",
+                        ) from error
+
                 agent_context = AgentContext(
                     turn_id=turn_id,
                     conversation_id=self.conversation_id,
@@ -692,10 +722,16 @@ class ConversationService:
                         else None
                     ),
                     permission_state={"scope": "global"},
+                    submission_guard=submission_guard,
                 )
                 try:
                     await self.gateway.submit_turn(str(turn["text"]), agent_context)
-                except DefinitivePreSubmitError:
+                except DefinitivePreSubmitError as error:
+                    if error.code in _DEFINITIVE_SUBMISSION_FAILURES:
+                        # A bounded verification already exhausted its readiness
+                        # budget, or authoritative access changed. Reattaching
+                        # must not reset that budget or bypass its result.
+                        raise
                     # The prompt was definitively not accepted, so it is safe to
                     # repair a stale JobOS-to-agent session attachment and submit
                     # once more. This is deliberately bounded to one retry: an
@@ -728,12 +764,17 @@ class ConversationService:
             current = self.store.turn_record(turn_id)
             if current and current["cancel_requested"]:
                 return
+            failure = _DEFINITIVE_SUBMISSION_FAILURES.get(error.code)
             self.store.settle_active_turn(
                 turn_id,
                 "failed",
                 event_type="error",
-                summary=safe_error_summary(error),
-                detail={"actionable": True, "retry": True},
+                summary=failure[1] if failure else safe_error_summary(error),
+                detail={
+                    "actionable": True,
+                    "retry": True,
+                    **({"reason": failure[0], "code": error.code} if failure else {}),
+                },
             )
             self._restore_session_after_isolated_turn(turn_id)
         except Exception as error:

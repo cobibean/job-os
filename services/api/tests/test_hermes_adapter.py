@@ -4,6 +4,7 @@ from urllib.parse import parse_qs, urlsplit
 
 import pytest
 from jobos_api.agent_gateway import (
+    AgentBusyError,
     AgentContext,
     AmbiguousDeliveryError,
     DefinitivePreSubmitError,
@@ -25,6 +26,305 @@ from jobos_api.hermes_adapter import (
 from jobos_api.state_store import ConversationBusy, JobOsStateStore
 
 TOKEN = "protected-dashboard-token-value"
+
+
+def test_cold_resume_waits_for_effective_reasoning_before_one_prompt(tmp_path, monkeypatch):
+    import jobos_api.hermes_adapter as adapter
+
+    monkeypatch.setattr(adapter, "_REASONING_VERIFICATION_TIMEOUT_SECONDS", 0.2, raising=False)
+    monkeypatch.setattr(adapter, "_REASONING_VERIFICATION_POLL_SECONDS", 0.001, raising=False)
+
+    async def scenario():
+        reads = 0
+
+        def responder(request):
+            nonlocal reads
+            if request["method"] == "session.resume":
+                return [
+                    result(
+                        request,
+                        {
+                            "stored_session_id": "stored-1",
+                            "session_id": "live-1",
+                            "info": {"profile_name": "job-hunter", "cwd": str(tmp_path)},
+                        },
+                    )
+                ]
+            if request["method"] == "config.get":
+                reads += 1
+                return [result(request, {"value": "medium" if reads < 3 else "low"})]
+            return [result(request, {"status": "accepted"})]
+
+        socket = FakeWebSocket(responder)
+        gateway = HermesWebSocketGateway(
+            url="ws://127.0.0.1:9119/api/ws",
+            token=TOKEN,
+            cwd=tmp_path,
+            reasoning_effort="low",
+            connector=FakeConnector(socket),
+        )
+        try:
+            await gateway.create_or_resume_conversation("stored-1")
+            await gateway.submit_turn(
+                "(FAKE) cold-resume follow-up",
+                AgentContext("turn_cold_reasoning", None, {}, "conv_test"),
+            )
+            methods = [request["method"] for request in socket.requests]
+            assert methods == [
+                "session.resume",
+                "config.get",
+                "config.get",
+                "config.get",
+                "prompt.submit",
+            ]
+            assert all(
+                request["params"]["session_id"] == "live-1"
+                for request in socket.requests
+                if request["method"] == "config.get"
+            )
+        finally:
+            await gateway.close()
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("readback", ["medium", "unavailable", "pending"])
+def test_reasoning_verification_uses_one_short_deadline_and_never_writes_or_submits(
+    tmp_path, monkeypatch, readback
+):
+    import jobos_api.hermes_adapter as adapter
+
+    monkeypatch.setattr(adapter, "_REASONING_VERIFICATION_TIMEOUT_SECONDS", 0.03)
+    monkeypatch.setattr(adapter, "_REASONING_VERIFICATION_POLL_SECONDS", 0.001)
+
+    async def scenario():
+        def responder(request):
+            if request["method"] == "config.get":
+                if readback == "pending":
+                    return []
+                if readback == "unavailable":
+                    return [{"jsonrpc": "2.0", "id": request["id"], "error": {"code": 4004}}]
+                return [result(request, {"value": readback})]
+            return [
+                result(
+                    request,
+                    {
+                        "stored_session_id": "stored-1",
+                        "session_id": "live-1",
+                        "info": {"profile_name": "job-hunter", "cwd": str(tmp_path)},
+                    },
+                )
+            ]
+
+        socket = FakeWebSocket(responder)
+        gateway = HermesWebSocketGateway(
+            url="ws://127.0.0.1:9119/api/ws",
+            token=TOKEN,
+            cwd=tmp_path,
+            request_timeout=120,
+            reasoning_effort="low",
+            connector=FakeConnector(socket),
+        )
+        try:
+            await gateway.create_or_resume_conversation("stored-1")
+            started = asyncio.get_running_loop().time()
+            with pytest.raises(DefinitivePreSubmitError) as caught:
+                await gateway.submit_turn(
+                    "(FAKE) do not submit",
+                    AgentContext("turn_reasoning_timeout", None, {}, "conv_test"),
+                )
+            elapsed = asyncio.get_running_loop().time() - started
+            assert elapsed < 0.3
+            assert caught.value.code == (
+                "AGENT_REASONING_MISMATCH" if readback == "medium" else "AGENT_REASONING_UNVERIFIED"
+            )
+            assert {request["method"] for request in socket.requests} == {
+                "session.resume",
+                "config.get",
+            }
+            assert gateway._requests == {}
+        finally:
+            await gateway.close()
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("change", ["disconnect", "replace", "scope", "continuation"])
+def test_reasoning_wait_keeps_session_scope_and_continuation_ownership(
+    tmp_path, monkeypatch, change
+):
+    import jobos_api.hermes_adapter as adapter
+
+    monkeypatch.setattr(adapter, "_REASONING_VERIFICATION_TIMEOUT_SECONDS", 0.2)
+    monkeypatch.setattr(adapter, "_REASONING_VERIFICATION_POLL_SECONDS", 0.01)
+
+    async def scenario():
+        scheduled = False
+
+        def invalidate():
+            if change == "disconnect":
+                gateway._set_connection_state("offline")
+            elif change == "replace":
+                gateway._live_session_id = "live-other"
+            elif change == "scope":
+                gateway._session_isolation_state = "failed"
+            else:
+                gateway._active_continuation_turn_id = "turn_background_in_wait"
+
+        def responder(request):
+            nonlocal scheduled
+            if request["method"] == "config.get":
+                if not scheduled:
+                    scheduled = True
+                    asyncio.get_running_loop().call_later(0.001, invalidate)
+                return [result(request, {"value": "medium"})]
+            return [
+                result(
+                    request,
+                    {
+                        "stored_session_id": "stored-1",
+                        "session_id": "live-1",
+                        "info": {"profile_name": "job-hunter", "cwd": str(tmp_path)},
+                    },
+                )
+            ]
+
+        socket = FakeWebSocket(responder)
+        gateway = HermesWebSocketGateway(
+            url="ws://127.0.0.1:9119/api/ws",
+            token=TOKEN,
+            cwd=tmp_path,
+            reasoning_effort="low",
+            connector=FakeConnector(socket),
+        )
+        try:
+            await gateway.create_or_resume_conversation("stored-1")
+            expected = AgentBusyError if change == "continuation" else DefinitivePreSubmitError
+            with pytest.raises(expected):
+                await gateway.submit_turn(
+                    "(FAKE) do not overlap",
+                    AgentContext("turn_reasoning_changed", None, {}, "conv_test"),
+                )
+            assert "prompt.submit" not in [request["method"] for request in socket.requests]
+            assert "config.set" not in [request["method"] for request in socket.requests]
+            if change == "continuation":
+                assert gateway._active_continuation_turn_id == "turn_background_in_wait"
+        finally:
+            await gateway.close()
+
+    asyncio.run(scenario())
+
+
+def test_cancelled_reasoning_readback_drops_pending_request_without_submission(
+    tmp_path, monkeypatch
+):
+    import jobos_api.hermes_adapter as adapter
+
+    monkeypatch.setattr(adapter, "_REASONING_VERIFICATION_TIMEOUT_SECONDS", 0.2)
+
+    async def scenario():
+        read_started = asyncio.Event()
+
+        def responder(request):
+            if request["method"] == "config.get":
+                read_started.set()
+                return []
+            return [
+                result(
+                    request,
+                    {
+                        "stored_session_id": "stored-1",
+                        "session_id": "live-1",
+                        "info": {"profile_name": "job-hunter", "cwd": str(tmp_path)},
+                    },
+                )
+            ]
+
+        socket = FakeWebSocket(responder)
+        gateway = HermesWebSocketGateway(
+            url="ws://127.0.0.1:9119/api/ws",
+            token=TOKEN,
+            cwd=tmp_path,
+            reasoning_effort="low",
+            connector=FakeConnector(socket),
+        )
+        try:
+            await gateway.create_or_resume_conversation("stored-1")
+            submitting = asyncio.create_task(
+                gateway.submit_turn(
+                    "(FAKE) cancel while verifying",
+                    AgentContext("turn_cancel_verification", None, {}, "conv_test"),
+                )
+            )
+            await read_started.wait()
+            submitting.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await submitting
+            assert gateway._requests == {}
+            assert "prompt.submit" not in [request["method"] for request in socket.requests]
+        finally:
+            await gateway.close()
+
+    asyncio.run(scenario())
+
+
+def test_stop_during_reasoning_readiness_wait_never_submits(tmp_path, monkeypatch):
+    import jobos_api.hermes_adapter as adapter
+
+    monkeypatch.setattr(adapter, "_REASONING_VERIFICATION_TIMEOUT_SECONDS", 0.2)
+    monkeypatch.setattr(adapter, "_REASONING_VERIFICATION_POLL_SECONDS", 0.01)
+
+    async def scenario():
+        read_started = asyncio.Event()
+
+        def responder(request):
+            if request["method"] == "config.get":
+                read_started.set()
+                return [result(request, {"value": "medium"})]
+            return [
+                result(
+                    request,
+                    {
+                        "stored_session_id": "stored-1",
+                        "session_id": "live-1",
+                        "info": {"profile_name": "job-hunter", "cwd": str(tmp_path)},
+                    },
+                )
+            ]
+
+        socket = FakeWebSocket(responder)
+        gateway = HermesWebSocketGateway(
+            url="ws://127.0.0.1:9119/api/ws",
+            token=TOKEN,
+            cwd=tmp_path,
+            reasoning_effort="low",
+            connector=FakeConnector(socket),
+        )
+        store = JobOsStateStore(tmp_path / "jobos.db")
+        store.initialize()
+        service = ConversationService(store, gateway)
+        try:
+            sending = asyncio.create_task(
+                service.send(
+                    SendMessageRequest(
+                        text="(FAKE) wait then stop", idempotency_key="stop-reasoning-wait"
+                    ),
+                    actor_id="device-a",
+                    context={"selected_job_id": None, "workspace": {}},
+                )
+            )
+            await read_started.wait()
+            turn_id = service.snapshot().active_turn["turn_id"]
+            stopped = await service.cancel(turn_id)
+            await sending
+            assert stopped.status == "interrupted"
+            assert service.snapshot().active_turn is None
+            assert "prompt.submit" not in [request["method"] for request in socket.requests]
+            assert service.snapshot().recovery_state == "ready"
+        finally:
+            await gateway.close()
+
+    asyncio.run(scenario())
 
 
 @pytest.mark.parametrize(
@@ -170,7 +470,13 @@ def test_routed_hermes_pins_chat_model_and_effort_and_verifies_resume(tmp_path, 
 
 
 @pytest.mark.parametrize("reported", ["medium", None])
-def test_reasoning_mismatch_prevents_prompt_without_global_mutation(tmp_path, reported):
+def test_reasoning_mismatch_prevents_prompt_without_global_mutation(
+    tmp_path, reported, monkeypatch
+):
+    import jobos_api.hermes_adapter as adapter
+
+    monkeypatch.setattr(adapter, "_REASONING_VERIFICATION_TIMEOUT_SECONDS", 0.01)
+
     async def scenario():
         def responder(request):
             if request["method"] == "config.get":

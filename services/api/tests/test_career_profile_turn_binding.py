@@ -1050,6 +1050,47 @@ def test_first_seen_unsupported_continuation_keeps_complete_context_source_scope
     asyncio.run(scenario())
 
 
+def test_agent_access_revoked_during_readiness_wait_prevents_submission_without_quarantine(
+    tmp_path,
+):
+    async def scenario():
+        database, complete, _, service, gateway, _, _ = configured_complete_context_service(
+            tmp_path
+        )
+        entered = asyncio.Event()
+        release = asyncio.Event()
+
+        async def waiting_submit(text, context):
+            entered.set()
+            await release.wait()
+            assert context.submission_guard is not None
+            if context.submission_guard():
+                gateway.submissions.append((text, context))
+
+        gateway.submit_turn = waiting_submit
+        sending = asyncio.create_task(
+            service.send(
+                SendMessageRequest(
+                    text="(FAKE) verify then submit", idempotency_key="revoke-readiness-wait"
+                ),
+                actor_id="device-a",
+                context={},
+            )
+        )
+        await entered.wait()
+        CareerProfileCollaborationStore(database, complete).disconnect(agent_id=AGENT_ID)
+        release.set()
+        created = await sending
+        assert not gateway.submissions
+        assert service.store.turn_record(created.turn_id)["status"] == "failed"
+        assert service.snapshot().recovery_state == "ready"
+        terminal = service.snapshot().entries[-1]
+        assert terminal["detail"]["code"] == "AGENT_SUBMISSION_STALE"
+        assert terminal["detail"]["reason"] == "submission_stale"
+
+    asyncio.run(scenario())
+
+
 def test_disconnected_agent_cannot_retry_a_frozen_complete_context_turn(tmp_path):
     async def scenario():
         (

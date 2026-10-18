@@ -38,6 +38,16 @@ payloads are omitted, and remote cleanup must finish before new work. The app
 does not solicit credentials or claim that it submitted a clarification answer.
 Codex's existing bounded tool approval protocol remains separate.
 
+Hermes cold resume can acknowledge a session before its restored agent is ready.
+During that window, reasoning readback may report the profile default instead of
+the saved session override. JobOS waits up to 10 seconds for the effective effort
+to match the sealed chat binding. One deadline covers readback RPCs and polling;
+the broader adapter request timeout is unchanged. The wait never writes config
+or submits a probe prompt. A mismatch or unavailable readback fails with a stable
+reason after that budget, without resetting it through automatic reattachment.
+Every readback and wait retains the same verified live attachment, and submission
+rechecks cancellation and active agent access before sending any message.
+
 A first-seen terminal background continuation commits its failed turn and
 recovery lease together. Validated continuation identity remains available to
 the store's source binding and Career Profile scope checks. Rejected or

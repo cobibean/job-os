@@ -1632,6 +1632,44 @@ def test_definitive_pre_submit_attachment_loss_is_repaired_before_failing_turn(t
     assert store.recovery_turn_id() is None
 
 
+def test_reasoning_verification_timeout_is_safe_actionable_and_does_not_reset_budget(tmp_path):
+    async def scenario():
+        store = JobOsStateStore(tmp_path / "jobos.db")
+        store.initialize()
+
+        class MismatchedGateway(FakeGateway):
+            attempts = 0
+
+            async def submit_turn(self, text, context):
+                self.attempts += 1
+                raise DefinitivePreSubmitError(
+                    "(FAKE) provider raw mismatch text must not become UI copy",
+                    code="AGENT_REASONING_MISMATCH",
+                )
+
+        gateway = MismatchedGateway()
+        service = ConversationService(store, gateway)
+        created = await service.send(
+            SendMessageRequest(
+                text="(FAKE) verify effort", idempotency_key="reasoning-timeout-state"
+            ),
+            actor_id="device-a",
+            context={"selected_job_id": None, "workspace": {}},
+        )
+        assert gateway.attempts == 1
+        assert len(gateway.session_requests) == 1
+        assert not gateway.submissions
+        assert store.turn_record(created.turn_id)["status"] == "failed"
+        assert service.snapshot().recovery_state == "ready"
+        terminal = service.snapshot().entries[-1]
+        assert terminal["detail"]["reason"] == "reasoning_mismatch"
+        assert terminal["detail"]["code"] == "AGENT_REASONING_MISMATCH"
+        assert terminal["detail"]["retry"] is True
+        assert "raw mismatch" not in terminal["summary"]
+
+    asyncio.run(scenario())
+
+
 def test_rotated_durable_id_reconciles_without_transcript_or_raw_metadata(tmp_path):
     store = JobOsStateStore(tmp_path / "jobos.db")
     store.initialize()

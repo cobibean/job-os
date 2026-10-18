@@ -1,7 +1,7 @@
 import asyncio
 import hashlib
 import json
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Literal, Protocol, cast, runtime_checkable
@@ -38,6 +38,10 @@ class DefinitiveSessionCreationError(RuntimeError):
 class DefinitivePreSubmitError(RuntimeError):
     """The provider rejected work before the prompt could be submitted."""
 
+    def __init__(self, message: str, *, code: str | None = None) -> None:
+        super().__init__(message)
+        self.code = code
+
 
 class AgentBusyError(RuntimeError):
     """The provider is already running autonomous work for this conversation."""
@@ -58,6 +62,7 @@ class AgentContext:
     model_id: str | None = None
     reasoning_effort: str | None = None
     permission_state: dict[str, object] = field(default_factory=dict)
+    submission_guard: Callable[[], bool] | None = field(default=None, repr=False, compare=False)
 
 
 @dataclass(frozen=True)

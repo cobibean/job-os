@@ -136,7 +136,8 @@ test('every session tab controls a persistent panel while only the selected pane
     const panelId = tab.getAttribute('aria-controls')
     const panel = panelId ? document.getElementById(panelId) : null
     expect(panel?.getAttribute('role')).toBe('tabpanel')
-    expect(panel?.getAttribute('aria-labelledby')).toBe(tab.id)
+    expect(panel?.getAttribute('aria-label')).toBe(tab.getAttribute('aria-label'))
+    expect(panel?.getAttribute('aria-labelledby')).toBeNull()
   }
   const firstPanel = document.getElementById('agent-session-panel-conv_1')!
   const secondPanel = document.getElementById('agent-session-panel-conv_2')!
@@ -148,6 +149,46 @@ test('every session tab controls a persistent panel while only the selected pane
   expect(document.getElementById('agent-session-panel-conv_2')).toBe(secondPanel)
   expect(firstPanel.hidden).toBe(true)
   expect(secondPanel.hidden).toBe(false)
+})
+
+test.each(['completed', 'failed'] as const)('a %s turn updates the persistent panel accessible name directly without losing focus or scroll', async state => {
+  const running = { turnId: 'turn-5', status: 'running' as const, cancelRequested: false }
+  const summaries = Array.from({ length: 5 }, (_, index) => summary(index + 1, index === 4 ? running : null))
+  const started = event(1, { turnId: 'turn-5', type: 'turn', state: 'working' })
+  const { emit } = install(summaries, summaries.map(item => snapshot(item.position, item.position === 5 ? [started] : [], item.activeTurn)))
+  window.localStorage.setItem('jobos.agent.activeConversationId', 'conv_5')
+  render(<Harness />)
+  await waitFor(() => expect(screen.queryByText('Restoring conversation…')).toBeNull())
+  const panel = screen.getByRole('tabpanel', { name: 'Session 5, Working' })
+  const tab = screen.getByRole('tab', { name: 'Session 5, Working' })
+  const tabId = tab.id
+  const panelId = panel.id
+  expect(panel.getAttribute('aria-label')).toBe('Session 5, Working')
+  fireEvent.change(screen.getByRole('textbox', { name: 'Message the agent' }), { target: { value: 'Next instruction' } })
+  let scrollTop = 300
+  Object.defineProperties(panel, {
+    scrollHeight: { configurable: true, get: () => 2_000 },
+    clientHeight: { configurable: true, get: () => 500 },
+    scrollTop: { configurable: true, get: () => scrollTop, set: value => { scrollTop = Number(value) } }
+  })
+  fireEvent.scroll(panel)
+  panel.focus()
+  act(() => emit({
+    kind: 'event', conversationId: 'conv_5', recoveryState: 'ready',
+    event: event(2, {
+      turnId: 'turn-5', type: state === 'completed' ? 'assistant_message' : 'error', state,
+      summary: 'Turn settled', detail: state === 'completed' ? { type: 'message.complete', text: 'Finished' } : { retry: true }
+    })
+  }))
+  expect(screen.getByRole('tabpanel', { name: 'Session 5, Idle' })).toBe(panel)
+  expect(panel.getAttribute('aria-label')).toBe('Session 5, Idle')
+  expect(screen.getByRole('tab', { name: 'Session 5, Idle' })).toBe(tab)
+  expect(tab.id).toBe(tabId)
+  expect(panel.id).toBe(panelId)
+  expect(tab.getAttribute('aria-controls')).toBe(panelId)
+  expect(document.activeElement).toBe(panel)
+  expect(scrollTop).toBe(300)
+  expect((screen.getByRole('button', { name: 'Send message' }) as HTMLButtonElement).disabled).toBe(false)
 })
 
 test('two session panel DOM nodes restore their distinct real scroll positions across switching', async () => {

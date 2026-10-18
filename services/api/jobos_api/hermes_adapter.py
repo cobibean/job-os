@@ -31,6 +31,9 @@ from .redaction import (
     sanitize_text,
 )
 
+_REASONING_VERIFICATION_TIMEOUT_SECONDS = 10.0
+_REASONING_VERIFICATION_POLL_SECONDS = 0.1
+
 
 def _bounded_reference(value: object, limit: int) -> str | None:
     if not isinstance(value, str):
@@ -545,35 +548,70 @@ class HermesWebSocketGateway:
             raise self._unsafe_session_response()
         return has_profile and info.get("profile_name") == self._profile and has_cwd
 
+    def _require_current_submission(self, live_session_id: str, context: AgentContext) -> None:
+        if (
+            self._live_session_id != live_session_id
+            or self._session_isolation_state != "verified"
+            or self._connection_state != "online"
+        ):
+            raise DefinitivePreSubmitError("Hermes session is no longer attached")
+        if self._active_continuation_turn_id is not None:
+            raise AgentBusyError("A background continuation is active")
+        if context.submission_guard is not None and not context.submission_guard():
+            raise DefinitivePreSubmitError(
+                "Hermes turn is no longer authorized for submission",
+                code="AGENT_SUBMISSION_STALE",
+            )
+
+    async def _verify_reasoning(self, live_session_id: str, context: AgentContext) -> None:
+        # Cold resume returns before Hermes builds the restored agent. During
+        # that interval config.get reports the profile default, not the session
+        # override. Wait only for a verified readback, never change config or
+        # submit a probe prompt. One deadline includes all read RPCs and sleeps.
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + min(self._request_timeout, _REASONING_VERIFICATION_TIMEOUT_SECONDS)
+        unverified = True
+        while True:
+            self._require_current_submission(live_session_id, context)
+            remaining = deadline - loop.time()
+            if remaining <= 0:
+                break
+            try:
+                effective = await asyncio.wait_for(
+                    self._request(
+                        "config.get", {"session_id": live_session_id, "key": "reasoning"}
+                    ),
+                    timeout=remaining,
+                )
+            except Exception:
+                unverified = True
+            else:
+                self._require_current_submission(live_session_id, context)
+                if effective.get("value") == self._reasoning_effort:
+                    return
+                unverified = False
+            self._require_current_submission(live_session_id, context)
+            remaining = deadline - loop.time()
+            if remaining <= 0:
+                break
+            await asyncio.sleep(min(_REASONING_VERIFICATION_POLL_SECONDS, remaining))
+        raise DefinitivePreSubmitError(
+            "Hermes conversation reasoning could not be verified"
+            if unverified
+            else "Hermes conversation reasoning does not match the selected effort",
+            code="AGENT_REASONING_UNVERIFIED" if unverified else "AGENT_REASONING_MISMATCH",
+        )
+
     async def submit_turn(self, text: str, context: AgentContext) -> None:
         if not self._live_session_id:
             raise DefinitivePreSubmitError("Hermes session is not attached")
         await self._require_session_verification()
-        if self._active_continuation_turn_id is not None:
-            raise AgentBusyError("A background continuation is active")
-        if self._reasoning_effort is not None:
-            # Read the session's effective pin on every turn, including cold resume.
-            # Never use config.set: stock Hermes falls back to a GLOBAL write if
-            # a session disappears. Creation overrides are session-only by design.
-            try:
-                effective = await self._request(
-                    "config.get",
-                    {"session_id": self._live_session_id, "key": "reasoning"},
-                )
-            except Exception as error:
-                raise DefinitivePreSubmitError(
-                    "Hermes conversation reasoning could not be verified"
-                ) from error
-            if effective.get("value") != self._reasoning_effort:
-                raise DefinitivePreSubmitError(
-                    "Hermes conversation reasoning does not match the selected effort"
-                )
-        # The read-back above yields to transport events. A continuation can start
-        # while it is in flight; never erase that ownership and submit over it.
-        if self._active_continuation_turn_id is not None:
-            raise AgentBusyError("A background continuation is active")
-        if not self._live_session_id or self._session_isolation_state != "verified":
+        live_session_id = self._live_session_id
+        if not live_session_id or self._session_isolation_state != "verified":
             raise DefinitivePreSubmitError("Hermes session is no longer attached")
+        if self._reasoning_effort is not None:
+            await self._verify_reasoning(live_session_id, context)
+        self._require_current_submission(live_session_id, context)
         self._clear_pending_async_continuation()
         self._active_turn_id = context.turn_id
         bounded_context = {

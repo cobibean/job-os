@@ -31,6 +31,10 @@ const stateLabel = {
   idle: 'Idle'
 } as const
 
+export function agentSessionAccessibleLabel(position: number, session: AgentSessionViewState): string {
+  return `Session ${position}, ${stateLabel[visibleState(session)]}`
+}
+
 interface AgentSessionTabsProps {
   controller: AgentSessionsController
   onNewChat?: () => void
@@ -83,7 +87,7 @@ export function AgentSessionTabs({ controller, onNewChat }: AgentSessionTabsProp
           return (
             <button
               aria-controls={`agent-session-panel-${id}`}
-              aria-label={`Session ${index + 1}, ${stateLabel[state]}`}
+              aria-label={agentSessionAccessibleLabel(index + 1, session)}
               aria-selected={selected}
               className={`agent-session-tab ${selected ? 'selected' : ''}`}
               id={`agent-session-tab-${id}`}

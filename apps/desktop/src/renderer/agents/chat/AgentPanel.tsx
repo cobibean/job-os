@@ -11,7 +11,7 @@ import { initialAgentConversationState } from './useAgentConversation'
 import { AgentActivityGroup } from './AgentActivityGroup'
 import { ActivityRow } from './ActivityRow'
 import { AssistantMarkdown } from './AssistantMarkdown'
-import { AgentSessionTabs } from './AgentSessionTabs'
+import { AgentSessionTabs, agentSessionAccessibleLabel } from './AgentSessionTabs'
 
 function formatElapsedTime(elapsedMilliseconds: number): string {
   const totalSeconds = Math.max(0, Math.floor(elapsedMilliseconds / 1_000))
@@ -227,10 +227,11 @@ export function AgentPanel({ agentLabel, avatarId, contextLabel, apiState = 'con
         ) : null}
       </div>
 
-      {(sessions.order.length ? sessions.order : ['']).map(panelId => {
+      {(sessions.order.length ? sessions.order : ['']).map((panelId, index) => {
         const selected = !panelId || panelId === activeId
+        const session = sessions.sessions[panelId]
         return <div
-          aria-labelledby={panelId ? `agent-session-tab-${panelId}` : undefined}
+          aria-label={session ? agentSessionAccessibleLabel(index + 1, session) : undefined}
           className="agent-body"
           hidden={!selected}
           id={panelId ? `agent-session-panel-${panelId}` : undefined}
