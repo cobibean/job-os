@@ -20,7 +20,10 @@ export async function createMainWindow(options: {
   isAppQuitting: () => boolean
   cancelAppQuit: () => void
   quitApp: () => void
-  setSafetyRequester: (request: (reason: 'window-close' | 'profile-switch') => Promise<boolean>) => void
+  setSafetyRequester: (
+    request: (reason: 'window-close' | 'profile-switch') => Promise<boolean>,
+    finishProfileSwitch?: (committed: boolean) => void
+  ) => void
   attachWindowFeatures: (window: BrowserWindow) => Promise<WindowFeatureAttachment> | WindowFeatureAttachment
   afterShow: (window: BrowserWindow) => void
 }): Promise<BrowserWindow> {
@@ -54,19 +57,48 @@ export async function createMainWindow(options: {
   applyDenyAllPermissionPolicy(rendererSession)
 
   let allowClose = false
+  let closePending = false
+  let approvedProfileSwitch: string | null = null
+  const requestReasons = new Map<string, 'window-close' | 'profile-switch'>()
   const safety = new RendererSafetyCoordinator((requestId, reason) => {
+    requestReasons.set(requestId, reason)
     if (!window.isDestroyed()) window.webContents.send('jobos:window:prepare-close', requestId, reason)
+  }, 15_000, undefined, requestId => {
+    requestReasons.delete(requestId)
+    if (!window.isDestroyed() && !window.webContents.isDestroyed()) window.webContents.send('jobos:window:prepare-close-cancelled', requestId)
   })
-  options.setSafetyRequester(reason => safety.request(reason))
+  const finishProfileSwitch = (committed: boolean) => {
+    if (!approvedProfileSwitch) return
+    const requestId = approvedProfileSwitch
+    approvedProfileSwitch = null
+    if (committed) allowClose = true
+    else if (!window.isDestroyed() && !window.webContents.isDestroyed()) window.webContents.send('jobos:window:prepare-close-cancelled', requestId)
+  }
+  options.setSafetyRequester(reason => safety.request(reason), finishProfileSwitch)
   const onPrepareCloseResult = (event: IpcMainEvent, requestId: unknown, safe: unknown) => {
-    if (event.sender === window.webContents) safety.resolve(requestId, safe)
+    if (event.sender !== window.webContents) return
+    if (safe && typeof safe === 'object' && 'promptPending' in safe) {
+      safety.promptPending(requestId, safe.promptPending)
+    } else {
+      const reason = typeof requestId === 'string' ? requestReasons.get(requestId) : undefined
+      if (!safety.resolve(requestId, safe)) return
+      if (typeof requestId === 'string') requestReasons.delete(requestId)
+      if (reason === 'profile-switch' && safe === true) approvedProfileSwitch = requestId as string
+    }
   }
   ipcMain.on('jobos:window:prepare-close-result', onPrepareCloseResult)
+  const rendererGone = () => { safety.dispose(); finishProfileSwitch(false) }
+  window.webContents.on('render-process-gone', rendererGone)
+  window.webContents.on('destroyed', rendererGone)
   window.on('close', event => {
     if (allowClose || window.webContents.isLoadingMainFrame()) return
     event.preventDefault()
+    if (approvedProfileSwitch) { options.cancelAppQuit(); return }
+    if (closePending) return
+    closePending = true
     void safety.request('window-close').then(safe => {
       if (!safe) {
+        closePending = false
         options.cancelAppQuit()
         return
       }

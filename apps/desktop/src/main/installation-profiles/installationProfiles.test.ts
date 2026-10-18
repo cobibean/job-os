@@ -19,6 +19,36 @@ function response(value: unknown, status = 200, headers?: HeadersInit): Response
 }
 
 describe('installation profiles main client', () => {
+  it('bounds a hung activation without retrying or claiming its outcome', async () => {
+    vi.useFakeTimers()
+    const fetch = vi.fn(() => new Promise<Response>(() => undefined))
+    const client = createInstallationProfilesClient({
+      baseUrl: 'http://jobos.test', deviceToken: 'device-token', requestTimeoutMs: 20, fetch
+    })
+    let error: unknown
+    const pending = client.activate(PROFILE_B, 2, 'stable-activation-key').catch(failure => { error = failure })
+    await vi.advanceTimersByTimeAsync(20)
+    expect(error).toBeInstanceOf(Error)
+    expect((error as Error).message).toContain('could not confirm')
+    expect(fetch).toHaveBeenCalledOnce()
+    await pending
+    vi.useRealTimers()
+  })
+
+  it('keeps the profile request deadline active through an incomplete JSON body', async () => {
+    vi.useFakeTimers()
+    const client = createInstallationProfilesClient({
+      baseUrl: 'http://jobos.test', deviceToken: 'device-token', requestTimeoutMs: 20,
+      fetch: async () => new Response(new ReadableStream({ start() {} }), { headers: { 'content-type': 'application/json' } })
+    })
+    let error: unknown
+    const pending = client.activate(PROFILE_B, 2, 'stable-activation-key').catch(failure => { error = failure })
+    await vi.advanceTimersByTimeAsync(20)
+    expect(error).toBeInstanceOf(Error)
+    expect((error as Error).message).toContain('could not confirm')
+    await pending
+    vi.useRealTimers()
+  })
   it('blocks active downloads before an activation request can be made', () => {
     expect(() => assertProfileSwitchDownloadSafe({ state: 'starting' })).toThrow(
       'Wait for the browser download to finish'

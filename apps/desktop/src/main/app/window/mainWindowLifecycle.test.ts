@@ -24,6 +24,34 @@ describe('activateVisibleWindow', () => {
 })
 
 describe('RendererSafetyCoordinator', () => {
+  it('keeps a responsive confirmation pending beyond the initial watchdog and rejects stale prompt updates', async () => {
+    vi.useFakeTimers()
+    const coordinator = new RendererSafetyCoordinator(vi.fn(), 15_000, () => 'request-prompt')
+    const result = coordinator.request('window-close')
+    let settled = false
+    void result.then(() => { settled = true })
+    for (let index = 0; index < 6; index += 1) {
+      await vi.advanceTimersByTimeAsync(5_000)
+      expect(coordinator.promptPending('request-prompt', true)).toBe(true)
+    }
+    expect(settled).toBe(false)
+    expect(coordinator.promptPending('stale-request', true)).toBe(false)
+    expect(coordinator.promptPending('request-prompt', 'invalid')).toBe(false)
+    expect(coordinator.promptPending('request-prompt', false)).toBe(true)
+    await vi.advanceTimersByTimeAsync(15_000)
+    await expect(result).resolves.toBe(false)
+    expect(coordinator.resolve('request-prompt', true)).toBe(false)
+    expect(coordinator.promptPending('request-prompt', true)).toBe(false)
+    vi.useRealTimers()
+  })
+
+  it('fails closed when the renderer dies during a pending confirmation', async () => {
+    const coordinator = new RendererSafetyCoordinator(vi.fn(), 15_000, () => 'request-crash')
+    const result = coordinator.request('window-close')
+    expect(coordinator.promptPending('request-crash', true)).toBe(true)
+    coordinator.dispose()
+    await expect(result).resolves.toBe(false)
+  })
   it('uses one request/ack path for close and profile switch', async () => {
     const send = vi.fn()
     const coordinator = new RendererSafetyCoordinator(send, 100, () => 'request-1')

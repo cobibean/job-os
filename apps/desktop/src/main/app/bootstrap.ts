@@ -62,6 +62,7 @@ export function createDesktopApplication() {
   let mediaCaptureSpec: Awaited<ReturnType<typeof loadMediaCaptureSpec>> = null
   let activeProfileStorageIdentity: DesktopProfileStorageIdentity = { kind: 'recovery' }
   let requestMainWindowSafety: (reason: 'window-close' | 'profile-switch') => Promise<boolean> = async () => false
+  let finishMainProfileSwitchSafety: (committed: boolean) => void = () => undefined
   const activeAgentConversationIds = new AgentConversationRegistry()
   let desktopRuntimeState: DesktopRuntimeState = {
     runtime: null,
@@ -96,6 +97,7 @@ export function createDesktopApplication() {
   const profileSwitch = createProfileSwitchCoordinator({
     getBrowserManager: () => browserManager,
     requestWorkspaceSafety: () => requestMainWindowSafety('profile-switch'),
+    finishWorkspaceSafety: committed => finishMainProfileSwitchSafety(committed),
     getClient: profileClient,
     getRuntimeState: () => desktopRuntimeState,
     apiLifecycle,
@@ -298,7 +300,10 @@ export function createDesktopApplication() {
       isAppQuitting: () => appIsQuitting,
       cancelAppQuit: () => { appIsQuitting = false },
       quitApp: () => app.quit(),
-      setSafetyRequester: request => { requestMainWindowSafety = request },
+      setSafetyRequester: (request, finishProfileSwitch) => {
+        requestMainWindowSafety = request
+        finishMainProfileSwitchSafety = finishProfileSwitch ?? (() => undefined)
+      },
       attachWindowFeatures,
       afterShow
     })

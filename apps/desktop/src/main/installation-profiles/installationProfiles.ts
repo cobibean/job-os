@@ -152,7 +152,32 @@ export function createInstallationProfilesClient(config: InstallationProfilesCon
     config.deviceToken,
     config.installationProfileId
   )
-  if (config.fetch) client.setConfig({ fetch: config.fetch })
+  const fetchRequest = config.fetch ?? fetch
+  client.setConfig({ fetch: async (input, init) => {
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(new InstallationProfileClientError(
+      'profile_request_outcome_unknown',
+      'JobOS could not confirm the profile request outcome. Check the active profile before retrying.'
+    )), config.requestTimeoutMs ?? 20_000)
+    const original = new Request(input, init)
+    const signal = AbortSignal.any([original.signal, controller.signal])
+    let onAbort: () => void = () => undefined
+    try {
+      const aborted = new Promise<never>((_resolve, reject) => {
+        onAbort = () => reject(signal.reason)
+        if (signal.aborted) onAbort()
+        else signal.addEventListener('abort', onAbort, { once: true })
+      })
+      const response = await Promise.race([fetchRequest(new Request(original, { signal })), aborted])
+      const body = await Promise.race([response.arrayBuffer(), aborted])
+      return new Response([204, 205, 304].includes(response.status) ? null : body, {
+        status: response.status, statusText: response.statusText, headers: response.headers
+      })
+    } finally {
+      clearTimeout(timeout)
+      signal.removeEventListener('abort', onAbort)
+    }
+  } })
   const sleep = (milliseconds: number) => new Promise<void>(resolve => setTimeout(resolve, milliseconds))
 
   return {

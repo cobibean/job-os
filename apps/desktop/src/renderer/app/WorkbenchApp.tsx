@@ -31,7 +31,8 @@ import type {
 import { NewAgentChatDialog } from '../agents/new-chat/NewAgentChatDialog'
 import { DocumentWorkspace } from '../documents/artifacts/DocumentWorkspace'
 import { InstallationProfileMenu } from '../installation-profiles/InstallationProfileMenu'
-import { useCloseSafety } from './CloseSafetyContext'
+import { useWorkbenchCloseSafety } from './useWorkbenchCloseSafety'
+import { UnsentChatDraftsDialog } from './dialogs/UnsentChatDraftsDialog'
 
 export function requireDefaultConnectedAgent(snapshot: ConnectedAgentsSnapshot): ConnectedAgentSummary {
   const agent = snapshot.defaultConnectedAgentId
@@ -135,7 +136,9 @@ export function WorkbenchApp() {
   const panelReorderGeneration = useRef(0)
   const navigatorSelectionQueue = useRef<Promise<unknown>>(Promise.resolve())
   const prepareClose = useRef<() => Promise<boolean>>(async () => true)
-  const prepareProfileSwitch = useRef<() => Promise<boolean>>(async () => true)
+  const closeSafety = useWorkbenchCloseSafety({
+    prepareDocumentClose: prepareClose, sessions: agentSessions, flushWorkspace: layoutState.flush
+  })
   const expectedInstallationProfileId = useRef<string | null>(
     window.jobos?.installationProfiles?.expectedProfileId ?? null
   )
@@ -149,7 +152,7 @@ export function WorkbenchApp() {
   const activeLayout = layoutState.workspace.layouts[activePreset]
   const browseVisible = activeTopLevelWorkspace === 'browse' && browseDetachState === 'ready'
   const browserTransitionPending = browseDetachState === 'preparing'
-  const nativeBrowserVisible = layoutState.hydrated && !profileChangedElsewhere && !editingDocument && activeTopLevelWorkspace !== 'browse' && !careerProfileOpen && !browserTransitionPending && !activeLayout.collapsed.includes('center') && !settingsOpen && !settingsPreparing && !newChatOpen && !profileOverlayActive
+  const nativeBrowserVisible = layoutState.hydrated && !profileChangedElsewhere && !editingDocument && activeTopLevelWorkspace !== 'browse' && !careerProfileOpen && !browserTransitionPending && !activeLayout.collapsed.includes('center') && !settingsOpen && !settingsPreparing && !newChatOpen && !profileOverlayActive && !closeSafety.inProgress
   const browser = useBrowser(
     {
       tabs: layoutState.workspace.browserTabs ?? [],
@@ -157,7 +160,7 @@ export function WorkbenchApp() {
     },
     layoutState.hydrated,
     layoutState.workspace.activeCenterSurface === 'browser' && nativeBrowserVisible && !panelReorderActive,
-    `${activePreset}:${activeLayout.order.join(',')}:${activeLayout.collapsed.join(',')}`,
+    `${activePreset}:${activeLayout.order.join(',')}:${activeLayout.collapsed.join(',')}:close-${closeSafety.browserRestoreGeneration}`,
     layoutState.updateBrowserState,
     !profileChangedElsewhere
   )
@@ -235,24 +238,6 @@ export function WorkbenchApp() {
     if (generation !== panelReorderGeneration.current) return false
     return true
   }, [nativeBrowserVisible])
-
-  prepareProfileSwitch.current = async () => {
-    if (!await prepareClose.current()) return false
-    try {
-      await layoutState.flush()
-    } catch {
-      return false
-    }
-    return !Object.values(agentSessions.sessions).some(session => (
-      session.conversation.activeTurn !== null
-      || session.summary.recoveryState === 'recovering'
-      || session.operation !== null
-    ))
-  }
-
-  useCloseSafety(useCallback(
-    reason => reason === 'profile-switch' ? prepareProfileSwitch.current() : prepareClose.current()
-  , []))
 
   useEffect(() => setDocumentPreviewMode('pdf'), [jobState.selectedJobId])
 
@@ -556,6 +541,15 @@ export function WorkbenchApp() {
       </div>
       <p aria-live="polite" className="layout-announcement">{layoutState.announcement}</p>
       <StatusBar apiVersion={connectivity.apiVersion} message={connectivity.message} onOpenSettings={() => { void openSettings() }} state={connectivity.state} />
+      {closeSafety.error && <p className="agent-inline-error" role="alert">{closeSafety.error}</p>}
+      {closeSafety.confirmation && <UnsentChatDraftsDialog
+        busy={closeSafety.busy}
+        checking={closeSafety.confirmation.checking}
+        count={closeSafety.count}
+        onCancel={closeSafety.cancel}
+        onConfirm={closeSafety.confirm}
+        request={closeSafety.confirmation.request}
+      />}
       {settingsOpen ? (
         <SettingsPanel
           activeAgentAvatarId={agentAvatar.avatarId}

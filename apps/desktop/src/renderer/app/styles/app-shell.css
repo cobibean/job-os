@@ -26,3 +26,5 @@
 }
 
 .brand { font-size: var(--text-xl); font-weight: var(--weight-bold); letter-spacing: -0.04em; }
+
+.career-product-modal-layer.app-close-safety-layer { z-index: 220; }

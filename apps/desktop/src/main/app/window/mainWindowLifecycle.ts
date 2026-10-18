@@ -16,20 +16,37 @@ export class RendererSafetyCoordinator {
   constructor(
     private readonly send: (requestId: string, reason: RendererSafetyReason) => void,
     private readonly timeoutMs = 15_000,
-    private readonly identifier = () => `safety_${crypto.randomUUID()}`
+    private readonly identifier = () => `safety_${crypto.randomUUID()}`,
+    private readonly cancel: (requestId: string) => void = () => undefined
   ) {}
 
   request(reason: RendererSafetyReason): Promise<boolean> {
     if (this.#pending.size > 0) return Promise.resolve(false)
     const requestId = this.identifier()
     return new Promise(resolve => {
-      const timer = setTimeout(() => {
-        this.#pending.delete(requestId)
-        resolve(false)
-      }, this.timeoutMs)
+      const timer = this.#watchdog(requestId)
       this.#pending.set(requestId, { resolve, timer })
       this.send(requestId, reason)
     })
+  }
+
+  #watchdog(requestId: string): ReturnType<typeof setTimeout> {
+    return setTimeout(() => {
+      const pending = this.#pending.get(requestId)
+      if (!pending) return
+      this.#pending.delete(requestId)
+      this.cancel(requestId)
+      pending.resolve(false)
+    }, this.timeoutMs)
+  }
+
+  promptPending(requestId: unknown, pending: unknown): boolean {
+    if (typeof requestId !== 'string' || typeof pending !== 'boolean') return false
+    const request = this.#pending.get(requestId)
+    if (!request) return false
+    clearTimeout(request.timer)
+    request.timer = this.#watchdog(requestId)
+    return true
   }
 
   resolve(requestId: unknown, safe: unknown): boolean {
@@ -43,8 +60,9 @@ export class RendererSafetyCoordinator {
   }
 
   dispose(): void {
-    for (const pending of this.#pending.values()) {
+    for (const [requestId, pending] of this.#pending) {
       clearTimeout(pending.timer)
+      this.cancel(requestId)
       pending.resolve(false)
     }
     this.#pending.clear()

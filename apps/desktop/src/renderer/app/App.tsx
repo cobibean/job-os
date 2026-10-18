@@ -17,10 +17,10 @@ export function App() {
     return () => { if (workbenchSafety.current === handler) workbenchSafety.current = null }
   }, [])
 
-  useEffect(() => window.jobos?.lifecycle?.subscribePrepareClose(async reason => {
+  useEffect(() => window.jobos?.lifecycle?.subscribePrepareClose(async (reason, request) => {
     if (setupRef.current === null) return true
     if (setupRef.current.state !== 'ready') return true
-    try { return await workbenchSafety.current?.(reason) ?? false } catch { return false }
+    try { return await workbenchSafety.current?.(reason, request) ?? false } catch { return false }
   }), [])
 
   useEffect(() => {

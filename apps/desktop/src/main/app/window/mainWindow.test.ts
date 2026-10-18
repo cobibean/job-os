@@ -1,4 +1,5 @@
-import { expect, test, vi } from 'vitest'
+import { afterEach, expect, test, vi } from 'vitest'
+import { createProfileSwitchCoordinator } from '../../installation-profiles/profileSwitchCoordinator.js'
 
 const electron = vi.hoisted(() => {
   class Emitter {
@@ -19,6 +20,7 @@ const electron = vi.hoisted(() => {
     webContents = Object.assign(new Emitter(), {
       setWindowOpenHandler: vi.fn(),
       isLoadingMainFrame: vi.fn(() => false),
+      isDestroyed: vi.fn(() => false),
       send: vi.fn()
     })
     loadFile = vi.fn(async () => undefined)
@@ -39,6 +41,107 @@ vi.mock('electron', () => ({
 }))
 
 import { createMainWindow } from './mainWindow.js'
+
+afterEach(() => {
+  for (const window of electron.Window.instances) window.emit('closed')
+  electron.Window.instances.length = 0
+  electron.ipcMain.listeners.clear()
+  vi.useRealTimers()
+  vi.clearAllMocks()
+})
+
+async function safetyWindow() {
+  let quitting = true
+  const setSafetyRequester = vi.fn()
+  const cancelAppQuit = vi.fn(() => { quitting = false })
+  const quitApp = vi.fn()
+  const result = await createMainWindow({
+    preloadPath: '/desktop/preload.cjs', rendererRoot: '/desktop/renderer', enableLargerThanScreen: false,
+    isAppQuitting: () => quitting, cancelAppQuit, quitApp, setSafetyRequester,
+    attachWindowFeatures: () => ({ cleanup: vi.fn() }), afterShow: vi.fn()
+  })
+  const window = result as unknown as InstanceType<typeof electron.Window>
+  const request = setSafetyRequester.mock.calls[0]![0] as (reason: 'window-close' | 'profile-switch') => Promise<boolean>
+  const finishProfileSwitch = setSafetyRequester.mock.calls[0]![1] as (committed: boolean) => void
+  const acknowledge = (id: string, value: unknown, sender: unknown = window.webContents) => {
+    electron.ipcMain.emit('jobos:window:prepare-close-result', { sender } as never, id as never, value as never)
+  }
+  const close = () => {
+    const event = { preventDefault: vi.fn() }
+    window.emit('close', event as never)
+    return event
+  }
+  return { window, request, finishProfileSwitch, acknowledge, close, cancelAppQuit, quitApp }
+}
+
+test('repeated Quit while one confirmation waits preserves quit intent and sends one request', async () => {
+  const actions = await safetyWindow()
+  actions.close()
+  actions.close()
+  expect(actions.window.webContents.send).toHaveBeenCalledTimes(1)
+  expect(actions.cancelAppQuit).not.toHaveBeenCalled()
+  const id = actions.window.webContents.send.mock.calls[0]![1] as string
+  actions.acknowledge(id, true, {})
+  expect(actions.quitApp).not.toHaveBeenCalled()
+  actions.acknowledge(id, { promptPending: true })
+  actions.acknowledge(id, true)
+  await Promise.resolve()
+  expect(actions.quitApp).toHaveBeenCalledOnce()
+  expect(actions.cancelAppQuit).not.toHaveBeenCalled()
+})
+
+test('renderer crash cancels a waiting close and a late answer cannot close the app', async () => {
+  const actions = await safetyWindow()
+  actions.close()
+  const id = actions.window.webContents.send.mock.calls[0]![1] as string
+  actions.acknowledge(id, { promptPending: true })
+  actions.window.webContents.emit('render-process-gone')
+  await Promise.resolve()
+  expect(actions.cancelAppQuit).toHaveBeenCalledOnce()
+  expect(actions.window.webContents.send).toHaveBeenCalledWith('jobos:window:prepare-close-cancelled', id)
+  actions.acknowledge(id, true)
+  expect(actions.quitApp).not.toHaveBeenCalled()
+})
+
+test.each([true, false])('the profile coordinator reuses approved safety only for a confirmed transition, success %s', async success => {
+  const actions = await safetyWindow()
+  const requests: string[] = []
+  actions.window.webContents.send.mockImplementation((channel, id, reason) => {
+    if (channel !== 'jobos:window:prepare-close') return
+    requests.push(reason)
+    queueMicrotask(() => actions.acknowledge(id, reason === 'profile-switch'))
+  })
+  let relaunchClose: { preventDefault: ReturnType<typeof vi.fn> } | undefined
+  const coordinator = createProfileSwitchCoordinator({
+    getBrowserManager: () => null,
+    requestWorkspaceSafety: () => actions.request('profile-switch'),
+    finishWorkspaceSafety: actions.finishProfileSwitch,
+    getClient: () => ({ activate: async () => {
+      if (!success) throw new Error('Activation outcome unknown')
+      return { switch_id: 'switch-1', to_profile_id: 'profile-new' }
+    } }) as never,
+    getRuntimeState: () => ({
+      runtime: { apiBaseUrl: 'http://127.0.0.1:8766', deviceId: 'device', mode: 'local-service' },
+      deviceToken: 'synthetic-token', connectivity: { state: 'connected', checkedAt: '', installationProfileId: 'profile-old' }
+    }),
+    apiLifecycle: { ensureApiReady: vi.fn() }, sourceApi: { stop: vi.fn(), rollbackProfileSwitch: vi.fn() },
+    probe: vi.fn(async () => ({ state: 'connected', checkedAt: '', installationProfileId: 'profile-new' })),
+    relaunchAndQuit: () => { relaunchClose = actions.close() }
+  })
+  const result = coordinator.complete({ profileId: 'profile-new', expectedRegistryRevision: 2, activationIdempotencyKey: 'activation-key' })
+  if (success) {
+    await result
+    expect(relaunchClose?.preventDefault).not.toHaveBeenCalled()
+    expect(requests).toEqual(['profile-switch'])
+  } else {
+    await expect(result).rejects.toThrow('Activation outcome unknown')
+    expect(actions.window.webContents.send.mock.calls.some(([channel]) => channel === 'jobos:window:prepare-close-cancelled')).toBe(true)
+    expect(actions.close().preventDefault).toHaveBeenCalledOnce()
+    await Promise.resolve()
+    expect(requests).toEqual(['profile-switch', 'window-close'])
+    expect(actions.quitApp).not.toHaveBeenCalled()
+  }
+})
 
 test('constructs the trusted renderer window with locked security and window-scoped cleanup', async () => {
   const cleanup = vi.fn()

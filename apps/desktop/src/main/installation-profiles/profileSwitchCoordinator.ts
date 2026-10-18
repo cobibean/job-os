@@ -31,6 +31,7 @@ export type ProfileSwitchTarget = {
 export function createProfileSwitchCoordinator(dependencies: {
   getBrowserManager: () => ProfileSwitchBrowserAccess | null
   requestWorkspaceSafety: () => Promise<boolean>
+  finishWorkspaceSafety?: (committed: boolean) => void
   getClient: () => ProfilesClient
   getRuntimeState: () => DesktopRuntimeState
   apiLifecycle: ApiLifecycle
@@ -106,8 +107,10 @@ export function createProfileSwitchCoordinator(dependencies: {
           throw new Error('JobOS stayed in the previous profile; no workspace data was changed.')
         }
         switchCompleted = true
+        dependencies.finishWorkspaceSafety?.(true)
         dependencies.relaunchAndQuit()
       } finally {
+        if (!switchCompleted) dependencies.finishWorkspaceSafety?.(false)
         const currentBrowserManager = dependencies.getBrowserManager()
         if (!switchCompleted && previousBrowserBounds) currentBrowserManager?.setBounds(previousBrowserBounds)
         currentBrowserManager?.setDownloadsAllowed(true)

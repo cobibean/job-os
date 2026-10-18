@@ -7,6 +7,7 @@ import type {
   AgentChatSelection,
   AgentSessionStreamUpdate,
   ConnectedAgentSummary,
+  CloseSafetyRequest,
   BrowserBounds,
   BrowserJobExtraction,
   BrowserRestoreState,
@@ -56,18 +57,61 @@ const bridge: JobOsRendererBridge = Object.freeze({
     openLogs: () => ipcRenderer.invoke('jobos:diagnostics:open-logs')
   }),
   lifecycle: Object.freeze({
-    subscribePrepareClose: (handler: (reason: 'window-close' | 'profile-switch') => Promise<boolean>) => {
+    subscribePrepareClose: (handler: (reason: 'window-close' | 'profile-switch', request?: CloseSafetyRequest) => Promise<boolean>) => {
+      const requests = new Map<string, () => void>()
       const wrapped = (
         _event: IpcRendererEvent,
         requestId: string,
         reason: 'window-close' | 'profile-switch'
       ) => {
-        void handler(reason)
-          .then(safe => ipcRenderer.send('jobos:window:prepare-close-result', requestId, safe))
-          .catch(() => ipcRenderer.send('jobos:window:prepare-close-result', requestId, false))
+        let active = true
+        let settled = false
+        let heartbeat: ReturnType<typeof setInterval> | undefined
+        const cancelled = new Set<() => void>()
+        const stopHeartbeat = () => { if (heartbeat) clearInterval(heartbeat); heartbeat = undefined }
+        const cancel = () => {
+          if (!active) return
+          active = false
+          stopHeartbeat()
+          requests.delete(requestId)
+          for (const callback of cancelled) callback()
+          cancelled.clear()
+        }
+        requests.set(requestId, cancel)
+        const finish = (safe: boolean) => {
+          if (!active || settled) return
+          settled = true
+          stopHeartbeat()
+          if (!safe || reason !== 'profile-switch') {
+            active = false
+            requests.delete(requestId)
+            cancelled.clear()
+          }
+          ipcRenderer.send('jobos:window:prepare-close-result', requestId, safe)
+        }
+        void Promise.resolve().then(() => handler(reason, {
+          setPromptPending: pending => {
+            if (!active || settled) return
+            stopHeartbeat()
+            const report = () => ipcRenderer.send('jobos:window:prepare-close-result', requestId, { promptPending: pending })
+            report()
+            if (pending) heartbeat = setInterval(report, 5_000)
+          },
+          onCancelled: callback => {
+            if (!active) { callback(); return () => undefined }
+            cancelled.add(callback)
+            return () => { cancelled.delete(callback) }
+          }
+        })).then(safe => finish(safe === true)).catch(() => finish(false))
       }
+      const cancelRequest = (_event: IpcRendererEvent, requestId: string) => requests.get(requestId)?.()
       ipcRenderer.on('jobos:window:prepare-close', wrapped)
-      return () => ipcRenderer.removeListener('jobos:window:prepare-close', wrapped)
+      ipcRenderer.on('jobos:window:prepare-close-cancelled', cancelRequest)
+      return () => {
+        ipcRenderer.removeListener('jobos:window:prepare-close', wrapped)
+        ipcRenderer.removeListener('jobos:window:prepare-close-cancelled', cancelRequest)
+        for (const cancel of requests.values()) cancel()
+      }
     }
   }),
   shell: Object.freeze({

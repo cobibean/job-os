@@ -75,6 +75,33 @@ revision, and a failed archive leaves the draft and chat available. The same
 guard applies when making room at the five-chat limit. Drafts remain in memory
 and do not persist across application restart.
 
+App quit, window close, and profile switching also guard unsent drafts across
+all chats. Document close safety runs first. Profile switching additionally
+flushes workspace changes and rejects active or recovering work and pending
+chat operations before asking about drafts. The confirmation waits for pending
+operations on draft-bearing chats, then rechecks document safety and the
+approved draft revisions. Keep working, Escape, backdrop cancellation, or a
+failed safety check preserves every draft. Confirmation approves the exit but
+does not clear text before the caller actually closes or changes profiles.
+
+The single app close responder carries a request-scoped prompt context through
+preload. A mounted confirmation sends a heartbeat every five seconds over the
+existing result channel. Main retains its fifteen-second watchdog; stale or
+foreign replies cannot extend it. Timeout, renderer failure, or window
+destruction cancels that exact request, and late confirmation cannot approve it.
+Repeated Quit requests share the pending window-close decision without changing
+the original quit intent.
+
+The native browser must acknowledge detach before draft confirmation appears.
+Cancellation and rejected detach restore its current workspace bounds. The
+confirmation layer sits above profile dialogs and switching overlays. An
+approved profile preflight keeps the old workspace read-only until the main
+profile operation settles, including when it initially had no drafts. Failure
+releases that lock with drafts intact. Only a confirmed target profile permits
+the ensuing relaunch close to reuse that approval, avoiding a second discard
+prompt. Profile requests have a bounded deadline through response-body parsing;
+timeouts report an unknown outcome and never automatically retry a mutation.
+
 After discard is confirmed, the dialog stays open and the draft cannot change
 while the archive request is pending. Keep writing, Escape, and backdrop clicks
 cannot dismiss that pending action. An unconfirmed close retains the draft and

@@ -3,9 +3,10 @@ import { useRef, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { useModalDialog } from '../../../app/dialogs/useModalDialog'
 
-export function Dialog({ children, className = '', label, onClose }: {
+export function Dialog({ children, className = '', layerClassName = '', label, onClose }: {
   children: ReactNode
   className?: string
+  layerClassName?: string
   label: string
   onClose: () => void
 }) {
@@ -14,7 +15,7 @@ export function Dialog({ children, className = '', label, onClose }: {
   useModalDialog(dialog, onClose, { modalRootRef: layer })
 
   return createPortal(
-    <div className="career-product-modal-layer" ref={layer}>
+    <div className={`career-product-modal-layer ${layerClassName}`} ref={layer}>
       <button aria-hidden="true" className="career-product-backdrop" onClick={onClose} tabIndex={-1} type="button" />
       <section
         aria-label={label}

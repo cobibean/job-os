@@ -736,6 +736,11 @@ export type AgentSessionStreamUpdate =
   | { kind: 'event'; conversationId: string; recoveryState: AgentRecoveryState; event: ConversationEvent }
   | { kind: 'connection'; conversationId: string; state: AgentConnectionState }
 
+export interface CloseSafetyRequest {
+  setPromptPending: (pending: boolean) => void
+  onCancelled: (handler: () => void) => () => void
+}
+
 export interface JobOsRendererBridge {
   setup: {
     get: () => Promise<SetupSnapshot>
@@ -750,7 +755,7 @@ export interface JobOsRendererBridge {
   }
   lifecycle: {
     subscribePrepareClose: (
-      handler: (reason: 'window-close' | 'profile-switch') => Promise<boolean>
+      handler: (reason: 'window-close' | 'profile-switch', request?: CloseSafetyRequest) => Promise<boolean>
     ) => () => void
   }
   shell: {
