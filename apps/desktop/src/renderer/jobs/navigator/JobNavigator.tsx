@@ -14,6 +14,7 @@ interface JobNavigatorProps {
   loading: boolean
   error: string | null
   feedback: string | null
+  onRetry?: () => void
   onQueryChange: (query: string) => void
   onStatusGroupChange: (statusGroup: string) => void
   onSortChange: (sort: JobSortMode) => void
@@ -70,7 +71,7 @@ export function JobNavigator(props: JobNavigatorProps) {
       role="listitem"
     >
       <div className="job-row-main">
-        <button aria-label={`Select ${job.company} ${job.title}`} className="job-select" onClick={() => props.onSelect(job.jobId)} type="button">
+        <button aria-current={job.jobId === props.selectedJobId ? true : undefined} aria-label={`Select ${job.company} ${job.title}`} className="job-select" onClick={() => props.onSelect(job.jobId)} type="button">
           <BriefcaseBusiness aria-hidden="true" size={17} strokeWidth={1.45} />
           <span><strong>{job.company}{job.syntheticDemo ? <span className="demo-badge">Demo</span> : null}</strong><small>{job.title}</small></span>
         </button>
@@ -129,7 +130,7 @@ export function JobNavigator(props: JobNavigatorProps) {
 
       <div className="job-list" role={props.sortMode === 'status' ? undefined : 'list'}>
         {props.loading ? <p className="navigator-message">Loading opportunities…</p> : null}
-        {!props.loading && props.jobs.length === 0 ? (
+        {!props.loading && !props.error && props.jobs.length === 0 ? (
           <div className="navigator-empty">
             <BriefcaseBusiness aria-hidden="true" size={22} strokeWidth={1.4} />
             <h2>No matching opportunities</h2>
@@ -162,6 +163,7 @@ export function JobNavigator(props: JobNavigatorProps) {
         }) : props.jobs.map(renderJob)}
       </div>
 
+      {props.error === 'Jobs unavailable' && props.onRetry ? <button onClick={props.onRetry} type="button">Retry loading jobs</button> : null}
       <div aria-live="polite" className={`navigator-feedback${props.error ? ' error' : ''}`}>{props.error ?? props.feedback ?? ''}</div>
       <div className="profile-row">
         <span className="profile-avatar"><UserRound aria-hidden="true" size={18} strokeWidth={1.4} /></span>

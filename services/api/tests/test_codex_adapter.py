@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import time
 from collections.abc import Awaitable, Callable
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 from typing import cast
@@ -129,6 +130,114 @@ def context(conversation_id: str = "conv_alpha") -> AgentContext:
         reasoning_effort="medium",
         permission_state={"scope": "global"},
     )
+
+
+@pytest.mark.anyio
+async def test_codex_activity_has_turn_scoped_identity_and_safe_tool_label(tmp_path: Path) -> None:
+    client = FakeCodexClient()
+    gateway = CodexGatewayFactory(
+        client, cwd=tmp_path, publication_root=tmp_path / "publication-inbox"
+    ).create("conv_alpha")
+    await gateway.create_or_resume_conversation(None)
+    await gateway.submit_turn("(FAKE) inspect job", context())
+    events = gateway.stream_events()
+    for method, payload in [
+        (
+            "item/started",
+            {"item": {"id": "tool-a", "type": "mcpToolCall", "server": "jobos", "tool": "job_get"}},
+        ),
+        ("item/mcpToolCall/progress", {"itemId": "tool-a", "message": "(FAKE) reading"}),
+        (
+            "item/completed",
+            {"item": {"id": "tool-a", "type": "mcpToolCall", "server": "jobos", "tool": "job_get"}},
+        ),
+    ]:
+        await client.emit(method, {"threadId": "thread-a", "turnId": "provider-turn-a", **payload})
+    activity = [await anext(events) for _ in range(3)]
+    assert activity[0].activity_id
+    assert {entry.activity_id for entry in activity} == {activity[0].activity_id}
+    assert activity[0].summary == "jobos.job_get"
+    assert activity[-1].state == "completed"
+    for _ in range(5):
+        await client.emit(
+            "item/mcpToolCall/progress",
+            {"threadId": "thread-a", "turnId": "provider-turn-a", "itemId": "tool-a"},
+        )
+        assert (await anext(events)).activity_id == activity[0].activity_id
+    await client.emit(
+        "item/started",
+        {
+            "threadId": "thread-a",
+            "turnId": "provider-turn-a",
+            "item": {"id": "tool-b", "type": "mcpToolCall", "server": "jobos", "tool": "job_get"},
+        },
+    )
+    assert (await anext(events)).activity_id != activity[0].activity_id
+    await gateway.close()
+
+
+@pytest.mark.anyio
+async def test_codex_streams_second_warm_resumed_and_restarted_turns_with_partial_interrupt(
+    tmp_path: Path,
+) -> None:
+    client = FakeCodexClient()
+    factory = CodexGatewayFactory(
+        client, cwd=tmp_path, publication_root=tmp_path / "publication-inbox"
+    )
+    gateway = factory.create("conv_alpha")
+    await gateway.create_or_resume_conversation(None)
+    for index in range(4):
+        if index == 2:
+            # Warm resume responses have only identity, without optional thread metadata.
+            await gateway.create_or_resume_conversation("thread-a")
+        if index == 3:
+            await gateway.close()
+            factory = CodexGatewayFactory(
+                client, cwd=tmp_path, publication_root=tmp_path / "publication-inbox"
+            )
+            gateway = factory.create("conv_alpha")
+            await gateway.create_or_resume_conversation("thread-a")
+        turn_context = replace(context(), turn_id=f"turn_stream_{index}")
+        await gateway.submit_turn("(FAKE) stream a reply", turn_context)
+        events = gateway.stream_events()
+        await client.emit(
+            "item/agentMessage/delta",
+            {
+                "threadId": "thread-a",
+                "turnId": "provider-turn-a",
+                "itemId": "message-a",
+                "delta": "(FAKE) visible ",
+            },
+        )
+        delta = await anext(events)
+        assert delta.state == "working"
+        assert delta.turn_id == turn_context.turn_id
+        assert delta.detail["text"] == "(FAKE) visible "
+        # A final token is buffered for credential redaction, then flushed in a
+        # valid state even when the provider ends the turn by interruption.
+        await client.emit(
+            "item/agentMessage/delta",
+            {
+                "threadId": "thread-a",
+                "turnId": "provider-turn-a",
+                "itemId": "message-a",
+                "delta": "tail",
+            },
+        )
+        await client.emit(
+            "turn/completed",
+            {
+                "threadId": "thread-a",
+                "turn": {"id": "provider-turn-a", "status": "interrupted"},
+            },
+        )
+        tail = await anext(events)
+        terminal = await anext(events)
+        assert tail.state == "working"
+        assert tail.detail["text"] == "tail"
+        assert terminal.state == "interrupted"
+        assert terminal.detail == {"type": "message.complete", "text": "(FAKE) visible tail"}
+    await gateway.close()
 
 
 @pytest.mark.anyio
@@ -290,6 +399,7 @@ async def test_codex_events_are_isolated_lossless_and_terminal(tmp_path: Path) -
         },
     )
     delta = await anext(events)
+    assert delta.state == "working"
     assert delta.turn_id == "turn_12345678"
     assert delta.summary == "Hello "
     assert delta.source_event_id and delta.source_event_id.startswith("codex:")
@@ -304,6 +414,7 @@ async def test_codex_events_are_isolated_lossless_and_terminal(tmp_path: Path) -
         },
     )
     repeated_delta = await anext(events)
+    assert repeated_delta.state == "working"
     assert repeated_delta.summary == "Hello "
     assert repeated_delta.source_event_id != delta.source_event_id
 

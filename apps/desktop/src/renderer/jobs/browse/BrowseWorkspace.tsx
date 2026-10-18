@@ -8,6 +8,7 @@ import { CANONICAL_STATUS_GROUPS, STATUS_TRANSITIONS, statusLabel, statusOptionL
 import { useBrowseJobs } from './useBrowseJobs'
 
 interface BrowseWorkspaceProps {
+  connectivityState?: string
   activeJobId: string | null
   focusJobId: string | null
   mode: BrowseMode
@@ -48,6 +49,7 @@ export function BrowseWorkspace(props: BrowseWorkspaceProps) {
   }, [props.onUpdate])
   const state = useBrowseJobs({
     active: true,
+    connectivityState: props.connectivityState,
     activeJobId: props.activeJobId,
     persistedFocusJobId: props.focusJobId,
     query: props.query,
@@ -168,10 +170,10 @@ export function BrowseWorkspace(props: BrowseWorkspaceProps) {
       </aside>
 
       {state.loading ? <BrowseMessage message="Loading opportunities…" /> : null}
-      {!state.loading && state.error ? <BrowseMessage error message={state.error} /> : null}
+      {!state.loading && state.error ? <div><BrowseMessage error message={state.error} /><button onClick={() => { void state.retry() }} type="button">Retry loading jobs</button></div> : null}
       {!state.loading && !state.error && state.results.length === 0 ? <BrowseMessage message="No matching opportunities" /> : null}
 
-      {!state.loading && !state.error && focusedJob && props.mode === 'list' ? (
+      {!state.loading && focusedJob && props.mode === 'list' ? (
         <>
           <section aria-label={`${state.results.length} matching jobs`} className="browse-list-pane">
             <header><strong>Opportunities</strong><span>{state.results.length} jobs</span></header>
@@ -206,7 +208,7 @@ export function BrowseWorkspace(props: BrowseWorkspaceProps) {
         </>
       ) : null}
 
-      {!state.loading && !state.error && focusedJob && props.mode === 'swipe' ? (
+      {!state.loading && focusedJob && props.mode === 'swipe' ? (
         <section
           aria-label="Opportunity swipe browser"
           className="browse-swipe-stage"

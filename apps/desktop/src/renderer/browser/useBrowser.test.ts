@@ -212,3 +212,20 @@ test('unsubscribes, hides, and rejects browser actions when the controller becom
   })
   expect(select).not.toHaveBeenCalled()
 })
+
+test('a failed restore exposes retry and a successful recovery enables listing navigation', async () => {
+  const restored = browserState('Recovered listing')
+  const restore = vi.fn().mockRejectedValueOnce(new Error('Browser manager unavailable')).mockResolvedValue(restored)
+  const create = vi.fn().mockResolvedValue(restored)
+  Object.defineProperty(window, 'jobos', { configurable: true, value: { browser: {
+    restore, create, subscribe: vi.fn(() => () => undefined), setBounds: vi.fn().mockResolvedValue(undefined)
+  } } })
+  const { result } = renderHook(() => useBrowser({ tabs: [], activeTabId: null }, true, false, 'layout', vi.fn()))
+  await waitFor(() => expect(result.current.message).toContain('Browser manager unavailable'))
+  expect(result.current.restorationError).toBeTruthy()
+  await act(async () => { await result.current.retryRestore() })
+  expect(result.current.restorationReady).toBe(true)
+  expect(result.current.restorationError).toBeNull()
+  await act(async () => { expect(await result.current.openJobListing('job-1', 'https://example.com/one')).toBe(true) })
+  expect(create).toHaveBeenCalledWith('https://example.com/one', 'job-1')
+})

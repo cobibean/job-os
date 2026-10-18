@@ -27,6 +27,31 @@ from jobos_api.state_store import ConversationBusy, JobOsStateStore
 TOKEN = "protected-dashboard-token-value"
 
 
+@pytest.mark.parametrize(
+    "request_type",
+    ["clarify.request", "approval.request", "sudo.request", "secret.request", "waiting_for_user"],
+)
+def test_unsupported_interaction_fails_with_safe_cleanup_capability(tmp_path, request_type):
+    gateway = HermesWebSocketGateway(url="ws://127.0.0.1:9119/api/ws", token=TOKEN, cwd=tmp_path)
+    gateway._live_session_id = "live-1"
+    gateway._active_turn_id = "turn-1"
+    normalized = gateway.normalize_frame(
+        event(
+            request_type,
+            "live-1",
+            {"prompt": "(FAKE) credential token=never-display-this", "choices": ["A", "B"]},
+        )
+    )
+    assert normalized is not None
+    assert normalized.event_type == "error"
+    assert normalized.state == "failed"
+    assert normalized.detail["code"] == "AGENT_INTERACTION_UNSUPPORTED"
+    assert normalized.detail["recovery_pending"] is True
+    assert normalized.detail["retry"] is False
+    assert "never-display-this" not in json.dumps(normalized.detail)
+    assert "never-display-this" not in normalized.summary
+
+
 class FakeWebSocket:
     def __init__(self, responder, *, ready=True) -> None:
         self.responder = responder
@@ -1796,7 +1821,7 @@ def test_real_status_and_error_fields_are_read_from_payload(tmp_path):
         ("secret.request", {"prompt": "Credential required"}, "Credential required"),
     ],
 )
-def test_real_waiting_events_use_exact_names_and_payload_fields(
+def test_unsupported_waiting_events_do_not_publish_unanswerable_payload_fields(
     tmp_path, event_type, payload, summary
 ):
     gateway = HermesWebSocketGateway(url="ws://127.0.0.1:9119/api/ws", token=TOKEN, cwd=tmp_path)
@@ -1806,9 +1831,12 @@ def test_real_waiting_events_use_exact_names_and_payload_fields(
     normalized = gateway.normalize_frame(event(event_type, "live-1", payload))
 
     assert normalized is not None
-    assert normalized.state == "waiting"
-    assert normalized.summary == summary
-    assert normalized.detail["type"] == event_type
+    assert normalized.state == "failed"
+    assert normalized.detail["code"] == "AGENT_INTERACTION_UNSUPPORTED"
+    assert normalized.detail["reason"] == "unsupported_interaction"
+    assert normalized.detail["recovery_action"] == "cleanup"
+    assert "choices" not in normalized.detail
+    assert "prompt" not in normalized.detail
     assert "session_id" not in normalized.detail
     assert "stored_session_id" not in normalized.detail
     assert "profile" not in normalized.detail
@@ -1917,7 +1945,8 @@ def test_adapter_normalizes_waiting_file_render_errors_and_redacts_output(tmp_pa
         )
     )
 
-    assert waiting.state == "waiting"
+    assert waiting.state == "failed"
+    assert waiting.detail["code"] == "AGENT_INTERACTION_UNSUPPORTED"
     assert changed.summary == "Updated file"
     assert rendered.summary == "Rendered artifact"
     assert error.state == "failed"

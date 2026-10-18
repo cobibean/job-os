@@ -79,12 +79,13 @@ function EvidenceDetails({ evidence, onClose, online, product }: {
 
 export function EvidenceArea({ active, online, product }: { active: boolean; online: boolean; product: CareerProfileProductController }) {
   const [queue, setQueue] = useState<ImportQueueEntry[]>([])
-  const [detail, setDetail] = useState<CareerProfileEvidence | null>(null)
+  const [detailId, setDetailId] = useState<string | null>(null)
   const processing = useRef(false)
   const evidence = product.current?.sourceEvidence ?? []
+  const detail = evidence.find(source => source.evidenceId === detailId) ?? null
 
   useEffect(() => {
-    if (!active) setDetail(null)
+    if (!active) setDetailId(null)
   }, [active])
 
   const addFiles = useCallback((files: File[]) => {
@@ -236,7 +237,7 @@ export function EvidenceArea({ active, online, product }: { active: boolean; onl
       ) : (
         <div className="career-product-card-grid">
           {evidence.map(source => (
-            <button aria-label={`${source.originalFilename} details`} className={`career-product-card evidence ${source.active ? '' : 'inactive'}`} key={source.evidenceId} onClick={() => setDetail(source)} type="button">
+            <button aria-label={`${source.originalFilename} details`} className={`career-product-card evidence ${source.active ? '' : 'inactive'}`} key={source.evidenceId} onClick={() => setDetailId(source.evidenceId)} type="button">
               <div><span className="career-product-kind">{readableLabel(source.provenance.sourceKind)}</span><span className={`career-product-review ${source.active ? 'accepted' : 'inactive'}`}>{source.active ? 'Available' : 'Unavailable'}</span></div>
               <strong>{source.originalFilename}</strong>
               <p>{source.provenance.sourceLabel}</p>
@@ -245,7 +246,7 @@ export function EvidenceArea({ active, online, product }: { active: boolean; onl
           ))}
         </div>
       )}
-      {detail ? <EvidenceDetails evidence={detail} onClose={() => setDetail(null)} online={online} product={product} /> : null}
+      {detail ? <EvidenceDetails evidence={detail} onClose={() => setDetailId(null)} online={online} product={product} /> : null}
     </section>
   )
 }

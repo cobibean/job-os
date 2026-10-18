@@ -47,6 +47,7 @@
 .browser-toolbar {
   min-height: 44px;
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 3px;
   padding: 6px 9px;

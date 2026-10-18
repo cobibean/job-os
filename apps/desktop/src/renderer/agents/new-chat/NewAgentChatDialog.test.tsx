@@ -93,7 +93,7 @@ test('the five-chat state offers archive recovery instead of hiding New Chat', a
   render(<NewAgentChatDialog atMaximum connectedAgents={connectedAgents()} onArchiveCurrent={onArchiveCurrent} onClose={vi.fn()} onCreate={vi.fn()} />)
 
   expect(screen.getByText('Five chats are already open')).toBeTruthy()
-  await waitFor(() => expect(document.activeElement).toBe(screen.getByRole('dialog')))
+  await waitFor(() => expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Close New Chat' })))
   fireEvent.click(screen.getByRole('button', { name: 'Archive current chat' }))
   expect(onArchiveCurrent).toHaveBeenCalledOnce()
 })

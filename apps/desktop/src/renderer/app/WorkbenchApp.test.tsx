@@ -350,8 +350,8 @@ test('real jobs render compactly and user selection and status use the shared br
   render(<WorkbenchApp />)
   const job = await screen.findByRole('button', { name: 'Select Example Co Product Builder' })
   fireEvent.click(job)
-  await waitFor(() => expect(select).toHaveBeenCalledWith('conv_unavailable', 'job-1'))
-  await screen.findByText('Example Co · Product Builder')
+  expect(select).not.toHaveBeenCalled()
+  await screen.findByText('Example Co · Product Builder', { selector: 'span' })
   fireEvent.change(screen.getByRole('combobox', { name: 'Change Example Co status' }), {
     target: { value: 'reviewed' }
   })
@@ -762,7 +762,7 @@ test('overlapping navigator selections only open the latest clicked job', async 
 
   expect(actions.selectJob.mock.calls.map(([, jobId]) => jobId)).toEqual(['job-1', 'job-2'])
   expect(actions.create).toHaveBeenCalledTimes(1)
-  expect(screen.getByText('Northstar · Staff PM')).not.toBeNull()
+  expect(screen.getByText('Northstar · Staff PM', { selector: 'span' })).not.toBeNull()
 })
 
 test('clicking a job focuses its associated listing tab without creating a duplicate', async () => {
@@ -799,7 +799,7 @@ test('startup selection does not open a job listing tab', async () => {
 
   render(<WorkbenchApp />)
 
-  expect(await screen.findByText('Northstar · Staff PM')).not.toBeNull()
+  expect(await screen.findByText('Northstar · Staff PM', { selector: 'span' })).not.toBeNull()
   expect(actions.create).not.toHaveBeenCalled()
   expect(actions.select).not.toHaveBeenCalled()
 })
@@ -815,8 +815,8 @@ test('a global MCP job selection cannot replace the active session job', async (
     actions.emitJobEvent({ eventId: 4, eventType: 'job_selected', origin: 'mcp', jobId: 'job-2' })
   })
 
-  expect(screen.getByText('Example Co · Product Builder')).not.toBeNull()
-  expect(screen.queryByText('Northstar · Staff PM')).toBeNull()
+  expect(screen.getByText('Example Co · Product Builder', { selector: 'span' })).not.toBeNull()
+  expect(screen.queryByText('Northstar · Staff PM', { selector: 'span' })).toBeNull()
   expect(actions.create).not.toHaveBeenCalled()
   expect(actions.select).not.toHaveBeenCalled()
 })
@@ -867,7 +867,7 @@ test('filtering the list never clears the active job context', async () => {
       connectivity: { get: vi.fn().mockRejectedValue(new Error('offline')) },
       jobs: {
         getState: vi.fn().mockResolvedValue({ jobs: [apollo, northstar], selectedJobId: null, sortMode: 'manual', manualOrder: ['apollo', 'northstar'] }),
-        list: vi.fn().mockResolvedValue([apollo]), select: vi.fn().mockImplementation(async (_conversationId, jobId) => ({ ...emptyJobContext, selectedJobId: jobId })),
+        list: vi.fn(async (_sort, query) => query ? [apollo] : [apollo, northstar]), select: vi.fn().mockImplementation(async (_conversationId, jobId) => ({ ...emptyJobContext, selectedJobId: jobId })),
         reorder: vi.fn(), setSort: vi.fn(), updateStatus: vi.fn(),
         subscribe: vi.fn().mockReturnValue(() => undefined)
       }
@@ -876,12 +876,12 @@ test('filtering the list never clears the active job context', async () => {
 
   render(<WorkbenchApp />)
   fireEvent.click(await screen.findByRole('button', { name: 'Select Northstar Product Manager' }))
-  expect(await screen.findByText('Northstar · Product Manager')).not.toBeNull()
+  expect(await screen.findByText('Northstar · Product Manager', { selector: 'span' })).not.toBeNull()
 
   fireEvent.change(screen.getByRole('textbox', { name: 'Filter jobs' }), { target: { value: 'Apollo' } })
 
   await waitFor(() => expect(screen.queryByRole('button', { name: 'Select Northstar Product Manager' })).toBeNull())
-  expect(screen.getByText('Northstar · Product Manager')).not.toBeNull()
+  expect(screen.getByText('Northstar · Product Manager', { selector: 'span' })).not.toBeNull()
 })
 
 test('changing selected jobs preserves one mounted durable agent conversation and draft', async () => {
@@ -912,7 +912,7 @@ test('changing selected jobs preserves one mounted durable agent conversation an
   fireEvent.change(composer, { target: { value: 'Keep this draft' } })
   fireEvent.click(screen.getByRole('button', { name: 'Select Daybreak Platform PM' }))
 
-  await waitFor(() => expect(screen.getByText('Daybreak · Platform PM')).not.toBeNull())
+  await waitFor(() => expect(screen.getByText('Daybreak · Platform PM', { selector: 'span' })).not.toBeNull())
   expect(screen.getByText('Persistent response')).not.toBeNull()
   expect((screen.getByRole('textbox', { name: 'Message the agent' }) as HTMLTextAreaElement).value).toBe('Keep this draft')
   expect(conversationGet).toHaveBeenCalledOnce()
@@ -1687,7 +1687,7 @@ test('Browse focus stays local until Open job commits selection and listing navi
   expect(create).not.toHaveBeenCalled()
 
   fireEvent.click(screen.getByRole('button', { name: 'Open job' }))
-  await waitFor(() => expect(select).toHaveBeenCalledWith('conv_unavailable', 'two'))
+  expect(select).not.toHaveBeenCalled()
   await waitFor(() => expect(create).toHaveBeenCalledWith('https://example.com/two', 'two'))
   await waitFor(() => expect(screen.getByRole('button', { name: 'Research' }).getAttribute('aria-pressed')).toBe('true'))
 })
@@ -1755,3 +1755,66 @@ function remoteWorkspace(revision: number) {
     repairedPresets: []
   }
 }
+
+test('zero chats can open a saved job and retain the canonical association through navigator filtering', async () => {
+  const jobs: JobListItem[] = [
+    { jobId: 'one', company: 'Alpha', title: 'Builder', status: 'discovered', statusGroup: 'Inbox', canonicalUrl: 'https://example.com/one', discoveredAt: '2026-01-01', lastSeenAt: '2026-01-01' },
+    { jobId: 'two', company: 'Beta', title: 'Designer', status: 'reviewed', statusGroup: 'Considering', canonicalUrl: 'https://example.com/two', discoveredAt: '2026-01-02', lastSeenAt: '2026-01-02' }
+  ]
+  const select = vi.fn()
+  const createSession = vi.fn()
+  const create = vi.fn(async (url: string, jobId: string) => ({
+    tabs: [{ tabId: 'opened', url, title: 'Opened', faviconUrl: null, associatedJobId: jobId, loading: false, canGoBack: false, canGoForward: false, error: null, crashed: false, blockedUrl: null }],
+    activeTabId: 'opened', download: null, notice: null
+  }))
+  Object.defineProperty(window, 'jobos', { configurable: true, value: {
+    agent: { list: vi.fn().mockResolvedValue([]), subscribe: vi.fn(() => () => undefined), create: createSession },
+    jobs: {
+      getState: vi.fn().mockResolvedValue({ jobs, selectedJobId: null, sortMode: 'manual', manualOrder: ['one', 'two'] }),
+      list: vi.fn(async (_sort: string, query?: string) => query ? jobs.filter(job => job.company.includes(query)) : jobs),
+      inspect: vi.fn(async (jobId: string) => ({ ...jobs.find(job => job.jobId === jobId)!, description: `Detail ${jobId}`, location: null })),
+      select, reorder: vi.fn(), setSort: vi.fn(), updateStatus: vi.fn(), subscribe: vi.fn(() => () => undefined)
+    },
+    browser: {
+      restore: vi.fn().mockResolvedValue({ tabs: [], activeTabId: null, download: null, notice: null }),
+      subscribe: vi.fn(() => () => undefined), setBounds: vi.fn().mockResolvedValue(undefined), create,
+      select: vi.fn(), close: vi.fn(), reorder: vi.fn(), navigate: vi.fn(), back: vi.fn(), forward: vi.fn(), reload: vi.fn(), stop: vi.fn(), associate: vi.fn(), copyBlockedUrl: vi.fn()
+    }
+  } })
+  render(<WorkbenchApp />)
+  fireEvent.click(await screen.findByRole('button', { name: 'Select Beta Designer' }))
+  await waitFor(() => expect(create).toHaveBeenCalledWith('https://example.com/two', 'two'))
+  expect(select).not.toHaveBeenCalled()
+  expect(createSession).not.toHaveBeenCalled()
+  fireEvent.change(screen.getByRole('textbox', { name: 'Filter jobs' }), { target: { value: 'Alpha' } })
+  await waitFor(() => expect(screen.queryByRole('button', { name: 'Select Beta Designer' })).toBeNull())
+  expect((screen.getByRole('combobox', { name: 'Associate active tab with a job' }) as HTMLSelectElement).value).toBe('two')
+  expect(screen.getByRole('option', { name: 'Beta · Designer' })).not.toBeNull()
+})
+
+test('a failed browser restore settles Browse Open job and retry permits later selections', async () => {
+  const job: JobListItem = { jobId: 'one', company: 'Alpha', title: 'Builder', status: 'discovered', statusGroup: 'Inbox', canonicalUrl: 'https://example.com/one', discoveredAt: '2026-01-01', lastSeenAt: '2026-01-01' }
+  const empty = { tabs: [], activeTabId: null, download: null, notice: null }
+  const restore = vi.fn().mockRejectedValueOnce(new Error('Browser manager unavailable')).mockResolvedValue(empty)
+  const create = vi.fn(async (url, jobId) => ({ ...empty, activeTabId: 'opened', tabs: [{ tabId: 'opened', url, title: 'Opened', faviconUrl: null, associatedJobId: jobId, loading: false, canGoBack: false, canGoForward: false, error: null, crashed: false, blockedUrl: null }] }))
+  Object.defineProperty(window, 'jobos', { configurable: true, value: {
+    jobs: {
+      getState: vi.fn().mockResolvedValue({ jobs: [job], selectedJobId: null, sortMode: 'manual', manualOrder: ['one'] }),
+      list: vi.fn().mockResolvedValue([job]), inspect: vi.fn(async () => ({ ...job, description: 'Detail for retry', location: null })),
+      select: vi.fn(async () => ({ ...emptyJobContext, selectedJobId: 'one' })), subscribe: vi.fn(() => () => undefined)
+    },
+    browser: { restore, create, subscribe: vi.fn(() => () => undefined), setBounds: vi.fn().mockResolvedValue(undefined), select: vi.fn() }
+  } })
+  render(<WorkbenchApp />)
+  await screen.findByRole('button', { name: 'Select Alpha Builder' })
+  fireEvent.click(screen.getByRole('button', { name: 'Browse' }))
+  await screen.findByText('Detail for retry')
+  fireEvent.click(screen.getByRole('button', { name: 'Open job' }))
+  expect((await screen.findByRole('alert')).textContent).toContain('Could not open this job')
+  expect((screen.getByRole('button', { name: 'Open job' }) as HTMLButtonElement).disabled).toBe(false)
+  fireEvent.click(screen.getByRole('button', { name: 'Research' }))
+  fireEvent.click(screen.getByRole('button', { name: 'Retry browser restore' }))
+  await waitFor(() => expect(restore).toHaveBeenCalledTimes(2))
+  fireEvent.click(screen.getByRole('button', { name: 'Select Alpha Builder' }))
+  await waitFor(() => expect(create).toHaveBeenCalledWith(job.canonicalUrl, job.jobId))
+})

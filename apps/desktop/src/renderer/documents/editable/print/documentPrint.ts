@@ -46,7 +46,12 @@ bridge.onPayload(payload => {
       source.innerHTML = parsed.body.innerHTML
       source.hidden = false
       await waitForAssets(source)
-      const flow = await new Previewer().preview(source, [], pages)
+      // Paged.js reconstructs source ancestors while splitting. A detached fragment
+      // prevents it from cloning this renderer's html/body into each printed page.
+      const content = document.createDocumentFragment()
+      content.append(...source.childNodes)
+      // Let Paged.js process the document's @page and running header/footer rules.
+      const flow = await new Previewer().preview(content, undefined, pages)
       source.remove()
       await waitForAssets(pages)
       await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))

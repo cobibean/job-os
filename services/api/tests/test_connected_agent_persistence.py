@@ -433,7 +433,7 @@ def test_offline_v1_v31_migration_is_exact_idempotent_and_unknown_model_stays_lo
         "locked",
         "LEGACY_MODEL_UNRESOLVED",
     )
-    assert versions[-1] == 32
+    assert versions[-1] == 33
     assert registry.resume_connected_agent_migration(runtime) == completed
     assert registry.load().connected_agents == (agent,)
 
@@ -1180,4 +1180,4 @@ def test_sqlite_v32_statement_failure_rolls_back_and_retries(tmp_path, monkeypat
         connected_agent_migration_id="jagentmig_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
         legacy_connected_agent_id="jagent_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     )
-    assert store.health().schema_version == 32
+    assert store.health().schema_version == 33

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import type {
   AgentChatSelection,
+  AgentConnectionState,
   AgentConversationSnapshot,
   AgentSessionJobContext,
   AgentSessionStreamUpdate,
@@ -24,6 +25,8 @@ export interface AgentSessionViewState {
   summary: AgentSessionSummary
   conversation: AgentConversationState
   draft: string
+  draftRevision: number
+  restoreFailed: boolean
   operation: SessionOperation
   consumedReviewId?: string | null
   unreadTerminal: boolean
@@ -65,6 +68,8 @@ function sessionFromSummary(summary: AgentSessionSummary): AgentSessionViewState
       connection: summary.connection
     },
     draft: '',
+    draftRevision: 0,
+    restoreFailed: false,
     operation: null,
     consumedReviewId: null,
     unreadTerminal: false,
@@ -156,6 +161,10 @@ export function useAgentSessions() {
   const [announcement, setAnnouncement] = useState('')
   const [creating, setCreating] = useState(false)
   const [restoring, setRestoring] = useState(available)
+  const [pendingArchive, setPendingArchive] = useState<{ conversationId: string; draftRevision: number } | null>(null)
+  const mountedRef = useRef(true)
+  const hydrationRequests = useRef(new Map<string, Promise<void>>())
+  const streamConnections = useRef(new Map<string, AgentConnectionState>())
   const stateRef = useRef(state)
   const earlyUpdates = useRef(new Map<string, AgentSessionStreamUpdate[]>())
   const archivedIds = useRef(new Set<string>())
@@ -168,10 +177,69 @@ export function useAgentSessions() {
     setState(next)
   }, [])
 
+  const restoreConversation = useCallback((conversationId: string): Promise<void> => {
+    const bridge = window.jobos?.agent
+    const session = stateRef.current.sessions[conversationId]
+    if (!bridge || !session) return Promise.resolve()
+    const pending = hydrationRequests.current.get(conversationId)
+    if (pending) return pending
+    updateState(current => {
+      const currentSession = current.sessions[conversationId]
+      return currentSession ? { ...current, sessions: { ...current.sessions, [conversationId]: {
+        ...currentSession, conversation: { ...currentSession.conversation, restoring: true }
+      } } } : current
+    })
+    const request = (async () => {
+      try {
+        const response = await bridge.get(conversationId)
+        if (!mountedRef.current || response.conversationId !== conversationId) return
+        updateState(current => {
+          const currentSession = current.sessions[conversationId]
+          if (!currentSession) return current
+          // Older detail responses omit presentation metadata. Keep the sealed
+          // list binding while merging the transcript with events already received.
+          const snapshot = {
+            ...response,
+            recoveryState: response.recoveryState ?? currentSession.summary.recoveryState,
+            binding: response.binding ?? currentSession.summary.binding,
+            availability: response.binding ? response.availability : currentSession.summary.availability
+          }
+          const hasNewerEvents = currentSession.conversation.entries.some(entry => entry.eventId > snapshot.latestEventId)
+          return { ...current, sessions: { ...current.sessions, [conversationId]: {
+            ...currentSession,
+            restoreFailed: false,
+            summary: {
+              ...summaryFromSnapshot(snapshot),
+              recoveryState: hasNewerEvents ? currentSession.summary.recoveryState : snapshot.recoveryState
+            },
+            conversation: agentConversationReducer(currentSession.conversation, { type: 'hydrate', snapshot })
+          } } }
+        })
+      } catch (error) {
+        if (!mountedRef.current) return
+        updateState(current => {
+          const currentSession = current.sessions[conversationId]
+          return currentSession ? { ...current, sessions: { ...current.sessions, [conversationId]: {
+            ...currentSession,
+            restoreFailed: true,
+            conversation: agentConversationReducer(currentSession.conversation, {
+              type: 'restore-failure', message: safeError(error, 'Conversation could not be restored')
+            })
+          } } } : current
+        })
+      } finally {
+        hydrationRequests.current.delete(conversationId)
+      }
+    })()
+    hydrationRequests.current.set(conversationId, request)
+    return request
+  }, [updateState])
+
   useEffect(() => {
     const bridge = window.jobos?.agent
     if (!bridge) return
     let mounted = true
+    mountedRef.current = true
     let retryTimer: ReturnType<typeof setTimeout> | undefined
     const unsubscribe = bridge.subscribe(update => {
       if (archivedIds.current.has(update.conversationId)) return
@@ -182,11 +250,17 @@ export function useAgentSessions() {
         earlyUpdates.current.set(update.conversationId, queued)
         return
       }
+      const retryHydration = update.kind === 'connection' && update.state === 'online'
+        && (streamConnections.current.get(update.conversationId)
+          ?? current.sessions[update.conversationId]?.conversation.connection) !== 'online'
+        && current.sessions[update.conversationId]?.restoreFailed
+      if (update.kind === 'connection') streamConnections.current.set(update.conversationId, update.state)
       updateState(value => {
         const transition = transitionSessionUpdate(value, update)
         if (transition.announcement) setAnnouncement(transition.announcement)
         return transition.state
       })
+      if (retryHydration) void restoreConversation(update.conversationId)
     })
 
     const restore = async () => {
@@ -214,52 +288,7 @@ export function useAgentSessions() {
       setRestoring(false)
       if (replayAnnouncement) setAnnouncement(replayAnnouncement)
       if (activeId) window.localStorage.setItem(ACTIVE_CONVERSATION_KEY, activeId)
-      await Promise.all(sorted.map(async summary => {
-        try {
-          const response = await bridge.get(summary.conversationId)
-          if (!mounted || response.conversationId !== summary.conversationId) return
-          // The detail endpoint predates Connected Agent presentation metadata.
-          // Preserve the authoritative sealed binding from the list response while
-          // the conversation body hydrates instead of briefly relabelling it legacy.
-          const snapshot = {
-            ...response,
-            binding: response.binding ?? summary.binding,
-            availability: response.binding ? response.availability : summary.availability
-          }
-          updateState(current => {
-            const session = current.sessions[summary.conversationId]
-            if (!session) return current
-            return {
-              ...current,
-              sessions: {
-                ...current.sessions,
-                [summary.conversationId]: {
-                  ...session,
-                  summary: summaryFromSnapshot(snapshot),
-                  conversation: agentConversationReducer(session.conversation, { type: 'hydrate', snapshot })
-                }
-              }
-            }
-          })
-        } catch (error) {
-          updateState(current => {
-            const session = current.sessions[summary.conversationId]
-            if (!session) return current
-            return {
-              ...current,
-              sessions: {
-                ...current.sessions,
-                [summary.conversationId]: {
-                  ...session,
-                  conversation: agentConversationReducer(session.conversation, {
-                    type: 'restore-failure', message: safeError(error, 'Conversation could not be restored')
-                  })
-                }
-              }
-            }
-          })
-        }
-      }))
+      await Promise.all(sorted.map(summary => restoreConversation(summary.conversationId)))
       } catch {
         if (!mounted) return
         setAnnouncement('Conversations could not be restored. Retrying…')
@@ -269,10 +298,11 @@ export function useAgentSessions() {
     void restore()
     return () => {
       mounted = false
+      mountedRef.current = false
       if (retryTimer) clearTimeout(retryTimer)
       unsubscribe()
     }
-  }, [updateState])
+  }, [restoreConversation, updateState])
 
   const select = useCallback((conversationId: string) => {
     if (!stateRef.current.sessions[conversationId]) return false
@@ -285,8 +315,9 @@ export function useAgentSessions() {
       }
     }))
     window.localStorage.setItem(ACTIVE_CONVERSATION_KEY, conversationId)
+    if (stateRef.current.sessions[conversationId]?.restoreFailed) void restoreConversation(conversationId)
     return true
-  }, [updateState])
+  }, [restoreConversation, updateState])
 
   const selectByIndex = useCallback((index: number) => {
     const id = stateRef.current.order[index]
@@ -349,7 +380,9 @@ export function useAgentSessions() {
   const setDraft = useCallback((conversationId: string, draft: string) => {
     updateState(current => {
       const session = current.sessions[conversationId]
-      return session ? { ...current, sessions: { ...current.sessions, [conversationId]: { ...session, draft } } } : current
+      return session && session.operation !== 'archive'
+        ? { ...current, sessions: { ...current.sessions, [conversationId]: { ...session, draft, draftRevision: session.draftRevision + 1 } } }
+        : current
     })
   }, [updateState])
 
@@ -385,23 +418,22 @@ export function useAgentSessions() {
   const send = useCallback(async (conversationId: string) => {
     const session = stateRef.current.sessions[conversationId]
     const text = session?.draft.trim()
-    if (!session || !text || session.conversation.activeTurn || !window.jobos?.agent || !beginOperation(conversationId, 'send')) return
+    if (!session || !text || session.summary.recoveryState !== 'ready' || session.conversation.activeTurn || !window.jobos?.agent || !beginOperation(conversationId, 'send')) return
     try {
       const mutation = await window.jobos.agent.send(conversationId, text, identifier('message-'))
+      mutateConversation(conversationId, { type: 'mutation', mutation, status: 'running' })
       updateState(current => {
         const currentSession = current.sessions[conversationId]
-        return currentSession ? { ...current, sessions: { ...current.sessions, [conversationId]: {
-          ...currentSession, summary: { ...currentSession.summary, recoveryState: 'ready' }
-        } } } : current
+        return currentSession && currentSession.draftRevision === session.draftRevision
+          ? { ...current, sessions: { ...current.sessions, [conversationId]: { ...currentSession, draft: '' } } }
+          : current
       })
-      mutateConversation(conversationId, { type: 'mutation', mutation, status: 'running' })
-      setDraft(conversationId, '')
     } catch (error) {
       mutateConversation(conversationId, { type: 'failure', message: safeError(error, 'Message could not be sent') })
     } finally {
       finishOperation(conversationId, 'send')
     }
-  }, [beginOperation, finishOperation, mutateConversation, setDraft])
+  }, [beginOperation, finishOperation, mutateConversation, updateState])
 
   const stop = useCallback(async (conversationId: string) => {
     const turn = stateRef.current.sessions[conversationId]?.conversation.activeTurn
@@ -443,22 +475,11 @@ export function useAgentSessions() {
 
   const retry = useCallback(async (conversationId: string, turnId: string) => {
     const session = stateRef.current.sessions[conversationId]
-    if (!session || session.conversation.activeTurn || !window.jobos?.agent || !beginOperation(conversationId, 'retry')) return
-    const cleanupOnly = session.summary.recoveryState === 'quarantined' && projectConversation(session.conversation.entries).some(item => (
-      item.kind === 'agent-turn'
-      && item.turnId === turnId
-      && item.terminal?.detail.agent_continuation === true
-      && item.terminal.detail.reason === 'transport_lost'
-    ))
+    if (!session || session.summary.recoveryState !== 'ready' || session.conversation.activeTurn || !window.jobos?.agent || !beginOperation(conversationId, 'retry')) return
+
     try {
       const mutation = await window.jobos.agent.retry(conversationId, turnId, identifier('retry-'))
-      updateState(current => {
-        const currentSession = current.sessions[conversationId]
-        return currentSession ? { ...current, sessions: { ...current.sessions, [conversationId]: {
-          ...currentSession, summary: { ...currentSession.summary, recoveryState: 'ready' }
-        } } } : current
-      })
-      if (!cleanupOnly) mutateConversation(conversationId, { type: 'mutation', mutation, status: 'running' })
+      mutateConversation(conversationId, { type: 'mutation', mutation, status: 'running' })
     } catch (error) {
       mutateConversation(conversationId, { type: 'failure', message: safeError(error, 'Turn could not be retried') })
     } finally {
@@ -466,14 +487,43 @@ export function useAgentSessions() {
     }
   }, [beginOperation, finishOperation, mutateConversation])
 
-  const archive = useCallback(async (conversationId: string) => {
+  const cleanupRecovery = useCallback(async (conversationId: string, turnId: string) => {
+    const session = stateRef.current.sessions[conversationId]
+    const recovery = session && projectConversation(session.conversation.entries).find(item => (
+      item.kind === 'agent-turn' && item.turnId === turnId
+      && item.terminal?.detail.recovery_pending === true
+      && item.terminal.detail.recovery_action === 'cleanup'
+    ))
+    if (!session || session.summary.recoveryState !== 'quarantined' || !recovery
+      || session.conversation.activeTurn || !window.jobos?.agent || !beginOperation(conversationId, 'stop')) return
+    try {
+      const mutation = await window.jobos.agent.cancel(conversationId, turnId)
+      mutateConversation(conversationId, { type: 'mutation', mutation, status: 'cancel-result' })
+      // Recovery readiness comes from the authoritative stream or a fresh detail
+      // response. A cancel acknowledgement alone does not confirm remote cleanup.
+      await restoreConversation(conversationId)
+    } catch (error) {
+      mutateConversation(conversationId, { type: 'failure', message: safeError(error, 'Agent cleanup could not be confirmed') })
+    } finally {
+      finishOperation(conversationId, 'stop')
+    }
+  }, [beginOperation, finishOperation, mutateConversation, restoreConversation])
+
+  const archive = useCallback(async (conversationId: string, confirmedDraftRevision?: number) => {
     const current = stateRef.current
     const session = current.sessions[conversationId]
     if (!session || creating || session.summary.recoveryState === 'recovering' || session.summary.recoveryState === 'quarantined' || session.conversation.activeTurn || session.operation || !window.jobos?.agent) return false
+    if (session.draft.trim() && confirmedDraftRevision !== session.draftRevision) {
+      setAnnouncement('')
+      setPendingArchive({ conversationId, draftRevision: session.draftRevision })
+      return false
+    }
     if (!beginOperation(conversationId, 'archive')) return false
+    setAnnouncement('')
     try {
       await window.jobos.agent.archive(conversationId)
       archivedIds.current.add(conversationId)
+      setPendingArchive(null)
       updateState(value => {
         const index = value.order.indexOf(conversationId)
         const order = value.order.filter(id => id !== conversationId)
@@ -486,12 +536,20 @@ export function useAgentSessions() {
       })
       return true
     } catch {
-      setAnnouncement('Session could not be closed')
+      setAnnouncement('Chat close was not confirmed')
       return false
     } finally {
       finishOperation(conversationId, 'archive')
     }
   }, [beginOperation, creating, finishOperation, updateState])
+
+  const dismissArchive = useCallback(() => {
+    if (pendingArchive && operations.current.get(pendingArchive.conversationId) === 'archive') return
+    setPendingArchive(null)
+  }, [pendingArchive])
+  const confirmArchive = useCallback(async () => pendingArchive
+    ? archive(pendingArchive.conversationId, pendingArchive.draftRevision)
+    : false, [archive, pendingArchive])
 
   const saveScroll = useCallback((conversationId: string, scrollTop: number, pinnedToBottom: boolean) => {
     updateState(current => {
@@ -551,6 +609,11 @@ export function useAgentSessions() {
     create,
     createJobless,
     archive,
+    pendingArchiveId: pendingArchive?.conversationId ?? null,
+    dismissArchive,
+    confirmArchive,
+    restoreConversation,
+    cleanupRecovery,
     setDraft,
     send,
     stop,

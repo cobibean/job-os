@@ -6,8 +6,10 @@ import type {
   CareerProfileContextMode,
   CareerProfileContextPreview,
   CareerProfileContextScope,
+  CareerProfileContextUpdateRequest,
   ConnectedCareerProfileAgent
 } from '../../../../shared/contracts'
+import { careerProfileContextConflictCode } from '../../../../shared/careerProfileContextErrors'
 import { areaLabels } from '../itemSpecs'
 import { itemTitle } from '../itemPresentation'
 import type { CareerProfileProductController } from '../useCareerProfileProduct'
@@ -33,7 +35,8 @@ export function AgentAccessDialog({ onClose, online, product }: {
   const [message, setMessage] = useState('')
   const [messageKind, setMessageKind] = useState<'info' | 'error'>('info')
   const [preview, setPreview] = useState<CareerProfileContextPreview | null>(null)
-  const pendingKey = useRef('')
+  const pendingRequest = useRef<{ agentId: string; request: CareerProfileContextUpdateRequest } | null>(null)
+  const [accessConflict, setAccessConflict] = useState(false)
 
   useEffect(() => {
     let cancelled = false
@@ -57,7 +60,8 @@ export function AgentAccessDialog({ onClose, online, product }: {
     setPreview(null)
     setMessage('')
     setMessageKind('info')
-    pendingKey.current = ''
+    pendingRequest.current = null
+    setAccessConflict(false)
     if (!agentId) return
     let cancelled = false
     setStatus('loading')
@@ -71,7 +75,7 @@ export function AgentAccessDialog({ onClose, online, product }: {
       setMessage('')
       setMessageKind('info')
       setStatus('ready')
-      pendingKey.current = ''
+      pendingRequest.current = null
     }).catch(() => {
       if (!cancelled) { setStatus('error'); setMessageKind('error'); setMessage('This agent’s Career Profile access could not load.') }
     })
@@ -85,7 +89,7 @@ export function AgentAccessDialog({ onClose, online, product }: {
     setMessage('')
     setMessageKind('info')
     setPreview(null)
-    pendingKey.current = ''
+    pendingRequest.current = null
     if (nextMode !== 'selected') { setSelectedAreas([]); setSelectedItems([]) }
   }
   const toggleArea = (area: CareerProfileArea, checked: boolean) => {
@@ -93,34 +97,38 @@ export function AgentAccessDialog({ onClose, online, product }: {
     setPreview(null)
     setMessage('')
     setMessageKind('info')
-    pendingKey.current = ''
+    pendingRequest.current = null
   }
   const toggleItem = (itemId: string, checked: boolean) => {
     setSelectedItems(current => checked ? [...current, itemId] : current.filter(candidate => candidate !== itemId))
     setPreview(null)
     setMessage('')
     setMessageKind('info')
-    pendingKey.current = ''
+    pendingRequest.current = null
   }
 
   const save = async () => {
-    if (!product.current || !scopeReady || !scope || !agentId) return
+    if (!product.current || !scopeReady || !scope || !agentId || accessConflict) return
     if (mode === 'selected' && selectedAreas.length === 0 && selectedItems.length === 0) {
       setStatus('ready'); setMessageKind('error'); setMessage('Choose at least one whole area or exact detail.')
       return
     }
-    if (!pendingKey.current) pendingKey.current = requestId('career_context')
-    setStatus('saving'); setMessage(''); setMessageKind('info')
-    try {
-      const result = await product.updateAgentContext(agentId, {
+    pendingRequest.current ??= {
+      agentId,
+      request: {
         expectedAuthorityEpoch: product.current.authorityEpoch,
         expectedProfileRevision: product.current.profileRevision,
-        idempotencyKey: pendingKey.current,
+        idempotencyKey: requestId('career_context'),
         mode,
-        selectedAreas,
-        selectedItemIds: selectedItems
-      })
-      pendingKey.current = ''
+        selectedAreas: [...selectedAreas],
+        selectedItemIds: [...selectedItems]
+      }
+    }
+    const pending = pendingRequest.current
+    setStatus('saving'); setMessage(''); setMessageKind('info')
+    try {
+      const result = await product.updateAgentContext(pending.agentId, pending.request)
+      pendingRequest.current = null
       setScope(result)
       setMode(result.mode)
       setSelectedAreas(result.selectedAreas)
@@ -129,11 +137,33 @@ export function AgentAccessDialog({ onClose, online, product }: {
       setStatus('ready')
       setMessageKind('info')
       setMessage('Access saved. New agent turns will use this choice.')
-    } catch {
+    } catch (failure) {
       setStatus('ready')
       setMessageKind('error')
+      if (failure instanceof Error && failure.message.includes(careerProfileContextConflictCode)) {
+        pendingRequest.current = null
+        setAccessConflict(true)
+        setMessage('Access changed before this request could save. Your draft is still here. Review the latest access before saving again.')
+        return
+      }
       setMessage('Access could not be saved. Your exact draft is still here; retry uses the same request identity so an uncertain response cannot create a second change.')
     }
+  }
+
+  const reviewLatestAccess = async () => {
+    if (!agentId) return
+    setStatus('loading'); setMessage(''); setMessageKind('info')
+    try {
+      if (!await product.load(false)) throw new Error('Profile refresh failed')
+      const latest = await product.getAgentContext(agentId)
+      setScope(latest)
+      setAccessConflict(false)
+      setPreview(null)
+      setMessage('Latest access loaded. Your draft is preserved; review it before saving.')
+    } catch {
+      setMessageKind('error')
+      setMessage('Latest access could not load. Reconnect and try again.')
+    } finally { setStatus('ready') }
   }
 
   const sameSelection = (left: string[], right: string[]) => (
@@ -202,7 +232,7 @@ export function AgentAccessDialog({ onClose, online, product }: {
         )}
         {message ? <p className={`career-feedback ${messageKind === 'error' ? 'error' : 'saved'}`} role={messageKind === 'error' ? 'alert' : 'status'}>{message}</p> : null}
       </div>
-      {agents.length > 0 ? <footer className="career-product-dialog-actions"><button className="career-primary-button" disabled={!online || !scopeReady} onClick={() => { void save() }} type="button">{status === 'saving' ? 'Saving…' : 'Save access'}</button><button aria-label="Preview saved-scope context" className="career-secondary-button" disabled={!online || !scopeReady || draftDiffersFromSaved} onClick={() => { void makePreview() }} type="button">Preview saved scope</button></footer> : null}
+      {agents.length > 0 ? <footer className="career-product-dialog-actions"><button className="career-primary-button" disabled={!online || !scopeReady || accessConflict} onClick={() => { void save() }} type="button">{status === 'saving' ? 'Saving…' : 'Save access'}</button>{accessConflict ? <button className="career-secondary-button" disabled={!online || !scopeReady} onClick={() => { void reviewLatestAccess() }} type="button">Review latest access</button> : null}<button aria-label="Preview saved-scope context" className="career-secondary-button" disabled={!online || !scopeReady || accessConflict || draftDiffersFromSaved} onClick={() => { void makePreview() }} type="button">Preview saved scope</button></footer> : null}
     </Dialog>
   )
 }

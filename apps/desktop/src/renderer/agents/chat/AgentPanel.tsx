@@ -1,6 +1,8 @@
 import { ArrowDown, BriefcaseBusiness, CircleAlert, LoaderCircle, RotateCcw, Send, Square, UserRound, WifiOff } from 'lucide-react'
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 
+import { Dialog } from '../../career-profile/product/dialogs/Dialog'
+
 import type { ConnectivityState } from '../../../shared/contracts'
 import { AgentAvatar } from '../avatar/AgentAvatar'
 import type { AgentAvatarId } from '../avatar/agentAvatars'
@@ -75,11 +77,14 @@ export function AgentPanel({ agentLabel, avatarId, contextLabel, apiState = 'con
   }
   const activeId = sessions.activeId
   const activeSummary = sessions.activeSession?.summary
+  const archivePending = Boolean(sessions.pendingArchiveId
+    && sessions.sessions[sessions.pendingArchiveId]?.operation === 'archive')
   const retryRequiresRecovery = activeSummary?.recoveryState === 'quarantined'
   const recoveryTurn = retryRequiresRecovery
     ? [...conversation.items].reverse().find(item => (
         item.kind === 'agent-turn'
-        && item.terminal?.detail.reason === 'transport_lost'
+        && item.terminal?.detail.recovery_pending === true
+        && item.terminal.detail.recovery_action === 'cleanup'
       ))
     : undefined
   const recoveryTurnId = recoveryTurn?.kind === 'agent-turn'
@@ -263,9 +268,7 @@ export function AgentPanel({ agentLabel, avatarId, contextLabel, apiState = 'con
               if (item.kind === 'agent-turn') {
                 const active = item.turnId === conversation.activeTurn?.turnId
                 const terminal = item.terminal
-                const cleanupOnly = retryRequiresRecovery
-                  && item.turnId === recoveryTurnId
-                  && terminal?.detail.agent_continuation === true
+                const cleanupOnly = retryRequiresRecovery && item.turnId === recoveryTurnId
                 const waiting = terminal?.state === 'waiting' && active
                 const approvalId = waiting && typeof terminal?.detail.approval_id === 'string'
                   ? terminal.detail.approval_id
@@ -309,17 +312,27 @@ export function AgentPanel({ agentLabel, avatarId, contextLabel, apiState = 'con
                             </button>
                           </div>
                         )}
-                        {(terminal.retryable || cleanupOnly)
-                          && (!retryRequiresRecovery || item.turnId === recoveryTurnId)
-                          && !conversation.activeTurn
+                        {cleanupOnly && !conversation.activeTurn && activeSummary?.availability?.state !== 'locked' && (
+                          <button
+                            aria-label="Confirm agent cleanup"
+                            className="retry-button"
+                            disabled={conversation.operationPending}
+                            onClick={() => { if (activeId) void sessions.cleanupRecovery(activeId, item.turnId) }}
+                            type="button"
+                          >
+                            <RotateCcw aria-hidden="true" size={13} /> Confirm cleanup
+                          </button>
+                        )}
+                        {terminal.retryable && !retryRequiresRecovery && !conversation.activeTurn
                           && activeSummary?.availability?.state !== 'locked' && (
                           <button
-                            aria-label={cleanupOnly ? 'Confirm agent cleanup' : retryRequiresRecovery ? 'Confirm cleanup and retry turn' : 'Retry turn'}
+                            aria-label="Retry turn"
                             className="retry-button"
+                            disabled={conversation.operationPending}
                             onClick={() => { if (activeId) void sessions.retry(activeId, item.turnId) }}
                             type="button"
                           >
-                            <RotateCcw aria-hidden="true" size={13} /> {cleanupOnly ? 'Confirm cleanup' : retryRequiresRecovery ? 'Confirm cleanup & retry' : 'Retry'}
+                            <RotateCcw aria-hidden="true" size={13} /> Retry
                           </button>
                         )}
                       </article>
@@ -353,6 +366,11 @@ export function AgentPanel({ agentLabel, avatarId, contextLabel, apiState = 'con
           </div>
         )}
         {conversation.error && <p className="agent-inline-error" role="alert">{conversation.error}</p>}
+        {activeId && sessions.activeSession?.restoreFailed && (
+          <button aria-label="Retry restoring conversation" className="retry-button" disabled={conversation.restoring} onClick={() => void sessions.restoreConversation(activeId)} type="button">
+            <RotateCcw aria-hidden="true" size={13} /> Retry restore
+          </button>
+        )}
         </>}
       </div>
       })}
@@ -373,6 +391,7 @@ export function AgentPanel({ agentLabel, avatarId, contextLabel, apiState = 'con
         <label className="sr-only" htmlFor="agent-message">Message the agent</label>
         <textarea
           aria-describedby="composer-status"
+          disabled={sessions.activeSession?.operation === 'archive'}
           id="agent-message"
           maxLength={12_000}
           onChange={event => { if (activeId) sessions.setDraft(activeId, event.target.value) }}
@@ -402,6 +421,20 @@ export function AgentPanel({ agentLabel, avatarId, contextLabel, apiState = 'con
           </div>
         </div>
       </form>}
+      {sessions.pendingArchiveId && (
+        <Dialog label="Discard unsent message?" onClose={sessions.dismissArchive}>
+          <div className="career-product-dialog-body">
+            <h3>Discard unsent message?</h3>
+            <p>Closing this chat discards its unsent message. Sent messages stay saved.</p>
+            {archivePending && <p role="status">Closing chat…</p>}
+            {sessions.announcement === 'Chat close was not confirmed' && <p role="alert">Close was not confirmed. Your unsent message is still here.</p>}
+          </div>
+          <footer className="career-product-dialog-actions">
+            <button className="career-secondary-button" disabled={archivePending} onClick={sessions.dismissArchive} type="button">Keep writing</button>
+            <button aria-label="Discard message and close chat" className="career-primary-button danger" disabled={archivePending} onClick={() => void sessions.confirmArchive()} type="button">{archivePending ? 'Closing…' : 'Discard message and close chat'}</button>
+          </footer>
+        </Dialog>
+      )}
       <p aria-atomic="true" aria-live="polite" className="sr-only">{sessions.announcement || announcement}</p>
     </aside>
   )

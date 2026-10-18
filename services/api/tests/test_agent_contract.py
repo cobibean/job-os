@@ -19,12 +19,323 @@ from jobos_api.conversations import (
     SendMessageRequest,
     conversation_event_source,
 )
-from jobos_api.hermes_adapter import HermesGatewayFactory
+from jobos_api.hermes_adapter import HermesGatewayFactory, HermesWebSocketGateway
 from jobos_api.private_adapters.job_hunter import adapt_job_hunter_facade
 from jobos_api.settings import DeviceCredential, Settings
-from jobos_api.state_store import ConversationNotFound, JobOsStateStore
+from jobos_api.state_store import ConversationBusy, ConversationNotFound, JobOsStateStore
 
 TOKEN = "agent-contract-device-token"
+
+
+def test_ambiguous_submission_can_be_cleaned_without_prompt_resubmission(tmp_path):
+    async def scenario():
+        store = JobOsStateStore(tmp_path / "jobos.db")
+        store.initialize()
+
+        class AmbiguousGateway(FakeGateway):
+            async def submit_turn(self, text, context):
+                self.submissions.append((text, context))
+                raise RuntimeError("(FAKE) acknowledgement lost")
+
+        gateway = AmbiguousGateway()
+        service = ConversationService(store, gateway)
+        created = await service.send(
+            SendMessageRequest(text="(FAKE) inspect", idempotency_key="cleanup-without-resubmit"),
+            actor_id="device-a",
+            context={"selected_job_id": None, "workspace": {}},
+        )
+        quarantined = service.snapshot()
+        await service.cancel(created.turn_id)
+        return created, quarantined, service.snapshot(), gateway
+
+    created, quarantined, cleaned, gateway = asyncio.run(scenario())
+    assert quarantined.recovery_state == "quarantined"
+    terminal = quarantined.entries[-1]
+    assert terminal["detail"]["recovery_pending"] is True
+    assert terminal["detail"]["recovery_action"] == "cleanup"
+    assert cleaned.recovery_state == "ready"
+    assert gateway.interruptions == [created.turn_id]
+    assert len(gateway.submissions) == 1
+
+
+@pytest.mark.parametrize("retry_allowed", [False, True])
+def test_terminal_quarantine_cleanup_survives_failure_and_restart_without_resubmit(
+    tmp_path, retry_allowed
+):
+    async def scenario():
+        path = tmp_path / "jobos.db"
+        store = JobOsStateStore(path)
+        store.initialize()
+        created = store.create_conversation_turn(
+            text="(FAKE) original scoped instruction",
+            context={"selected_job_id": "(FAKE)-original-job", "workspace": {}},
+            idempotency_key="legacy-quarantine-recovery",
+            actor_id="device-a",
+        )
+        turn_id = str(created["turn_id"])
+        store.save_stored_session_id("(FAKE)-stored-session")
+        store.settle_active_turn(
+            turn_id,
+            "failed",
+            event_type="error",
+            summary="(FAKE) transport lost",
+            detail={"retry": retry_allowed},
+            quarantine=True,
+        )
+        # Simulate a pre-fix persisted quarantine whose terminal metadata is sparse.
+        with sqlite3.connect(path) as connection:
+            connection.execute(
+                "UPDATE conversation_events SET detail_json = ? "
+                "WHERE turn_id = ? AND event_type = 'error'",
+                (json.dumps({"retry": retry_allowed}), turn_id),
+            )
+
+        class CleanupGateway(FakeGateway):
+            attempts = 0
+
+            async def recover_active_turn(self, stored_session_id, recovery_turn_id):
+                assert stored_session_id == "(FAKE)-stored-session"
+                assert recovery_turn_id == turn_id
+                self.attempts += 1
+                if self.attempts == 1:
+                    raise ConnectionError("(FAKE) remote interruption unconfirmed")
+                await super().recover_active_turn(stored_session_id, recovery_turn_id)
+
+        gateway = CleanupGateway()
+        service = ConversationService(JobOsStateStore(path), gateway)
+        before = service.snapshot()
+        stream = store.all_conversation_events_after(0)[-1]
+        assert before.entries[-1]["detail"]["recovery_action"] == "cleanup"
+        assert stream["event"]["detail"]["recovery_pending"] is True
+        with pytest.raises(ConversationBusy):
+            await service.cancel(turn_id)
+        assert service.snapshot().recovery_state == "quarantined"
+        assert not gateway.submissions
+        result = await service.cancel(turn_id)
+        assert result.status == "failed"
+        assert service.snapshot().recovery_state == "ready"
+        assert not gateway.submissions
+        ready = store.all_conversation_events_after(int(stream["event"]["event_id"]))
+        assert ready[-1]["recovery_state"] == "ready"
+        assert ready[-1]["event"]["detail"]["transport_confirmed"] is True
+        assert store.turn_record(turn_id)["context"]["selected_job_id"] == "(FAKE)-original-job"
+        if not retry_allowed:
+            with pytest.raises(ValueError, match="cannot be resubmitted"):
+                await service.retry(
+                    turn_id,
+                    RetryTurnRequest(idempotency_key="forbidden-explicit-retry"),
+                    actor_id="device-a",
+                )
+            assert not gateway.submissions
+        else:
+            await service.retry(
+                turn_id,
+                RetryTurnRequest(idempotency_key="allowed-explicit-retry"),
+                actor_id="device-a",
+            )
+            assert len(gateway.submissions) == 1
+            assert gateway.submissions[0][1].selected_job_id == "(FAKE)-original-job"
+
+    asyncio.run(scenario())
+
+
+def test_legacy_streaming_rows_project_as_working_without_rewriting_saved_transcript(tmp_path):
+    path = tmp_path / "jobos.db"
+    store = JobOsStateStore(path)
+    store.initialize()
+    created = store.create_conversation_turn(
+        text="(FAKE) stream", context={}, idempotency_key="legacy-stream-state", actor_id="device-a"
+    )
+    store.append_conversation_event(
+        turn_id=created["turn_id"],
+        event_type="assistant_message",
+        state="streaming",
+        summary="(FAKE) partial ",
+        detail={"text": "(FAKE) partial "},
+    )
+    assert store.conversation_snapshot()["entries"][-1]["state"] == "working"
+    assert store.all_conversation_events_after(0)[-1]["event"]["state"] == "working"
+    with sqlite3.connect(path) as connection:
+        assert (
+            connection.execute(
+                "SELECT state FROM conversation_events WHERE event_type = 'assistant_message'"
+            ).fetchone()[0]
+            == "streaming"
+        )
+
+
+def test_real_unsupported_hermes_wait_requires_cleanup_then_allows_a_second_turn(tmp_path):
+    async def scenario():
+        store = JobOsStateStore(tmp_path / "jobos.db")
+        store.initialize()
+        gateway = FakeGateway()
+        service = ConversationService(store, gateway)
+        first = await service.send(
+            SendMessageRequest(
+                text="(FAKE) first instruction", idempotency_key="unsupported-first"
+            ),
+            actor_id="device-a",
+            context={"selected_job_id": None, "workspace": {}},
+        )
+        hermes = HermesWebSocketGateway(url="ws://127.0.0.1:9119/api/ws", token=TOKEN, cwd=tmp_path)
+        hermes._live_session_id = "(FAKE)-live"
+        hermes._active_turn_id = first.turn_id
+        unsupported = hermes.normalize_frame(
+            {
+                "jsonrpc": "2.0",
+                "method": "event",
+                "params": {
+                    "type": "secret.request",
+                    "session_id": "(FAKE)-live",
+                    "payload": {"prompt": "(FAKE) token=must-not-persist"},
+                },
+            }
+        )
+        assert unsupported is not None
+        gateway._events = [unsupported]
+        await service._consume_gateway_events()
+        assert service.snapshot().recovery_state == "quarantined"
+        assert service.snapshot().active_turn is None
+        assert "must-not-persist" not in json.dumps(service.snapshot().model_dump())
+        with pytest.raises(ValueError, match="cannot be resubmitted"):
+            await service.retry(
+                first.turn_id,
+                RetryTurnRequest(idempotency_key="unsupported-retry"),
+                actor_id="device-a",
+            )
+        await service.cancel(first.turn_id)
+        second = await service.send(
+            SendMessageRequest(
+                text="(FAKE) second instruction", idempotency_key="supported-second"
+            ),
+            actor_id="device-a",
+            context={"selected_job_id": None, "workspace": {}},
+        )
+        assert second.turn_id != first.turn_id
+        assert service.snapshot().recovery_state == "ready"
+        assert len(gateway.submissions) == 2
+        assert gateway.interruptions == [first.turn_id]
+
+    asyncio.run(scenario())
+
+
+def test_first_seen_unsupported_hermes_continuation_is_quarantined_until_cleanup(tmp_path):
+    async def scenario():
+        path = tmp_path / "jobos.db"
+        store = JobOsStateStore(path)
+        store.initialize()
+        store.save_stored_session_id("(FAKE)-stored")
+
+        class CleanupGateway(FakeGateway):
+            cleanup_available = False
+
+            async def recover_active_turn(self, stored_session_id, turn_id):
+                if not self.cleanup_available:
+                    raise ConnectionError("(FAKE) cleanup unavailable")
+                await super().recover_active_turn(stored_session_id, turn_id)
+
+        gateway = CleanupGateway()
+        service = ConversationService(store, gateway)
+        hermes = HermesWebSocketGateway(url="ws://127.0.0.1:9119/api/ws", token=TOKEN, cwd=tmp_path)
+        hermes._live_session_id = "(FAKE)-live"
+        unsupported = hermes.normalize_frame(
+            {
+                "jsonrpc": "2.0",
+                "method": "event",
+                "params": {
+                    "type": "secret.request",
+                    "session_id": "(FAKE)-live",
+                    "payload": {
+                        "display_kind": "async_delegation_complete",
+                        "continuation_id": "synthetic_continuation",
+                        "prompt": "(FAKE) request",
+                    },
+                },
+            }
+        )
+        assert unsupported is not None
+        gateway._events = [unsupported]
+        await service._consume_gateway_events()
+        assert service.snapshot().recovery_state == "quarantined"
+        assert store.recovery_turn_id() == unsupported.turn_id
+        assert unsupported.detail["continuation_id"] == "synthetic_continuation"
+        assert store.turn_record(unsupported.turn_id)["status"] == "failed"
+        with pytest.raises(ConversationBusy):
+            await service.send(
+                SendMessageRequest(text="(FAKE) do not overlap", idempotency_key="blocked-by-wait"),
+                actor_id="device-a",
+                context={"selected_job_id": None, "workspace": {}},
+            )
+        assert service.snapshot().recovery_state == "quarantined"
+        assert not gateway.submissions
+        # A restart must keep the lease before cleanup runs. The cleanup-only
+        # action must not manufacture a blank prompt for a continuation.
+        reopened = ConversationService(JobOsStateStore(path), gateway)
+        assert reopened.snapshot().recovery_state == "quarantined"
+        gateway.cleanup_available = True
+        await reopened.cancel(unsupported.turn_id)
+        assert reopened.snapshot().recovery_state == "ready"
+        assert gateway.interruptions == [unsupported.turn_id]
+        assert not gateway.submissions
+
+    asyncio.run(scenario())
+
+
+def test_terminal_continuation_and_recovery_lease_commit_together(tmp_path):
+    path = tmp_path / "jobos.db"
+    store = JobOsStateStore(path)
+    store.initialize()
+    conversation = store.conversation_store(store.first_active_conversation_id())
+    with sqlite3.connect(path) as connection:
+        connection.execute(
+            "CREATE TRIGGER reject_recovery BEFORE UPDATE OF recovery_turn_id ON conversations "
+            "BEGIN SELECT RAISE(ABORT, '(FAKE) lease update rejected'); END"
+        )
+    with pytest.raises(sqlite3.IntegrityError, match="lease update rejected"):
+        conversation.record_agent_continuation(
+            turn_id="turn_atomic_terminal_continuation",
+            status="failed",
+            event_type="error",
+            summary="(FAKE) cleanup required",
+            detail={"agent_continuation": True},
+            quarantine=True,
+        )
+    assert conversation.turn_record("turn_atomic_terminal_continuation") is None
+    assert conversation.recovery_turn_id() is None
+    assert conversation.events_after(0) == []
+
+
+def test_cleanup_route_returns_conflict_until_recovery_succeeds_without_resubmission(tmp_path):
+    class CleanupGateway(FakeGateway):
+        cleanup_available = False
+
+        async def submit_turn(self, text, context):
+            self.submissions.append((text, context))
+            raise RuntimeError("(FAKE) acknowledgement lost")
+
+        async def recover_active_turn(self, stored_session_id, turn_id):
+            if not self.cleanup_available:
+                raise ConnectionError("(FAKE) cleanup unavailable")
+            await super().recover_active_turn(stored_session_id, turn_id)
+
+    gateway = CleanupGateway()
+    with TestClient(make_client(tmp_path, gateway).app, raise_server_exceptions=False) as client:
+        created = send_message(client).json()
+        url = turn_url(client, created["turn_id"], "cancel")
+        pending = client.post(url, headers=headers())
+        assert pending.status_code == 409
+        assert pending.json()["code"] == "http_409"
+        assert client.get("/v1/conversations/current", headers=headers()).json()[
+            "recovery_state"
+        ] == "quarantined"
+        assert len(gateway.submissions) == 1
+        gateway.cleanup_available = True
+        cleaned = client.post(url, headers=headers())
+        assert cleaned.status_code == 200
+        assert client.get("/v1/conversations/current", headers=headers()).json()[
+            "recovery_state"
+        ] == "ready"
+        assert len(gateway.submissions) == 1
 
 
 class FakeJobFacade:

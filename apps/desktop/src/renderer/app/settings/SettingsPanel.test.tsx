@@ -1,5 +1,6 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, expect, test, vi } from 'vitest'
+import { useState } from 'react'
 
 import type { CareerProfileBridge } from '../../../shared/contracts'
 import { SettingsPanel } from './SettingsPanel'
@@ -89,4 +90,44 @@ test('explains agent edit modes, changes trust as the user, and disconnects with
   fireEvent.click(screen.getByRole('button', { name: 'Confirm remove access Job Hunter' }))
   await waitFor(() => expect(disconnectConnectedAgent).toHaveBeenCalledWith('job-hunter'))
   await waitFor(() => expect(screen.queryByText('Job Hunter')).toBeNull())
+})
+
+function ModalHarness() {
+  const [open, setOpen] = useState(false)
+  return <><button onClick={() => setOpen(true)}>Open settings</button>{open ? <SettingsPanel activeAgentAvatarId="ninja" activeThemeId="graphite" mode="dark" onClose={() => setOpen(false)} onSelectAgentAvatar={() => {}} onSelectTheme={() => {}} /> : null}</>
+}
+
+test('settings confines keyboard focus, cancels with Escape, and restores the opener', async () => {
+  render(<ModalHarness />)
+  const opener = screen.getByRole('button', { name: 'Open settings' })
+  opener.focus()
+  fireEvent.click(opener)
+  const dialog = screen.getByRole('dialog', { name: 'Settings' })
+  const controls = within(dialog).getAllByRole('button')
+  const first = controls[0]!
+  const last = controls.at(-1)!
+  expect(document.activeElement).toBe(first)
+  first.focus()
+  expect(fireEvent.keyDown(first, { key: 'Tab', shiftKey: true })).toBe(false)
+  expect(document.activeElement).toBe(last)
+  expect(fireEvent.keyDown(last, { key: 'Tab' })).toBe(false)
+  expect(document.activeElement).toBe(first)
+  fireEvent.keyDown(document, { key: 'Escape' })
+  expect(screen.queryByRole('dialog')).toBeNull()
+  await waitFor(() => expect(document.activeElement).toBe(opener))
+})
+
+test('settings makes background siblings inert while preserving previously inert content', () => {
+  const preexisting = document.createElement('div')
+  preexisting.inert = true
+  document.body.append(preexisting)
+  try {
+    render(<ModalHarness />)
+    const opener = screen.getByRole('button', { name: 'Open settings' })
+    fireEvent.click(opener)
+    expect(opener.inert).toBe(true)
+    fireEvent.keyDown(document, { key: 'Escape' })
+    expect(opener.inert).toBe(false)
+    expect(preexisting.inert).toBe(true)
+  } finally { preexisting.remove() }
 })

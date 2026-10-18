@@ -19,8 +19,11 @@ function statusChangeError(error: unknown): string {
 export function useJobs(
   activeConversationId?: string | null,
   activeJobContext?: AgentSessionJobContext | null,
-  onJobContextChange?: (conversationId: string, context: AgentSessionJobContext) => void
+  onJobContextChange?: (conversationId: string, context: AgentSessionJobContext) => void,
+  onLocalJobContextChange?: (context: AgentSessionJobContext) => void,
+  connectivityState?: string
 ) {
+  const [allJobs, setAllJobs] = useState<JobListItem[]>([])
   const [jobs, setJobs] = useState<JobListItem[]>([])
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null)
   const [selectedJob, setSelectedJob] = useState<JobListItem | null>(null)
@@ -34,8 +37,23 @@ export function useJobs(
   const [feedback, setFeedback] = useState<string | null>(null)
 
   const bridge = useRef(window.jobos?.jobs).current
+  const controls = useRef({ query, sortMode, statusGroup })
+  controls.current = { query, sortMode, statusGroup }
+  const controlsKey = JSON.stringify([query, sortMode, statusGroup])
+  const currentControlsKey = useRef(controlsKey)
+  currentControlsKey.current = controlsKey
+  const listRequest = useRef(0)
+  const canonicalJobs = useRef(allJobs)
+  canonicalJobs.current = allJobs
+  const initializationRequest = useRef(0)
+  const currentScope = useRef({ activeConversationId, activeJobContext })
+  currentScope.current = { activeConversationId, activeJobContext }
+  const localSelectedJobId = useRef<string | null>(null)
+  const readyRef = useRef(ready)
+  readyRef.current = ready
   const detailRequest = useRef(0)
   const selectionRevision = useRef(0)
+  const sortRequest = useRef(0)
   const eventRefreshTimer = useRef<number | null>(null)
 
   const loadDetail = useCallback(async (jobId: string | null) => {
@@ -56,33 +74,38 @@ export function useJobs(
 
   const refresh = useCallback(async () => {
     if (!bridge) return
+    const request = ++listRequest.current
+    const key = currentControlsKey.current
+    const current = controls.current
     try {
-      const refreshed = await bridge.list(
-        sortMode,
-        query.trim() || undefined,
-        statusGroup || undefined
-      )
+      const canonicalRequest = bridge.list('manual')
+      const filteredRequest = current.sortMode === 'manual' && !current.query.trim() && !current.statusGroup
+        ? canonicalRequest
+        : bridge.list(current.sortMode, current.query.trim() || undefined, current.statusGroup || undefined)
+      const [canonical, refreshed] = await Promise.all([canonicalRequest, filteredRequest])
+      if (request !== listRequest.current || key !== currentControlsKey.current) return
+      canonicalJobs.current = canonical
+      setAllJobs(canonical)
       setJobs(refreshed)
-      setSelectedJobId(selectedId => {
-        setSelectedJob(current => selectedId
-          ? refreshed.find(job => job.jobId === selectedId) ?? current
-          : null)
-        return selectedId
-      })
       setError(null)
     } catch {
-      setError('Jobs unavailable')
+      if (request === listRequest.current && key === currentControlsKey.current) setError('Jobs unavailable')
     }
-  }, [bridge, query, sortMode, statusGroup])
+  }, [bridge])
 
   useEffect(() => {
-    const selected = activeJobContext?.selectedJobId ?? null
+    // A conversation context remains authoritative only for that conversation.
+    // Without one, the renderer may project its separate local workspace context.
+    const selected = activeConversationId || activeJobContext
+      ? activeJobContext?.selectedJobId ?? null
+      : localSelectedJobId.current
     setSelectedJobId(selected)
     setSelectedJob(current => selected
-      ? jobs.find(job => job.jobId === selected) ?? (current?.jobId === selected ? current : null)
+      ? allJobs.find(job => job.jobId === selected) ?? (current?.jobId === selected ? current : null)
       : null)
-    void loadDetail(selected)
-  }, [activeConversationId, activeJobContext?.selectedJobId, jobs, loadDetail])
+  }, [activeConversationId, activeJobContext?.selectedJobId, allJobs])
+
+  useEffect(() => { void loadDetail(selectedJobId) }, [loadDetail, selectedJobId])
 
   useEffect(() => {
     if (!bridge) return
@@ -102,39 +125,65 @@ export function useJobs(
       eventRefreshTimer.current = null
       unsubscribe()
     }
-  }, [bridge, jobs, loadDetail, refresh, selectedJobId])
+  }, [bridge, loadDetail, refresh, selectedJobId])
 
-  useEffect(() => {
+  const initialize = useCallback(async () => {
     if (!bridge) {
       setLoading(false)
       return
     }
-    let active = true
+    const request = ++initializationRequest.current
     const initialSelectionRevision = selectionRevision.current
-    bridge.getState().then(snapshot => {
-      if (!active) return
-      setJobs(snapshot.jobs)
-      if (selectionRevision.current === initialSelectionRevision && activeJobContext === undefined) {
+    const initialSortRequest = sortRequest.current
+    const initialListRevision = ++listRequest.current
+    setLoading(true)
+    try {
+      const snapshot = await bridge.getState()
+      if (request !== initializationRequest.current) return
+      const current = controls.current
+      if (initialListRevision === listRequest.current) {
+        canonicalJobs.current = snapshot.jobs
+        setAllJobs(snapshot.jobs)
+        if (!current.query.trim() && !current.statusGroup) setJobs(snapshot.jobs)
+      }
+      if (!readyRef.current && initialSortRequest === sortRequest.current) setSortMode(snapshot.sortMode)
+      if (selectionRevision.current === initialSelectionRevision
+        && currentScope.current.activeJobContext === undefined) {
+        localSelectedJobId.current = snapshot.selectedJobId
         setSelectedJobId(snapshot.selectedJobId)
         setSelectedJob(snapshot.jobs.find(job => job.jobId === snapshot.selectedJobId) ?? null)
-        void loadDetail(snapshot.selectedJobId)
       }
-      setSortMode(snapshot.sortMode)
-      setLoading(false)
       setReady(true)
-    }).catch(() => {
-      if (!active) return
-      setError('Jobs unavailable')
-      setLoading(false)
-    })
-    return () => { active = false }
-  }, [activeJobContext, bridge, loadDetail])
+      setError(null)
+    } catch {
+      if (request === initializationRequest.current) setError('Jobs unavailable')
+    } finally {
+      if (request === initializationRequest.current) setLoading(false)
+    }
+  }, [bridge])
+
+  useEffect(() => {
+    void initialize()
+    return () => { initializationRequest.current += 1; listRequest.current += 1; detailRequest.current += 1; selectionRevision.current += 1; sortRequest.current += 1 }
+  }, [initialize])
 
   useEffect(() => {
     if (!bridge || !ready) return
     const timeout = window.setTimeout(() => { void refresh() }, 120)
     return () => window.clearTimeout(timeout)
-  }, [bridge, ready, refresh])
+  }, [bridge, ready, controlsKey, refresh])
+
+  const retry = useCallback(async () => {
+    await initialize()
+    await refresh()
+  }, [initialize, refresh])
+
+  const previousConnectivity = useRef(connectivityState)
+  useEffect(() => {
+    const recovered = connectivityState === 'connected' && previousConnectivity.current !== 'connected'
+    previousConnectivity.current = connectivityState
+    if (recovered) void retry()
+  }, [connectivityState, retry])
 
   const selectJobForConversation = useCallback(async (conversationId: string, jobId: string) => {
     if (!bridge || !conversationId) {
@@ -146,34 +195,51 @@ export function useJobs(
     try {
       const context = await bridge.select(conversationId, jobId)
       onJobContextChange?.(conversationId, context)
-      const [snapshot, refreshed] = await Promise.all([
-        bridge.getState(),
-        bridge.list(sortMode, query.trim() || undefined, statusGroup || undefined)
-      ])
-      if (selectionRevision.current !== requestRevision) return true
-      setJobs(refreshed)
+      await refresh()
+      if (selectionRevision.current !== requestRevision || currentScope.current.activeConversationId !== conversationId) return true
       setSelectedJobId(jobId)
-      setSelectedJob(snapshot.jobs.find(job => job.jobId === jobId) ?? null)
-      setSortMode(snapshot.sortMode)
+      setSelectedJob(canonicalJobs.current.find(job => job.jobId === jobId) ?? null)
       setFeedback('Active job selected')
       setError(null)
       await loadDetail(jobId)
       return true
     } catch {
-      if (selectionRevision.current === requestRevision) setError('Selection failed')
+      if (selectionRevision.current === requestRevision && currentScope.current.activeConversationId === conversationId) setError('Selection failed')
       return false
     }
-  }, [bridge, loadDetail, onJobContextChange, query, sortMode, statusGroup])
+  }, [bridge, loadDetail, onJobContextChange, refresh])
 
-  const selectJob = useCallback(async (jobId: string) => (
-    activeConversationId ? selectJobForConversation(activeConversationId, jobId) : false
-  ), [activeConversationId, selectJobForConversation])
+  const selectJob = useCallback(async (jobId: string) => {
+    if (activeConversationId) return selectJobForConversation(activeConversationId, jobId)
+    if (!bridge) return false
+    const request = ++selectionRevision.current
+    try {
+      const job = allJobs.find(candidate => candidate.jobId === jobId) ?? await bridge.inspect(jobId)
+      if (request !== selectionRevision.current || currentScope.current.activeConversationId) return false
+      localSelectedJobId.current = jobId
+      const localContext = currentScope.current.activeJobContext
+      onLocalJobContextChange?.(localContext?.selectedJobId === jobId
+        ? localContext
+        : { selectedJobId: jobId, activeArtifactId: null, activeArtifactPage: 1, activeArtifactZoom: 1 })
+      setSelectedJobId(jobId)
+      setSelectedJob(job)
+      setFeedback('Active job selected')
+      setError(null)
+      await loadDetail(jobId)
+      return true
+    } catch {
+      if (request === selectionRevision.current && !currentScope.current.activeConversationId) setError('Selection failed')
+      return false
+    }
+  }, [activeConversationId, allJobs, bridge, loadDetail, onLocalJobContextChange, selectJobForConversation])
 
   const changeStatus = useCallback(async (jobId: string, status: JobStatus) => {
     if (!bridge) return
     try {
       const result = await bridge.updateStatus(jobId, status)
-      setJobs(current => current.map(job => job.jobId === jobId ? result.job : job))
+      listRequest.current += 1
+      setJobs(current => current.map(job => job.jobId === jobId ? result.job : job).filter(job => !statusGroup || job.statusGroup === statusGroup))
+      setAllJobs(current => current.map(job => job.jobId === jobId ? result.job : job))
       setSelectedJob(current => current?.jobId === jobId ? result.job : current)
       if (selectedJobId === jobId) void loadDetail(jobId)
       setFeedback(`Status changed to ${status}`)
@@ -181,17 +247,19 @@ export function useJobs(
     } catch (statusError) {
       setError(statusChangeError(statusError))
     }
-  }, [bridge, loadDetail, selectedJobId])
+  }, [bridge, loadDetail, selectedJobId, statusGroup])
 
   const changeSort = useCallback(async (sort: JobSortMode) => {
     if (!bridge) return
+    const request = ++sortRequest.current
     try {
       await bridge.setSort(sort)
+      if (request !== sortRequest.current) return
       setSortMode(sort)
       setFeedback(`Ordered by ${sort}`)
       setError(null)
     } catch {
-      setError('Ordering failed')
+      if (request === sortRequest.current) setError('Ordering failed')
     }
   }, [bridge])
 
@@ -199,7 +267,13 @@ export function useJobs(
     if (!bridge) return
     try {
       await bridge.removeDemo(jobId)
+      listRequest.current += 1
+      setAllJobs(current => current.filter(job => job.jobId !== jobId))
       setJobs(current => current.filter(job => job.jobId !== jobId))
+      if (localSelectedJobId.current === jobId) {
+        localSelectedJobId.current = null
+        onLocalJobContextChange?.({ selectedJobId: null, activeArtifactId: null, activeArtifactPage: 1, activeArtifactZoom: 1 })
+      }
       if (selectedJobId === jobId) {
         setSelectedJobId(null)
         setSelectedJob(null)
@@ -210,7 +284,7 @@ export function useJobs(
     } catch {
       setError('Demo removal failed')
     }
-  }, [bridge, selectedJobId])
+  }, [bridge, onLocalJobContextChange, selectedJobId])
 
   const reorder = useCallback(async (jobId: string, direction: -1 | 1) => {
     if (!bridge || sortMode !== 'manual' || query || statusGroup) return
@@ -223,7 +297,9 @@ export function useJobs(
     reordered.splice(target, 0, moved)
     try {
       await bridge.reorder(reordered.map(job => job.jobId))
+      listRequest.current += 1
       setJobs(reordered)
+      setAllJobs(reordered)
       setFeedback('Manual order saved')
       setError(null)
     } catch {
@@ -242,7 +318,9 @@ export function useJobs(
     reordered.splice(targetIndex, 0, moved)
     try {
       await bridge.reorder(reordered.map(job => job.jobId))
+      listRequest.current += 1
       setJobs(reordered)
+      setAllJobs(reordered)
       setFeedback('Manual order saved')
       setError(null)
     } catch {
@@ -251,6 +329,7 @@ export function useJobs(
   }, [bridge, jobs, query, sortMode, statusGroup])
 
   return {
+    allJobs,
     jobs,
     selectedJob,
     selectedJobDetail,
@@ -262,6 +341,7 @@ export function useJobs(
     ready,
     error,
     feedback,
+    retry,
     setQuery,
     setStatusGroup,
     selectJob,

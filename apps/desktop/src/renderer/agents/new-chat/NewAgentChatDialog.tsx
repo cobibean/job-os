@@ -1,6 +1,7 @@
 import { Bot, CircleAlert, X } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 
+import { useModalDialog } from '../../app/dialogs/useModalDialog'
 import type { AgentChatSelection } from '../../../shared/contracts'
 import type { useConnectedAgents } from '../connected-agents/useConnectedAgents'
 
@@ -21,6 +22,7 @@ export function NewAgentChatDialog({ connectedAgents, atMaximum, onArchiveCurren
   const [error, setError] = useState<string | null>(null)
   const firstControl = useRef<HTMLSelectElement>(null)
   const dialog = useRef<HTMLDivElement>(null)
+  useModalDialog(dialog, onClose, { initialFocusRef: firstControl })
   const agents = useMemo(() => snapshot?.agents.filter(agent => agent.lifecycle === 'connected' && agent.health.providerAvailable && agent.health.toolsAvailable) ?? [], [snapshot])
   const selected = agents.find(agent => agent.id === agentId)
   const catalog = agentId ? models[agentId] : undefined
@@ -31,7 +33,6 @@ export function NewAgentChatDialog({ connectedAgents, atMaximum, onArchiveCurren
       ? snapshot.defaultConnectedAgentId
       : agents[0]?.id ?? ''
     setAgentId(initial)
-    requestAnimationFrame(() => (firstControl.current ?? dialog.current)?.focus())
   }, [snapshot?.registryRevision])
 
   useEffect(() => {
@@ -71,16 +72,7 @@ export function NewAgentChatDialog({ connectedAgents, atMaximum, onArchiveCurren
 
   return (
     <div className="new-chat-backdrop" onMouseDown={event => { if (event.target === event.currentTarget) onClose() }}>
-      <div aria-labelledby="new-chat-title" aria-modal="true" className="new-chat-dialog" onKeyDown={event => {
-        if (event.key === 'Escape') { onClose(); return }
-        if (event.key !== 'Tab') return
-        const controls = [...(dialog.current?.querySelectorAll<HTMLElement>('button:not(:disabled), select:not(:disabled), [tabindex]:not([tabindex="-1"])') ?? [])]
-        if (!controls.length) return
-        const first = controls[0]!
-        const last = controls.at(-1)!
-        if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus() }
-        else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus() }
-      }} ref={dialog} role="dialog" tabIndex={-1}>
+      <div aria-labelledby="new-chat-title" aria-modal="true" className="new-chat-dialog" ref={dialog} role="dialog" tabIndex={-1}>
         <header><div><span className="settings-eyebrow">New Chat</span><h2 id="new-chat-title">Pick the agent for this chat</h2><p>This choice stays locked so the conversation never silently changes brains.</p></div><button aria-label="Close New Chat" onClick={onClose} type="button"><X aria-hidden="true" size={16} /></button></header>
         {atMaximum ? <div className="new-chat-limit" role="status"><CircleAlert aria-hidden="true" size={18} /><div><strong>Five chats are already open</strong><p>Archive the current chat first. Its history stays saved.</p><button onClick={onArchiveCurrent} type="button">Archive current chat</button></div></div> : (
           <>

@@ -44,6 +44,7 @@ const validExpectedProfileId = expectedProfileId && /^jprof_[a-f0-9]{32}$/.test(
 const bridge: JobOsRendererBridge = Object.freeze({
   setup: Object.freeze({
     get: () => ipcRenderer.invoke('jobos:setup:get'),
+    retryConnection: () => ipcRenderer.invoke('jobos:setup:retry-connection'),
     initialize: (resetDemo = false, confirmed = false) => (
       ipcRenderer.invoke('jobos:setup:initialize', resetDemo, confirmed)
     ),
@@ -263,6 +264,9 @@ const bridge: JobOsRendererBridge = Object.freeze({
     createBlank: (jobId: string, documentKey: DocumentKey) => ipcRenderer.invoke('jobos:docx:create-blank', jobId, documentKey),
     reload: (bindingId: string) => ipcRenderer.invoke('jobos:docx:reload', bindingId),
     save: (request: SaveDocxRequest) => ipcRenderer.invoke('jobos:docx:save', request),
+    export: (bindingId: string, expectedSha256: string) => ipcRenderer.invoke('jobos:docx:export', bindingId, expectedSha256),
+    open: (bindingId: string, expectedSha256: string) => ipcRenderer.invoke('jobos:docx:open', bindingId, expectedSha256),
+    reveal: (bindingId: string, expectedSha256: string) => ipcRenderer.invoke('jobos:docx:reveal', bindingId, expectedSha256),
     saveAs: (bindingId: string, bytes: ArrayBuffer) => ipcRenderer.invoke('jobos:docx:save-as', bindingId, bytes),
     createRecovery: (bindingId: string, reason: 'baseline' | 'autosave' | 'manual' | 'conflict' | 'agent') => ipcRenderer.invoke('jobos:docx:create-recovery', bindingId, reason),
     listRecoveries: (bindingId: string) => ipcRenderer.invoke('jobos:docx:list-recoveries', bindingId),

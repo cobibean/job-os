@@ -51,6 +51,30 @@ describe('trusted print HTML', () => {
     expect(html).toContain('class="explicit-page-break"')
   })
 
+  it('registers the footer before page content and preserves its column layout inside the running root', () => {
+    const document = documentFixture()
+    const html = renderEditableDocumentHtml(document)
+    const footerStart = html.indexOf('<footer class="jobos-print-footer">')
+    expect(footerStart).toBeGreaterThan(-1)
+    expect(footerStart).toBeLessThan(html.indexOf('<main>'))
+    expect(html).toContain('<header class="jobos-print-header"><div class="jobos-print-columns">')
+    expect(html).toContain('<footer class="jobos-print-footer"><div class="jobos-print-columns">')
+    expect(html).toContain('.jobos-print-columns{display:grid;width:100%;grid-template-columns:1fr 1fr 1fr;gap:12px;text-align:left}')
+    expect(html).toContain('.jobos-print-columns>span:nth-child(2){text-align:center}')
+    expect(html).toContain('.jobos-print-columns>span:last-child{text-align:right}')
+  })
+
+  it.each([
+    [true, false, '@page:first{@top-center{content:none}}'],
+    [false, true, '@page:first{@bottom-center{content:none}}'],
+    [true, true, '@page:first{@top-center{content:none}@bottom-center{content:none}}']
+  ])('keeps first-page header %s and footer %s settings independent', (header, footer, rule) => {
+    const document = documentFixture()
+    document.settings.header.firstPageDifferent = header as boolean
+    document.settings.footer.firstPageDifferent = footer as boolean
+    expect(renderEditableDocumentHtml(document)).toContain(rule as string)
+  })
+
   it('preserves text background color in authoritative PDF HTML', () => {
     const document = documentFixture()
     const paragraph = document.content.content?.[1]?.content?.[0]

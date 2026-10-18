@@ -581,6 +581,7 @@ export interface InstallationProfileListSnapshot {
 export interface SetupSnapshot {
   state: 'required' | 'working' | 'succeeded' | 'ready' | 'error'
   message: string
+  recovery?: boolean
 }
 
 export interface DiagnosticsSnapshot {
@@ -738,6 +739,7 @@ export type AgentSessionStreamUpdate =
 export interface JobOsRendererBridge {
   setup: {
     get: () => Promise<SetupSnapshot>
+    retryConnection: () => Promise<SetupSnapshot>
     initialize: (resetDemo?: boolean, confirmed?: boolean) => Promise<SetupSnapshot>
     restart: () => Promise<void>
   }

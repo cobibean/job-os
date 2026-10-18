@@ -366,5 +366,13 @@ export function projectConversation(entries: ConversationEvent[]): ProjectedConv
     }
   }
 
+  for (const turn of turns.values()) {
+    if (!terminalStates.has(turn.turnId)) continue
+    turn.activities = turn.activities.map(activity => (
+      ['queued', 'working', 'waiting'].includes(activity.state)
+        ? { ...activity, state: 'interrupted' }
+        : activity
+    ))
+  }
   return projected.sort((left, right) => left.eventId - right.eventId)
 }

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState, type SetStateAction } from 'react'
 
 import type {
   CareerProfileBridge,
@@ -58,7 +58,7 @@ function requestId(prefix: string): string {
 
 export function useCareerProfile(bridge: CareerProfileBridge) {
   const [current, setCurrent] = useState<WorkArrangementCurrent | null>(null)
-  const [draft, setDraft] = useState<WorkArrangementValue>(emptyValue)
+  const [draft, updateDraft] = useState<WorkArrangementValue>(emptyValue)
   const [history, setHistory] = useState<WorkArrangementHistory | null>(null)
   const [historyError, setHistoryError] = useState('')
   const [historyOpen, setHistoryOpen] = useState(false)
@@ -67,12 +67,41 @@ export function useCareerProfile(bridge: CareerProfileBridge) {
   const [conflict, setConflict] = useState<ConflictState | null>(null)
   const pendingSave = useRef<PendingMutation | null>(null)
   const pendingRestore = useRef<PendingMutation | null>(null)
+  const draftRef = useRef<WorkArrangementValue>(emptyValue)
+  const draftBaseline = useRef<WorkArrangementValue>(emptyValue)
+  const editingRevision = useRef<number | null>(null)
 
-  const applyCurrent = useCallback((value: WorkArrangementCurrent) => {
+  const setDraft = useCallback((action: SetStateAction<WorkArrangementValue>) => {
+    const next = typeof action === 'function' ? action(draftRef.current) : action
+    draftRef.current = next
+    updateDraft(next)
+  }, [])
+
+  const applyCurrent = useCallback((value: WorkArrangementCurrent, resetDraft = false) => {
     cacheCareerProfile(value)
     setCurrent(value)
-    setDraft(value.record?.value ?? emptyValue)
-  }, [])
+    const saved = value.record?.value ?? emptyValue
+    const previous = draftRef.current
+    const baseline = draftBaseline.current
+    const dirty = !resetDraft && (Object.keys(saved) as Array<keyof WorkArrangementValue>)
+      .some(field => previous[field] !== baseline[field])
+    if (!dirty) {
+      draftBaseline.current = saved
+      editingRevision.current = value.profileRevision
+      setDraft(saved)
+      return
+    }
+    setDraft({
+      mode: previous.mode !== baseline.mode ? previous.mode : saved.mode,
+      strength: previous.strength !== baseline.strength ? previous.strength : saved.strength,
+      note: previous.note !== baseline.note ? previous.note : saved.note
+    })
+    draftBaseline.current = {
+      mode: previous.mode !== baseline.mode ? baseline.mode : saved.mode,
+      strength: previous.strength !== baseline.strength ? baseline.strength : saved.strength,
+      note: previous.note !== baseline.note ? baseline.note : saved.note
+    }
+  }, [setDraft])
 
   const load = useCallback(async (showLoading = true) => {
     if (showLoading) setStatus('loading')
@@ -103,7 +132,7 @@ export function useCareerProfile(bridge: CareerProfileBridge) {
     targetProfileRevision?: number
   ) => {
     if (result.status === 'conflict') {
-      applyCurrent(result.current)
+      applyCurrent(result.current, true)
       setDraft(proposed)
       setHistory(null)
       setConflict({ current: result.current, operation, proposed, targetProfileRevision })
@@ -111,18 +140,19 @@ export function useCareerProfile(bridge: CareerProfileBridge) {
       setMessage('This preference changed somewhere else. Review the latest saved value before reapplying your change.')
       return false
     }
-    applyCurrent(result.current)
+    applyCurrent(result.current, true)
     setConflict(null)
     setHistory(null)
     setStatus('saved')
     setMessage(success)
     return true
-  }, [applyCurrent])
+  }, [applyCurrent, setDraft])
 
   const save = useCallback(async (successMessage = 'Saved.') => {
     if (!current) return false
     const proposed = { ...draft, note: draft.note?.trim() || null }
-    const signature = JSON.stringify({ expectedProfileRevision: current.profileRevision, value: proposed })
+    const expectedProfileRevision = editingRevision.current ?? current.profileRevision
+    const signature = JSON.stringify({ expectedProfileRevision, value: proposed })
     if (pendingSave.current?.signature !== signature) {
       pendingSave.current = { idempotencyKey: requestId('career_save'), signature }
     }
@@ -130,7 +160,7 @@ export function useCareerProfile(bridge: CareerProfileBridge) {
     setMessage('')
     try {
       const result = await bridge.saveWorkArrangement({
-        expectedProfileRevision: current.profileRevision,
+        expectedProfileRevision,
         idempotencyKey: pendingSave.current.idempotencyKey,
         value: proposed
       })
@@ -160,7 +190,7 @@ export function useCareerProfile(bridge: CareerProfileBridge) {
       ?? history?.revisions.find(revision => revision.profileRevision === targetProfileRevision)?.value
     if (!proposed) {
       setStatus('error')
-      setMessage('That earlier value is no longer available. Reload history and try again.')
+      setHistoryError('That earlier value is no longer available. Reload history and try again.')
       return false
     }
     const signature = JSON.stringify({ expectedProfileRevision: current.profileRevision, targetProfileRevision })
@@ -195,7 +225,7 @@ export function useCareerProfile(bridge: CareerProfileBridge) {
 
   const keepCurrent = useCallback(() => {
     if (!conflict) return
-    applyCurrent(conflict.current)
+    applyCurrent(conflict.current, true)
     setConflict(null)
     setStatus('ready')
     setMessage('Kept the latest saved preference.')

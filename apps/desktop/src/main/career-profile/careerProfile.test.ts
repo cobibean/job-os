@@ -6,6 +6,7 @@ import path from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { createMainCareerProfileClient } from './careerProfile.js'
+import { careerProfileContextConflictCode } from '../../shared/careerProfileContextErrors.js'
 
 const originalFetch = globalThis.fetch
 
@@ -340,6 +341,18 @@ describe('Career Profile desktop client', () => {
       contentHash: 'a'.repeat(64),
       profile: { authorityEpoch: 4, profileRevision: 7 }
     })
+  })
+
+  it('distinguishes confirmed access conflicts from an uncertain transport failure across IPC', async () => {
+    const request = {
+      expectedAuthorityEpoch: 4, expectedProfileRevision: 7, idempotencyKey: 'context-conflict-1',
+      mode: 'broader' as const, selectedAreas: [], selectedItemIds: []
+    }
+    globalThis.fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({ detail: 'Career Profile revision conflict' }), { status: 409 }))
+    await expect(client().updateCareerProfileContext('job-hunter', request)).rejects.toThrow(careerProfileContextConflictCode)
+    globalThis.fetch = vi.fn().mockRejectedValue(new Error('response lost'))
+    await expect(client().updateCareerProfileContext('job-hunter', request)).rejects.toThrow('response lost')
+    await expect(client().updateCareerProfileContext('job-hunter', request)).rejects.not.toThrow(careerProfileContextConflictCode)
   })
 
   it('atomically replaces an export through a private no-follow sibling and syncs its directory', async () => {

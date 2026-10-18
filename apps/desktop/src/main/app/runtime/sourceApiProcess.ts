@@ -14,23 +14,35 @@ export function createSourceApiProcess(dependencies: {
 
   const stop = async (): Promise<void> => {
     const active = child
-    child = null
-    if (!active || active.exitCode !== null) return
-    const exited = () => new Promise<void>(resolve => active.once('exit', () => resolve()))
-    active.kill()
-    await Promise.race([exited(), new Promise<void>(resolve => setTimeout(resolve, 2_000))])
-    if (active.exitCode === null) {
-      active.kill('SIGKILL')
-      await Promise.race([exited(), new Promise<void>(resolve => setTimeout(resolve, 2_000))])
+    if (!active) return
+    let exitObserved = false
+    const hasExited = () => exitObserved || active.exitCode !== null || active.signalCode !== null
+    if (hasExited()) { if (child === active) child = null; return }
+    let resolveExit!: () => void
+    const onExit = () => { exitObserved = true; resolveExit() }
+    const exited = new Promise<void>(resolve => { resolveExit = resolve; active.once('exit', onExit) })
+    const wait = async () => {
+      let timer: ReturnType<typeof setTimeout> | undefined
+      await Promise.race([exited, new Promise<void>(resolve => { timer = setTimeout(resolve, 2_000) })])
+      clearTimeout(timer)
     }
-    if (active.exitCode === null) throw new Error('Source JobOS API did not stop')
+    try {
+      active.kill()
+      await wait()
+      if (!hasExited()) {
+        active.kill('SIGKILL')
+        await wait()
+      }
+      if (!hasExited()) throw new Error('Source JobOS API did not stop')
+      if (child === active) child = null
+    } finally { active.removeListener('exit', onExit) }
   }
 
   return {
     start(runtime: DesktopRuntimeConfig): Promise<void> {
       const configPath = dependencies.getConfigPath()
       if (dependencies.isPackaged() || !configPath) return Promise.reject(new Error('Source API startup is unavailable'))
-      if (child && child.exitCode === null) return Promise.resolve()
+      if (child && child.exitCode === null && child.signalCode === null) return Promise.resolve()
       const address = new URL(runtime.apiBaseUrl)
       const uvExecutable = dependencies.environment.JOBOS_UV_EXECUTABLE ?? 'uv'
       const childEnvironment = { ...dependencies.environment }

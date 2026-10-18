@@ -30,6 +30,7 @@ export function ConnectedAgentsSettings({ state, onAgentsChanged }: ConnectedAge
   const [notice, setNotice] = useState<string | null>(null)
   const [modelId, setModelId] = useState('')
   const [effort, setEffort] = useState('')
+  const [modelLoad, setModelLoad] = useState<{ agentId: string; loading: boolean; error: string | null } | null>(null)
   const [auth, setAuth] = useState<{ transactionId: string; status: string; userCode: string | null; verificationUrl: string | null; errorCode?: string | null } | null>(null)
   const pendingAuthRef = useRef<string | null>(null)
   const disconnectDialog = useRef<HTMLDivElement>(null)
@@ -37,14 +38,26 @@ export function ConnectedAgentsSettings({ state, onAgentsChanged }: ConnectedAge
   const [disconnecting, setDisconnecting] = useState<{ agent: ConnectedAgentSummary; activeChats: number; lockedChats: number; defaultProfileIds: string[] } | null>(null)
   const selected = useMemo(() => snapshot?.agents.find(item => item.id === selectedId) ?? snapshot?.agents[0] ?? null, [selectedId, snapshot])
   const catalog = selected ? models[selected.id] : undefined
+  const catalogLoading = modelLoad?.agentId === selected?.id && modelLoad?.loading
+  const catalogError = modelLoad?.agentId === selected?.id ? modelLoad?.error : null
+
+  const loadCatalog = async (agentId: string, force = false) => {
+    setModelLoad({ agentId, loading: force || !models[agentId]?.live, error: null })
+    try {
+      const result = await loadModels(agentId, force)
+      setModelLoad({ agentId, loading: false, error: result.live ? null : 'Live models are unavailable. Refresh to try again.' })
+    } catch {
+      setModelLoad({ agentId, loading: false, error: 'Models could not load. Refresh to try again.' })
+    }
+  }
 
   useEffect(() => {
     if (!selected) return
     setSelectedId(selected.id)
     setModelId(selected.defaultModelId ?? '')
     setEffort(selected.defaultReasoningEffort ?? '')
-    if (selected.lifecycle === 'connected') void loadModels(selected.id).catch(() => undefined)
-  }, [selected?.id])
+    if (selected.lifecycle === 'connected') void loadCatalog(selected.id)
+  }, [selected?.id, selected?.lifecycle])
 
   useEffect(() => {
     if (!auth || auth.status !== 'login_pending' || !bridge) return
@@ -56,7 +69,7 @@ export function ConnectedAgentsSettings({ state, onAgentsChanged }: ConnectedAge
           setNotice('ChatGPT connected. Models and tools are ready to refresh.')
           void refresh()
           void onAgentsChanged?.()
-          if (selected) void loadModels(selected.id, true).catch(() => undefined)
+          if (selected) void loadCatalog(selected.id, true)
         } else if (value.status !== 'login_pending') {
           pendingAuthRef.current = null
           setNotice(authTerminalNotice(value.status, value.errorCode ?? null))
@@ -122,7 +135,12 @@ export function ConnectedAgentsSettings({ state, onAgentsChanged }: ConnectedAge
           <h3>Choose who works each chat</h3>
           <p>Agents are shared across this JobOS installation. New chats lock their agent and model so history stays honest.</p>
         </div>
-        <button aria-label="Refresh Connected Agents" className="settings-icon-button" disabled={loading} onClick={() => void (async () => { await refresh(); await onAgentsChanged?.() })()} type="button">
+        <button aria-label="Refresh Connected Agents" className="settings-icon-button" disabled={loading || busy !== null} onClick={() => void run('refresh', async () => {
+          const refreshed = await refresh()
+          const agent = refreshed?.agents.find(agent => agent.id === selected?.id) ?? refreshed?.agents[0] ?? selected
+          if (agent?.lifecycle === 'connected') await loadCatalog(agent.id, true)
+          await onAgentsChanged?.()
+        })} type="button">
           <RefreshCw aria-hidden="true" className={loading ? 'spin' : ''} size={16} />
         </button>
       </div>
@@ -169,12 +187,14 @@ export function ConnectedAgentsSettings({ state, onAgentsChanged }: ConnectedAge
               {auth?.status === 'login_pending' ? (
                 <div className="connected-agent-auth" role="status"><LoaderCircle aria-hidden="true" className="spin" size={16} /><div><strong>Approve ChatGPT in your browser</strong><p>{auth.verificationUrl}</p><code>{auth.userCode}</code><button onClick={() => void run('cancel-auth', async () => { await bridge.cancelAuth(auth.transactionId); pendingAuthRef.current = null; setAuth(null); setNotice('ChatGPT sign in cancelled.') })} type="button">Cancel sign in</button></div></div>
               ) : null}
-              <label>Default model<select disabled={!catalog?.live || busy !== null} onChange={event => { setModelId(event.target.value); const option = catalog?.models.find(item => item.modelId === event.target.value); setEffort(option?.reasoningEfforts[0] ?? '') }} value={modelId}><option value="">Choose a live model</option>{catalog?.models.map(item => <option key={item.modelId} value={item.modelId}>{item.displayName}</option>)}</select></label>
+              {catalogLoading ? <p className="settings-callout" role="status">Loading models…</p> : null}
+              {catalogError ? <p className="settings-callout error" role="alert">{catalogError}</p> : null}
+              <label>Default model<select disabled={!catalog?.live || Boolean(catalogLoading || catalogError) || busy !== null} onChange={event => { setModelId(event.target.value); const option = catalog?.models.find(item => item.modelId === event.target.value); setEffort(option?.reasoningEfforts[0] ?? '') }} value={modelId}><option value="">Choose a live model</option>{catalog?.models.map(item => <option key={item.modelId} value={item.modelId}>{item.displayName}</option>)}</select></label>
               <label>Reasoning effort<select disabled={!modelId || busy !== null} onChange={event => setEffort(event.target.value)} value={effort}><option value="">Choose effort</option>{catalog?.models.find(item => item.modelId === modelId)?.reasoningEfforts.map(value => <option key={value} value={value}>{value}</option>)}</select></label>
               <div className="connected-agent-actions">
-                <button disabled={!modelId || !effort || busy !== null} onClick={saveDefaults} type="button">Save defaults</button>
+                <button disabled={!catalog?.live || Boolean(catalogLoading || catalogError) || !modelId || !effort || busy !== null} onClick={saveDefaults} type="button">Save defaults</button>
                 <button disabled={snapshot.defaultConnectedAgentId === selected.id || busy !== null} onClick={setProfileDefault} type="button">Use for New Chat</button>
-                <button disabled={busy !== null} onClick={() => void run('test', async () => { if (bridge) { const result = await bridge.test(selected.id); setNotice(result.health.label); await refresh(); await onAgentsChanged?.() } })} type="button">Test</button>
+                <button disabled={busy !== null} onClick={() => void run('test', async () => { if (bridge) { const result = await bridge.test(selected.id); setNotice(result.health.label); await refresh(); await loadCatalog(selected.id, true); await onAgentsChanged?.() } })} type="button">Test</button>
                 <button className="danger-link" disabled={busy !== null} onClick={inspectDisconnect} type="button"><Unplug aria-hidden="true" size={14} /> Disconnect</button>
               </div>
             </div>

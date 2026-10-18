@@ -157,6 +157,7 @@ export function useCareerProfileProduct(bridge: CareerProfileBridge) {
   const [status, setStatus] = useState<CareerProfileProductStatus>('loading')
   const [message, setMessage] = useState('')
   const currentRef = useRef<CareerProfileCurrent | null>(null)
+  const dataSourceRef = useRef<CareerProfileProductDataSource>('none')
   const pendingKeys = useRef(new Map<string, string>())
   const cacheWriteSequence = useRef(0)
   const headCheckRunning = useRef(false)
@@ -193,6 +194,7 @@ export function useCareerProfileProduct(bridge: CareerProfileBridge) {
   const useCurrent = useCallback((profile: CareerProfileCurrent, source: CareerProfileProductDataSource, persistLive = true) => {
     currentRef.current = profile
     setCurrent(profile)
+    dataSourceRef.current = source
     setDataSource(source)
     if (source === 'live' && persistLive) void persist(profile)
   }, [persist])
@@ -209,6 +211,7 @@ export function useCareerProfileProduct(bridge: CareerProfileBridge) {
     } catch {
       const existing = currentRef.current
       if (existing) {
+        dataSourceRef.current = 'stale'
         setDataSource('stale')
         setStatus('error')
         setMessage('The complete Career Profile could not refresh. JobOS is showing the last loaded profile and has disabled changes until reconnecting.')
@@ -236,7 +239,7 @@ export function useCareerProfileProduct(bridge: CareerProfileBridge) {
       try {
         const history = await bridge.getCareerProfileChangeHistory()
         const visible = currentRef.current
-        if (visible && history.profileRevision !== visible.profileRevision) await load(false)
+        if (visible && (dataSourceRef.current !== 'live' || history.profileRevision !== visible.profileRevision)) await load(false)
       } catch {
         // Collaboration refresh owns its own visible error; keep existing profile content.
       } finally {

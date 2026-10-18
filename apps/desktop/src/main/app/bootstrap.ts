@@ -22,7 +22,7 @@ import { DocxFileStore } from '../documents/docx/docxFileStore.js'
 import { LocalDocxBindingStore } from '../documents/docx/localDocxBindingStore.js'
 import { createMainEditableDocumentsClient } from '../documents/editable/editableDocuments.js'
 import { registerEditableDocumentsIpc } from '../documents/editable/editableDocumentsIpc.js'
-import { createInstallationProfilesClient, resolveProfileStorageIdentity } from '../installation-profiles/installationProfiles.js'
+import { createInstallationProfilesClient } from '../installation-profiles/installationProfiles.js'
 import { registerInstallationProfilesIpc } from '../installation-profiles/installationProfilesIpc.js'
 import { createProfileSwitchCoordinator } from '../installation-profiles/profileSwitchCoordinator.js'
 import { browserPartition, prepareProfileClientPaths, rendererPartition, type DesktopProfileStorageIdentity } from '../installation-profiles/profileStorage.js'
@@ -42,6 +42,7 @@ import { resolveDesktopPaths } from './runtime/desktopPaths.js'
 import { initializeDesktopRuntime, type DesktopRuntimeState } from './runtime/desktopRuntime.js'
 import { runtimeConfigPath } from './runtime/runtimeConfig.js'
 import { createSourceApiProcess } from './runtime/sourceApiProcess.js'
+import { resolveStartupProfile } from './runtime/startupProfile.js'
 import { applyDenyAllPermissionPolicy, assertTrustedRendererEvent } from './security/security.js'
 import { createMainWindow } from './window/mainWindow.js'
 import { activateVisibleWindow } from './window/mainWindowLifecycle.js'
@@ -107,6 +108,16 @@ export function createDesktopApplication() {
       configPath,
       configured: activeProfileStorageIdentity.kind !== 'recovery',
       runtimeCredentialAvailable: Boolean(desktopRuntimeState.runtime && desktopRuntimeState.deviceToken),
+      retryConnection: async () => {
+        const { runtime, deviceToken } = desktopRuntimeState
+        if (!runtime || !deviceToken) return false
+        const connectivity = await apiLifecycle.ensureApiReady(runtime, deviceToken)
+        const refreshed = { runtime, deviceToken, connectivity }
+        const identity = await resolveStartupProfile(refreshed)
+        if (identity.kind === 'recovery') return false
+        desktopRuntimeState = refreshed
+        return true
+      },
       runInitializer: sourceApi.runInitializer,
       restart: () => { app.relaunch(); app.quit() }
     })
@@ -173,6 +184,7 @@ export function createDesktopApplication() {
       docxWorkerManager = new DocxWorkerManager(ipcMain)
       docxDocumentsService = new DocxDocumentsService({
         dialog,
+        shell,
         bindings: new LocalDocxBindingStore(clientPaths.bindingsPath),
         files: new DocxFileStore({
           recoveryRoot: clientPaths.recoveryRoot,
@@ -302,15 +314,7 @@ export function createDesktopApplication() {
       mediaCaptureSpec = await loadMediaCaptureSpec(process.env.JOBOS_MEDIA_CAPTURE_SPEC)
       activeConfigPath = configPath
       desktopRuntimeState = await initializeDesktopRuntime({ configPath, environment: process.env, ensureApiReady: apiLifecycle.ensureApiReady })
-      const activeProfileId = desktopRuntimeState.connectivity.installationProfileId
-      if (desktopRuntimeState.runtime && desktopRuntimeState.deviceToken && activeProfileId) {
-        const profiles = await createInstallationProfilesClient({
-          baseUrl: desktopRuntimeState.runtime.apiBaseUrl,
-          deviceToken: desktopRuntimeState.deviceToken,
-          installationProfileId: activeProfileId
-        }).list()
-        activeProfileStorageIdentity = resolveProfileStorageIdentity(profiles, activeProfileId)
-      } else activeProfileStorageIdentity = { kind: 'recovery' }
+      activeProfileStorageIdentity = await resolveStartupProfile(desktopRuntimeState)
       await registerApplicationIpc(configPath)
       await createWindow()
     },

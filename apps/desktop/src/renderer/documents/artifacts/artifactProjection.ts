@@ -76,6 +76,17 @@ export function projectArtifactDocuments(artifacts: DocumentArtifact[]): Logical
   })
 }
 
+// Local bindings are navigable documents, but are never registered artifacts.
+export function includeBoundDocuments(documents: LogicalDocument[], boundKeys: DocumentKey[]): LogicalDocument[] {
+  return documentOrder.flatMap(documentKey => {
+    const document = documents.find(item => item.documentKey === documentKey)
+    if (document) return [document]
+    return boundKeys.includes(documentKey)
+      ? [{ documentKey, documentLabel: documentLabels[documentKey], revisions: [] }]
+      : []
+  })
+}
+
 export function selectArtifactRevision(documents: LogicalDocument[], artifactId: string | null): ArtifactSelection | null {
   if (!artifactId) return null
   for (const document of documents) {

@@ -24,7 +24,7 @@ function session(position: number, status?: 'running' | 'waiting'): AgentSession
       restoring: false,
       activeTurn: status ? { turnId: `turn-${position}`, status, cancelRequested: false } : null
     },
-    draft: '', operation: null, unreadTerminal: false, scrollTop: 0, pinnedToBottom: true
+    draft: '', draftRevision: 0, restoreFailed: false, operation: null, unreadTerminal: false, scrollTop: 0, pinnedToBottom: true
   }
 }
 
@@ -39,6 +39,8 @@ function controller(count = 3): AgentSessionsController {
     atMaximum: count === 5,
     select: vi.fn(() => true), selectByIndex: vi.fn(() => true), create: vi.fn(async () => true),
     createJobless: vi.fn(async () => 'conv_save'),
+    pendingArchiveId: null, dismissArchive: vi.fn(), confirmArchive: vi.fn(async () => true),
+    restoreConversation: vi.fn(async () => undefined), cleanupRecovery: vi.fn(async () => undefined),
     archive: vi.fn(async () => true), updateJobContext: vi.fn(), setDraft: vi.fn(), send: vi.fn(), stop: vi.fn(), review: vi.fn(), retry: vi.fn(), refreshAvailability: vi.fn(), saveScroll: vi.fn()
   }
 }
@@ -91,7 +93,7 @@ test('compact-width markup keeps every tab reachable with one roving tab stop', 
   const styles = resolveStylesheetImports(resolve(process.cwd(), 'src/renderer/styles.css')).source
   expect(styles).toMatch(/grid-template-columns:\s*repeat\(var\(--agent-session-count\), minmax\(36px, 1fr\)\)/)
   expect(styles).toMatch(/\.agent-session-tab\s*\{[^}]*min-width:\s*36px;[^}]*min-height:\s*40px;/s)
-  expect(styles).toMatch(/@media \(max-width: 720px\), \(min-resolution: 2dppx\)/)
+  expect(styles).not.toMatch(/min-resolution|device-pixel-ratio/)
   expect(styles).toMatch(/@container \(max-width: 285px\)[\s\S]*\.agent-session-toolbar\s*\{\s*flex-wrap:\s*wrap;/)
   expect(styles).toMatch(/\.agent-session-tabs\s*\{\s*flex-basis:\s*100%;/)
   expect(styles).not.toMatch(/\.agent-session-tabs\s*\{[^}]*overflow-x:\s*auto/s)
@@ -135,4 +137,17 @@ test('close is disabled while a new session is being created', () => {
   const close = screen.getByRole('button', { name: 'Close Session 1' }) as HTMLButtonElement
   expect(close.disabled).toBe(true)
   expect(close.title).toBe('Wait for the new session to finish opening')
+})
+
+
+test('compact session states use different glyphs for done and interrupted work', () => {
+  const value = controller(2)
+  for (const [id, state] of [['conv_1', 'completed'], ['conv_2', 'interrupted']] as const) {
+    value.sessions[id]!.conversation.entries = [{ eventId: 1, turnId: id, type: 'status', state, summary: state, detail: {}, occurredAt: '' }]
+    value.sessions[id]!.unreadTerminal = true
+  }
+  render(<AgentSessionTabs controller={value} />)
+  const done = screen.getByRole('tab', { name: 'Session 1, Done' }).querySelector('svg')!
+  const interrupted = screen.getByRole('tab', { name: 'Session 2, Interrupted' }).querySelector('svg')!
+  expect(done.innerHTML).not.toBe(interrupted.innerHTML)
 })

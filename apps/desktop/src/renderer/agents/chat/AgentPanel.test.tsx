@@ -314,13 +314,13 @@ test('runtime transport quarantine updates the tab and close gate until ready st
     kind: 'event', conversationId: 'conv_1', recoveryState: 'quarantined',
     event: event(1, {
       type: 'error', state: 'failed', summary: 'Transport lost',
-      detail: { reason: 'transport_lost', retry: true }
+      detail: { reason: 'transport_lost', retry: true, recovery_pending: true, recovery_action: 'cleanup' }
     })
   }))
   expect(screen.getByRole('tab', { name: 'Session 1, Quarantined' })).not.toBeNull()
   expect((screen.getByRole('button', { name: 'Close Session 1' }) as HTMLButtonElement).disabled).toBe(true)
   expect(screen.queryByRole('button', { name: 'Retry turn' })).toBeNull()
-  expect(screen.getByRole('button', { name: 'Confirm cleanup and retry turn' })).not.toBeNull()
+  expect(screen.getByRole('button', { name: 'Confirm agent cleanup' })).not.toBeNull()
 
   act(() => emit({
     kind: 'event', conversationId: 'conv_1', recoveryState: 'ready',
@@ -328,7 +328,7 @@ test('runtime transport quarantine updates the tab and close gate until ready st
   }))
   expect(screen.getByRole('tab', { name: 'Session 1, Idle' })).not.toBeNull()
   expect((screen.getByRole('button', { name: 'Close Session 1' }) as HTMLButtonElement).disabled).toBe(false)
-  expect(screen.queryByRole('button', { name: 'Confirm cleanup and retry turn' })).toBeNull()
+  expect(screen.queryByRole('button', { name: 'Confirm agent cleanup' })).toBeNull()
 })
 
 test('quarantined stock continuation offers cleanup without resurrecting a retry turn', async () => {
@@ -348,6 +348,8 @@ test('quarantined stock continuation offers cleanup without resurrecting a retry
       summary: 'Background work cleanup must be confirmed before new work',
       detail: {
         actionable: true,
+        recovery_pending: true,
+        recovery_action: 'cleanup',
         agent_continuation: true,
         continuation_id: 'deleg_stock_cleanup_1234',
         reason: 'transport_lost',
@@ -360,13 +362,15 @@ test('quarantined stock continuation offers cleanup without resurrecting a retry
     [quarantinedSummary],
     [{ ...snapshot(1, entries), recoveryState: 'quarantined' }]
   )
-  agent.retry.mockResolvedValue({ turnId: continuationTurnId, status: 'failed' })
+  agent.cancel.mockResolvedValue({ turnId: continuationTurnId, status: 'failed' })
 
   render(<Harness />)
   const cleanupButton = await screen.findByRole('button', { name: 'Confirm agent cleanup' })
+  agent.get.mockResolvedValue({ ...snapshot(1, entries), recoveryState: 'ready' })
   expect(screen.queryByRole('button', { name: 'Retry turn' })).toBeNull()
   fireEvent.click(cleanupButton)
-  await waitFor(() => expect(agent.retry).toHaveBeenCalledOnce())
+  await waitFor(() => expect(agent.cancel).toHaveBeenCalledWith('conv_1', continuationTurnId))
+  expect(agent.retry).not.toHaveBeenCalled()
   await waitFor(() => expect(screen.queryByRole('button', { name: 'Confirm agent cleanup' })).toBeNull())
   expect(screen.queryByText('Working')).toBeNull()
 })
@@ -468,4 +472,140 @@ test('preserves safe activity grouping and composer Enter behavior', async () =>
   fireEvent.change(composer, { target: { value: 'Send me' } })
   fireEvent.keyDown(composer, { key: 'Enter' })
   await waitFor(() => expect(agent.send).toHaveBeenCalledWith('conv_1', 'Send me', expect.any(String)))
+})
+
+test('a failed transcript restore offers a retry that preserves the composer', async () => {
+  const { agent } = install()
+  agent.get.mockRejectedValueOnce(new Error('Transcript unavailable'))
+  render(<Harness />)
+  await screen.findByText('Transcript unavailable')
+  const composer = screen.getByRole('textbox', { name: 'Message the agent' })
+  fireEvent.change(composer, { target: { value: 'Keep this text' } })
+  fireEvent.click(screen.getByRole('button', { name: 'Retry restoring conversation' }))
+  await waitFor(() => expect(screen.queryByText('Transcript unavailable')).toBeNull())
+  expect((composer as HTMLTextAreaElement).value).toBe('Keep this text')
+  expect(agent.get).toHaveBeenCalledTimes(2)
+})
+
+test('closing an unsent draft offers keep writing or explicit discard before archiving', async () => {
+  const { agent } = install()
+  render(<Harness />)
+  const composer = await screen.findByRole('textbox', { name: 'Message the agent' })
+  fireEvent.change(composer, { target: { value: 'Do not lose this instruction' } })
+  fireEvent.click(screen.getByRole('button', { name: 'Close Session 1' }))
+  expect(agent.archive).not.toHaveBeenCalled()
+  expect(await screen.findByRole('dialog', { name: 'Discard unsent message?' })).not.toBeNull()
+  fireEvent.click(screen.getByRole('button', { name: 'Keep writing' }))
+  expect((composer as HTMLTextAreaElement).value).toBe('Do not lose this instruction')
+  expect(screen.queryByRole('dialog')).toBeNull()
+  fireEvent.click(screen.getByRole('button', { name: 'Close Session 1' }))
+  fireEvent.click(await screen.findByRole('button', { name: 'Discard message and close chat' }))
+  await screen.findByRole('heading', { name: 'No open chats' })
+  expect(agent.archive).toHaveBeenCalledOnce()
+})
+
+test('authoritative cleanup uses cancel and preserves explicit retry false despite actionable true', async () => {
+  const failed = event(1, {
+    type: 'error', state: 'failed', summary: 'Submission outcome unknown',
+    detail: {
+      code: 'AGENT_INTERACTION_UNSUPPORTED', actionable: true,
+      recovery_pending: true, recovery_action: 'cleanup', reason: 'unsupported_interaction', retry: false
+    }
+  })
+  const quarantined = { ...summary(1), recoveryState: 'quarantined' as const }
+  const { agent, emit } = install([quarantined], [{ ...snapshot(1, [failed]), recoveryState: 'quarantined' }])
+  render(<Harness />)
+  const cleanupButton = await screen.findByRole('button', { name: 'Confirm agent cleanup' })
+  expect(screen.queryByRole('button', { name: 'Retry turn' })).toBeNull()
+  fireEvent.click(cleanupButton)
+  await waitFor(() => expect(agent.cancel).toHaveBeenCalledWith('conv_1', 'turn-1'))
+  expect(agent.retry).not.toHaveBeenCalled()
+  expect(agent.send).not.toHaveBeenCalled()
+  act(() => emit({
+    kind: 'event', conversationId: 'conv_1', recoveryState: 'ready',
+    event: event(2, { turnId: null, type: 'status', state: 'completed', summary: 'Cleanup confirmed', detail: { recovery_pending: false, transport_confirmed: true } })
+  }))
+  expect(screen.queryByRole('button', { name: 'Confirm agent cleanup' })).toBeNull()
+  expect(screen.queryByRole('button', { name: 'Retry turn' })).toBeNull()
+  expect(agent.retry).not.toHaveBeenCalled()
+})
+
+test.each(['completed', 'failed', 'interrupted'] as const)('a %s turn has no unfinished activity spinner', async state => {
+  install([summary(1)], [snapshot(1, [
+    event(1, { detail: { activity_id: 'tool-success' } }),
+    event(2, { detail: { activity_id: 'tool-success' }, state: 'completed' }),
+    event(3, { detail: { activity_id: 'tool-unfinished' } }),
+    event(4, { type: state === 'completed' ? 'assistant_message' : 'status', state, summary: 'Turn ended' })
+  ])])
+  render(<Harness />)
+  fireEvent.click(await screen.findByRole('button', { name: /^Show agent activity:/ }))
+  const rows = screen.getAllByTestId('agent-activity-row')
+  expect(rows).toHaveLength(2)
+  expect(rows[0]?.className).toContain('completed')
+  expect(rows[1]?.className).toContain('interrupted')
+  expect(rows.some(row => row.querySelector('.spin'))).toBe(false)
+})
+
+test('cleanup failure keeps quarantine and the draft until a separate successful cleanup and retry', async () => {
+  const failed = event(1, {
+    type: 'error', state: 'failed', summary: 'Remote cleanup required',
+    detail: { recovery_pending: true, recovery_action: 'cleanup', reason: 'transport_lost', retry: true }
+  })
+  const quarantined = { ...summary(1), recoveryState: 'quarantined' as const }
+  const { agent } = install([quarantined], [{ ...snapshot(1, [failed]), recoveryState: 'quarantined' }])
+  agent.cancel.mockRejectedValueOnce(new Error('Cleanup not confirmed'))
+  render(<Harness />)
+  const composer = await screen.findByRole('textbox', { name: 'Message the agent' })
+  fireEvent.change(composer, { target: { value: 'New instruction after cleanup' } })
+  fireEvent.click(await screen.findByRole('button', { name: 'Confirm agent cleanup' }))
+  await screen.findByText('Cleanup not confirmed')
+  expect(screen.getByRole('tab', { name: 'Session 1, Quarantined' })).not.toBeNull()
+  expect((composer as HTMLTextAreaElement).value).toBe('New instruction after cleanup')
+  expect(agent.retry).not.toHaveBeenCalled()
+  expect(agent.send).not.toHaveBeenCalled()
+  agent.get.mockResolvedValue(snapshot(1, [failed]))
+  fireEvent.click(screen.getByRole('button', { name: 'Confirm agent cleanup' }))
+  const retry = await screen.findByRole('button', { name: 'Retry turn' })
+  expect(agent.retry).not.toHaveBeenCalled()
+  fireEvent.click(retry)
+  await waitFor(() => expect(agent.retry).toHaveBeenCalledWith('conv_1', 'turn-1', expect.any(String)))
+  expect(agent.send).not.toHaveBeenCalled()
+})
+
+test.each(['success', 'failure'] as const)('pending archive blocks dismissal and draft edits until the request settles with %s', async outcome => {
+  const { agent } = install()
+  let settle!: () => void
+  agent.archive.mockReturnValue(new Promise<void>((resolve, reject) => {
+    settle = () => outcome === 'success' ? resolve() : reject(new Error('Close response unavailable'))
+  }))
+  render(<Harness />)
+  const composer = await screen.findByRole('textbox', { name: 'Message the agent' }) as HTMLTextAreaElement
+  fireEvent.change(composer, { target: { value: 'Approved discard draft' } })
+  fireEvent.click(screen.getByRole('button', { name: 'Close Session 1' }))
+  fireEvent.click(await screen.findByRole('button', { name: 'Discard message and close chat' }))
+  await waitFor(() => expect(agent.archive).toHaveBeenCalledOnce())
+  const dialog = screen.getByRole('dialog', { name: 'Discard unsent message?' })
+  expect((screen.getByRole('button', { name: 'Keep writing' }) as HTMLButtonElement).disabled).toBe(true)
+  expect(composer.disabled).toBe(true)
+  expect(screen.getByText('Closing chat…')).not.toBeNull()
+  fireEvent.click(screen.getByRole('button', { name: 'Keep writing' }))
+  fireEvent.keyDown(document, { key: 'Escape' })
+  fireEvent.click(document.querySelector<HTMLButtonElement>('.career-product-backdrop')!)
+  fireEvent.change(composer, { target: { value: 'New text cannot enter a closing chat' } })
+  expect(screen.getByRole('dialog', { name: 'Discard unsent message?' })).toBe(dialog)
+  expect(composer.value).toBe('Approved discard draft')
+  await act(async () => { settle(); await Promise.resolve() })
+  if (outcome === 'success') {
+    await screen.findByRole('heading', { name: 'No open chats' })
+    expect(screen.queryByRole('dialog')).toBeNull()
+  } else {
+    expect(screen.getByRole('alert').textContent).toContain('Close was not confirmed')
+    expect((screen.getByRole('button', { name: 'Keep writing' }) as HTMLButtonElement).disabled).toBe(false)
+    fireEvent.click(screen.getByRole('button', { name: 'Keep writing' }))
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(composer.disabled).toBe(false)
+    expect(composer.value).toBe('Approved discard draft')
+    fireEvent.change(composer, { target: { value: 'Continue after an unconfirmed close' } })
+    expect(composer.value).toBe('Continue after an unconfirmed close')
+  }
 })

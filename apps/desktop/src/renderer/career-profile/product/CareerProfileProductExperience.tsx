@@ -48,6 +48,7 @@ export function CareerProfileProductExperience({
       {product.status === 'error' && !product.current ? <div className="career-product-recover" role="alert"><p>{product.message}</p><button className="career-secondary-button" onClick={() => { void product.load() }} type="button">Retry complete profile</button></div> : null}
       {product.current && !online ? <p className="career-feedback career-product-message error" role="status">Offline — saved complete-profile content is still readable. Reconnect before changing, importing, exporting, or restoring it.</p> : null}
       {product.message && product.current && product.status !== 'saving' && !evidenceMessageHandledLocally ? <p className={`career-feedback career-product-message ${product.status}`} role={product.status === 'error' || product.status === 'conflict' ? 'alert' : 'status'}>{product.message}</p> : null}
+      {product.current && product.readOnly ? <button className="career-secondary-button" disabled={!online || product.status === 'loading'} onClick={() => { void product.load() }} type="button">Reconnect complete profile</button> : null}
 
       {product.current ? (
         <>

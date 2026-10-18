@@ -48,7 +48,7 @@ const normalizedDetailKeys = new Set([
   'activity_id', 'phase', 'type', 'name', 'tool_name', 'status', 'operation', 'path', 'file',
   'artifact', 'command', 'result', 'message', 'question', 'prompt', 'choices', 'actionable',
   'retry', 'redacted', 'redactions', 'transport_confirmed', 'text',
-  'agent_connection', 'recovery_pending', 'approval_id'
+  'agent_connection', 'recovery_pending', 'recovery_action', 'reason', 'agent_continuation', 'code', 'approval_id'
 ])
 const MAX_ASSISTANT_TRANSCRIPT_DETAIL = 100_001
 const conversationPattern = /^conv_[A-Za-z0-9_-]{1,128}$/

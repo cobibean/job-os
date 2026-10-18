@@ -155,29 +155,52 @@ export class DocxFileStore {
       const current = await this.read(filePath)
       if (current.sha256 !== expectedSha256) throw new DocxExternalChangeError()
       const recovery = await this.createRecovery(bindingId, filePath, current.bytes, reason)
-      const temporary = this.#temporarySibling(filePath)
-      const handle = await open(temporary, 'wx', current.mode & 0o777)
-      try {
-        await handle.writeFile(bytes)
-        await handle.sync()
-      } catch (error) {
-        await unlink(temporary).catch(() => undefined)
-        throw error
-      } finally {
-        await handle.close()
-      }
-      try {
-        await this.#beforeAtomicReplace?.()
-        const replaced = await this.#atomicReplace(filePath, temporary, expectedSha256)
-        if (!replaced) throw new DocxExternalChangeError()
-        if (!this.#atomicReplaceSynchronizesDirectory) await this.#syncCanonicalDirectory(filePath)
-        const saved = await this.read(filePath)
-        if (saved.sha256 !== sha256(bytes)) throw new DocxExternalChangeError()
-        return { file: saved, recovery }
-      } finally {
-        await unlink(temporary).catch(() => undefined)
-      }
+      return { file: await this.#replaceFile(filePath, expectedSha256, bytes, current.mode), recovery }
     })
+  }
+
+  // Export destinations do not belong to the source document's recovery history.
+  async exportCopy(filePath: string, bytes: Uint8Array): Promise<ReadDocxResult> {
+    this.assertWritablePath(filePath)
+    await this.#validate(bytes)
+    let expectedSha256: string
+    try {
+      expectedSha256 = (await this.read(filePath)).sha256
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+      const written = await this.writeNew(filePath, bytes)
+      if (written.sha256 !== sha256(bytes)) throw new DocxExternalChangeError()
+      return written
+    }
+    return this.#serialize(filePath, async () => {
+      const current = await this.read(filePath)
+      if (current.sha256 !== expectedSha256) throw new DocxExternalChangeError()
+      return this.#replaceFile(filePath, expectedSha256, bytes, current.mode)
+    })
+  }
+
+  async #replaceFile(filePath: string, expectedSha256: string, bytes: Uint8Array, mode: number): Promise<ReadDocxResult> {
+    const temporary = this.#temporarySibling(filePath)
+    const handle = await open(temporary, 'wx', mode & 0o777)
+    try {
+      await handle.writeFile(bytes)
+      await handle.sync()
+    } catch (error) {
+      await unlink(temporary).catch(() => undefined)
+      throw error
+    } finally {
+      await handle.close()
+    }
+    try {
+      await this.#beforeAtomicReplace?.()
+      if (!await this.#atomicReplace(filePath, temporary, expectedSha256)) throw new DocxExternalChangeError()
+      if (!this.#atomicReplaceSynchronizesDirectory) await this.#syncCanonicalDirectory(filePath)
+      const saved = await this.read(filePath)
+      if (saved.sha256 !== sha256(bytes)) throw new DocxExternalChangeError()
+      return saved
+    } finally {
+      await unlink(temporary).catch(() => undefined)
+    }
   }
 
   async createRecovery(

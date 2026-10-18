@@ -1,9 +1,13 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { useState } from 'react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import type { DocumentArtifact, JobArtifactsState, JobListItem, JobOsRendererBridge } from '../../../shared/contracts'
 import type { DocxExternalChangeEvent, DocxOpenResult } from '../../../shared/docxDocuments'
 import { DocumentWorkspace } from './DocumentWorkspace'
+import { useJobs } from '../../jobs/useJobs'
+import { useWorkspace } from '../../workspace/useWorkspace'
+import type { AgentSessionJobContext } from '../../../shared/contracts'
 
 const projectionCalls = vi.hoisted(() => ({ group: vi.fn() }))
 
@@ -163,6 +167,9 @@ function installDocxDocuments(overrides: Partial<JobOsRendererBridge['docxDocume
     reload: vi.fn(async () => opened),
     save: vi.fn(),
     saveAs: vi.fn(),
+    export: vi.fn(async () => 'Exported current DOCX'),
+    open: vi.fn(async () => 'Opened current DOCX'),
+    reveal: vi.fn(async () => 'Revealed current DOCX'),
     createRecovery: vi.fn(),
     listRecoveries: vi.fn(async () => []),
     restoreRecovery: vi.fn(),
@@ -200,6 +207,122 @@ describe('trusted document workspace', () => {
     expect(await screen.findByText('Local documents loaded; optional artifact refresh is unavailable')).not.toBeNull()
     expect(screen.getByText('Newest successful revision · render-2 · source source-2')).not.toBeNull()
     expect(screen.queryByText(/Document request failed/)).toBeNull()
+  })
+
+  it.each(['resume', 'cover_letter', 'references'] as const)('keeps a binding-only %s available after remount', async documentKey => {
+    const empty = state([])
+    installDocuments({ list: vi.fn(async () => empty), refresh: vi.fn(async () => empty) })
+    const installed = installDocxDocuments()
+    const opened = { ...installed.opened, binding: { ...installed.opened.binding, documentKey } }
+    vi.mocked(installed.docxDocuments.listBindings).mockResolvedValue([opened.binding])
+    vi.mocked(installed.docxDocuments.openBound).mockResolvedValue(opened)
+    const element = <DocumentWorkspace hydrated job={job} onViewChange={vi.fn()} restoredArtifactId={null} restoredPage={1} restoredZoom={1} />
+    const view = render(element)
+    expect(await screen.findByText(`Current editable DOCX · ${opened.binding.filename} · ${opened.binding.sha256}`)).not.toBeNull()
+    expect(screen.getByText('Local DOCX only. No published PDF/DOCX pair.')).not.toBeNull()
+    expect(screen.getByText('1 of 1')).not.toBeNull()
+    view.unmount()
+    render(element)
+    await screen.findByText(`Current editable DOCX · ${opened.binding.filename} · ${opened.binding.sha256}`)
+  })
+
+  it('keeps a bound cover letter beside a registered resume without inventing an artifact', async () => {
+    installDocuments()
+    const installed = installDocxDocuments()
+    const opened = { ...installed.opened, binding: { ...installed.opened.binding, documentKey: 'cover_letter' as const, documentLabel: 'Cover Letter' as const } }
+    vi.mocked(installed.docxDocuments.listBindings).mockResolvedValue([opened.binding])
+    vi.mocked(installed.docxDocuments.openBound).mockResolvedValue(opened)
+    const onViewChange = vi.fn()
+    render(<DocumentWorkspace hydrated job={job} onViewChange={onViewChange} restoredArtifactId={null} restoredPage={1} restoredZoom={1} />)
+    await screen.findByText('1 of 2')
+    fireEvent.click(screen.getByRole('button', { name: 'Next document' }))
+    await screen.findByText(`Current editable DOCX · ${opened.binding.filename} · ${opened.binding.sha256}`)
+    expect(screen.getByText('2 of 2')).not.toBeNull()
+    expect(onViewChange).toHaveBeenLastCalledWith(null, 1, 1)
+  })
+
+  it('uses the displayed binding and hash for actions and labels historical packet exports', async () => {
+    const pdf = artifact()
+    const docx = artifact({ artifactId: 'art_DOCXABCDEFGHIJKLMNOPQRST', mediaType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', sha256: 'a'.repeat(64), filename: 'packet.docx', previewAvailable: false })
+    const packet = state([pdf, docx])
+    const documents = installDocuments({ list: vi.fn(async () => packet), refresh: vi.fn(async () => packet) })
+    const installed = installDocxDocuments()
+    vi.mocked(installed.docxDocuments.listBindings).mockResolvedValue([installed.opened.binding])
+    vi.mocked(installed.docxDocuments.openBound).mockResolvedValue(installed.opened)
+    render(<DocumentWorkspace hydrated job={job} previewMode="docx" onViewChange={vi.fn()} restoredArtifactId={null} restoredPage={1} restoredZoom={1} />)
+    await screen.findByText(`Current editable DOCX · ${installed.opened.binding.filename} · ${installed.opened.binding.sha256}`)
+    expect(screen.getByText('Local edits differ from this published packet. Its PDF does not include these edits.')).not.toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Open' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Reveal' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Export' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Export current DOCX' }))
+    for (const action of ['open', 'reveal', 'export'] as const) await waitFor(() => expect(installed.docxDocuments[action]).toHaveBeenCalledWith(installed.opened.binding.bindingId, installed.opened.binding.sha256))
+    expect(documents.open).not.toHaveBeenCalled()
+    expect(documents.reveal).not.toHaveBeenCalled()
+    expect(documents.export).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: 'Export' }))
+    expect(screen.getByRole('menuitem', { name: 'Export published PDF · render-2' })).not.toBeNull()
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Export published DOCX · render-2' }))
+    await waitFor(() => expect(documents.export).toHaveBeenCalledWith(docx.artifactId))
+  })
+
+  it('opens the displayed packet DOCX rather than its representative PDF', async () => {
+    const pdf = artifact()
+    const docx = artifact({ artifactId: 'art_DOCXABCDEFGHIJKLMNOPQRST', mediaType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', filename: 'packet.docx', previewAvailable: false })
+    const packet = state([pdf, docx])
+    const documents = installDocuments({ list: vi.fn(async () => packet), refresh: vi.fn(async () => packet) })
+    render(<DocumentWorkspace hydrated job={job} previewMode="docx" onViewChange={vi.fn()} restoredArtifactId={null} restoredPage={1} restoredZoom={1} />)
+    await screen.findByText(`Packet DOCX · packet.docx · ${docx.artifactId}`)
+    fireEvent.click(screen.getByRole('button', { name: 'Open' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Reveal' }))
+    await waitFor(() => expect(documents.open).toHaveBeenCalledWith(docx.artifactId))
+    expect(documents.reveal).toHaveBeenCalledWith(docx.artifactId)
+  })
+
+  it('keeps the selected older packet banner, exports, mismatch notice, and approval aligned beside a newer pair', async () => {
+    const olderPdf = artifact({ artifactRevision: 'older-pdf', sourceRevision: 'older-source', isCurrent: false, renderSequence: 2 })
+    const olderDocx = artifact({ artifactId: 'art_OLDERDOCXABCDEFGHIJKLMNO', artifactRevision: 'older-docx', sourceRevision: 'older-source', sha256: 'b'.repeat(64), mediaType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', previewAvailable: false, isCurrent: false, renderSequence: 1 })
+    const newerPdf = artifact({ artifactId: 'art_NEWERPDFABCDEFGHIJKLMNOP', artifactRevision: 'newer-pdf', sourceRevision: 'newer-source', renderSequence: 4 })
+    const newerDocx = artifact({ artifactId: 'art_NEWERDOCXABCDEFGHIJKLMNO', artifactRevision: 'newer-docx', sourceRevision: 'newer-source', sha256: 'c'.repeat(64), mediaType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', previewAvailable: false, renderSequence: 3 })
+    const registry = state([newerPdf, newerDocx, olderPdf, olderDocx])
+    const documents = installDocuments({ list: vi.fn(async () => registry), refresh: vi.fn(async () => registry), approve: vi.fn(async () => registry) })
+    const installed = installDocxDocuments()
+    vi.mocked(installed.docxDocuments.listBindings).mockResolvedValue([installed.opened.binding])
+    render(<DocumentWorkspace hydrated job={job} onViewChange={vi.fn()} restoredArtifactId={olderPdf.artifactId} restoredPage={1} restoredZoom={1} />)
+    await screen.findByText('Artifact registry is current')
+    await waitFor(() => expect(installed.docxDocuments.listBindings).toHaveBeenCalled())
+    expect(screen.getByText('Published packet · older-pdf')).not.toBeNull()
+    expect(screen.queryByText('Local edits differ from this published packet. Its PDF does not include these edits.')).toBeNull()
+    const selector = screen.getByRole('combobox', { name: 'Resume revision' }) as HTMLSelectElement
+    expect(selector.value).toBe(olderPdf.artifactId)
+    fireEvent.click(screen.getByRole('button', { name: 'Export' }))
+    expect(screen.getByRole('menuitem', { name: 'Export published PDF · older-pdf' })).not.toBeNull()
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Export published DOCX · older-docx' }))
+    await waitFor(() => expect(documents.export).toHaveBeenCalledWith(olderDocx.artifactId))
+    fireEvent.click(screen.getByRole('button', { name: 'Approve this revision' }))
+    await waitFor(() => expect(documents.approve).toHaveBeenCalledWith(job.jobId, olderPdf.artifactId))
+    fireEvent.change(selector, { target: { value: newerPdf.artifactId } })
+    expect(await screen.findByText('Published packet · newer-pdf')).not.toBeNull()
+    expect(screen.getByText('Local edits differ from this published packet. Its PDF does not include these edits.')).not.toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Export' }))
+    expect(screen.getByRole('menuitem', { name: 'Export published DOCX · newer-docx' })).not.toBeNull()
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Export published PDF · newer-pdf' }))
+    await waitFor(() => expect(documents.export).toHaveBeenCalledWith(newerPdf.artifactId))
+  })
+
+  it('approves the exact cover letter PDF and keeps approval after reload', async () => {
+    const cover = artifact({ documentKey: 'cover_letter', documentLabel: 'Cover Letter' })
+    let current = state([cover])
+    const documents = installDocuments({ list: vi.fn(async () => current), refresh: vi.fn(async () => current), approve: vi.fn(async () => { current = state([{ ...cover, isApproved: true }]); return current }) })
+    const element = <DocumentWorkspace hydrated job={job} onViewChange={vi.fn()} restoredArtifactId={null} restoredPage={1} restoredZoom={1} />
+    const view = render(element)
+    await screen.findByText('PDF bytes 2 · page 1 at 100%')
+    fireEvent.click(screen.getByRole('button', { name: 'Approve this revision' }))
+    await waitFor(() => expect(documents.approve).toHaveBeenCalledWith(job.jobId, cover.artifactId))
+    expect(await screen.findByRole('button', { name: 'Approved revision' })).not.toBeNull()
+    view.unmount()
+    render(element)
+    expect(await screen.findByRole('button', { name: 'Approved revision' })).not.toBeNull()
   })
 
   it('labels each document action as an editor entry point', async () => {
@@ -306,6 +429,26 @@ describe('trusted document workspace', () => {
     expect(projectionCalls.group).not.toHaveBeenCalled()
   })
 
+  it('confines the DOCX source choice and cancels it without creating a file', async () => {
+    installDocuments()
+    const { docxDocuments } = installDocxDocuments()
+    render(<DocumentWorkspace hydrated job={job} onOpenEditor={vi.fn()} onViewChange={vi.fn()} restoredArtifactId={null} restoredPage={1} restoredZoom={1} />)
+    const opener = await screen.findByRole('button', { name: 'New blank DOCX' })
+    opener.focus()
+    fireEvent.click(opener)
+    const dialog = screen.getByRole('dialog', { name: 'Create or choose a DOCX' })
+    const controls = within(dialog).getAllByRole('button')
+    expect(dialog.contains(document.activeElement)).toBe(true)
+    controls[0]!.focus()
+    expect(fireEvent.keyDown(controls[0]!, { key: 'Tab', shiftKey: true })).toBe(false)
+    expect(document.activeElement).toBe(controls.at(-1))
+    fireEvent.keyDown(document, { key: 'Escape' })
+    expect(screen.queryByRole('dialog')).toBeNull()
+    await waitFor(() => expect(document.activeElement).toBe(opener))
+    expect(docxDocuments.chooseFile).not.toHaveBeenCalled()
+    expect(docxDocuments.createBlank).not.toHaveBeenCalled()
+  })
+
   it('approves the exact visible successful revision and shows its durable state', async () => {
     const pending = artifact()
     const approved = artifact({ isApproved: true })
@@ -402,6 +545,65 @@ describe('trusted document workspace', () => {
     expect(documents.reveal).toHaveBeenCalledWith(docx.artifactId)
     expect(documents.export).toHaveBeenCalledWith(docx.artifactId)
     expect(documents.loadPdf).not.toHaveBeenCalled()
+  })
+
+  it('reloads newly published local revisions when the optional provider refresh is unavailable', async () => {
+    const older = artifact({ isCurrent: false })
+    const newer = artifact({ artifactId: 'art_LOCALNEWPDFABCDEFGHIJKLM', sourceRevision: 'local-source-3', artifactRevision: 'local-render-3', renderSequence: 3 })
+    const newerDocx = artifact({ ...newer, artifactId: 'art_LOCALNEWDOCXABCDEFGHIJKL', mediaType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', previewAvailable: false })
+    const initial = state([older])
+    const updated = state([older, newer, newerDocx])
+    const documents = installDocuments({
+      list: vi.fn().mockResolvedValueOnce(initial).mockResolvedValue(updated),
+      refresh: vi.fn(async () => { throw new Error('capability_unavailable') })
+    })
+    render(<DocumentWorkspace hydrated job={job} onViewChange={vi.fn()} restoredArtifactId={older.artifactId} restoredPage={2} restoredZoom={1.4} />)
+    await screen.findByText('Local documents loaded; optional artifact refresh is unavailable')
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh' }))
+    await screen.findByText('Local artifacts reloaded; optional artifact refresh is unavailable')
+    expect(documents.list).toHaveBeenCalledTimes(2)
+    const selector = screen.getByRole('combobox', { name: 'Resume revision' }) as HTMLSelectElement
+    expect(selector.value).toBe(older.artifactId)
+    expect(Array.from(selector.options).some(option => option.textContent?.includes('local-render-3'))).toBe(true)
+    expect(screen.getByText('PDF bytes 2 · page 2 at 140%')).not.toBeNull()
+    expect(screen.queryByText(/capability_unavailable/)).toBeNull()
+    fireEvent.change(selector, { target: { value: newer.artifactId } })
+    fireEvent.click(screen.getByRole('button', { name: 'Export' }))
+    expect(screen.getByRole('menuitem', { name: 'Export DOCX' })).not.toBeNull()
+  })
+
+  it.each(['list', 'refresh'] as const)('ignores a pending manual %s result after switching jobs', async phase => {
+    const older = artifact()
+    const newer = artifact({ artifactId: 'art_LATELOCALPDFABCDEFGHIJKL', sourceRevision: 'late-source', artifactRevision: 'late-render', renderSequence: 3 })
+    const initial = state([older])
+    const updated = state([older, newer])
+    const otherArtifact = artifact({ artifactId: 'art_OTHERJOBPDFABCDEFGHIJKLM', jobId: otherJob.jobId, filename: 'acme-resume.pdf' })
+    const other = { ...state([otherArtifact]), jobId: otherJob.jobId }
+    const pending = deferred<JobArtifactsState>()
+    let firstList = true
+    let firstRefresh = true
+    const documents = installDocuments({
+      list: vi.fn(async owner => {
+        if (owner !== job.jobId) return other
+        if (firstList) { firstList = false; return initial }
+        return phase === 'list' ? pending.promise : updated
+      }),
+      refresh: vi.fn(async owner => {
+        if (owner !== job.jobId) return other
+        if (firstRefresh) { firstRefresh = false; return initial }
+        return phase === 'refresh' ? pending.promise : updated
+      })
+    })
+    const view = render(<DocumentWorkspace hydrated job={job} onViewChange={vi.fn()} restoredArtifactId={older.artifactId} restoredPage={1} restoredZoom={1} />)
+    await screen.findByText('Artifact registry is current')
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh' }))
+    await waitFor(() => expect(documents[phase]).toHaveBeenCalledTimes(2))
+    view.rerender(<DocumentWorkspace hydrated job={otherJob} onViewChange={vi.fn()} restoredArtifactId={null} restoredPage={1} restoredZoom={1} />)
+    await screen.findByText(/Viewing acme-resume.pdf/)
+    await act(async () => pending.resolve(updated))
+    expect(screen.getByText(/Viewing acme-resume.pdf/)).not.toBeNull()
+    expect(screen.queryByRole('option', { name: /late-render/ })).toBeNull()
+    expect(vi.mocked(documents.refresh).mock.calls.filter(([owner]) => owner === job.jobId)).toHaveLength(phase === 'list' ? 1 : 2)
   })
 
   it('refreshes paired export formats when publication completes while documents are already open', async () => {
@@ -946,6 +1148,59 @@ describe('trusted document workspace', () => {
     expect(docxDocuments.openBound).toHaveBeenLastCalledWith(job.jobId, 'resume')
   })
 
+  it('keeps the valid Resume preview when a different local document goes missing', async () => {
+    installDocuments()
+    const installed = installDocxDocuments()
+    const missing = { ...installed.opened.binding, bindingId: 'docx_missing_references_fake', documentKey: 'references' as const }
+    vi.mocked(installed.docxDocuments.listBindings).mockResolvedValue([installed.opened.binding, missing])
+    vi.mocked(installed.docxDocuments.openBound).mockResolvedValue(installed.opened)
+    render(<DocumentWorkspace hydrated job={job} previewMode="docx" onViewChange={vi.fn()} restoredArtifactId={null} restoredPage={1} restoredZoom={1} />)
+    const preview = `Current editable DOCX · ${installed.opened.binding.filename} · ${installed.opened.binding.sha256}`
+    await screen.findByText(preview)
+    await act(async () => installed.emit({ bindingId: missing.bindingId, jobId: job.jobId, documentKey: 'references', kind: 'missing' }))
+    expect(screen.getByText(preview)).not.toBeNull()
+    expect(screen.queryByText('The current editable DOCX is no longer available on this device')).toBeNull()
+  })
+
+  it('clears a missing current preview and clears its warning when moving to another document', async () => {
+    const resumeDocx = artifact({ artifactId: 'art_MISSINGRESUMEDOCXABCDEFG', mediaType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', previewAvailable: false })
+    const coverPdf = artifact({ artifactId: 'art_COVERPDFABCDEFGHIJKLMNOP', documentKey: 'cover_letter', documentLabel: 'Cover Letter', sourceRevision: 'cover-source' })
+    const packet = state([artifact(), resumeDocx, coverPdf])
+    installDocuments({ list: vi.fn(async () => packet), refresh: vi.fn(async () => packet) })
+    const installed = installDocxDocuments()
+    vi.mocked(installed.docxDocuments.listBindings).mockResolvedValue([installed.opened.binding])
+    vi.mocked(installed.docxDocuments.openBound).mockResolvedValue(installed.opened)
+    render(<DocumentWorkspace hydrated job={job} previewMode="docx" onViewChange={vi.fn()} restoredArtifactId={null} restoredPage={1} restoredZoom={1} />)
+    const preview = `Current editable DOCX · ${installed.opened.binding.filename} · ${installed.opened.binding.sha256}`
+    await screen.findByText(preview)
+    vi.mocked(installed.docxDocuments.listBindings).mockResolvedValue([])
+    await act(async () => installed.emit({ bindingId: installed.opened.binding.bindingId, jobId: job.jobId, documentKey: 'resume', kind: 'missing' }))
+    expect(screen.queryByText(preview)).toBeNull()
+    expect(screen.getByText('The current editable DOCX is no longer available on this device')).not.toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Next document' }))
+    await waitFor(() => expect(screen.queryByText('The current editable DOCX is no longer available on this device')).toBeNull())
+  })
+
+  it.each([false, true])('keeps an old document export status off the new document, pending=%s', async pending => {
+    const coverPdf = artifact({ artifactId: 'art_COVERPDFABCDEFGHIJKLMNOP', documentKey: 'cover_letter', documentLabel: 'Cover Letter', sourceRevision: 'cover-source' })
+    const packet = state([artifact(), coverPdf])
+    const exported = deferred<string>()
+    installDocuments({ list: vi.fn(async () => packet), refresh: vi.fn(async () => packet), export: vi.fn(() => exported.promise) })
+    render(<DocumentWorkspace hydrated job={job} onViewChange={vi.fn()} restoredArtifactId={null} restoredPage={1} restoredZoom={1} />)
+    await screen.findByText('Artifact registry is current')
+    fireEvent.click(screen.getByRole('button', { name: 'Export' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Export PDF' }))
+    if (!pending) {
+      await act(async () => exported.resolve('Exported old-resume.pdf'))
+      expect(screen.getByText('Exported old-resume.pdf')).not.toBeNull()
+    }
+    fireEvent.click(screen.getByRole('button', { name: 'Next document' }))
+    if (pending) await act(async () => exported.resolve('Exported old-resume.pdf'))
+    await waitFor(() => expect((screen.getByRole('button', { name: 'Refresh' }) as HTMLButtonElement).disabled).toBe(false))
+    expect(screen.getByText('2 of 2')).not.toBeNull()
+    expect(screen.queryByText('Exported old-resume.pdf')).toBeNull()
+  })
+
   it('refreshes the visible editable DOCX when an agent operation publishes new canonical bytes', async () => {
     const pdf = artifact()
     const docx = artifact({
@@ -1053,4 +1308,44 @@ describe('trusted document workspace', () => {
       expect(screen.getByText(`Current editable DOCX · ${newer.binding.filename} · ${newer.binding.sha256}`)).not.toBeNull()
     })
   })
+})
+
+
+function LocalJobDocumentHarness() {
+  const [localContext, setLocalContext] = useState<AgentSessionJobContext>({ selectedJobId: null, activeArtifactId: null, activeArtifactPage: 1, activeArtifactZoom: 1 })
+  const [chat, setChat] = useState(false)
+  const [chatContext] = useState<AgentSessionJobContext>({ selectedJobId: otherJob.jobId, activeArtifactId: null, activeArtifactPage: 1, activeArtifactZoom: 1 })
+  const context = chat ? chatContext : localContext
+  const jobs = useJobs(chat ? 'chat-a' : null, context, undefined, setLocalContext)
+  const workspace = useWorkspace(chat ? 'chat-a' : null, context, undefined, setLocalContext)
+  return <>
+    <button disabled={!jobs.ready} onClick={() => { void jobs.selectJob(job.jobId) }} type="button">Select local job</button>
+    <button onClick={() => setChat(value => !value)} type="button">Toggle chat</button>
+    <output aria-label="Projected workspace">{workspace.workspace.selectedJobId} page {workspace.workspace.activeArtifactPage} zoom {workspace.workspace.activeArtifactZoom}</output>
+    <DocumentWorkspace hydrated={workspace.hydrated} job={jobs.selectedJob} onViewChange={workspace.updateDocumentState} restoredArtifactId={workspace.workspace.activeArtifactId ?? null} restoredPage={workspace.workspace.activeArtifactPage ?? 1} restoredZoom={workspace.workspace.activeArtifactZoom ?? 1} />
+  </>
+}
+
+it('local job selection supports real document page and zoom controls independently of chat context', async () => {
+  installDocuments()
+  const select = vi.fn()
+  Object.defineProperty(window, 'jobos', { configurable: true, value: { ...window.jobos, jobs: {
+    getState: vi.fn().mockResolvedValue({ jobs: [job, otherJob], selectedJobId: null, sortMode: 'manual', manualOrder: [job.jobId, otherJob.jobId] }),
+    list: vi.fn().mockResolvedValue([job, otherJob]), inspect: vi.fn(async (jobId: string) => ({ ...(jobId === job.jobId ? job : otherJob), description: '', location: null })),
+    select, subscribe: vi.fn(() => () => undefined)
+  } } })
+  render(<LocalJobDocumentHarness />)
+  await waitFor(() => expect((screen.getByRole('button', { name: 'Select local job' }) as HTMLButtonElement).disabled).toBe(false))
+  fireEvent.click(screen.getByRole('button', { name: 'Select local job' }))
+  await screen.findByText('PDF bytes 2 · page 1 at 100%')
+  await screen.findByText('Page 1 of 3')
+  fireEvent.click(screen.getByRole('button', { name: 'Next page' }))
+  fireEvent.click(screen.getByRole('button', { name: 'Zoom in' }))
+  await screen.findByText('PDF bytes 2 · page 2 at 110%')
+  expect(screen.getByLabelText('Projected workspace').textContent).toBe('job-1 page 2 zoom 1.1')
+  fireEvent.click(screen.getByRole('button', { name: 'Toggle chat' }))
+  await waitFor(() => expect(screen.getByLabelText('Projected workspace').textContent).toBe('job-2 page 1 zoom 1'))
+  fireEvent.click(screen.getByRole('button', { name: 'Toggle chat' }))
+  await waitFor(() => expect(screen.getByLabelText('Projected workspace').textContent).toBe('job-1 page 2 zoom 1.1'))
+  expect(select).not.toHaveBeenCalled()
 })

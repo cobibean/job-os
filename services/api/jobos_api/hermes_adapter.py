@@ -1006,6 +1006,34 @@ class HermesWebSocketGateway:
                 }
                 or kind in {"waiting", "waiting_for_user"}
             )
+            if waiting:
+                # Hermes does not expose a scoped response method for these
+                # requests. Do not solicit answers or credentials that JobOS
+                # cannot submit. The remote wait still needs confirmed cleanup.
+                return GatewayEvent(
+                    event_type="error",
+                    state="failed",
+                    summary=(
+                        "This agent requested an interaction JobOS cannot answer. "
+                        "Confirm cleanup, then send a new instruction "
+                        "without the unsupported request."
+                    ),
+                    detail={
+                        "code": "AGENT_INTERACTION_UNSUPPORTED",
+                        "reason": "unsupported_interaction",
+                        "actionable": True,
+                        "retry": False,
+                        "recovery_pending": True,
+                        "recovery_action": "cleanup",
+                        **(
+                            {"agent_continuation": True, "continuation_id": continuation_id}
+                            if continuation_turn_id is not None
+                            else {}
+                        ),
+                    },
+                    turn_id=event_turn_id,
+                    source_event_id=event_id,
+                )
             safe_detail = redact_detail(frame)
             safe_message = str(
                 safe_detail.get("message")

@@ -8,6 +8,7 @@ import secrets
 import stat
 import time
 from collections.abc import AsyncIterator, Awaitable, Callable
+from hashlib import sha256
 from pathlib import Path
 
 from .agent_gateway import AgentContext, ConnectionState, GatewayEvent
@@ -18,7 +19,7 @@ from .codex_runtime import (
     jobos_mcp_ready,
 )
 from .hermes_adapter import _prompt_with_context
-from .redaction import redact_detail, sanitize_assistant_text, sanitize_text
+from .redaction import redact_detail, sanitize_assistant_text
 
 _TERMINAL_STATUSES = {"completed", "failed", "interrupted"}
 _STREAM_TOKEN_TAIL = re.compile(r"[A-Za-z0-9_+=.\-]+$")
@@ -26,6 +27,7 @@ _JOBOS_TOOL_REVIEW = re.compile(
     r'^Allow the jobos MCP server to run tool "([A-Za-z][A-Za-z0-9_]{0,127})"\?$'
 )
 _TOOL_REVIEW_TIMEOUT_SECONDS = 300.0
+_SAFE_TOOL_LABEL = re.compile(r"^[A-Za-z][A-Za-z0-9_.-]{0,127}$")
 
 
 def _prepare_publication_root(path: Path) -> None:
@@ -206,6 +208,7 @@ class CodexAppServerGateway:
         self._assistant_pending = ""
         self._assistant_streamed_text = ""
         self._assistant_completed_text = ""
+        self._activity_labels: dict[str, str] = {}
         self._rate_limit_snapshot = dict(rate_limit_snapshot)
         self._refresh_rate_limits = refresh_rate_limits
         self._rate_limit_settling: set[str] = set()
@@ -391,6 +394,7 @@ class CodexAppServerGateway:
             raise CodexRuntimeError("AGENT_PROVIDER_UNAVAILABLE", "Codex turn did not start")
         self._jobos_turn_id = context.turn_id
         self._provider_turn_id = provider_turn_id
+        self._activity_labels.clear()
         self._assistant_pending = ""
         self._assistant_streamed_text = ""
         self._assistant_completed_text = ""
@@ -558,7 +562,7 @@ class CodexAppServerGateway:
             await self._events.put(
                 GatewayEvent(
                     "assistant_message",
-                    "streaming",
+                    "working",
                     pending,
                     {"text": pending},
                     self._jobos_turn_id,
@@ -678,9 +682,7 @@ class CodexAppServerGateway:
         if turn_id is None or provider_turn_id is None:
             return None
         self._event_sequence += 1
-        source_id = (
-            f"codex:{self._event_namespace}:{provider_turn_id}:{self._event_sequence}"
-        )
+        source_id = f"codex:{self._event_namespace}:{provider_turn_id}:{self._event_sequence}"
         if method == "item/agentMessage/delta":
             raw_delta = str(params.get("delta") or "")
             self._assistant_streamed_text += raw_delta
@@ -696,7 +698,7 @@ class CodexAppServerGateway:
                 return None
             delta = sanitize_assistant_text(safe_prefix)
             return GatewayEvent(
-                "assistant_message", "streaming", delta, {"text": delta}, turn_id, source_id
+                "assistant_message", "working", delta, {"text": delta}, turn_id, source_id
             )
         if method in {"item/started", "item/completed", "item/mcpToolCall/progress"}:
             item = params.get("item")
@@ -711,8 +713,31 @@ class CodexAppServerGateway:
                 return None
             detail = redact_detail(item if isinstance(item, dict) else params)
             state = "completed" if method == "item/completed" else "working"
-            summary = sanitize_text(str(detail.get("name") or "Codex tool activity"))[:500]
-            return GatewayEvent("activity", state, summary, detail, turn_id, source_id)
+            provider_item_id = item.get("id") if isinstance(item, dict) else params.get("itemId")
+            activity_id = (
+                "codex-" + sha256(f"{turn_id}:{provider_item_id}".encode()).hexdigest()[:32]
+                if isinstance(provider_item_id, str) and provider_item_id
+                else source_id
+            )
+            server = detail.get("server")
+            tool = detail.get("tool") or detail.get("name")
+            label = tool if isinstance(tool, str) and _SAFE_TOOL_LABEL.fullmatch(tool) else None
+            if label and isinstance(server, str) and _SAFE_TOOL_LABEL.fullmatch(server):
+                label = f"{server}.{label}"
+            if label:
+                self._activity_labels[activity_id] = label
+            summary = self._activity_labels.get(activity_id, "Codex tool activity")
+            detail["phase"] = (
+                "complete"
+                if method == "item/completed"
+                else "start"
+                if method == "item/started"
+                else "progress"
+            )
+            detail["tool_name"] = summary
+            return GatewayEvent(
+                "activity", state, summary, detail, turn_id, source_id, activity_id=activity_id
+            )
         if method == "error":
             error = params.get("error")
             error_info = error.get("codexErrorInfo") if isinstance(error, dict) else None
@@ -777,8 +802,16 @@ class CodexAppServerGateway:
                     turn_id,
                     source_id,
                 )
+            partial = self._assistant_completed_text or sanitize_assistant_text(
+                self._assistant_streamed_text
+            )
             return GatewayEvent(
-                "assistant_message", state, "Codex turn ended", {}, turn_id, source_id
+                "assistant_message",
+                state,
+                "Codex turn ended",
+                {"type": "message.complete", "text": partial} if partial else {},
+                turn_id,
+                source_id,
             )
         return None
 

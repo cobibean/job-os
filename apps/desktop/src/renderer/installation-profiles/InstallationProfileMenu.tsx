@@ -2,6 +2,7 @@ import { Check, ChevronDown } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 
 import type { InstallationProfileListSnapshot, InstallationProfileSummary } from '../../shared/contracts'
+import { useModalDialog } from '../app/dialogs/useModalDialog'
 
 interface Props {
   activeProfileName: string
@@ -33,18 +34,30 @@ export function InstallationProfileMenu({ activeProfileName, onOverlayClose, pre
   const [open, setOpen] = useState(false)
   const [dialog, setDialog] = useState<DialogState>(null)
   const [error, setError] = useState('')
+  const [listError, setListError] = useState('')
   const [switching, setSwitching] = useState<string | null>(null)
   const [overlayPrepared, setOverlayPrepared] = useState(false)
   const trigger = useRef<HTMLButtonElement>(null)
   const menu = useRef<HTMLDivElement>(null)
+  const dialogElement = useRef<HTMLDivElement>(null)
+  const switchDialogElement = useRef<HTMLDivElement>(null)
+  const pendingCreation = useRef<{ name: string; key: string; previousIds: string[] } | null>(null)
   const currentActiveProfileName = profiles?.profiles.find(profile => profile.active)?.displayName
     ?? activeProfileName
 
   const load = async () => {
-    if (!window.jobos?.installationProfiles) return
-    setProfiles(await window.jobos.installationProfiles.list())
+    if (!window.jobos?.installationProfiles) return null
+    try {
+      const snapshot = await window.jobos.installationProfiles.list()
+      setProfiles(snapshot)
+      setListError('')
+      return snapshot
+    } catch (failure) {
+      setListError('JobOS Profiles are unavailable.')
+      throw failure
+    }
   }
-  useEffect(() => { void load().catch(() => setError('JobOS Profiles are unavailable.')) }, [])
+  useEffect(() => { void load().catch(() => undefined) }, [])
   useEffect(() => {
     if (open || dialog || switching || !overlayPrepared) return
     setOverlayPrepared(false)
@@ -58,15 +71,17 @@ export function InstallationProfileMenu({ activeProfileName, onOverlayClose, pre
     setOpen(true)
   }
 
-  const closeMenu = () => {
+  const closeMenu = (restoreFocus = true) => {
     setOpen(false)
-    requestAnimationFrame(() => trigger.current?.focus())
+    if (restoreFocus) requestAnimationFrame(() => trigger.current?.focus())
   }
   const closeDialog = () => {
     setDialog(null)
     setError('')
     requestAnimationFrame(() => trigger.current?.focus())
   }
+  useModalDialog(dialogElement, closeDialog, { open: dialog?.kind === 'create' || dialog?.kind === 'rename', returnFocusRef: trigger })
+  useModalDialog(switchDialogElement, closeDialog, { open: dialog?.kind === 'switch', returnFocusRef: trigger })
   const nameError = dialog && (dialog.kind === 'create' || dialog.kind === 'rename')
     ? !dialog.name.trim()
       ? 'Enter a profile name.'
@@ -82,14 +97,25 @@ export function InstallationProfileMenu({ activeProfileName, onOverlayClose, pre
     : ''
 
   const create = async () => {
-    if (!dialog || dialog.kind !== 'create' || nameError || !window.jobos?.installationProfiles) return
+    if (!dialog || dialog.kind !== 'create' || nameError || !profiles || !window.jobos?.installationProfiles) return
     const name = dialog.name.trim()
+    if (pendingCreation.current?.name !== name) {
+      pendingCreation.current = { name, key: idempotencyKey('create-profile'), previousIds: profiles.profiles.map(profile => profile.profileId) }
+    }
+    const pending = pendingCreation.current
     setSwitching(name)
     setError('')
     try {
-      await window.jobos.installationProfiles.createAndSwitch(name, idempotencyKey('create-profile'))
+      await window.jobos.installationProfiles.createAndSwitch(pending.name, pending.key)
     } catch (failure) {
       setSwitching(null)
+      const refreshed = await load().catch(() => null)
+      const created = refreshed?.profiles.find(profile => !pending.previousIds.includes(profile.profileId)
+        && profile.displayName.localeCompare(pending.name, undefined, { sensitivity: 'base' }) === 0)
+      if (created) {
+        pendingCreation.current = null
+        setDialog({ kind: 'switch', profile: created })
+      }
       const message = actionErrorMessage(failure, 'Couldn’t switch profiles.')
       const normalizedMessage = message.replace(/\.$/, '')
       setError(normalizedMessage === 'JobOS stayed in the previous profile; no workspace data was changed'
@@ -113,6 +139,7 @@ export function InstallationProfileMenu({ activeProfileName, onOverlayClose, pre
       setProfiles(updated)
       closeDialog()
     } catch (failure) {
+      await load().catch(() => undefined)
       setError(actionErrorMessage(failure, 'Profile could not be renamed.'))
     }
   }
@@ -128,6 +155,7 @@ export function InstallationProfileMenu({ activeProfileName, onOverlayClose, pre
       )
     } catch (failure) {
       setSwitching(null)
+      await load().catch(() => undefined)
       const message = actionErrorMessage(failure, 'Couldn’t switch profiles.')
       const normalizedMessage = message.replace(/\.$/, '')
       setError(normalizedMessage === 'JobOS stayed in the previous profile; no workspace data was changed'
@@ -193,7 +221,7 @@ export function InstallationProfileMenu({ activeProfileName, onOverlayClose, pre
               key={profile.profileId}
               onClick={() => {
                 if (!profile.active) setDialog({ kind: 'switch', profile })
-                closeMenu()
+                closeMenu(profile.active)
               }}
               role="menuitem"
               type="button"
@@ -202,15 +230,16 @@ export function InstallationProfileMenu({ activeProfileName, onOverlayClose, pre
               {profile.active ? <Check aria-label="Active" size={14} /> : null}
             </button>
           ))}
+          {listError ? <><p role="alert">{listError}</p><button onClick={() => { void load().catch(() => undefined) }} role="menuitem" type="button">Retry profiles</button></> : null}
           <div className="installation-profile-separator" role="separator" />
-          <button onClick={() => { setDialog({ kind: 'create', name: 'Fresh setup' }); closeMenu() }} role="menuitem" type="button">New profile…</button>
-          <button onClick={() => { setDialog({ kind: 'rename', name: currentActiveProfileName }); closeMenu() }} role="menuitem" type="button">Rename current profile…</button>
+          <button disabled={!profiles} onClick={() => { setDialog({ kind: 'create', name: 'Fresh setup' }); closeMenu(false) }} role="menuitem" type="button">New profile…</button>
+          <button disabled={!profiles} onClick={() => { setDialog({ kind: 'rename', name: currentActiveProfileName }); closeMenu(false) }} role="menuitem" type="button">Rename current profile…</button>
         </div>
       ) : null}
       {dialog?.kind === 'create' || dialog?.kind === 'rename' ? (
-        <div aria-modal="true" className="profile-dialog-backdrop" role="dialog">
+        <div aria-labelledby="installation-profile-dialog-title" aria-modal="true" className="profile-dialog-backdrop" ref={dialogElement} role="dialog">
           <div className="profile-dialog">
-            <h2>{dialog.kind === 'create' ? 'New JobOS Profile' : 'Rename JobOS Profile'}</h2>
+            <h2 id="installation-profile-dialog-title">{dialog.kind === 'create' ? 'New JobOS Profile' : 'Rename JobOS Profile'}</h2>
             {dialog.kind === 'create' ? <p>This starts a blank JobOS workspace. Your agent connections stay available.<br />Jobs, Career Profile data, documents, chats, browser data, and layout do not carry over.</p> : null}
             <label>Name<input autoFocus value={dialog.name} onChange={event => setDialog({ ...dialog, name: event.target.value })} /></label>
             {nameError ? <p className="profile-dialog-error" role="alert">{nameError}</p> : null}
@@ -225,9 +254,9 @@ export function InstallationProfileMenu({ activeProfileName, onOverlayClose, pre
         </div>
       ) : null}
       {dialog?.kind === 'switch' ? (
-        <div aria-modal="true" className="profile-dialog-backdrop" role="alertdialog">
+        <div aria-labelledby="installation-profile-dialog-title" aria-modal="true" className="profile-dialog-backdrop" ref={switchDialogElement} role="alertdialog">
           <div className="profile-dialog">
-            <h2>Switch to “{dialog.profile.displayName}”?</h2>
+            <h2 id="installation-profile-dialog-title">Switch to “{dialog.profile.displayName}”?</h2>
             <p>JobOS will save this workspace, restart, and open the selected profile.<br />Your current profile stays unchanged.</p>
             {error ? <p className="profile-dialog-error" role="alert">{error}</p> : null}
             <div className="profile-dialog-actions">

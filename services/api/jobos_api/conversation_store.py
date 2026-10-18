@@ -31,11 +31,29 @@ from .state_store import (
 
 def event_row(row: sqlite3.Row) -> dict[str, object]:
     detail = json.loads(str(row["detail_json"]))
+    # Old quarantines did not persist recovery metadata. Derive their cleanup
+    # capability only from the authoritative conversation recovery lease.
+    if (
+        "recovery_turn_id" in set(row.keys())
+        and row["recovery_turn_id"] == row["turn_id"]
+        and row["event_type"] in {"error", "status", "assistant_message"}
+        and row["state"] in {"failed", "interrupted", "waiting"}
+    ):
+        detail = {
+            **detail,
+            "recovery_pending": True,
+            "recovery_action": "cleanup",
+            "reason": detail.get("reason") or "submission_outcome_unknown",
+        }
     entry: dict[str, object] = {
         "event_id": int(row["event_id"]),
         "turn_id": row["turn_id"],
         "type": row["event_type"],
-        "state": row["state"],
+        "state": (
+            "working"
+            if row["event_type"] == "assistant_message" and row["state"] == "streaming"
+            else row["state"]
+        ),
         "summary": row["summary"],
         "detail": detail,
         "occurred_at": row["occurred_at"],
@@ -267,12 +285,23 @@ class ConversationStore:
             ).fetchone()
         return str(row[0]) if row and row[0] else None
 
-    def clear_recovery_turn_if_current(self, turn_id: str) -> bool:
+    def clear_recovery_turn_if_current(self, turn_id: str, *, announce: bool = False) -> bool:
         with connect_sqlite(self._path) as connection:
+            connection.execute("BEGIN IMMEDIATE")
             cursor = connection.execute(
                 "UPDATE conversations SET recovery_turn_id = NULL, updated_at = CURRENT_TIMESTAMP WHERE conversation_id = ? AND recovery_turn_id = ?",
                 (self.conversation_id, turn_id),
             )
+            if cursor.rowcount == 1 and announce:
+                connection.execute(
+                    "INSERT INTO conversation_events(conversation_id, turn_id, event_type, state, summary, detail_json) "
+                    "VALUES (?, NULL, 'status', 'completed', 'Remote cleanup confirmed', ?)",
+                    (
+                        self.conversation_id,
+                        json.dumps({"recovery_pending": False, "transport_confirmed": True}),
+                    ),
+                )
+            connection.commit()
         return cursor.rowcount == 1
 
     def create_turn(
@@ -597,6 +626,7 @@ class ConversationStore:
         summary: str,
         detail: dict[str, object],
         source_event_id: str | None = None,
+        quarantine: bool = False,
         career_profile_principal: str | None = None,
         career_profile_context: CareerProfileContextStore | None = None,
         career_profile_agent_id: str | None = None,
@@ -606,12 +636,23 @@ class ConversationStore:
             raise ValueError("Invalid continuation turn id")
         if status not in {"running", "completed", "failed", "interrupted"}:
             raise ValueError("Invalid continuation status")
+        if quarantine and status not in {"failed", "interrupted"}:
+            raise ValueError("Only failed or interrupted continuations require cleanup")
         safe_detail = _conversation_detail(event_type, detail)
+        if quarantine:
+            safe_detail.update(
+                recovery_pending=True,
+                recovery_action="cleanup",
+                reason=safe_detail.get("reason") or "submission_outcome_unknown",
+            )
         message_id = f"msg_{secrets.token_urlsafe(16)}"
         context = {"agent_continuation": True}
         with connect_sqlite(self._path) as connection:
             connection.execute("BEGIN IMMEDIATE")
-            self._require_active(connection)
+            conversation = self._require_active(connection)
+            if quarantine and conversation["recovery_turn_id"] not in {None, turn_id}:
+                connection.rollback()
+                return False
             if connection.execute(
                 "SELECT 1 FROM conversation_turns WHERE turn_id = ? AND conversation_id = ?",
                 (turn_id, self.conversation_id),
@@ -763,6 +804,12 @@ class ConversationStore:
                     source_event_id[:256] if source_event_id else None,
                 ),
             )
+            if quarantine:
+                connection.execute(
+                    "UPDATE conversations SET recovery_turn_id = ?, "
+                    "updated_at = CURRENT_TIMESTAMP WHERE conversation_id = ?",
+                    (turn_id, self.conversation_id),
+                )
             connection.commit()
         return True
 
@@ -969,6 +1016,12 @@ class ConversationStore:
         if status not in {"completed", "failed", "interrupted"}:
             raise ValueError("Turn settlement must be terminal")
         safe_detail = _conversation_detail(event_type, detail)
+        if quarantine:
+            safe_detail.update(
+                recovery_pending=True,
+                recovery_action="cleanup",
+                reason=safe_detail.get("reason") or "submission_outcome_unknown",
+            )
         with connect_sqlite(self._path) as connection:
             connection.execute("BEGIN IMMEDIATE")
             cursor = connection.execute(
@@ -1046,7 +1099,9 @@ class ConversationStore:
         with connect_sqlite(f"file:{self._path}?mode=ro", uri=True) as connection:
             connection.row_factory = sqlite3.Row
             rows = connection.execute(
-                "SELECT * FROM conversation_events WHERE conversation_id = ? AND event_id > ? ORDER BY event_id",
+                "SELECT event.*, conversation.recovery_turn_id FROM conversation_events AS event "
+                "JOIN conversations AS conversation USING (conversation_id) "
+                "WHERE event.conversation_id = ? AND event.event_id > ? ORDER BY event.event_id",
                 (self.conversation_id, after),
             ).fetchall()
         return [event_row(row) for row in rows]

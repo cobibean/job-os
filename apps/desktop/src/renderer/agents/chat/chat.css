@@ -27,11 +27,11 @@
 .agent-session-tab.selected { border-color: var(--accent-border-strong); color: var(--text); background: var(--accent-tint); }
 .agent-session-state { display: inline-flex; align-items: center; gap: 3px; color: var(--muted); font-size: 11px; }
 .agent-session-state.working { color: var(--accent-text); }
-.agent-session-state.needs-you { color: var(--warning-text); }
-.agent-session-state.done { color: var(--success-text); }
+.agent-session-state.needs-you { color: var(--warn-text); }
+.agent-session-state.done { color: var(--green-text); }
 .agent-session-state.failed { color: var(--danger-text); }
-.agent-session-state.interrupted { color: var(--warning-text); }
-.agent-session-state.recovering { color: var(--warning-text); }
+.agent-session-state.interrupted { color: var(--warn-text); }
+.agent-session-state.recovering { color: var(--warn-text); }
 .agent-session-state.quarantined { color: var(--danger-text); }
 .agent-session-actions { display: flex; flex: 0 0 auto; gap: 4px; }
 .agent-session-close { width: 36px; min-height: 36px; display: grid; place-items: center; padding: 0; border: 1px solid transparent; border-radius: var(--radius-sm); color: var(--quiet); background: transparent; cursor: pointer; }
@@ -40,11 +40,6 @@
 .agent-session-add { flex: 0 0 36px; min-height: 36px; display: grid; place-items: center; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); color: var(--text-soft); background: var(--surface-raised); cursor: pointer; }
 .agent-session-add:hover:not(:disabled) { border-color: var(--accent-border-strong); color: var(--accent-text); background: var(--accent-tint); }
 .agent-session-add:disabled { opacity: var(--disabled-opacity); cursor: not-allowed; }
-@media (max-width: 720px), (min-resolution: 2dppx) {
-  .agent-session-name-full,
-  .agent-session-state-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
-  .agent-session-tab { gap: 4px; padding-inline: 4px; }
-}
 @container (max-width: 285px) {
   .agent-session-toolbar { flex-wrap: wrap; }
   .agent-session-tabs { flex-basis: 100%; }

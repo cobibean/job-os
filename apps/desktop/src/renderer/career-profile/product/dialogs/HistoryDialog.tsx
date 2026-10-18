@@ -19,10 +19,17 @@ export function HistoryDialog({ onClose, online, product }: {
   const [revisions, setRevisions] = useState<CareerProfileChangeRevision[] | null>(null)
   const [message, setMessage] = useState('')
   const [saving, setSaving] = useState(false)
+  const [loading, setLoading] = useState(true)
+  const [loadFailed, setLoadFailed] = useState(false)
 
   const load = useCallback(async () => {
     setMessage('')
-    try { setRevisions((await product.getChangeHistory()).revisions) } catch { setMessage('Career Profile history could not load. Try again.') }
+    setLoading(true)
+    setLoadFailed(false)
+    try { setRevisions((await product.getChangeHistory()).revisions) } catch {
+      setLoadFailed(true)
+      setMessage('Career Profile history could not load. Try again.')
+    } finally { setLoading(false) }
   }, [product.getChangeHistory])
   useEffect(() => { void load() }, [load])
 
@@ -48,7 +55,8 @@ export function HistoryDialog({ onClose, online, product }: {
       <DialogHeading closeLabel="Close Career Profile history" eyebrow="Change log" onClose={onClose} title="Career Profile history" />
       <div className="career-product-dialog-body">
         {message ? <p className={`career-feedback ${/undone/.test(message) ? 'saved' : 'error'}`} role={/undone/.test(message) ? 'status' : 'alert'}>{message}</p> : null}
-        {!revisions ? <p role="status">Loading history…</p> : revisions.length === 0 ? <div className="career-product-empty"><Clock3 aria-hidden="true" size={20} /><strong>No complete-profile changes yet</strong><p>Your work-arrangement history remains available in its own panel.</p></div> : <ol className="career-product-history">{revisions.map(revision => <li key={revision.revisionId}><div><strong>{readableLabel(revision.operation.replaceAll('.', ' '))}</strong><span>{revision.reason ?? `${readableLabel(revision.actorKind)} change`}</span><small>Revision {revision.profileRevision} · {new Date(revision.createdAt).toLocaleString()}</small></div>{revision.undoable ? <button className="career-secondary-button" disabled={!online || saving} onClick={() => { void undo(revision) }} type="button">Undo change</button> : <span className="career-product-not-undoable">Baseline</span>}</li>)}</ol>}
+        {loadFailed ? <button className="career-secondary-button" onClick={() => { void load() }} type="button">Try again</button> : null}
+        {loading ? <p role="status">Loading history…</p> : !revisions ? null : revisions.length === 0 ? <div className="career-product-empty"><Clock3 aria-hidden="true" size={20} /><strong>No complete-profile changes yet</strong><p>Your work-arrangement history remains available in its own panel.</p></div> : <ol className="career-product-history">{revisions.map(revision => <li key={revision.revisionId}><div><strong>{readableLabel(revision.operation.replaceAll('.', ' '))}</strong><span>{revision.reason ?? `${readableLabel(revision.actorKind)} change`}</span><small>Revision {revision.profileRevision} · {new Date(revision.createdAt).toLocaleString()}</small></div>{revision.undoable ? <button className="career-secondary-button" disabled={!online || saving} onClick={() => { void undo(revision) }} type="button">Undo change</button> : <span className="career-product-not-undoable">Baseline</span>}</li>)}</ol>}
       </div>
     </Dialog>
   )

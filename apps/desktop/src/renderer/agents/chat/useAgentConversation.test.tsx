@@ -29,6 +29,24 @@ const snapshot = (entries: ConversationEvent[] = []): AgentConversationSnapshot 
   jobContext: { selectedJobId: null, activeArtifactId: null, activeArtifactPage: 1, activeArtifactZoom: 1 }
 })
 
+test.each(['completed', 'failed', 'interrupted'] as const)('a %s turn settles unfinished activities without changing explicit outcomes', state => {
+  const [turn] = projectConversation([
+    event(1, { detail: { activity_id: 'tool-success' } }),
+    event(2, { detail: { activity_id: 'tool-success' }, state: 'completed' }),
+    event(3, { detail: { activity_id: 'tool-unfinished' } }),
+    event(4, { detail: { activity_id: 'tool-failed' }, state: 'failed' }),
+    event(5, { type: state === 'completed' ? 'assistant_message' : 'status', state, summary: 'Turn ended' })
+  ])
+  expect(turn).toMatchObject({
+    kind: 'agent-turn', state,
+    activities: [
+      { activityId: 'tool-success', state: 'completed' },
+      { activityId: 'tool-unfinished', state: 'interrupted' },
+      { activityId: 'tool-failed', state: 'failed' }
+    ]
+  })
+})
+
 test('hydration merges snapshot and early stream delivery once by durable event id', () => {
   const streamed = agentConversationReducer(initialAgentConversationState, { type: 'event', event: event(3) })
   const hydrated = agentConversationReducer(streamed, { type: 'hydrate', snapshot: snapshot([event(1), event(2), event(3)]) })

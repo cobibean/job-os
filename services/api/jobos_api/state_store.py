@@ -1564,6 +1564,10 @@ MIGRATIONS = (
             """,
         ),
     ),
+    Migration(
+        version=33,
+        statements=("ALTER TABLE job_events ADD COLUMN publication_event_id INTEGER",),
+    ),
 )
 SCHEMA_VERSION = MIGRATIONS[-1].version
 
@@ -4777,10 +4781,17 @@ class JobOsStateStore:
         reserved_event_id: int | None = None,
     ) -> int:
         safe_detail = redact_detail(detail)
+        delivery_fields = {
+            "job_created": (),
+            "job_refreshed": (),
+            "job_removed": (),
+            "job_status_changed": ("from_status", "to_status"),
+            "job_description_updated": ("source", "description_length"),
+        }
         with connect_sqlite(self._path) as connection:
+            connection.execute("BEGIN IMMEDIATE")
             if reserved_event_id is not None:
-                event_id = reserved_event_id
-                stored_result = {**result, "event_id": event_id} if inject_event_id else result
+                audit_event_id = reserved_event_id
                 cursor = connection.execute(
                     """
                     UPDATE job_events
@@ -4788,6 +4799,8 @@ class JobOsStateStore:
                         actor_id = ?, target_resource = ?, command_name = ?, outcome = ?,
                         idempotency_key = ?, request_hash = ?, result_json = ?
                     WHERE event_id = ? AND request_hash = ? AND result_json IS NULL
+                        AND actor_id = ? AND target_resource = ? AND command_name = ?
+                        AND idempotency_key = ? AND outcome = 'pending'
                     """,
                     (
                         event_type,
@@ -4800,48 +4813,80 @@ class JobOsStateStore:
                         outcome,
                         idempotency_key,
                         request_hash,
-                        json.dumps(stored_result, separators=(",", ":"), sort_keys=True),
-                        event_id,
+                        json.dumps(result, separators=(",", ":"), sort_keys=True),
+                        audit_event_id,
                         request_hash,
+                        actor_id,
+                        target_resource,
+                        command_name,
+                        idempotency_key,
                     ),
                 )
                 if cursor.rowcount != 1:
                     raise IdempotencyConflict("Mutation reservation is no longer pending")
-                return event_id
-            try:
-                cursor = connection.execute(
+            else:
+                try:
+                    cursor = connection.execute(
+                        """
+                        INSERT INTO job_events(
+                            event_type, job_id, origin, payload_json, actor_id, target_resource,
+                            command_name, outcome, idempotency_key, request_hash, result_json
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            event_type[:50],
+                            job_id,
+                            origin,
+                            json.dumps(safe_detail, separators=(",", ":"), sort_keys=True),
+                            actor_id,
+                            target_resource,
+                            command_name,
+                            outcome[:30],
+                            idempotency_key,
+                            request_hash,
+                            json.dumps(result, separators=(",", ":"), sort_keys=True),
+                        ),
+                    )
+                except sqlite3.IntegrityError as error:
+                    raise IdempotencyConflict("Idempotency key was already used") from error
+                if cursor.lastrowid is None:  # pragma: no cover - SQLite INSERT guarantees this
+                    raise RuntimeError("Mutation event insert did not return an event ID")
+                audit_event_id = int(cursor.lastrowid)
+
+            event_id = audit_event_id
+            if event_type in delivery_fields and outcome in {"completed", "succeeded"}:
+                # Reservations are mutable audit records. Publish a separate row only
+                # after settlement, so a later completion always advances the cursor.
+                payload = {
+                    key: safe_detail[key]
+                    for key in delivery_fields[event_type]
+                    if key in safe_detail
+                }
+                publication = connection.execute(
                     """
-                    INSERT INTO job_events(
-                        event_type, job_id, origin, payload_json, actor_id, target_resource,
-                        command_name, outcome, idempotency_key, request_hash, result_json
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    INSERT INTO job_events(event_type, job_id, origin, payload_json)
+                    VALUES (?, ?, ?, ?)
                     """,
                     (
-                        event_type[:50],
+                        event_type,
                         job_id,
                         origin,
-                        json.dumps(safe_detail, separators=(",", ":"), sort_keys=True),
-                        actor_id,
-                        target_resource,
-                        command_name,
-                        outcome[:30],
-                        idempotency_key,
-                        request_hash,
-                        json.dumps(result, separators=(",", ":"), sort_keys=True),
+                        json.dumps(payload, separators=(",", ":"), sort_keys=True),
                     ),
                 )
-            except sqlite3.IntegrityError as error:
-                raise IdempotencyConflict("Idempotency key was already used") from error
-            if cursor.lastrowid is None:  # pragma: no cover - SQLite INSERT guarantees this
-                raise RuntimeError("Mutation event insert did not return an event ID")
-            event_id = int(cursor.lastrowid)
+                assert publication.lastrowid is not None
+                event_id = int(publication.lastrowid)
+                connection.execute(
+                    "UPDATE job_events SET publication_event_id = ? WHERE event_id = ?",
+                    (event_id, audit_event_id),
+                )
             if inject_event_id:
                 stored_result = {**result, "event_id": event_id}
                 connection.execute(
                     "UPDATE job_events SET result_json = ? WHERE event_id = ?",
                     (
                         json.dumps(stored_result, separators=(",", ":"), sort_keys=True),
-                        event_id,
+                        audit_event_id,
                     ),
                 )
         return event_id
@@ -4945,7 +4990,12 @@ class JobOsStateStore:
                 WHERE event_id > ?
                     AND (
                         command_name IS NULL
-                        OR event_type IN ('job_description_updated', 'job_status_changed')
+                        OR (
+                            publication_event_id IS NULL
+                            AND outcome IN ('completed', 'succeeded')
+                            AND result_json IS NOT NULL
+                            AND event_type IN ('job_description_updated', 'job_status_changed')
+                        )
                     )
                 ORDER BY event_id
                 """,
@@ -5011,8 +5061,10 @@ class JobOsStateStore:
     def recovery_agent_session_id(self, turn_id):  # noqa: F811
         return self._first_conversation_store().recovery_agent_session_id(turn_id)
 
-    def clear_recovery_turn_if_current(self, turn_id):  # noqa: F811
-        return self._first_conversation_store().clear_recovery_turn_if_current(turn_id)
+    def clear_recovery_turn_if_current(self, turn_id, *, announce=False):  # noqa: F811
+        return self._first_conversation_store().clear_recovery_turn_if_current(
+            turn_id, announce=announce
+        )
 
     def create_conversation_turn(self, **values):  # noqa: F811
         return self._first_conversation_store().create_turn(**values)

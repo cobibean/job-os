@@ -23,8 +23,9 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
   const tabRefs = useRef(new Map<string, HTMLButtonElement>())
   const active = browser.activeTab
   const activeJob = props.jobs.find(item => item.jobId === active?.associatedJobId)
-  const saveState: SaveFeedback = active && props.saveStates[active.tabId]
-    ? props.saveStates[active.tabId]!
+  const tabSaveState = active ? props.saveStates[active.tabId] : undefined
+  const saveState: SaveFeedback = active && tabSaveState?.sourceUrl === active.url
+    ? tabSaveState
     : active?.associatedJobId
       ? { status: 'saved', message: activeJob ? `Saved to JobOS: ${activeJob.company} · ${activeJob.title}` : 'Saved to JobOS' }
       : { status: 'idle', message: '' }
@@ -155,7 +156,7 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
           value={active?.associatedJobId ?? ''}
         >
           <option value="">No job</option>
-          {props.jobs.map(job => <option key={job.jobId} value={job.jobId}>{job.company}</option>)}
+          {props.jobs.map(job => <option key={job.jobId} value={job.jobId}>{job.company} · {job.title}</option>)}
         </select>
       </div>
 
@@ -181,6 +182,12 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
             <span className="empty-orbit"><Search aria-hidden="true" size={23} /></span>
             <h1>Browser available in the desktop app</h1>
             <p>The trusted web surface is owned by Electron and is not available in this renderer-only preview.</p>
+          </section>
+        ) : browser.restorationError ? (
+          <section className="browser-error" role="alert">
+            <h1>Browser could not restore</h1>
+            <p>{browser.restorationError}</p>
+            <button onClick={() => { void browser.retryRestore() }} type="button">Retry browser restore</button>
           </section>
         ) : active?.error ? (
           <section className="browser-error" role="alert">

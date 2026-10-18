@@ -79,7 +79,7 @@ const job: JobListItem = {
 
 vi.mock('../jobs/useJobs', () => ({
   useJobs: () => ({
-    changeSort: vi.fn(), changeStatus: vi.fn(), error: null, feedback: '', jobs: [job], loading: false,
+    changeSort: vi.fn(), changeStatus: vi.fn(), error: null, feedback: '', jobs: [job], allJobs: [job], loading: false,
     query: '', removeDemo: vi.fn(), reorder: vi.fn(), reorderTo: vi.fn(), selectJob: vi.fn(),
     selectJobForConversation: vi.fn().mockResolvedValue(true), selectedJob: job, selectedJobDetail: null,
     selectedJobId: job.jobId, setQuery: vi.fn(), setStatusGroup: vi.fn(), sortMode: 'manual', statusGroup: ''

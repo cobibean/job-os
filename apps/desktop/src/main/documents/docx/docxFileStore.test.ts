@@ -65,6 +65,18 @@ describe.skipIf(process.platform !== 'darwin')('DocxFileStore', () => {
     expect((await readdir(root)).filter(name => name.includes('.jobos-'))).toEqual([])
   })
 
+  it('preserves an external destination change during export without source recovery entries', async () => {
+    const external = await buildBlankDocx()
+    const guarded = new DocxFileStore({
+      recoveryRoot: path.join(root, 'export-recovery'),
+      beforeAtomicReplace: async () => { await writeFile(target, external) }
+    })
+    await expect(guarded.exportCopy(target, source)).rejects.toBeInstanceOf(DocxExternalChangeError)
+    expect(new Uint8Array(await readFile(target))).toEqual(external)
+    expect((await readdir(root)).filter(name => name.includes('.jobos-'))).toEqual([])
+    expect(await guarded.listRecoveries('docx_000000000000000000000000')).toEqual([])
+  })
+
   it('serializes concurrent writes so only the first expected revision wins', async () => {
     const replacement = await buildBlankDocx()
     const expected = sha256(source)

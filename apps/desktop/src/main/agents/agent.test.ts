@@ -3,7 +3,7 @@
 import { expect, test, vi } from 'vitest'
 
 import type { AgentSessionStreamUpdate } from '../../shared/contracts.js'
-import { AgentConversationRegistry, AgentEventDecoder, createMainAgentClient, createScopedMainAgentClient, startAgentEventStream } from './agent.js'
+import { AgentConversationRegistry, AgentEventDecoder, createMainAgentClient, createScopedMainAgentClient, normalizeConversationEvent, startAgentEventStream } from './agent.js'
 
 const event = (eventId: number, overrides: Record<string, unknown> = {}) => ({
   event_id: eventId, turn_id: 'turn_1', type: 'activity', state: 'working', summary: `Action ${eventId}`,
@@ -29,6 +29,25 @@ const apiSnapshot = (conversationId: string, position: number) => ({
     active_artifact_page: 1,
     active_artifact_zoom: 1
   }
+})
+
+test('quarantine recovery capability survives both transcript hydration and stream normalization', async () => {
+  const terminal = event(70, { type: 'error', state: 'failed', detail: {
+    reason: 'transport_lost', agent_continuation: true, retry: false,
+    recovery_pending: true, recovery_action: 'cleanup', session_id: 'private-session'
+  } })
+  const expected = {
+    reason: 'transport_lost', agent_continuation: true, retry: false,
+    recovery_pending: true, recovery_action: 'cleanup'
+  }
+  expect(normalizeConversationEvent(terminal)?.detail).toEqual(expected)
+  const decoder = new AgentEventDecoder()
+  const [update] = decoder.push(`data: ${JSON.stringify({ ...envelope('conv_one', 70), recovery_state: 'quarantined', event: terminal })}\n\n`)
+  expect(update?.event.detail).toEqual(expected)
+  const client = createMainAgentClient({ baseUrl: 'http://jobos.test', deviceToken: 'secret', fetch: vi.fn(async () => Response.json({
+    ...apiSnapshot('conv_one', 1), entries: [terminal], recovery_state: 'quarantined'
+  })) })
+  expect((await client.get('conv_one')).entries[0]?.detail).toEqual(expected)
 })
 
 function streamResponse(chunks: string[]): Response {

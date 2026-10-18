@@ -209,6 +209,30 @@ def export_pair(
         assert expected_fragments
         assert all(fragment in exported_text for fragment in expected_fragments)
     assert pdf_path.read_bytes().startswith(b"%PDF-")
+    pdf_content = subprocess.run(
+        [
+            "node",
+            "scripts/public-release/verify-exported-pdf.mjs",
+            "--input",
+            str(input_path.resolve()),
+            "--pdf",
+            str(pdf_path.resolve()),
+            "--pages",
+            "1",
+        ],
+        env=environment,
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+    (root / "logs/pdf-content.log").write_text(
+        redact(pdf_content.stdout + pdf_content.stderr), encoding="utf-8"
+    )
+    assert pdf_content.returncode == 0, (
+        "exported PDF content/page count failed; see redacted harness log"
+    )
     for path, key in ((docx_path, "docx"), (pdf_path, "pdf")):
         assert 0 < path.stat().st_size <= 20_000_000
         assert hashlib.sha256(path.read_bytes()).hexdigest() == output[key]["sha256"]
@@ -446,6 +470,17 @@ async def test_clean_home_golden_path(clean_runtime) -> None:
                     201,
                 )
                 insert_synthetic_text(document["content"], values["documentText"])
+                document["settings"]["header"].update(
+                    left="(FAKE) Header left",
+                    center="(FAKE) Header center",
+                    right="(FAKE) Header right",
+                )
+                document["settings"]["footer"].update(
+                    left="(FAKE) Footer left",
+                    center="(FAKE) Page {page} of {pages}",
+                    right="(FAKE) Footer right",
+                )
+
                 document = assert_response(
                     client.put(
                         f"/v1/editable-documents/{document['document_id']}",

@@ -3601,9 +3601,12 @@ def create_app(
         turn_id: TurnId,
         identity: Annotated[DeviceIdentity, Depends(authenticated_device)],
     ) -> TurnMutationResponse:
-        result = await conversation_service(conversation_id, identity).cancel(
-            validated_turn_id(turn_id)
-        )
+        try:
+            result = await conversation_service(conversation_id, identity).cancel(
+                validated_turn_id(turn_id)
+            )
+        except ConversationBusy as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
         if result is None:
             raise HTTPException(status_code=404, detail="Turn not found")
         return result
@@ -3811,7 +3814,7 @@ def create_app(
             created=saved.job_id == command_job_id,
             job=normalized,
         )
-        record_mutation(
+        event_id = record_mutation(
             identity=identity,
             target="jobs",
             command_name=command_name,
@@ -3826,8 +3829,10 @@ def create_app(
             ),
             job_id=normalized.job_id,
             detail={"created": result.created},
+            event_type="job_created" if result.created else "job_refreshed",
+            inject_event_id=True,
         )
-        return result
+        return result.model_copy(update={"event_id": event_id})
 
     @app.put(
         "/v1/jobs/order",
@@ -4139,6 +4144,7 @@ def create_app(
             result=result_payload,
             label="Removed fictional demo job",
             job_id=job_id,
+            event_type="job_removed",
             inject_event_id=True,
         )
         return JobMutationResponse(event_id=event_id)
@@ -4283,10 +4289,10 @@ def create_app(
         except Conflict as error:
             raise HTTPException(status_code=409, detail=str(error)) from error
         result = StatusChangeResponse(
-            event_id=reservation_event_id,
+            event_id=0,
             job=normalize_job_detail(updated),
         )
-        record_mutation(
+        event_id = record_mutation(
             identity=identity,
             target=f"jobs/{job_id}",
             command_name="job.update_status",
@@ -4301,7 +4307,7 @@ def create_app(
             inject_event_id=True,
             reserved_event_id=reservation_event_id,
         )
-        return result
+        return result.model_copy(update={"event_id": event_id})
 
     @app.get(
         "/v1/jobs/{job_id}/history",

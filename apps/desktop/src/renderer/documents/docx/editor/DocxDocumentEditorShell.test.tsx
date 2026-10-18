@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { readFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -57,6 +57,20 @@ afterEach(() => {
 })
 
 describe('OOXML-retaining DOCX editor', () => {
+  it('blocks close while loading unknown DOCX state and permits close after a fatal load error', async () => {
+    const opened = await fixture()
+    const { bridge } = installBridge(opened)
+    let fail!: (error: Error) => void
+    bridge.reload.mockImplementation(() => new Promise((_resolve, reject) => { fail = reject }))
+    let prepare!: () => Promise<boolean>
+    render(<DocxDocumentEditorShell jobLabel="Synthetic" onExit={vi.fn()} onPrepareClose={handler => { prepare = handler }} opened={opened} />)
+    expect(screen.getByRole('status').textContent).toContain('Opening the original DOCX')
+    await expect(prepare()).resolves.toBe(false)
+    await act(async () => fail(new Error('Synthetic DOCX load failure')))
+    await screen.findByRole('alert')
+    await expect(prepare()).resolves.toBe(true)
+  })
+
   function insertEditorText(text: string): void {
     const editor = document.querySelector('.ProseMirror') as HTMLElement
     const paragraph = editor.querySelector('p')
@@ -78,6 +92,37 @@ describe('OOXML-retaining DOCX editor', () => {
     expect(screen.getByRole('button', { name: /Save a Copy/ })).not.toBeNull()
     await waitFor(() => expect(document.querySelector('.ProseMirror')).not.toBeNull())
     expect(document.querySelector('.jobos-docx-canvas')).not.toBeNull()
+    const page = document.querySelector('.jobos-docx-page')!
+    expect(page.classList.contains('doc-page')).toBe(true)
+    const scope = page.getAttribute('data-docx-style-scope')
+    expect(scope).toBeTruthy()
+    const sheet = document.querySelector('.docx-document-editor > style') as HTMLStyleElement
+    expect(sheet.textContent).toContain(`.doc-page[data-docx-style-scope="${scope}"] p`)
+    expect(screen.getByText('1 page')).not.toBeNull()
+    expect(screen.queryByText(/Page 1 of/)).toBeNull()
+
+  })
+
+
+  it('lets a narrow editor reveal Recovery and restore a local checkpoint', async () => {
+    const opened = await fixture()
+    const { bridge } = installBridge(opened)
+    const entry: DocxRecoveryEntry = {
+      recoveryId: 'recovery_fake_narrow', bindingId: opened.binding.bindingId,
+      filename: opened.binding.filename, sha256: opened.binding.sha256,
+      byteLength: opened.binding.byteLength, reason: 'manual', createdAt: '2026-08-08T01:00:00Z'
+    }
+    bridge.listRecoveries.mockResolvedValue([entry])
+    bridge.restoreRecovery.mockResolvedValue(opened)
+    render(<DocxDocumentEditorShell jobLabel="(FAKE) Northstar · Product Lead" onExit={vi.fn()} onPrepareClose={vi.fn()} opened={opened} />)
+    const toggle = await screen.findByRole('button', { name: 'Recovery' })
+    expect(toggle.getAttribute('aria-expanded')).toBe('false')
+    fireEvent.click(toggle)
+    expect(toggle.getAttribute('aria-expanded')).toBe('true')
+    expect(document.querySelector('.docx-editor-main')?.getAttribute('data-recovery-open')).toBe('true')
+    expect(document.getElementById(toggle.getAttribute('aria-controls')!)).toBe(screen.getByRole('complementary', { name: 'Document recovery' }))
+    fireEvent.click(await screen.findByRole('button', { name: /manual/ }))
+    await waitFor(() => expect(bridge.restoreRecovery).toHaveBeenCalledWith(opened.binding.bindingId, entry.recoveryId))
   })
 
   it('exposes paragraph alignment controls and applies center alignment to the active paragraph', async () => {
@@ -120,6 +165,33 @@ describe('OOXML-retaining DOCX editor', () => {
     await act(async () => { finishSaveAs(null); await Promise.resolve() })
     await waitFor(() => expect(document.querySelector('.ProseMirror')?.getAttribute('contenteditable')).toBe('true'))
     expect(await prepareClose?.()).toBe(true)
+  })
+
+  it('Escape leaves an unsaved DOCX open and returns focus to its exit control', async () => {
+    const opened = await fixture()
+    const { bridge, emit } = installBridge(opened)
+    const onExit = vi.fn()
+    render(<DocxDocumentEditorShell jobLabel="(FAKE) Northstar · Product Lead" onExit={onExit} onPrepareClose={vi.fn()} opened={opened} />)
+    await screen.findByRole('toolbar', { name: 'DOCX formatting' })
+    insertEditorText('Unsaved text. ')
+    emit({ bindingId: opened.binding.bindingId, jobId: opened.binding.jobId, documentKey: 'resume', kind: 'changed', sha256: 'b'.repeat(64), modifiedAtMs: 2 })
+    await screen.findByText('This file changed outside JobOS.')
+    const opener = screen.getByRole('button', { name: 'Back to Review' })
+    opener.focus()
+    fireEvent.click(opener)
+    const dialog = await screen.findByRole('alertdialog', { name: 'This DOCX is not safely saved' })
+    const stay = within(dialog).getByRole('button', { name: 'Stay' })
+    expect(document.activeElement).toBe(stay)
+    expect(fireEvent.keyDown(stay, { key: 'Tab', shiftKey: true })).toBe(false)
+    expect(document.activeElement).toBe(within(dialog).getByRole('button', { name: 'Reload and discard mine' }))
+    const reloadCount = bridge.reload.mock.calls.length
+    fireEvent.keyDown(document, { key: 'Escape' })
+    expect(screen.queryByRole('alertdialog')).toBeNull()
+    expect(onExit).not.toHaveBeenCalled()
+    expect(bridge.reload).toHaveBeenCalledTimes(reloadCount)
+    expect(bridge.saveAs).not.toHaveBeenCalled()
+    expect(document.querySelector('.ProseMirror')?.textContent).toContain('Unsaved text.')
+    await waitFor(() => expect(document.activeElement).toBe(opener))
   })
 
   it('closes the initial subscription gap before presenting editable bytes', async () => {

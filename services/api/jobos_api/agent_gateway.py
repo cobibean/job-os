@@ -8,6 +8,9 @@ from typing import Literal, Protocol, cast, runtime_checkable
 
 ConnectionState = Literal["online", "connecting", "offline"]
 ConnectedAgentProvider = Literal["hermes", "codex"]
+ConversationEventState = Literal[
+    "queued", "working", "waiting", "completed", "failed", "interrupted"
+]
 NormalizedEventKind = Literal[
     "turn_started",
     "assistant_text_delta",
@@ -60,7 +63,7 @@ class AgentContext:
 @dataclass(frozen=True)
 class GatewayEvent:
     event_type: str
-    state: str
+    state: ConversationEventState
     summary: str
     detail: dict[str, object] = field(default_factory=dict)
     turn_id: str | None = None

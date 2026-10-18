@@ -19,7 +19,7 @@ function readableValue(value: ActivityItem['detail'][string]): string {
 function StateIcon({ state }: { state: ActivityItem['state'] }) {
   if (state === 'completed') return <Check aria-hidden="true" size={14} />
   if (state === 'failed') return <CircleAlert aria-hidden="true" size={14} />
-  if (state === 'waiting') return <Pause aria-hidden="true" size={14} />
+  if (state === 'waiting' || state === 'interrupted') return <Pause aria-hidden="true" size={14} />
   return <LoaderCircle aria-hidden="true" className="spin" size={14} />
 }
 

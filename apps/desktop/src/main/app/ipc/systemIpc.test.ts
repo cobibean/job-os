@@ -30,7 +30,7 @@ test('setup, diagnostics, and connectivity retain their exact channel inventory'
   const state = { runtime: null, deviceToken: null, connectivity: { state: 'disconnected', checkedAt: '', message: 'required' } } as const
   registerSetupIpc(ipc, trust, {
     configPath: '/tmp/jobos/config.json', configured: false, runtimeCredentialAvailable: false,
-    runInitializer: vi.fn(async () => undefined), restart: vi.fn()
+    runInitializer: vi.fn(async () => undefined), retryConnection: vi.fn(async () => false), restart: vi.fn()
   })
   registerDiagnosticsIpc(ipc, trust, {
     configPath: '/tmp/jobos/config.json', getRuntimeState: () => state,
@@ -41,7 +41,7 @@ test('setup, diagnostics, and connectivity retain their exact channel inventory'
     getState: () => state, setState: vi.fn(), ensureApiReady: vi.fn(), captureEnabled: false
   })
   expect([...handlers.keys()]).toEqual([
-    'jobos:setup:get', 'jobos:setup:initialize', 'jobos:setup:restart',
+    'jobos:setup:get', 'jobos:setup:initialize', 'jobos:setup:retry-connection', 'jobos:setup:restart',
     'jobos:diagnostics:get', 'jobos:diagnostics:open-data', 'jobos:diagnostics:open-logs',
     'jobos:connectivity:get'
   ])

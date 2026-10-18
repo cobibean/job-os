@@ -1,5 +1,5 @@
 import { Check, X } from 'lucide-react'
-import { useEffect, useRef } from 'react'
+import { useRef } from 'react'
 
 import type { CareerProfileBridge } from '../../../shared/contracts'
 import { AgentAvatar } from '../../agents/avatar/AgentAvatar'
@@ -9,6 +9,7 @@ import { THEMES, type ThemeMode } from '../theme/themes'
 import { DiagnosticsPanel } from './diagnostics/DiagnosticsPanel'
 import type { useConnectedAgents } from '../../agents/connected-agents/useConnectedAgents'
 import { ConnectedAgentsSettings } from '../../agents/connected-agents/ConnectedAgentsSettings'
+import { useModalDialog } from '../dialogs/useModalDialog'
 import { SettingsSection } from './SettingsSection'
 
 interface SettingsPanelProps {
@@ -37,9 +38,7 @@ export function SettingsPanel({
   onSelectTheme
 }: SettingsPanelProps) {
   const dialogRef = useRef<HTMLDivElement>(null)
-  useEffect(() => {
-    dialogRef.current?.focus()
-  }, [])
+  useModalDialog(dialogRef, onClose)
 
   return (
     <div className="settings-overlay" onClick={onClose} role="presentation">
@@ -48,9 +47,6 @@ export function SettingsPanel({
         aria-modal="true"
         className="settings-panel"
         onClick={event => event.stopPropagation()}
-        onKeyDown={event => {
-          if (event.key === 'Escape') onClose()
-        }}
         ref={dialogRef}
         role="dialog"
         tabIndex={-1}

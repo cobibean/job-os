@@ -4,6 +4,8 @@ import { copyFile, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path, { resolve } from 'node:path'
 
+import JSZip from 'jszip'
+
 import { buildBlankDocx } from '@jobos/docx-engine'
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest'
 
@@ -18,12 +20,16 @@ let selected: string
 let service: DocxDocumentsService
 let emit: Mock<(event: DocxExternalChangeEvent) => void>
 let workerRun: ReturnType<typeof vi.fn>
+let nativeShell: { openPath: ReturnType<typeof vi.fn>; showItemInFolder: ReturnType<typeof vi.fn> }
+let saveDestination: string | null
 
 beforeEach(async () => {
   root = await mkdtemp(path.join(os.tmpdir(), 'jobos-docx-service-'))
   selected = path.join(root, '(FAKE)-resume.docx')
   await copyFile(resolve(process.cwd(), '../../packages/docx-engine/tests/fixtures/(FAKE)-polished-resume.docx'), selected)
   emit = vi.fn()
+  nativeShell = { openPath: vi.fn(async () => ''), showItemInFolder: vi.fn() }
+  saveDestination = null
   workerRun = vi.fn(async (request: DocxWorkerRequest) => {
     const context = { revision: '(FAKE)-context-1', blocks: [] }
     const capabilities = {
@@ -37,9 +43,10 @@ beforeEach(async () => {
       : { kind: 'inspect' as const, context, capabilities }
   })
   service = new DocxDocumentsService({
+    shell: nativeShell,
     dialog: {
       showOpenDialog: vi.fn(async () => ({ canceled: false, filePaths: [selected] })),
-      showSaveDialog: vi.fn(async () => ({ canceled: true, filePath: '' }))
+      showSaveDialog: vi.fn(async () => ({ canceled: !saveDestination, filePath: saveDestination ?? '' }))
     },
     bindings: new LocalDocxBindingStore(path.join(root, 'bindings.json')),
     files: new DocxFileStore({ recoveryRoot: path.join(root, 'recovery') }),
@@ -63,6 +70,50 @@ describe.skipIf(process.platform !== 'darwin')('DocxDocumentsService', () => {
     const reopened = await service.openBound('(FAKE)-job-7', 'resume')
     expect(reopened?.binding.sha256).toBe(opened?.binding.sha256)
     expect(new Uint8Array(reopened!.bytes)).toEqual(new Uint8Array(await readFile(selected)))
+  })
+
+  it('exports reviewed bytes without rebinding and opens/reveals the current path', async () => {
+    const original = await service.chooseFile('(FAKE)-job-7', 'resume')
+    const archive = await JSZip.loadAsync(original!.bytes)
+    const xml = await archive.file('word/document.xml')!.async('string')
+    archive.file('word/document.xml', xml.replace('<w:body>', '<w:body><w:p><w:r><w:t>(FAKE)-Saved correction 7821</w:t></w:r></w:p>'))
+    const edited = await archive.generateAsync({ type: 'arraybuffer' })
+    const saved = await service.save({ bindingId: original!.binding.bindingId, expectedSha256: original!.binding.sha256, generation: 1, bytes: edited })
+    const opened = await service.openBound('(FAKE)-job-7', 'resume')
+    expect(opened!.binding.sha256).toBe(saved.binding.sha256)
+    expect(opened!.binding.sha256).not.toBe(original!.binding.sha256)
+    saveDestination = path.join(root, '(FAKE)-exported-resume.docx')
+    await service.export(opened!.binding.bindingId, opened!.binding.sha256)
+    expect(sha256(new Uint8Array(await readFile(saveDestination)))).toBe(opened!.binding.sha256)
+    const exported = await JSZip.loadAsync(await readFile(saveDestination))
+    expect(await exported.file('word/document.xml')!.async('string')).toContain('(FAKE)-Saved correction 7821')
+    expect((await service.listBindings('(FAKE)-job-7'))[0]?.canonicalPath).toBe(selected)
+    await service.open(opened!.binding.bindingId, opened!.binding.sha256)
+    await service.reveal(opened!.binding.bindingId, opened!.binding.sha256)
+    expect(nativeShell.openPath).toHaveBeenCalledWith(selected)
+    expect(nativeShell.showItemInFolder).toHaveBeenCalledWith(selected)
+  })
+
+  it('does not add an overwritten export destination to the source recovery history', async () => {
+    const opened = await service.chooseFile('(FAKE)-job-7', 'resume')
+    const before = await service.listRecoveries(opened!.binding.bindingId)
+    saveDestination = path.join(root, '(FAKE)-unrelated-document.docx')
+    await writeFile(saveDestination, await buildBlankDocx())
+    await service.export(opened!.binding.bindingId, opened!.binding.sha256)
+    expect(sha256(new Uint8Array(await readFile(saveDestination)))).toBe(opened!.binding.sha256)
+    expect(await service.listRecoveries(opened!.binding.bindingId)).toEqual(before)
+  })
+
+  it('rejects stale display hashes before export or native actions', async () => {
+    const opened = await service.chooseFile('(FAKE)-job-7', 'resume')
+    await writeFile(selected, await buildBlankDocx())
+    saveDestination = path.join(root, '(FAKE)-stale-export.docx')
+    for (const action of ['export', 'open', 'reveal'] as const) {
+      await expect(service[action](opened!.binding.bindingId, opened!.binding.sha256)).rejects.toThrow('changed since this preview')
+    }
+    expect(nativeShell.openPath).not.toHaveBeenCalled()
+    expect(nativeShell.showItemInFolder).not.toHaveBeenCalled()
+    await expect(readFile(saveDestination)).rejects.toMatchObject({ code: 'ENOENT' })
   })
 
   it('materializes a registered packet DOCX once and reopens that stable editable binding', async () => {

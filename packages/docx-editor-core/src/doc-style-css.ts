@@ -8,6 +8,8 @@ import {
   textHasCjk,
 } from './line-metrics.js'
 
+export const DOCX_STYLE_CLASS = 'doc-page'
+
 function cssEscape(value: string): string {
   if (globalThis.CSS?.escape) return globalThis.CSS.escape(value)
   return value.replace(/[^a-zA-Z0-9_-]/g, character => `\\${character.codePointAt(0)!.toString(16)} `)
@@ -83,7 +85,7 @@ export function docBodyFont(parsed: ParsedDocFull): string | undefined {
   return normal?.fontAscii ?? normal?.font ?? parsed.docDefaults?.asciiFont
 }
 
-export function docStyleCss(parsed: ParsedDocFull): string {
+export function docStyleCss(parsed: ParsedDocFull, scope = `.${DOCX_STYLE_CLASS}`): string {
   const rules: string[] = []
   const dd = parsed.docDefaults
   // Word applies the w:default="1" paragraph style (Normal) to every paragraph
@@ -119,12 +121,12 @@ export function docStyleCss(parsed: ParsedDocFull): string {
       cssLineHeight(normal?.lineRule, normal?.lineRawTwips, normal?.lineSpacing) ??
       cssLineHeight(dd?.lineRule, dd?.lineRawTwips, dd?.lineSpacing)
     decls.push(`line-height:${lh ?? `calc(${factor} * 1)`}`)
-    rules.push(`.doc-page { ${decls.join(';')} }`)
+    rules.push(`${scope} { ${decls.join(';')} }`)
     // docDefaults paragraph spacing is Word's real fallback (the static stylesheet's
     // 8pt is a guess); declared per block so --doc-line-factor set inline on a
     // paragraph re-evaluates the line-height var (it wouldn't through inheritance)
     const blockSel =
-      '.doc-page p, .doc-page .doc-li, .doc-page h1, .doc-page h2, .doc-page h3, .doc-page h4, .doc-page h5, .doc-page h6'
+      `${scope} p, ${scope} .doc-li, ${scope} h1, ${scope} h2, ${scope} h3, ${scope} h4, ${scope} h5, ${scope} h6`
     const blockDecls = [
       `margin-top:${((normal?.spaceBeforeTwips ?? dd?.spaceBeforeTwips ?? 0) / 20).toFixed(1)}pt`,
       `margin-bottom:${((normal?.spaceAfterTwips ?? dd?.spaceAfterTwips ?? 160) / 20).toFixed(1)}pt`,
@@ -135,7 +137,7 @@ export function docStyleCss(parsed: ParsedDocFull): string {
     // their geometry runs on --li-left/--li-hang)
     if ((normal?.indentFirstLineTwips ?? 0) > 0) {
       rules.push(
-        `.doc-page p { text-indent:${((normal!.indentFirstLineTwips as number) / 20).toFixed(1)}pt }`,
+        `${scope} p { text-indent:${((normal!.indentFirstLineTwips as number) / 20).toFixed(1)}pt }`,
       )
     }
   }
@@ -144,7 +146,7 @@ export function docStyleCss(parsed: ParsedDocFull): string {
   for (const info of parsed.styles.values()) {
     const t = info.tableDisplay
     if (info.type !== 'table' || !t) continue
-    const sel = `.doc-page table[data-tbl-style="${cssEscape(info.styleId)}"]`
+    const sel = `${scope} table[data-tbl-style="${cssEscape(info.styleId)}"]`
     if (t.fill) rules.push(`${sel} td, ${sel} th { background:#${t.fill} }`)
     // band1 = first data row after the header → even nth-child when a header row exists
     if (t.band1Fill) {
@@ -220,14 +222,14 @@ export function docStyleCss(parsed: ParsedDocFull): string {
     // a real style definition without w:i means upright
     if (info.headingLevel && info.headingLevel >= 4 && !d.italic) decls.push('font-style:normal')
     if (decls.length > 0) {
-      rules.push(`.doc-page [data-style="${cssEscape(info.styleId)}"] { ${decls.join(';')} }`)
+      rules.push(`${scope} [data-style="${cssEscape(info.styleId)}"] { ${decls.join(';')} }`)
     }
     // w:contextualSpacing: consecutive same-style paragraphs swallow the spacing
     // between them (ListParagraph/ListBullet carry this — Word lists are tight)
     if (d.contextualSpacing) {
       const s = `[data-style="${cssEscape(info.styleId)}"]`
-      rules.push(`.doc-page ${s}:has(+ ${s}) { margin-bottom:0 }`)
-      rules.push(`.doc-page ${s} + ${s} { margin-top:0 }`)
+      rules.push(`${scope} ${s}:has(+ ${s}) { margin-bottom:0 }`)
+      rules.push(`${scope} ${s} + ${s} { margin-top:0 }`)
     }
   }
   return rules.join('\n')

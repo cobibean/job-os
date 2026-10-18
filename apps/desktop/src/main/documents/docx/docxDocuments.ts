@@ -3,7 +3,7 @@ import path from 'node:path'
 
 import type { DocumentContext, StructuredDocumentOperation } from '@jobos/docx-editor-core'
 import { buildBlankDocx, parseDocx } from '@jobos/docx-engine'
-import type { Dialog } from 'electron'
+import type { Dialog, Shell } from 'electron'
 
 import {
   DOCX_DOCUMENT_LABELS,
@@ -23,6 +23,7 @@ import { docxBindingId, LocalDocxBindingStore } from './localDocxBindingStore.js
 
 interface DocxDocumentsServiceOptions {
   dialog: Pick<Dialog, 'showOpenDialog' | 'showSaveDialog'>
+  shell?: Pick<Shell, 'openPath' | 'showItemInFolder'>
   bindings: LocalDocxBindingStore
   files: DocxFileStore
   artifactRoot: string
@@ -83,6 +84,7 @@ async function capabilities(bytes: Uint8Array): Promise<DocxCapabilities> {
 
 export class DocxDocumentsService {
   readonly #dialog: DocxDocumentsServiceOptions['dialog']
+  readonly #shell: DocxDocumentsServiceOptions['shell']
   readonly #bindings: LocalDocxBindingStore
   readonly #files: DocxFileStore
   readonly #artifactRoot: string
@@ -92,6 +94,7 @@ export class DocxDocumentsService {
 
   constructor(options: DocxDocumentsServiceOptions) {
     this.#dialog = options.dialog
+    this.#shell = options.shell
     this.#bindings = options.bindings
     this.#files = options.files
     this.#artifactRoot = path.resolve(options.artifactRoot)
@@ -226,6 +229,48 @@ export class DocxDocumentsService {
         this.#watcher.clearExpectedSave(binding.bindingId, expectedSavedSha256)
       }
     })
+  }
+
+  async export(bindingId: string, expectedSha256: string): Promise<string> {
+    return this.#serializeBinding(bindingId, async () => {
+      const { binding, file } = await this.#reviewedFile(bindingId, expectedSha256)
+      const selection = await this.#dialog.showSaveDialog({
+        title: 'Export current DOCX',
+        defaultPath: binding.filename,
+        filters: [{ name: 'Word document', extensions: ['docx'] }]
+      })
+      if (selection.canceled || !selection.filePath) return 'Export cancelled'
+      await this.#reviewedFile(bindingId, expectedSha256)
+      await this.#files.exportCopy(selection.filePath, file.bytes)
+      return `Exported ${path.basename(selection.filePath)}`
+    })
+  }
+
+  async open(bindingId: string, expectedSha256: string): Promise<string> {
+    return this.#serializeBinding(bindingId, async () => {
+      const { binding } = await this.#reviewedFile(bindingId, expectedSha256)
+      if (!this.#shell) throw new Error('Native DOCX actions unavailable')
+      const error = await this.#shell.openPath(binding.canonicalPath)
+      if (error) throw new Error(error)
+      return `Opened ${binding.filename}`
+    })
+  }
+
+  async reveal(bindingId: string, expectedSha256: string): Promise<string> {
+    return this.#serializeBinding(bindingId, async () => {
+      const { binding } = await this.#reviewedFile(bindingId, expectedSha256)
+      if (!this.#shell) throw new Error('Native DOCX actions unavailable')
+      this.#shell.showItemInFolder(binding.canonicalPath)
+      return `Revealed ${binding.filename}`
+    })
+  }
+
+  async #reviewedFile(bindingId: string, expectedSha256: string) {
+    if (typeof expectedSha256 !== 'string' || !/^[a-f0-9]{64}$/.test(expectedSha256)) throw new Error('Invalid expected DOCX hash')
+    const binding = await this.#requireBinding(bindingId)
+    const file = await this.#files.read(binding.canonicalPath)
+    if (file.sha256 !== expectedSha256) throw new Error('This DOCX changed since this preview. Reload it before continuing.')
+    return { binding, file }
   }
 
   async saveAs(bindingId: string, bytesBuffer: ArrayBuffer): Promise<DocxOpenResult | null> {

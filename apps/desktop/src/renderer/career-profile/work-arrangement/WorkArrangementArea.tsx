@@ -198,10 +198,10 @@ export function WorkArrangementArea({ active, hasActiveTurn, online, profile }: 
           <div className="career-history-heading"><div><span className="career-kicker">Change log</span><h3>Work arrangement history</h3></div><button aria-label="Close history" className="career-text-button" onClick={closeHistory} type="button">Close</button></div>
           {profile.historyError ? <div className="career-history-error" role="alert"><p>{profile.historyError}</p><button className="career-secondary-button" onClick={() => { void profile.openHistory() }} type="button">Try again</button></div> : !profile.history ? <p role="status">Loading history…</p> : (
             <ol className="career-history-list">
-              {profile.history.revisions.map(revision => (
+              {profile.history.revisions.map((revision, index) => (
                 <li key={revision.revisionId}>
                   <div><strong>Revision {revision.profileRevision}</strong><span>{modeLabels[revision.value.mode]} · {strengthLabels[revision.value.strength]}</span><small>{revision.operation === 'restore' ? 'Restored by you' : 'Changed by you'} · {new Date(revision.createdAt).toLocaleString()}</small></div>
-                  {revision.baseProfileRevision >= 1 ? <button aria-label={`Undo to before revision ${revision.profileRevision}`} className="career-icon-action" disabled={!online || profile.status === 'saving'} onClick={() => { void profile.restore(revision.baseProfileRevision) }} title={online ? 'Undo to this previous value' : 'Reconnect before using Undo'} type="button"><RotateCcw aria-hidden="true" size={15} /></button> : null}
+                  {profile.history!.revisions[index + 1] ? <button aria-label={`Undo to before revision ${revision.profileRevision}`} className="career-icon-action" disabled={!online || profile.status === 'saving'} onClick={() => { void profile.restore(profile.history!.revisions[index + 1]!.profileRevision) }} title={online ? 'Undo to this previous value' : 'Reconnect before using Undo'} type="button"><RotateCcw aria-hidden="true" size={15} /></button> : null}
                 </li>
               ))}
             </ol>

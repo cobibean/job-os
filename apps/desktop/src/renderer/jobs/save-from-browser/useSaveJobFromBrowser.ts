@@ -15,6 +15,8 @@ import {
 export type SaveFeedback = {
   status: 'idle' | 'saving' | 'saved' | 'existing' | 'error'
   message: string
+  sourceUrl?: string
+  operationId?: string
 }
 
 interface SaveOperation {
@@ -66,9 +68,16 @@ export function useSaveJobFromBrowser(options: UseSaveJobFromBrowserOptions) {
   }
   const [saveStates, setSaveStates] = useState<Record<string, SaveFeedback>>({})
   const saveOperations = useRef(new Map<string, SaveOperation>())
+  const latestTabOperation = useRef(new Map<string, string>())
 
-  const setTabSaveState = useCallback((tabId: string, feedback: SaveFeedback) => {
-    setSaveStates(current => ({ ...current, [tabId]: feedback }))
+  const setTabSaveState = useCallback((
+    operation: SaveOperation, feedback: SaveFeedback,
+    tabId = operation.sourceTabId, sourceUrl = operation.sourceUrl
+  ) => {
+    const latestOperation = latestTabOperation.current.get(tabId)
+    if (latestOperation && latestOperation !== operation.operationId) return
+    latestTabOperation.current.set(tabId, operation.operationId)
+    setSaveStates(current => ({ ...current, [tabId]: { ...feedback, sourceUrl, operationId: operation.operationId } }))
   }, [])
 
   const reconcileAgentTurn = useCallback(async (operationId: string) => {
@@ -93,7 +102,7 @@ export function useSaveJobFromBrowser(options: UseSaveJobFromBrowserOptions) {
           ])
         } catch {
           if (saveOperations.current.has(operationId)) {
-            setTabSaveState(operation.sourceTabId, { status: 'error', message: 'Could not confirm the extraction result. You can retry.' })
+            setTabSaveState(operation, { status: 'error', message: 'Could not confirm the extraction result. You can retry.' })
             saveOperations.current.delete(operationId)
           }
           return
@@ -149,20 +158,20 @@ export function useSaveJobFromBrowser(options: UseSaveJobFromBrowserOptions) {
                 ? `${saveResult.created ? 'Saved to JobOS' : 'Already in JobOS'}: ${job.company} · ${job.title}`
                 : saveResult.created ? 'Saved to JobOS' : 'Already in JobOS'
             }
-            if (saveResult.tabId !== operation.sourceTabId) {
+            if (saveResult.tabId !== operation.sourceTabId
+              && latestTabOperation.current.get(operation.sourceTabId) === operationId) {
               setSaveStates(current => {
+                if (current[operation.sourceTabId]?.operationId !== operationId) return current
                 const next = { ...current }
                 delete next[operation.sourceTabId]
-                next[saveResult.tabId] = feedback
                 return next
               })
-            } else {
-              setTabSaveState(saveResult.tabId, feedback)
             }
+            setTabSaveState(operation, feedback, saveResult.tabId, reconciledTab.url)
             return
           } catch (error) {
             if (saveOperations.current.has(operationId)) {
-              setTabSaveState(operation.sourceTabId, {
+              setTabSaveState(operation, {
                 status: 'error',
                 message: error instanceof Error ? error.message : 'Could not save this job. You can retry.'
               })
@@ -171,7 +180,7 @@ export function useSaveJobFromBrowser(options: UseSaveJobFromBrowserOptions) {
             return
           }
         }
-        setTabSaveState(operation.sourceTabId, {
+        setTabSaveState(operation, {
           status: 'error',
           message: saveError ?? (terminal.type === 'error'
             ? terminal.summary || 'Job hunter could not inspect this listing'
@@ -188,6 +197,7 @@ export function useSaveJobFromBrowser(options: UseSaveJobFromBrowserOptions) {
   useEffect(() => {
     if (!active || !agent) {
       saveOperations.current.clear()
+      latestTabOperation.current.clear()
       return undefined
     }
     return agent.subscribe(update => {
@@ -207,7 +217,9 @@ export function useSaveJobFromBrowser(options: UseSaveJobFromBrowserOptions) {
   }, [active, agent, reconcileAgentTurn])
 
   const saveJob = useCallback(async (tab: BrowserTab) => {
-    if (!activeRef.current || tab.associatedJobId || saveStates[tab.tabId]?.status === 'saving') return
+    if (!activeRef.current || tab.associatedJobId || [...saveOperations.current.values()].some(operation => (
+      operation.sourceTabId === tab.tabId && operation.sourceUrl === tab.url
+    ))) return
     const operationId = browserSaveKey()
     const operation: SaveOperation = {
       operationId,
@@ -219,7 +231,8 @@ export function useSaveJobFromBrowser(options: UseSaveJobFromBrowserOptions) {
       reconcilePending: false
     }
     saveOperations.current.set(operationId, operation)
-    setTabSaveState(tab.tabId, { status: 'saving', message: 'Job hunter is reading this listing…' })
+    latestTabOperation.current.set(tab.tabId, operationId)
+    setTabSaveState(operation, { status: 'saving', message: 'Job hunter is reading this listing…' })
     try {
       if (!agent || !browser || !jobs) throw new Error('Could not read this job listing')
       const conversationId = await latestCallbacks.current.onCreateSaveSession()
@@ -237,13 +250,13 @@ export function useSaveJobFromBrowser(options: UseSaveJobFromBrowserOptions) {
     } catch (error) {
       saveOperations.current.delete(operationId)
       if (activeRef.current) {
-        setTabSaveState(operation.sourceTabId, {
+        setTabSaveState(operation, {
           status: 'error',
           message: error instanceof Error ? error.message : 'Could not read this job listing'
         })
       }
     }
-  }, [agent, browser, jobs, reconcileAgentTurn, saveStates, setTabSaveState])
+  }, [agent, browser, jobs, reconcileAgentTurn, setTabSaveState])
 
   return { saveJob, saveStates }
 }

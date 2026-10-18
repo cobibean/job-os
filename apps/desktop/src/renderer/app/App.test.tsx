@@ -3,6 +3,7 @@ import { afterEach, expect, test, vi } from 'vitest'
 
 import type { SetupSnapshot } from '../../shared/contracts'
 import { App } from './App'
+import { RendererSafetyCoordinator } from '../../main/app/window/mainWindowLifecycle'
 
 afterEach(() => { cleanup(); window.localStorage.clear() })
 
@@ -70,4 +71,21 @@ test('missing configuration opens setup without starting workbench services', as
   expect(getConnectivity).not.toHaveBeenCalled()
   expect(getJobs).not.toHaveBeenCalled()
   expect(getWorkspace).not.toHaveBeenCalled()
+})
+
+test.each(['required', 'error', 'succeeded'] as const)('allows native close immediately from %s onboarding', async state => {
+  let prepare: ((reason: 'window-close' | 'profile-switch') => Promise<boolean>) | undefined
+  const subscribePrepareClose = vi.fn((handler: (reason: 'window-close' | 'profile-switch') => Promise<boolean>) => { prepare = handler; return () => { prepare = undefined } })
+  Object.defineProperty(window, 'jobos', { configurable: true, value: {
+    setup: { get: vi.fn().mockResolvedValue({ state, message: 'Synthetic setup state' }) },
+    lifecycle: { subscribePrepareClose }
+  } })
+  render(<App />)
+  await screen.findByRole('heading', { name: 'Set up JobOS on this Mac' })
+  expect(subscribePrepareClose).toHaveBeenCalledOnce()
+  const safety = new RendererSafetyCoordinator((id, reason) => {
+    void prepare!(reason).then(safe => safety.resolve(id, safe))
+  })
+  await expect(safety.request('window-close')).resolves.toBe(true)
+  safety.dispose()
 })

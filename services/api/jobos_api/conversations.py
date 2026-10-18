@@ -296,7 +296,7 @@ class ConversationService:
         if not stored_session_id:
             raise ConnectionError("Stored agent session is unavailable")
         await self.gateway.recover_active_turn(stored_session_id, turn_id)
-        self.store.clear_recovery_turn_if_current(turn_id)
+        self.store.clear_recovery_turn_if_current(turn_id, announce=True)
         if self._recovery_turn_id == turn_id:
             self._recovery_turn_id = None
 
@@ -398,6 +398,24 @@ class ConversationService:
             )
         if recovery_turn_id is not None and recovery_turn_id != turn_id:
             raise ConversationBusy("Another turn requires remote cleanup")
+        terminal = next(
+            (
+                entry
+                for entry in reversed(self.store.conversation_events_after(0))
+                if entry.get("turn_id") == turn_id
+                and entry.get("state") in {"failed", "interrupted"}
+                and entry.get("type") in {"error", "status", "assistant_message"}
+            ),
+            None,
+        )
+        if (
+            terminal is not None
+            and isinstance(terminal.get("detail"), dict)
+            and terminal["detail"].get("retry") is False
+        ):
+            raise ValueError(
+                "This turn cannot be resubmitted; confirm cleanup and send a new instruction"
+            )
         await self._ensure_recovery_clear()
         if source["status"] not in {"failed", "interrupted"}:
             raise ValueError("Only failed or interrupted turns can be retried")
@@ -453,6 +471,13 @@ class ConversationService:
             turn = self.store.turn_record(turn_id)
             if turn is None:
                 return None
+            if (
+                turn["status"] in {"completed", "failed", "interrupted"}
+                and self.store.recovery_turn_id() == turn_id
+            ):
+                # Cancel is cleanup-only for terminal quarantined work. It must
+                # never create a replacement prompt or change its saved scope.
+                await self._ensure_recovery_clear()
             if turn["status"] in {"running", "queued", "waiting"}:
                 turn_context = turn.get("context")
                 is_agent_continuation = (
@@ -764,6 +789,11 @@ class ConversationService:
                 )
                 continue
             turn_id = event.turn_id
+            requires_recovery = (
+                event.detail.get("reason") == "transport_lost"
+                or event.detail.get("recovery_pending") is True
+                or event.detail.get("recovery_required") is True
+            )
             if turn_id and self.store.turn_record(turn_id) is None:
                 if event.detail.get("agent_continuation") is True:
                     if event.state in {
@@ -778,6 +808,7 @@ class ConversationService:
                             summary=event.summary,
                             detail=self._event_detail(event),
                             source_event_id=event.source_event_id,
+                            quarantine=requires_recovery,
                             career_profile_principal=self.career_profile_principal,
                             career_profile_context=self.career_profile_context,
                             career_profile_agent_id=self.career_profile_agent_id,
@@ -802,7 +833,7 @@ class ConversationService:
                     summary=event.summary,
                     detail=self._event_detail(event),
                     source_event_id=event.source_event_id,
-                    quarantine=event.detail.get("reason") == "transport_lost",
+                    quarantine=requires_recovery,
                 )
                 if won:
                     self._restore_session_after_isolated_turn(str(turn_id))

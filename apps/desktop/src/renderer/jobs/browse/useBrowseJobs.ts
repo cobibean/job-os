@@ -31,6 +31,7 @@ export function useBrowseJobs(options: {
   query: string
   statusGroup: string
   sortMode: JobSortMode
+  connectivityState?: string
   onFocusChange: (jobId: string | null, message?: string) => void
 }) {
   const bridge = useRef(window.jobos?.jobs).current
@@ -43,6 +44,10 @@ export function useBrowseJobs(options: {
   const [detailError, setDetailError] = useState<string | null>(null)
   const [mutationError, setMutationError] = useState<string | null>(null)
   const detailRequest = useRef(0)
+  const [detailRevision, setDetailRevision] = useState(0)
+  const focusedId = useRef<string | null>(null)
+  const active = useRef(options.active)
+  active.current = options.active
   const jobsRequest = useRef(0)
   const eventRefreshTimer = useRef<number | null>(null)
 
@@ -66,9 +71,20 @@ export function useBrowseJobs(options: {
   }, [bridge])
 
   useEffect(() => { void refresh() }, [refresh])
+  const previousConnectivity = useRef(options.connectivityState)
+  useEffect(() => {
+    const recovered = options.connectivityState === 'connected' && previousConnectivity.current !== 'connected'
+    previousConnectivity.current = options.connectivityState
+    if (recovered) void refresh()
+  }, [options.connectivityState, refresh])
+  useEffect(() => () => { jobsRequest.current += 1; detailRequest.current += 1 }, [])
   useEffect(() => {
     if (!bridge) return
-    const unsubscribe = bridge.subscribe(() => {
+    const unsubscribe = bridge.subscribe(event => {
+      if (active.current && event?.jobId === focusedId.current && event?.eventType === 'job_description_updated') {
+        detailRequest.current += 1
+        setDetailRevision(revision => revision + 1)
+      }
       if (eventRefreshTimer.current !== null) window.clearTimeout(eventRefreshTimer.current)
       eventRefreshTimer.current = window.setTimeout(() => {
         eventRefreshTimer.current = null
@@ -92,6 +108,7 @@ export function useBrowseJobs(options: {
     : results.some(job => job.jobId === options.activeJobId)
       ? options.activeJobId
       : results[0]?.jobId ?? null
+  focusedId.current = focusJobId
 
   useEffect(() => {
     if (!loading && focusJobId !== options.persistedFocusJobId) {
@@ -102,7 +119,7 @@ export function useBrowseJobs(options: {
   useEffect(() => {
     const request = detailRequest.current + 1
     detailRequest.current = request
-    setDetail(null)
+    setDetail(current => current?.jobId === focusJobId ? current : null)
     setDetailJobId(focusJobId)
     setDetailError(null)
     if (!options.active || !focusJobId || !bridge) {
@@ -117,7 +134,7 @@ export function useBrowseJobs(options: {
     }).finally(() => {
       if (request === detailRequest.current) setDetailLoading(false)
     })
-  }, [bridge, focusJobId, options.active])
+  }, [bridge, detailRevision, focusJobId, options.active])
 
   const changeStatus = useCallback(async (jobId: string, status: JobStatus) => {
     if (!bridge) return
@@ -135,5 +152,5 @@ export function useBrowseJobs(options: {
     }
   }, [bridge, jobs])
 
-  return { jobs, results, focusJobId, detail, detailJobId, loading, detailLoading, error, detailError, mutationError, changeStatus }
+  return { jobs, results, focusJobId, detail, detailJobId, loading, detailLoading, error, detailError, mutationError, changeStatus, retry: refresh }
 }

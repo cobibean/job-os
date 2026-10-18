@@ -88,3 +88,35 @@ test('a stale document-view response from session A cannot overwrite active sess
   expect(result.current.workspace).toMatchObject({ selectedJobId: 'job-b', activeArtifactId: 'art-b' })
   expect(onJobContextChange).not.toHaveBeenCalled()
 })
+
+test('local document view updates do not require a conversation or call its authoritative endpoint', async () => {
+  const saveDocumentView = vi.fn()
+  const save = vi.fn()
+  const onLocalContextChange = vi.fn()
+  Object.defineProperty(window, 'jobos', { configurable: true, value: { workspace: {
+    get: vi.fn().mockResolvedValue({ ...canonicalWorkspace, revision: 1 }), save, saveDocumentView
+  } } })
+  const local = context('job-local')
+  const { result } = renderHook(() => useWorkspace(null, local, undefined, onLocalContextChange))
+  await waitFor(() => expect(result.current.hydrated).toBe(true))
+
+  await act(async () => { await result.current.updateDocumentState('art-local', 3, 1.5) })
+
+  expect(result.current.workspace).toMatchObject({ selectedJobId: 'job-local', activeArtifactId: 'art-local', activeArtifactPage: 3, activeArtifactZoom: 1.5 })
+  expect(onLocalContextChange).toHaveBeenCalledWith(context('job-local', 'art-local', 3, 1.5))
+  expect(saveDocumentView).not.toHaveBeenCalled()
+  expect(save).not.toHaveBeenCalled()
+})
+
+test('switching from local work to a chat and back restores each independent job and view', async () => {
+  Object.defineProperty(window, 'jobos', { configurable: true, value: undefined })
+  const local = context('job-local', 'art-local', 3, 1.5)
+  const { result, rerender } = renderHook(({ conversationId, jobContext }) => useWorkspace(conversationId, jobContext), {
+    initialProps: { conversationId: null as string | null, jobContext: local }
+  })
+  expect(result.current.workspace).toMatchObject({ selectedJobId: 'job-local', activeArtifactPage: 3 })
+  rerender({ conversationId: 'chat-a', jobContext: context('job-chat', 'art-chat', 2, 1.2) })
+  expect(result.current.workspace).toMatchObject({ selectedJobId: 'job-chat', activeArtifactId: 'art-chat', activeArtifactPage: 2 })
+  rerender({ conversationId: null, jobContext: local })
+  expect(result.current.workspace).toMatchObject({ selectedJobId: 'job-local', activeArtifactId: 'art-local', activeArtifactPage: 3, activeArtifactZoom: 1.5 })
+})

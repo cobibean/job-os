@@ -1,4 +1,4 @@
-import { Circle, LoaderCircle, Plus, X } from 'lucide-react'
+import { Check, Circle, CircleAlert, LoaderCircle, Pause, Plus, RefreshCw, ShieldAlert, X } from 'lucide-react'
 import { useRef, type CSSProperties } from 'react'
 
 import type { AgentSessionsController, AgentSessionViewState } from './useAgentSessions'
@@ -17,6 +17,8 @@ export function visibleState(session: AgentSessionViewState): 'recovering' | 'qu
   if (terminal?.state === 'interrupted' && session.unreadTerminal) return 'interrupted'
   return 'idle'
 }
+
+const stateIcon = { recovering: RefreshCw, quarantined: ShieldAlert, working: LoaderCircle, 'needs-you': CircleAlert, done: Check, failed: X, interrupted: Pause, idle: Circle } as const
 
 const stateLabel = {
   recovering: 'Recovering',
@@ -77,6 +79,7 @@ export function AgentSessionTabs({ controller, onNewChat }: AgentSessionTabsProp
           const session = controller.sessions[id]!
           const state = visibleState(session)
           const selected = id === controller.activeId
+          const StateIcon = stateIcon[state]
           return (
             <button
               aria-controls={`agent-session-panel-${id}`}
@@ -101,9 +104,7 @@ export function AgentSessionTabs({ controller, onNewChat }: AgentSessionTabsProp
               <span className="agent-session-name"><span className="agent-session-name-full">Session </span>{index + 1}</span>
               {state !== 'idle' && (
                 <span className={`agent-session-state ${state}`}>
-                  {state === 'working'
-                    ? <LoaderCircle aria-hidden="true" className="spin" size={14} />
-                    : <Circle aria-hidden="true" fill="currentColor" size={10} />}
+                  <StateIcon aria-hidden="true" className={state === 'working' ? 'spin' : undefined} size={14} />
                   <span className="agent-session-state-label">{stateLabel[state]}</span>
                 </span>
               )}

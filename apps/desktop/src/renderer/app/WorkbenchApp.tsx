@@ -23,6 +23,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import type { DocxOpenResult } from '../../shared/docxDocuments'
 import type {
   AgentChatSelection,
+  AgentSessionJobContext,
   ConnectedAgentModelsSnapshot,
   ConnectedAgentSummary,
   ConnectedAgentsSnapshot,
@@ -30,6 +31,7 @@ import type {
 import { NewAgentChatDialog } from '../agents/new-chat/NewAgentChatDialog'
 import { DocumentWorkspace } from '../documents/artifacts/DocumentWorkspace'
 import { InstallationProfileMenu } from '../installation-profiles/InstallationProfileMenu'
+import { useCloseSafety } from './CloseSafetyContext'
 
 export function requireDefaultConnectedAgent(snapshot: ConnectedAgentsSnapshot): ConnectedAgentSummary {
   const agent = snapshot.defaultConnectedAgentId
@@ -90,16 +92,25 @@ export function WorkbenchApp() {
     }
     return agentSessions.createJobless(selection)
   }, [agentSessions.createJobless, connectedAgents])
-  const activeJobContext = agentSessions.activeSession?.summary.jobContext ?? null
+  const [localJobContext, setLocalJobContext] = useState<AgentSessionJobContext>({
+    selectedJobId: null, activeArtifactId: null, activeArtifactPage: 1, activeArtifactZoom: 1
+  })
+  const activeConversationId = agentSessions.available ? agentSessions.activeId : null
+  const activeJobContext = activeConversationId
+    ? agentSessions.activeSession?.summary.jobContext ?? null
+    : localJobContext
   const jobState = useJobs(
-    agentSessions.activeId,
+    activeConversationId,
     activeJobContext,
-    agentSessions.updateJobContext
+    agentSessions.updateJobContext,
+    setLocalJobContext,
+    connectivity.state
   )
   const layoutState = useWorkspace(
-    agentSessions.activeId,
+    activeConversationId,
     activeJobContext,
-    agentSessions.updateJobContext
+    agentSessions.updateJobContext,
+    setLocalJobContext
   )
   const theme = useTheme()
   const agentAvatar = useAgentAvatarPreference()
@@ -117,6 +128,8 @@ export function WorkbenchApp() {
   const [profileOverlayActive, setProfileOverlayActive] = useState(false)
   const nextJobListingRequestId = useRef(0)
   const lastHandledJobListingRequestId = useRef(0)
+  const listingCompletions = useRef(new Map<number, (success: boolean) => void>())
+  const listingControllerActive = useRef(true)
   const latestNavigatorSelection = useRef(0)
   const browseTransitionGeneration = useRef(0)
   const panelReorderGeneration = useRef(0)
@@ -167,10 +180,27 @@ export function WorkbenchApp() {
 
   useEffect(() => {
     const request = jobListingRequest
-    if (!request || !browser.restorationReady || request.requestId === lastHandledJobListingRequestId.current) return
+    if (!request || request.requestId === lastHandledJobListingRequestId.current) return
+    if (profileChangedElsewhere || browser.restorationError || !browser.bridgeAvailable) {
+      lastHandledJobListingRequestId.current = request.requestId
+      request.onComplete?.(false)
+      return
+    }
+    if (!browser.restorationReady) return
     lastHandledJobListingRequestId.current = request.requestId
-    void browser.openJobListing(request.jobId, request.canonicalUrl).then(success => request.onComplete?.(success))
-  }, [browser.openJobListing, browser.restorationReady, jobListingRequest])
+    void browser.openJobListing(request.jobId, request.canonicalUrl)
+      .catch(() => false).then(success => request.onComplete?.(success))
+  }, [browser.bridgeAvailable, browser.openJobListing, browser.restorationError, browser.restorationReady, jobListingRequest, profileChangedElsewhere])
+
+  useEffect(() => {
+    listingControllerActive.current = true
+    return () => {
+      listingControllerActive.current = false
+      latestNavigatorSelection.current += 1
+      for (const complete of listingCompletions.current.values()) complete(false)
+      listingCompletions.current.clear()
+    }
+  }, [])
 
   useEffect(() => {
     const bridge = window.jobos?.careerProfile
@@ -220,9 +250,9 @@ export function WorkbenchApp() {
     ))
   }
 
-  useEffect(() => window.jobos?.lifecycle?.subscribePrepareClose(
+  useCloseSafety(useCallback(
     reason => reason === 'profile-switch' ? prepareProfileSwitch.current() : prepareClose.current()
-  ), [])
+  , []))
 
   useEffect(() => setDocumentPreviewMode('pdf'), [jobState.selectedJobId])
 
@@ -285,29 +315,35 @@ export function WorkbenchApp() {
     }
   }
 
+  useEffect(() => {
+    latestNavigatorSelection.current += 1
+    for (const complete of listingCompletions.current.values()) complete(false)
+  }, [activeConversationId, profileChangedElsewhere])
+
   const selectJobFromNavigator = (jobId: string, openInResearch = false, canonicalUrl?: string): Promise<boolean> => {
     const selectionRequest = latestNavigatorSelection.current + 1
     latestNavigatorSelection.current = selectionRequest
-    const job = jobState.jobs.find(candidate => candidate.jobId === jobId)
+    for (const complete of listingCompletions.current.values()) complete(false)
+    const job = jobState.allJobs.find(candidate => candidate.jobId === jobId)
     const listingUrl = canonicalUrl ?? job?.canonicalUrl
     if (!listingUrl) return Promise.resolve(false)
     const operation = navigatorSelectionQueue.current.then(async () => {
-      if (selectionRequest !== latestNavigatorSelection.current) return false
+      if (!listingControllerActive.current || selectionRequest !== latestNavigatorSelection.current) return false
       if (!await jobState.selectJob(jobId)) return false
       try {
         await layoutState.showBrowser()
       } catch {
         // The visible workspace update already succeeded; navigation should not depend on persistence.
       }
-      if (selectionRequest !== latestNavigatorSelection.current) return false
+      if (!listingControllerActive.current || selectionRequest !== latestNavigatorSelection.current) return false
       const opened = await new Promise<boolean>(resolve => {
-        nextJobListingRequestId.current += 1
-        setJobListingRequest({
-          requestId: nextJobListingRequestId.current,
-          jobId,
-          canonicalUrl: listingUrl,
-          onComplete: resolve
-        })
+        const requestId = ++nextJobListingRequestId.current
+        const complete = (success: boolean) => {
+          listingCompletions.current.delete(requestId)
+          resolve(success)
+        }
+        listingCompletions.current.set(requestId, complete)
+        setJobListingRequest({ requestId, jobId, canonicalUrl: listingUrl, onComplete: complete })
       })
       if (!opened || selectionRequest !== latestNavigatorSelection.current) return false
       if (openInResearch) {
@@ -413,6 +449,7 @@ export function WorkbenchApp() {
             : 'Selected job'}
           onPrepareClose={handler => { prepareClose.current = handler }}
           onExit={() => {
+            prepareClose.current = async () => true
             setDocumentPreviewMode('docx')
             setEditingDocument(null)
             setDocumentMutationGeneration(generation => generation + 1)
@@ -435,7 +472,7 @@ export function WorkbenchApp() {
             browser={browser}
             browserRepaired={Boolean(layoutState.workspace.repairedBrowser)}
             browserRepairReasons={layoutState.workspace.browserRepairReasons ?? []}
-            jobs={jobState.jobs}
+            jobs={jobState.allJobs}
             onSaveJob={saveJobFromBrowser.saveJob}
             saveStates={saveJobFromBrowser.saveStates}
           />}
@@ -443,7 +480,10 @@ export function WorkbenchApp() {
             job={jobState.selectedJob}
             hydrated={layoutState.hydrated}
             onViewChange={layoutState.updateDocumentState}
-            onOpenEditor={setEditingDocument}
+            onOpenEditor={opened => {
+              prepareClose.current = async () => false
+              setEditingDocument(opened)
+            }}
             onPreviewModeChange={setDocumentPreviewMode}
             previewMode={documentPreviewMode}
             refreshGeneration={documentMutationGeneration}
@@ -457,6 +497,7 @@ export function WorkbenchApp() {
           feedback={jobState.feedback}
           jobs={jobState.jobs}
           loading={jobState.loading}
+          onRetry={jobState.retry}
           onMove={jobState.reorder}
           onReorder={jobState.reorderTo}
           onQueryChange={jobState.setQuery}
@@ -490,6 +531,7 @@ export function WorkbenchApp() {
       ) : null}
       {browseVisible ? (
         <BrowseWorkspace
+          connectivityState={connectivity.state}
           activeJobId={jobState.selectedJobId}
           focusJobId={layoutState.workspace.browseFocusJobId}
           mode={layoutState.workspace.browseMode}

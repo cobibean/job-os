@@ -255,3 +255,29 @@ test('rejected status updates are visible beside the status control and clear af
   fireEvent.change(status, { target: { value: 'closed' } })
   await waitFor(() => expect(screen.queryByText('Status change failed')).toBeNull())
 })
+
+test('a focused description update refreshes Browse without changing focus', async () => {
+  const bridge = installJobsBridge()
+  let listener!: (event: { eventType: string; jobId: string }) => void
+  ;(window.jobos.jobs.subscribe as ReturnType<typeof vi.fn>).mockImplementation(callback => {
+    listener = callback
+    return () => undefined
+  })
+  render(<Harness initialFocus="two" />)
+  await screen.findByText('Description two')
+  ;(bridge.inspect as ReturnType<typeof vi.fn>).mockResolvedValue({ ...jobs[1]!, description: 'Updated responsibilities', location: 'Updated location' })
+  listener({ eventType: 'job_description_updated', jobId: 'two' })
+  expect(await screen.findByText('Updated responsibilities')).not.toBeNull()
+  expect(screen.getByText(/Updated location/)).not.toBeNull()
+  expect(bridge.select).not.toHaveBeenCalled()
+})
+
+test('a failed initial Browse load offers retry and recovers in place', async () => {
+  installJobsBridge()
+  ;(window.jobos.jobs.list as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error('local API starting'))
+  render(<Harness />)
+  await screen.findByText('Jobs unavailable')
+  fireEvent.click(screen.getByRole('button', { name: 'Retry loading jobs' }))
+  expect(await screen.findByText('Description two')).not.toBeNull()
+  expect(screen.queryByText('Jobs unavailable')).toBeNull()
+})

@@ -222,6 +222,25 @@ test('shows history, performs Undo as a new revision, and closes the drawer', as
   expect(dialog.getAttribute('aria-modal')).toBe('true')
 })
 
+test('Undo selects the earlier work-arrangement revision across an interleaved career-detail change', async () => {
+  const history = await bridge().getWorkArrangementHistory()
+  const api = bridge({
+    getWorkArrangement: vi.fn().mockResolvedValue({ ...current, profileRevision: 3 }),
+    getWorkArrangementHistory: vi.fn().mockResolvedValue({
+      profileRevision: 3,
+      revisions: [{ ...history.revisions[0]!, profileRevision: 3, baseProfileRevision: 2 }, history.revisions[1]!]
+    })
+  })
+  render(<CareerProfileWorkspace bridge={api} hasActiveTurn={false} />)
+  await screen.findByRole('heading', { name: 'Work arrangement' })
+  fireEvent.click(screen.getByRole('button', { name: 'View history' }))
+  fireEvent.click(await screen.findByRole('button', { name: 'Undo to before revision 3' }))
+  await waitFor(() => expect(api.restoreWorkArrangement).toHaveBeenCalledWith(expect.objectContaining({
+    expectedProfileRevision: 3,
+    targetProfileRevision: 1
+  })))
+})
+
 test('reuses mutation identities after ambiguous save and Undo failures', async () => {
   const saveWorkArrangement = vi.fn()
     .mockRejectedValueOnce(new Error('response lost'))

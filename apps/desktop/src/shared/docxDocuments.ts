@@ -67,6 +67,9 @@ export interface DocxDocumentsBridge {
   createBlank: (jobId: string, documentKey: DocumentKey) => Promise<DocxOpenResult | null>
   reload: (bindingId: string) => Promise<DocxOpenResult>
   save: (request: SaveDocxRequest) => Promise<SaveDocxResult>
+  export: (bindingId: string, expectedSha256: string) => Promise<string>
+  open: (bindingId: string, expectedSha256: string) => Promise<string>
+  reveal: (bindingId: string, expectedSha256: string) => Promise<string>
   saveAs: (bindingId: string, bytes: ArrayBuffer) => Promise<DocxOpenResult | null>
   createRecovery: (bindingId: string, reason: DocxRecoveryEntry['reason']) => Promise<DocxRecoveryEntry>
   listRecoveries: (bindingId: string) => Promise<DocxRecoveryEntry[]>

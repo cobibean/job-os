@@ -89,6 +89,7 @@ test('refreshes both the roster and recovered chat summaries', async () => {
 
   await waitFor(() => expect(value.refresh).toHaveBeenCalledTimes(1))
   expect(onAgentsChanged).toHaveBeenCalledTimes(1)
+  expect(value.loadModels).toHaveBeenCalledWith(agentId, true)
 })
 
 test('testing an agent refreshes recovered chat summaries', async () => {
@@ -102,6 +103,17 @@ test('testing an agent refreshes recovered chat summaries', async () => {
   await waitFor(() => expect(value.bridge!.test).toHaveBeenCalledWith(agentId))
   expect(value.refresh).toHaveBeenCalledTimes(1)
   expect(onAgentsChanged).toHaveBeenCalledTimes(1)
+  expect(value.loadModels).toHaveBeenCalledWith(agentId, true)
+})
+
+test('explains a failed model load and retries it through Refresh without changing agents', async () => {
+  const value = state()
+  value.models = {}
+  value.loadModels = vi.fn().mockRejectedValueOnce(new Error('Model catalog unavailable')).mockResolvedValue({ live: true, models: [] })
+  renderExpanded(value)
+  expect((await screen.findByRole('alert')).textContent).toMatch(/models|catalog/i)
+  fireEvent.click(screen.getByRole('button', { name: 'Refresh Connected Agents' }))
+  await waitFor(() => expect(value.loadModels).toHaveBeenLastCalledWith(agentId, true))
 })
 
 test('disconnect requires impact disclosure and promises readable history', async () => {

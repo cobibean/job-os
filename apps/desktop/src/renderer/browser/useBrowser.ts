@@ -46,6 +46,12 @@ export function useBrowser(
   const [state, setState] = useState<BrowserState>(emptyState)
   const [message, setMessage] = useState('Browser ready')
   const [restorationReady, setRestorationReady] = useState(!bridge)
+  const [restorationError, setRestorationError] = useState<string | null>(null)
+  const restoreRequest = useRef(0)
+  const restoreInput = useRef(restoredState)
+  restoreInput.current = restoredState
+  const readiness = useRef(restorationReady)
+  readiness.current = restorationReady
   const viewportRef = useRef<HTMLDivElement | null>(null)
   const restored = useRef(false)
   const explicitBrowserAction = useRef(false)
@@ -73,30 +79,44 @@ export function useBrowser(
     return bridge?.subscribe(next => { void acceptState(next).catch(() => undefined) })
   }, [acceptState, active, bridge])
 
-  useEffect(() => {
-    if (!active || !bridge || !workspaceHydrated || restored.current) return
+  const retryRestore = useCallback(async (): Promise<boolean> => {
+    if (!activeRef.current || !bridge) return false
+    const request = ++restoreRequest.current
+    const input = restoreInput.current
     restored.current = true
-    persistedKey.current = JSON.stringify(restoredState)
-    requestedRestoreKey.current = JSON.stringify(restoredState)
-    void bridge.restore(restoredState).then(next => {
+    persistedKey.current = JSON.stringify(input)
+    requestedRestoreKey.current = JSON.stringify(input)
+    setRestorationReady(false)
+    readiness.current = false
+    setRestorationError(null)
+    try {
+      const next = await bridge.restore(input)
+      if (!activeRef.current || request !== restoreRequest.current) return false
       setState(next)
       persistedKey.current = JSON.stringify(browserStateForPersistence(next))
       setRestorationReady(true)
-    }).catch(error => {
-      setMessage(error instanceof Error ? error.message : 'Browser restore failed')
-    })
-  }, [acceptState, active, bridge, restoredState, workspaceHydrated])
+      readiness.current = true
+      setMessage('Browser ready')
+      return true
+    } catch (error) {
+      if (!activeRef.current || request !== restoreRequest.current) return false
+      const message = error instanceof Error ? error.message : 'Browser restore failed'
+      setMessage(message)
+      setRestorationError(message)
+      return false
+    }
+  }, [bridge])
+
+  useEffect(() => {
+    if (active && bridge && workspaceHydrated && !restored.current) void retryRestore()
+  }, [active, bridge, retryRestore, workspaceHydrated])
 
   useEffect(() => {
     if (!active || !bridge || !restored.current || explicitBrowserAction.current) return
-    const requestedKey = JSON.stringify(restoredState)
-    if (requestedKey === requestedRestoreKey.current) return
-    requestedRestoreKey.current = requestedKey
-    void bridge.restore(restoredState).then(next => {
-      setState(next)
-      persistedKey.current = JSON.stringify(browserStateForPersistence(next))
-    }).catch(error => setMessage(error instanceof Error ? error.message : 'Browser recovery failed'))
-  }, [active, bridge, restoredState])
+    if (JSON.stringify(restoredState) !== requestedRestoreKey.current) void retryRestore()
+  }, [active, bridge, restoredState, retryRestore])
+
+  useEffect(() => () => { restoreRequest.current += 1 }, [])
 
   const activeTab = useMemo(
     () => state.tabs.find(tab => tab.tabId === state.activeTabId) ?? null,
@@ -127,9 +147,11 @@ export function useBrowser(
   }, [active, activeTab?.error, bridge, layoutSignal, state.activeTabId, visible])
 
   const run = useCallback(async (operation: () => Promise<BrowserState>): Promise<boolean> => {
-    if (!activeRef.current) return false
+    if (!activeRef.current || !readiness.current) return false
     try {
-      await acceptState(await operation(), true)
+      const next = await operation()
+      if (!activeRef.current) return false
+      await acceptState(next, true)
       setMessage('Browser ready')
       return true
     } catch (error) {
@@ -154,6 +176,8 @@ export function useBrowser(
   return {
     bridgeAvailable: Boolean(bridge),
     restorationReady,
+    restorationError,
+    retryRestore,
     state,
     activeTab,
     message,

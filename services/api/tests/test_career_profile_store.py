@@ -19,6 +19,7 @@ from jobos_api.career_profile import (
     WorkArrangementMutation,
     WorkArrangementRestore,
 )
+from jobos_api.career_profile_complete import CareerProfileCompleteStore, ProfileItemMutation
 from jobos_api.state_store import JobOsStateStore
 
 
@@ -264,6 +265,49 @@ def test_restore_is_a_compensating_revision_that_preserves_history(tmp_path: Pat
     assert history.revisions[0].restored_from_profile_revision == 1
     assert history.revisions[0].base_profile_revision == 2
     assert history.revisions[1].value.mode == "hybrid"
+
+
+def test_restore_resolves_preference_at_an_interleaved_global_revision(tmp_path: Path) -> None:
+    database = tmp_path / "jobos.db"
+    store = initialized_store(database)
+    first = store.set_work_arrangement(
+        principal="device:primary",
+        command=mutation(revision=0, key="sparse-preference-one", mode="remote"),
+    )
+    complete = CareerProfileCompleteStore(database, tmp_path / "evidence")
+    complete.initialize()
+    skill = complete.upsert_item(
+        principal="device:primary",
+        command=ProfileItemMutation.model_validate({
+            "expected_profile_revision": 1,
+            "idempotency_key": "sparse-skill-two",
+            "value": {"kind": "skill", "name": "(FAKE) TypeScript"},
+            "evidence_ids": [],
+        }),
+    )
+    store.set_work_arrangement(
+        principal="device:primary",
+        command=mutation(revision=2, key="sparse-preference-three", mode="hybrid"),
+    )
+    history = store.work_arrangement_history()
+    assert [revision.profile_revision for revision in history.revisions] == [3, 1]
+
+    restored = store.restore_work_arrangement(
+        principal="device:primary",
+        command=WorkArrangementRestore(
+            expected_profile_revision=3,
+            idempotency_key="sparse-restore-before-three",
+            target_profile_revision=2,
+        ),
+    )
+
+    assert restored.profile_revision == 4
+    assert restored.record is not None and first.record is not None
+    assert restored.record.value == first.record.value
+    assert [item for item in complete.current().items if item.value.kind == "skill"] == [
+        item for item in skill.items if item.value.kind == "skill"
+    ]
+    assert store.work_arrangement_history().revisions[0].restored_from_profile_revision == 1
 
 
 def test_snapshot_is_bounded_immutable_hashed_and_principal_bound(tmp_path: Path) -> None:

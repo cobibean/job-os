@@ -32,21 +32,32 @@ export function useDocxPageStyle(parsed: ParsedDocFull): CSSProperties {
   }, [parsed])
 }
 
-export function useDocxPagination(editor: Editor | null, parsed: ParsedDocFull): number {
+/** DOM rectangles include both CSS zoom and any responsive ancestor transform. */
+export function docxRenderedScale(pm: HTMLElement): number {
+  const layoutWidth = Number.parseFloat(window.getComputedStyle(pm).width) || pm.offsetWidth
+  const renderedWidth = pm.getBoundingClientRect().width
+  const scale = renderedWidth / layoutWidth
+  return Number.isFinite(scale) && scale > 0 ? scale : 1
+}
+
+export function useDocxPagination(editor: Editor | null, parsed: ParsedDocFull, zoom = 1): number {
   const [pageCount, setPageCount] = useState(1)
 
   useEffect(() => {
     if (!editor) return
     const pm = editor.view.dom as HTMLElement
     let timer: number | null = null
+    let active = true
 
     const measure = () => {
+      if (!active || editor.isDestroyed) return
       const allSections = readSections(parsed)
       if (allSections.length === 0) return
-      const { blocks, totalHeight } = measureBlocks(pm, pm.getBoundingClientRect().top, 1)
+      const scale = docxRenderedScale(pm)
+      const { blocks, totalHeight } = measureBlocks(pm, pm.getBoundingClientRect().top, scale)
       const sections = liveSections(allSections, blocks)
       assignSections(blocks, sections)
-      const slices = sliceWithLineSplit(blocks, sectionGeoms(sections), totalHeight, 1)
+      const slices = sliceWithLineSplit(blocks, sectionGeoms(sections), totalHeight, scale)
       const gaps: PageGapSpec[] = []
 
       slices.slice(1).forEach((slice, index) => {
@@ -72,7 +83,7 @@ export function useDocxPagination(editor: Editor | null, parsed: ParsedDocFull):
           block.el && block.top < slice.start && slice.start < block.top + block.height - 0.5
         ))
         if (!split?.el) return
-        const anchor = lineStartAnchor(split.el, slice.start - split.top, 1)
+        const anchor = lineStartAnchor(split.el, slice.start - split.top, scale)
         if (!anchor) return
         try {
           const pos = editor.view.posAtDOM(anchor.node, anchor.charOffset)
@@ -87,25 +98,29 @@ export function useDocxPagination(editor: Editor | null, parsed: ParsedDocFull):
     }
 
     const schedule = () => {
+      if (!active || editor.isDestroyed) return
       if (timer !== null) window.clearTimeout(timer)
       timer = window.setTimeout(measure, 180)
     }
     const resize = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(schedule)
     resize?.observe(pm)
     editor.on('update', schedule)
+    window.addEventListener('resize', schedule)
     const fonts = document.fonts
     fonts?.ready.then(schedule).catch(() => undefined)
     fonts?.addEventListener('loadingdone', schedule)
     measure()
 
     return () => {
+      active = false
       if (timer !== null) window.clearTimeout(timer)
       resize?.disconnect()
       editor.off('update', schedule)
+      window.removeEventListener('resize', schedule)
       fonts?.removeEventListener('loadingdone', schedule)
-      setPageGaps(editor.view, [])
+      if (!editor.isDestroyed) setPageGaps(editor.view, [])
     }
-  }, [editor, parsed])
+  }, [editor, parsed, zoom])
 
   return pageCount
 }

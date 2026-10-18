@@ -391,11 +391,14 @@ class CareerProfileStore:
                 head = self._head_revision(connection)
                 if head != command.expected_profile_revision:
                     raise CareerProfileRevisionConflict(head)
+                if command.target_profile_revision > head:
+                    raise CareerProfileRevisionNotFound
                 target = connection.execute(
                     """
-                    SELECT resulting_value_json
+                    SELECT resulting_value_json, profile_revision
                     FROM career_profile_revisions
-                    WHERE profile_revision = ? AND namespace = ?
+                    WHERE profile_revision <= ? AND namespace = ?
+                    ORDER BY profile_revision DESC LIMIT 1
                     """,
                     (command.target_profile_revision, WORK_ARRANGEMENT_NAMESPACE),
                 ).fetchone()
@@ -410,7 +413,7 @@ class CareerProfileStore:
                     base_profile_revision=head,
                     operation="restore",
                     value=value,
-                    restored_from_profile_revision=command.target_profile_revision,
+                    restored_from_profile_revision=target[1],
                 )
                 connection.commit()
                 return result

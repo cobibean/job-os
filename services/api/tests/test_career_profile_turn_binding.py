@@ -27,6 +27,7 @@ from jobos_api.conversations import (
     RetryTurnRequest,
     SendMessageRequest,
 )
+from jobos_api.hermes_adapter import HermesWebSocketGateway
 from jobos_api.state_store import JobOsStateStore
 
 AGENT_ID = "job-hunter"
@@ -971,6 +972,82 @@ def test_complete_context_background_continuation_keeps_source_binding(tmp_path)
     assert continuation_binding == source_binding
     assert continuation_binding is not None
     assert all(value is not None for value in continuation_binding)
+
+
+def test_first_seen_unsupported_continuation_keeps_complete_context_source_scope(tmp_path):
+    async def scenario():
+        database, _, context_store, service, gateway, principal, _ = (
+            configured_complete_context_service(tmp_path)
+        )
+        source = service.store.create_turn(
+            text="(FAKE) delegate work",
+            context={},
+            idempotency_key="first-wait-source-scope",
+            actor_id="device-a",
+            career_profile_principal=principal,
+            career_profile_context=context_store,
+            career_profile_agent_id=AGENT_ID,
+        )
+        service.store.bind_agent_continuation(
+            turn_id=str(source["turn_id"]), continuation_id="synthetic_scoped_continuation"
+        )
+        service.store.update_turn_status(str(source["turn_id"]), "completed")
+        hermes = HermesWebSocketGateway(
+            url="ws://127.0.0.1:9119/api/ws", token="(FAKE)-token", cwd=tmp_path
+        )
+        hermes._live_session_id = "(FAKE)-live"
+        for continuation_id, accepted in [
+            ("synthetic_unbound_continuation", False),
+            ("synthetic_scoped_continuation", True),
+        ]:
+            normalized = hermes.normalize_frame(
+                {
+                    "jsonrpc": "2.0",
+                    "method": "event",
+                    "params": {
+                        "type": "secret.request",
+                        "session_id": "(FAKE)-live",
+                        "payload": {
+                            "display_kind": "async_delegation_complete",
+                            "continuation_id": continuation_id,
+                            "prompt": "(FAKE) request",
+                        },
+                    },
+                }
+            )
+            assert normalized is not None
+
+            async def events(event=normalized):
+                yield event
+
+            gateway.stream_events = events
+            await service._consume_gateway_events()
+            assert (service.store.turn_record(normalized.turn_id) is not None) is accepted
+            if not accepted:
+                assert service.store.recovery_turn_id() is None
+                assert service.snapshot().recovery_state == "ready"
+            else:
+                assert service.store.recovery_turn_id() == normalized.turn_id
+                assert service.snapshot().recovery_state == "quarantined"
+                columns = (
+                    "career_profile_snapshot_id, career_profile_revision, "
+                    "career_profile_content_hash, career_profile_context_snapshot_id, "
+                    "career_profile_context_agent_id, career_profile_context_revision, "
+                    "career_profile_context_authority_epoch, career_profile_context_content_hash"
+                )
+                with sqlite3.connect(database) as connection:
+                    source_binding = connection.execute(
+                        f"SELECT {columns} FROM conversation_turns WHERE turn_id = ?",
+                        (source["turn_id"],),
+                    ).fetchone()
+                    continuation_binding = connection.execute(
+                        f"SELECT {columns} FROM conversation_turns WHERE turn_id = ?",
+                        (normalized.turn_id,),
+                    ).fetchone()
+                assert continuation_binding == source_binding
+                assert all(value is not None for value in continuation_binding)
+
+    asyncio.run(scenario())
 
 
 def test_disconnected_agent_cannot_retry_a_frozen_complete_context_turn(tmp_path):

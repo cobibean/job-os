@@ -170,3 +170,22 @@ test('a selected fictional job has an accessible Demo badge and intentional remo
   fireEvent.click(screen.getByRole('button', { name: 'Remove demo job' }))
   expect(onRemoveDemo).toHaveBeenCalledWith(job.jobId)
 })
+
+
+test('the active job exposes current state and moves it when selection changes', () => {
+  const jobs = [
+    { jobId: 'a', company: 'Alpha', title: 'Builder', status: 'discovered' as const, statusGroup: 'Inbox', canonicalUrl: 'https://example.com/a', discoveredAt: '', lastSeenAt: '' },
+    { jobId: 'b', company: 'Beta', title: 'Operator', status: 'reviewed' as const, statusGroup: 'Inbox', canonicalUrl: 'https://example.com/b', discoveredAt: '', lastSeenAt: '' }
+  ]
+  const props = {
+    error: null, feedback: null, jobs, loading: false, onMove: vi.fn(), onQueryChange: vi.fn(), onReorder: vi.fn(), onSelect: vi.fn(), onSortChange: vi.fn(), onStatusChange: vi.fn(), onStatusGroupChange: vi.fn(), query: '', sortMode: 'manual' as const, statusGroup: ''
+  }
+  const { rerender } = render(<JobNavigator {...props} selectedJobId="a" />)
+  expect(screen.getByRole('button', { name: 'Select Alpha Builder' }).getAttribute('aria-current')).toBe('true')
+  expect(screen.getAllByRole('button').filter(button => button.getAttribute('aria-current') === 'true')).toHaveLength(1)
+  fireEvent.click(screen.getByRole('button', { name: 'Select Beta Operator' }))
+  expect(props.onSelect).toHaveBeenCalledWith('b')
+  rerender(<JobNavigator {...props} selectedJobId="b" />)
+  expect(screen.getByRole('button', { name: 'Select Alpha Builder' }).getAttribute('aria-current')).not.toBe('true')
+  expect(screen.getByRole('button', { name: 'Select Beta Operator' }).getAttribute('aria-current')).toBe('true')
+})

@@ -31,7 +31,8 @@ function withBrowseDefaults(snapshot: BridgeWorkspaceSnapshot): WorkspaceSnapsho
 export function useWorkspace(
   conversationId: string | null,
   jobContext: AgentSessionJobContext | null,
-  onJobContextChange?: (conversationId: string, context: AgentSessionJobContext) => void
+  onJobContextChange?: (conversationId: string, context: AgentSessionJobContext) => void,
+  onLocalJobContextChange?: (context: AgentSessionJobContext) => void
 ) {
   const [workspace, setWorkspace] = useState<WorkspaceSnapshot>(canonicalWorkspace)
   const [announcement, setAnnouncement] = useState('Layout controls ready')
@@ -47,6 +48,9 @@ export function useWorkspace(
   const recoveringStartup = useRef(false)
   const conversationIdRef = useRef(conversationId)
   conversationIdRef.current = conversationId
+  const selectedJobRef = useRef(jobContext?.selectedJobId ?? null)
+  selectedJobRef.current = jobContext?.selectedJobId ?? null
+  const documentRequest = useRef(0)
 
   const persist = useCallback((next: WorkspaceSnapshot): Promise<void> => {
     if (!bridge) return Promise.resolve()
@@ -164,7 +168,7 @@ export function useWorkspace(
     }
     latest.current = next
     setWorkspace(next)
-  }, [conversationId, hydrated, jobContext])
+  }, [conversationId, hydrated, jobContext?.selectedJobId, jobContext?.activeArtifactId, jobContext?.activeArtifactPage, jobContext?.activeArtifactZoom])
 
   const selectPreset = (preset: LayoutPreset) => commit(current => ({
     ...current,
@@ -226,14 +230,22 @@ export function useWorkspace(
 
   const updateDocumentState = useCallback(async (artifactId: string | null, page: number, zoom: number) => {
     const ownerConversationId = conversationId
-    if (!ownerConversationId || !bridge) return
-    const context = await bridge.saveDocumentView(ownerConversationId, artifactId, page, zoom)
-    if (ownerConversationId !== conversationIdRef.current) return
-    onJobContextChange?.(ownerConversationId, context)
+    const ownerJobId = selectedJobRef.current
+    const request = ++documentRequest.current
+    if (ownerConversationId) {
+      if (!bridge) return
+      const context = await bridge.saveDocumentView(ownerConversationId, artifactId, page, zoom)
+      if (request !== documentRequest.current || ownerConversationId !== conversationIdRef.current || ownerJobId !== selectedJobRef.current) return
+      onJobContextChange?.(ownerConversationId, context)
+    } else {
+      // The global workspace contract deliberately strips job/document context.
+      // Keep chatless document work in its own renderer-local context.
+      onLocalJobContextChange?.({ selectedJobId: ownerJobId, activeArtifactId: artifactId, activeArtifactPage: page, activeArtifactZoom: zoom })
+    }
     const next = { ...latest.current, activeArtifactId: artifactId, activeArtifactPage: page, activeArtifactZoom: zoom }
     latest.current = next
     setWorkspace(next)
-  }, [bridge, conversationId, onJobContextChange])
+  }, [bridge, conversationId, onJobContextChange, onLocalJobContextChange])
 
   const showDocument = useCallback(() => commit(current => ({
     ...current,

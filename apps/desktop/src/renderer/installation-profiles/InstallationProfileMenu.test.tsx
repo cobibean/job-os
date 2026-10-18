@@ -135,3 +135,48 @@ test('uses the latest renamed active profile in failed-switch rollback copy', as
     'Couldn’t open “Fresh setup”. JobOS returned to Primary search.'
   )
 })
+
+test('refreshes a persisted creation after activation rollback and opens it without creating again', async () => {
+  const created = { ...profiles.profiles[1]!, profileId: `jprof_${'c'.repeat(32)}`, displayName: 'Audit recovery' }
+  const updated = { ...profiles, registryRevision: 4, profiles: [...profiles.profiles, created] }
+  const list = vi.fn().mockResolvedValueOnce(profiles).mockResolvedValue(updated)
+  window.jobos!.installationProfiles.list = list
+  window.jobos!.installationProfiles.createAndSwitch = vi.fn().mockRejectedValue(new Error('JobOS stayed in the previous profile; no workspace data was changed.'))
+  render(<InstallationProfileMenu activeProfileName="Personal" />)
+  await waitFor(() => expect(list).toHaveBeenCalledTimes(1))
+  fireEvent.click(screen.getByRole('button', { name: /Personal/ }))
+  fireEvent.click(screen.getByRole('menuitem', { name: 'New profile…' }))
+  fireEvent.change(screen.getByRole('textbox', { name: 'Name' }), { target: { value: created.displayName } })
+  fireEvent.click(screen.getByRole('button', { name: 'Create and switch' }))
+
+  await waitFor(() => expect(list).toHaveBeenCalledTimes(2))
+  fireEvent.click(await screen.findByRole('button', { name: 'Switch profile' }))
+  await waitFor(() => expect(window.jobos!.installationProfiles.activate).toHaveBeenCalledWith(created.profileId, 4, expect.any(String)))
+  expect(window.jobos!.installationProfiles.createAndSwitch).toHaveBeenCalledTimes(1)
+})
+
+test('allows an initial profile-list failure to recover from the open menu', async () => {
+  const list = vi.fn().mockRejectedValueOnce(new Error('offline')).mockResolvedValue(profiles)
+  window.jobos!.installationProfiles.list = list
+  render(<InstallationProfileMenu activeProfileName="Personal" />)
+  await waitFor(() => expect(list).toHaveBeenCalledTimes(1))
+  fireEvent.click(screen.getByRole('button', { name: /Personal/ }))
+  fireEvent.click(await screen.findByRole('menuitem', { name: /Retry profiles/i }))
+  expect(await screen.findByRole('menuitem', { name: 'Fresh setup' })).not.toBeNull()
+})
+
+test('reuses the original creation identity when both the response and registry refresh are unavailable', async () => {
+  window.jobos!.installationProfiles.list = vi.fn().mockResolvedValueOnce(profiles).mockRejectedValue(new Error('offline'))
+  const createAndSwitch = vi.fn().mockRejectedValue(new Error('response lost'))
+  window.jobos!.installationProfiles.createAndSwitch = createAndSwitch
+  render(<InstallationProfileMenu activeProfileName="Personal" />)
+  await waitFor(() => expect(window.jobos!.installationProfiles.list).toHaveBeenCalledTimes(1))
+  fireEvent.click(screen.getByRole('button', { name: /Personal/ }))
+  fireEvent.click(screen.getByRole('menuitem', { name: 'New profile…' }))
+  fireEvent.change(screen.getByRole('textbox', { name: 'Name' }), { target: { value: 'Audit uncertain' } })
+  fireEvent.click(screen.getByRole('button', { name: 'Create and switch' }))
+  await screen.findByRole('alert')
+  fireEvent.click(screen.getByRole('button', { name: 'Create and switch' }))
+  await waitFor(() => expect(createAndSwitch).toHaveBeenCalledTimes(2))
+  expect(createAndSwitch.mock.calls[1]).toEqual(createAndSwitch.mock.calls[0])
+})

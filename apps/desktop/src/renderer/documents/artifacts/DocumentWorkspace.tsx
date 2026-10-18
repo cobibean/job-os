@@ -1,3 +1,4 @@
+import { useModalDialog } from '../../app/dialogs/useModalDialog'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import {
@@ -30,6 +31,7 @@ import {
   documentLabels,
   documentOrder,
   latestArtifactByFormat,
+  includeBoundDocuments,
   PDF,
   projectArtifactDocuments,
   selectArtifactRevision,
@@ -64,6 +66,9 @@ export function DocumentWorkspace(props: DocumentWorkspaceProps) {
   const bridge = useRef(window.jobos?.documents).current
   const docxBridge = useRef(window.jobos?.docxDocuments).current
   const [state, setState] = useState<JobArtifactsState>(emptyState(props.job?.jobId))
+  const [localSelection, setLocalSelection] = useState<{ jobId: string; documentKey: DocumentKey } | null>(null)
+  const localSelectionRef = useRef(localSelection)
+  localSelectionRef.current = localSelection
   const [activeId, setActiveId] = useState<string | null>(props.restoredArtifactId)
   const [page, setPage] = useState(Math.max(1, props.restoredPage))
   const [zoom, setZoom] = useState(Math.max(0.5, Math.min(3, props.restoredZoom)))
@@ -81,6 +86,8 @@ export function DocumentWorkspace(props: DocumentWorkspaceProps) {
   const [editorBusyKey, setEditorBusyKey] = useState<DocumentKey | null>(null)
   const [importKey, setImportKey] = useState<DocumentKey>('resume')
   const [blankChoiceKey, setBlankChoiceKey] = useState<DocumentKey | null>(null)
+  const sourceChoiceDialog = useRef<HTMLDivElement>(null)
+  useModalDialog(sourceChoiceDialog, () => setBlankChoiceKey(null), { open: Boolean(blankChoiceKey) })
   const exportButton = useRef<HTMLButtonElement>(null)
   const exportMenu = useRef<HTMLDivElement>(null)
   const incomingViewKey = `${props.restoredArtifactId ?? ''}:${props.restoredPage}:${props.restoredZoom}`
@@ -109,17 +116,34 @@ export function DocumentWorkspace(props: DocumentWorkspaceProps) {
 
   const stateMatchesJob = state.jobId === props.job?.jobId
   const documents = useMemo(
-    () => projectArtifactDocuments(stateMatchesJob ? state.artifacts : []),
-    [state.artifacts, stateMatchesJob]
+    () => includeBoundDocuments(
+      projectArtifactDocuments(stateMatchesJob ? state.artifacts : []),
+      bindings.filter(binding => binding.jobId === jobId).map(binding => binding.documentKey)
+    ),
+    [bindings, jobId, state.artifacts, stateMatchesJob]
   )
   const activeSelection = useMemo(() => selectArtifactRevision(documents, activeId), [activeId, documents])
-  const activeDocument = activeSelection?.document ?? null
-  const activeRevision = activeSelection?.revision ?? null
+  const selectedLocalDocument = localSelection?.jobId === jobId
+    ? documents.find(document => document.documentKey === localSelection.documentKey)
+    : null
+  const activeDocument = selectedLocalDocument ?? activeSelection?.document ?? documents[0] ?? null
+  const activeRevision = activeSelection?.document === activeDocument
+    ? activeSelection.revision
+    : activeDocument?.revisions.find(revision => revision.representative.renderStatus === 'succeeded') ?? activeDocument?.revisions[0] ?? null
   const activeArtifact = activeRevision?.representative ?? null
   const requestedPreviewMode = props.previewMode ?? 'pdf'
   const activeDocumentIndex = activeDocument
     ? documents.findIndex(document => document.documentKey === activeDocument.documentKey)
     : -1
+  const documentScope = `${jobId ?? ''}:${activeDocument?.documentKey ?? ''}`
+  const activeDocumentScope = useRef(documentScope)
+  activeDocumentScope.current = documentScope
+  const previousDocumentScope = useRef({ scope: documentScope, documentKey: activeDocument?.documentKey })
+  useEffect(() => {
+    const previous = previousDocumentScope.current
+    if (previous.documentKey && previous.scope !== documentScope) setMessage('')
+    previousDocumentScope.current = { scope: documentScope, documentKey: activeDocument?.documentKey }
+  }, [activeDocument?.documentKey, documentScope])
   const currentRevision = activeDocument?.revisions[0] ?? null
   const currentArtifact = currentRevision?.artifacts
     .slice()
@@ -129,7 +153,7 @@ export function DocumentWorkspace(props: DocumentWorkspaceProps) {
   const exportPdf = latestArtifactByFormat(exportArtifacts, PDF)
   const exportDocx = latestArtifactByFormat(exportArtifacts, DOCX)
   const activeBinding = activeDocument
-    ? bindings.find(binding => binding.documentKey === activeDocument.documentKey) ?? null
+    ? bindings.find(binding => binding.jobId === jobId && binding.documentKey === activeDocument.documentKey) ?? null
     : null
   const previewMode: DocumentPreviewMode = requestedPreviewMode === 'pdf' && !exportPdf && (activeBinding || exportDocx)
     ? 'docx'
@@ -141,8 +165,17 @@ export function DocumentWorkspace(props: DocumentWorkspaceProps) {
     : null
   const previewBinding = currentDocxPreview?.binding ?? activeBinding
   const previewFilename = previewBinding ? displayDocxFilename(previewBinding) : null
+  const displayedLocalDocx = previewMode === 'docx' ? currentDocxPreview : null
+  const displayedArtifact = previewMode === 'docx' ? (activeBinding ? null : exportDocx ?? null) : exportPdf ?? activeArtifact
+  const selectedPacketArtifact = displayedArtifact ?? activeArtifact
+  const canActOnDisplayed = Boolean(displayedLocalDocx ? docxBridge : displayedArtifact && bridge)
+  const canApprove = Boolean(displayedArtifact
+    && ['resume', 'cover_letter'].includes(displayedArtifact.documentKey)
+    && [PDF, DOCX].includes(displayedArtifact.mediaType))
+  const localDiffersFromPacket = Boolean(previewBinding && exportDocx && previewBinding.sha256 !== exportDocx.sha256)
 
   const choosePreview = useCallback((next: JobArtifactsState, preferredId: string | null) => {
+    if (localSelectionRef.current?.jobId === next.jobId) return null
     const projection = chooseArtifactPreview(next.artifacts, preferredId)
     const chosen = projection.selectedPreview
     const nextId = chosen?.revision.representative.artifactId ?? null
@@ -169,6 +202,10 @@ export function DocumentWorkspace(props: DocumentWorkspaceProps) {
   }, [])
 
   useEffect(() => {
+    if (localSelectionRef.current && localSelectionRef.current.jobId !== jobId) {
+      localSelectionRef.current = null
+      setLocalSelection(null)
+    }
     const jobChanged = Boolean(jobId && lastNonNullJobId.current && lastNonNullJobId.current !== jobId)
     if (jobId) lastNonNullJobId.current = jobId
     if (!jobId || !bridge) {
@@ -239,7 +276,9 @@ export function DocumentWorkspace(props: DocumentWorkspaceProps) {
       if (event.kind === 'missing') {
         setBindings(current => current.filter(binding => binding.bindingId !== event.bindingId))
         setDocxPreview(current => current?.binding.bindingId === event.bindingId ? null : current)
-        setMessage('The current editable DOCX is no longer available on this device')
+        if (previewMode === 'docx' && activeDocument?.documentKey === event.documentKey) {
+          setMessage('The current editable DOCX is no longer available on this device')
+        }
         return
       }
       void docxBridge.openBound(jobId, event.documentKey).then(opened => {
@@ -253,7 +292,7 @@ export function DocumentWorkspace(props: DocumentWorkspaceProps) {
           setMessage('Current editable DOCX refreshed')
         }
       }).catch(error => {
-        if (active && docxMutationEpoch.current.get(event.bindingId) === epoch) {
+        if (active && previewMode === 'docx' && activeDocument?.documentKey === event.documentKey && docxMutationEpoch.current.get(event.bindingId) === epoch) {
           setMessage(error instanceof Error ? error.message : 'Current DOCX refresh failed')
         }
       })
@@ -358,13 +397,21 @@ export function DocumentWorkspace(props: DocumentWorkspaceProps) {
     const requestJobId = jobId
     setLoading(true)
     try {
-      const refreshed = await bridge.refresh(requestJobId)
+      const listed = await bridge.list(requestJobId)
       if (activeJobId.current !== requestJobId) return
-      setState(refreshed)
-      choosePreview(refreshed, selectedId.current)
-      setMessage('Checked for newer artifacts')
+      setState(listed)
+      choosePreview(listed, selectedId.current)
+      try {
+        const refreshed = await bridge.refresh(requestJobId)
+        if (activeJobId.current !== requestJobId) return
+        setState(refreshed)
+        choosePreview(refreshed, selectedId.current)
+        setMessage('Checked for newer artifacts')
+      } catch {
+        if (activeJobId.current === requestJobId) setMessage('Local artifacts reloaded; optional artifact refresh is unavailable')
+      }
     } catch {
-      if (activeJobId.current === requestJobId) setMessage('Optional artifact refresh is unavailable; local documents remain available')
+      if (activeJobId.current === requestJobId) setMessage('Could not reload local artifacts; existing documents remain available')
     } finally {
       if (activeJobId.current === requestJobId) setLoading(false)
     }
@@ -377,25 +424,30 @@ export function DocumentWorkspace(props: DocumentWorkspaceProps) {
   }, [refresh, refreshGeneration])
 
   const nativeAction = async (name: 'reveal' | 'open') => {
-    const presentedArtifact = activeArtifact
-    if (!presentedArtifact || !bridge) return
+    const requestScope = activeDocumentScope.current
+    const requestJobId = jobId
+    if (!canActOnDisplayed) return
     try {
-      setMessage(await bridge[name](presentedArtifact.artifactId))
+      const result = displayedLocalDocx && docxBridge
+        ? await docxBridge[name](displayedLocalDocx.binding.bindingId, displayedLocalDocx.binding.sha256)
+        : await bridge![name](displayedArtifact!.artifactId)
+      if (activeJobId.current === requestJobId && activeDocumentScope.current === requestScope) setMessage(result)
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : 'Document action failed')
+      if (activeJobId.current === requestJobId && activeDocumentScope.current === requestScope) setMessage(error instanceof Error ? error.message : 'Document action failed')
     }
   }
 
   const exportArtifact = async (artifact: DocumentArtifact) => {
+    const requestScope = activeDocumentScope.current
     const requestJobId = props.job?.jobId
     if (!bridge || !requestJobId || exportBusy) return
     setExportOpen(false)
     setExportBusy(true)
     try {
       const result = await bridge.export(artifact.artifactId)
-      if (activeJobId.current === requestJobId) setMessage(result)
+      if (activeJobId.current === requestJobId && activeDocumentScope.current === requestScope) setMessage(result)
     } catch (error) {
-      if (activeJobId.current === requestJobId) {
+      if (activeJobId.current === requestJobId && activeDocumentScope.current === requestScope) {
         setMessage(error instanceof Error ? error.message : 'Document export failed')
       }
     } finally {
@@ -403,7 +455,26 @@ export function DocumentWorkspace(props: DocumentWorkspaceProps) {
     }
   }
 
+  const exportCurrentDocx = async () => {
+    const document = displayedLocalDocx
+    const requestScope = activeDocumentScope.current
+    const requestJobId = jobId
+    if (!document || !docxBridge || exportBusy) return
+    setExportOpen(false)
+    setExportBusy(true)
+    try {
+      const result = await docxBridge.export(document.binding.bindingId, document.binding.sha256)
+      if (activeJobId.current === requestJobId && activeDocumentScope.current === requestScope) setMessage(result)
+    } catch (error) {
+      if (activeJobId.current === requestJobId && activeDocumentScope.current === requestScope) setMessage(error instanceof Error ? error.message : 'DOCX export failed')
+    } finally {
+      setExportBusy(false)
+    }
+  }
+
   const selectRevision = (revision: LogicalRevision) => {
+    setLocalSelection(null)
+    localSelectionRef.current = null
     const nextId = revision.representative.artifactId
     if (nextId === activeId) return
     selectedId.current = nextId
@@ -420,11 +491,23 @@ export function DocumentWorkspace(props: DocumentWorkspaceProps) {
     if (!document) return
     const revision = document.revisions.find(item => item.representative.renderStatus === 'succeeded') ?? document.revisions[0]
     if (revision) selectRevision(revision)
+    else if (jobId) {
+      const selection = { jobId, documentKey: document.documentKey }
+      setLocalSelection(selection)
+      localSelectionRef.current = selection
+      selectedId.current = null
+      setActiveId(null)
+      setPayload(null)
+      setExportOpen(false)
+      setPage(1)
+      setZoom(1)
+      setPageCount(0)
+    }
   }
 
   const approve = async () => {
-    const presentedArtifact = activeArtifact
-    if (!props.job || !presentedArtifact || presentedArtifact.documentKey !== 'resume' || !bridge || presentedArtifact.renderStatus !== 'succeeded') return
+    const presentedArtifact = displayedArtifact
+    if (!props.job || !presentedArtifact || !canApprove || !bridge || presentedArtifact.renderStatus !== 'succeeded') return
     const requestJobId = props.job.jobId
     setLoading(true)
     try {
@@ -525,7 +608,7 @@ export function DocumentWorkspace(props: DocumentWorkspaceProps) {
             <span className="document-job">Documents for {props.job.company} · {props.job.title}</span>
             <strong>{previewMode === 'docx' && previewFilename
               ? previewFilename
-              : activeArtifact?.filename ?? 'Document artifacts'}</strong>
+              : displayedArtifact?.filename ?? 'Document artifacts'}</strong>
           </div>
           <div aria-label="Preview format" className="document-preview-switch" role="group">
           <button
@@ -557,7 +640,7 @@ export function DocumentWorkspace(props: DocumentWorkspaceProps) {
           }}
           value={activeArtifact?.artifactId ?? ''}
         >
-          <option value="">No artifact</option>
+          <option value="">{activeBinding && !activeRevision ? 'Current local DOCX' : 'No artifact'}</option>
           {activeDocument?.revisions.map(revision => {
             const artifact = revision.representative
             return (
@@ -599,10 +682,10 @@ export function DocumentWorkspace(props: DocumentWorkspaceProps) {
         </select>
         <button disabled={!docxBridge || !props.onOpenEditor || Boolean(editorBusyKey)} onClick={() => { void importDocx() }} type="button"><FolderOpen aria-hidden="true" size={14} /> Choose DOCX</button>
                 <button disabled={!docxBridge || !props.onOpenEditor || Boolean(editorBusyKey)} onClick={() => setBlankChoiceKey(importKey)} type="button"><Plus aria-hidden="true" size={14} /> New blank DOCX</button>
-        <button disabled={!activeArtifact || !bridge} onClick={() => nativeAction('open')} type="button"><ExternalLink aria-hidden="true" size={14} /> Open</button>
-        <button disabled={!activeArtifact || !bridge} onClick={() => nativeAction('reveal')} type="button"><FolderOpen aria-hidden="true" size={14} /> Reveal</button>
+        <button disabled={!canActOnDisplayed} onClick={() => nativeAction('open')} type="button"><ExternalLink aria-hidden="true" size={14} /> Open</button>
+        <button disabled={!canActOnDisplayed} onClick={() => nativeAction('reveal')} type="button"><FolderOpen aria-hidden="true" size={14} /> Reveal</button>
         <div className="document-export">
-          <button ref={exportButton} aria-expanded={exportOpen} aria-haspopup="menu" disabled={!bridge || exportBusy || (!exportPdf && !exportDocx)} onClick={() => { if (!exportOpen) positionExportMenu(); setExportOpen(value => !value) }} type="button"><Download aria-hidden="true" size={14} /> Export</button>
+          <button ref={exportButton} aria-expanded={exportOpen} aria-haspopup="menu" disabled={exportBusy || (!displayedLocalDocx && (!bridge || (!exportPdf && !exportDocx)))} onClick={() => { if (!exportOpen) positionExportMenu(); setExportOpen(value => !value) }} type="button"><Download aria-hidden="true" size={14} /> Export</button>
         </div>
         {exportOpen ? createPortal(
           <div
@@ -613,20 +696,21 @@ export function DocumentWorkspace(props: DocumentWorkspaceProps) {
             role="menu"
             style={exportMenuPosition}
           >
-            {exportPdf ? <button disabled={exportBusy} onClick={() => exportArtifact(exportPdf)} role="menuitem" type="button">Export PDF</button> : null}
-            {exportDocx ? <button disabled={exportBusy} onClick={() => exportArtifact(exportDocx)} role="menuitem" type="button">Export DOCX</button> : null}
+            {displayedLocalDocx ? <button disabled={exportBusy} onClick={() => { void exportCurrentDocx() }} role="menuitem" type="button">Export current DOCX</button> : null}
+            {exportPdf ? <button disabled={exportBusy} onClick={() => exportArtifact(exportPdf)} role="menuitem" type="button">{activeBinding ? `Export published PDF · ${exportPdf.artifactRevision}` : 'Export PDF'}</button> : null}
+            {exportDocx ? <button disabled={exportBusy} onClick={() => exportArtifact(exportDocx)} role="menuitem" type="button">{activeBinding ? `Export published DOCX · ${exportDocx.artifactRevision}` : 'Export DOCX'}</button> : null}
           </div>,
           document.body
         ) : null}
-        {previewMode === 'pdf' && activeArtifact && ['resume', 'cover_letter'].includes(activeArtifact.documentKey) && [PDF, DOCX].includes(activeArtifact.mediaType) ? (
+        {previewMode === 'pdf' && canApprove && displayedArtifact ? (
           <button
             className="approve-revision"
-            disabled={activeArtifact.renderStatus !== 'succeeded' || activeArtifact.isApproved || !bridge || loading}
+            disabled={displayedArtifact.renderStatus !== 'succeeded' || displayedArtifact.isApproved || !bridge || loading}
             onClick={approve}
             type="button"
           >
             <CheckCircle2 aria-hidden="true" size={14} />
-            {activeArtifact.isApproved ? 'Approved revision' : 'Approve this revision'}
+            {displayedArtifact.isApproved ? 'Approved revision' : 'Approve this revision'}
           </button>
         ) : null}
         <span className="document-toolbar-spacer" />
@@ -641,6 +725,11 @@ export function DocumentWorkspace(props: DocumentWorkspaceProps) {
       </div>
 
       <div className="document-status-line">
+        {previewBinding && !exportDocx ? (
+          <div className="render-progress" role="status">Local DOCX only. No published PDF/DOCX pair.</div>
+        ) : localDiffersFromPacket ? (
+          <div className="render-progress" role="status">Local edits differ from this published packet. Its PDF does not include these edits.</div>
+        ) : null}
         {currentArtifact?.renderStatus === 'failed' ? (
           <div className="render-failure" role="alert">
             <strong>Newest render failed.</strong> {currentArtifact.failureMessage ?? 'The latest artifact is unavailable.'}
@@ -648,8 +737,8 @@ export function DocumentWorkspace(props: DocumentWorkspaceProps) {
           </div>
         ) : currentArtifact?.renderStatus === 'rendering' ? (
           <div className="render-progress" role="status">A newer revision is rendering. The last successful document remains available.</div>
-        ) : currentArtifact ? (
-          <div className="render-current" role="status"><CheckCircle2 aria-hidden="true" size={13} /> Current · {currentArtifact.artifactRevision}</div>
+        ) : selectedPacketArtifact ? (
+          <div className="render-current" role="status"><CheckCircle2 aria-hidden="true" size={13} /> Published packet · {selectedPacketArtifact.artifactRevision}</div>
         ) : (
           <div className="render-progress" role="status">No registered render is available for this document.</div>
         )}
@@ -698,7 +787,7 @@ export function DocumentWorkspace(props: DocumentWorkspaceProps) {
         )}
       </section>
       {blankChoiceKey ? (
-        <div aria-labelledby="document-source-choice-title" aria-modal="true" className="document-exit-dialog" role="dialog">
+        <div aria-labelledby="document-source-choice-title" aria-modal="true" className="document-exit-dialog" ref={sourceChoiceDialog} role="dialog" tabIndex={-1}>
           <div>
             <FileText aria-hidden="true" size={22} />
             <h2 id="document-source-choice-title">Create or choose a DOCX</h2>

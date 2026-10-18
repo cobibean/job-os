@@ -11,6 +11,7 @@ import type {
 } from '../../../shared/contracts'
 import { CareerProfileWorkspace } from '../CareerProfileWorkspace'
 import { useCareerProfileProduct } from './useCareerProfileProduct'
+import { careerProfileContextConflictCode } from '../../../shared/careerProfileContextErrors'
 
 const workArrangement = {
   profileRevision: 4,
@@ -886,6 +887,103 @@ test('retries an ambiguous agent-scope save with one identity and rotates it onl
   fireEvent.click(save)
   await waitFor(() => expect(updateCareerProfileContext).toHaveBeenCalledTimes(3))
   expect(updateCareerProfileContext.mock.calls[2]?.[1].idempotencyKey).not.toBe(firstKey)
+})
+
+test('replays the full uncertain access request after the profile head and authority epoch refresh', async () => {
+  const updateCareerProfileContext = vi.fn().mockRejectedValueOnce(new Error('response lost'))
+    .mockResolvedValue({ agentId: 'job-hunter', mode: 'broader', selectedAreas: [], selectedItemIds: [], updatedAt: skill.updatedAt })
+  const getCareerProfile = vi.fn().mockResolvedValue(complete)
+  const getCareerProfileChangeHistory = vi.fn().mockResolvedValue({ profileRevision: 4, revisions: [] })
+  render(<CareerProfileWorkspace bridge={bridge({ updateCareerProfileContext, getCareerProfile, getCareerProfileChangeHistory })} hasActiveTurn={false} />)
+  await screen.findByRole('heading', { name: 'Work arrangement' })
+  fireEvent.click(screen.getByRole('button', { name: 'Agent access' }))
+  const dialog = await screen.findByRole('dialog', { name: 'Agent Career Profile access' })
+  const save = within(dialog).getByRole('button', { name: 'Save access' })
+  await waitFor(() => expect(save.hasAttribute('disabled')).toBe(false))
+  fireEvent.click(within(dialog).getByLabelText(/Broader accepted profile/i))
+  fireEvent.click(save)
+  await within(dialog).findByRole('alert')
+  const original = structuredClone(updateCareerProfileContext.mock.calls[0]!)
+
+  getCareerProfile.mockResolvedValue({ ...complete, profileRevision: 5, authorityEpoch: 3 })
+  getCareerProfileChangeHistory.mockResolvedValue({ profileRevision: 5, revisions: [] })
+  act(() => window.dispatchEvent(new Event('focus')))
+  await waitFor(() => expect(getCareerProfile).toHaveBeenCalledTimes(2))
+  fireEvent.click(save)
+
+  await waitFor(() => expect(updateCareerProfileContext).toHaveBeenCalledTimes(2))
+  expect(updateCareerProfileContext.mock.calls[1]).toEqual(original)
+  expect(await within(dialog).findByText(/Access saved/i)).not.toBeNull()
+})
+
+test('reconnects cached content at the same profile revision after focus returns', async () => {
+  const first = renderHook(() => useCareerProfileProduct(bridge()))
+  await waitFor(() => expect(window.localStorage.getItem('jobos.careerProfile.complete.v1')).not.toBeNull())
+  first.unmount()
+  const getCareerProfile = vi.fn().mockRejectedValue(new Error('offline'))
+  const api = bridge({ getCareerProfile })
+  const cached = renderHook(() => useCareerProfileProduct(api))
+  await waitFor(() => expect(cached.result.current.dataSource).toBe('cache'))
+  getCareerProfile.mockResolvedValue(complete)
+
+  act(() => window.dispatchEvent(new Event('focus')))
+
+  await waitFor(() => expect(cached.result.current.readOnly).toBe(false))
+  expect(cached.result.current.dataSource).toBe('live')
+  expect(cached.result.current.current?.profileRevision).toBe(complete.profileRevision)
+})
+
+test('requires review after a confirmed access conflict and starts a new intent only after that review', async () => {
+  const updateCareerProfileContext = vi.fn().mockRejectedValueOnce(new Error(`Error invoking remote method: ${careerProfileContextConflictCode} revision changed`))
+    .mockResolvedValue({ agentId: 'job-hunter', mode: 'broader', selectedAreas: [], selectedItemIds: [], updatedAt: skill.updatedAt })
+  const api = bridge({ updateCareerProfileContext })
+  render(<CareerProfileWorkspace bridge={api} hasActiveTurn={false} />)
+  await screen.findByRole('heading', { name: 'Work arrangement' })
+  fireEvent.click(screen.getByRole('button', { name: 'Agent access' }))
+  const dialog = await screen.findByRole('dialog', { name: 'Agent Career Profile access' })
+  const save = within(dialog).getByRole('button', { name: 'Save access' })
+  await waitFor(() => expect(save.hasAttribute('disabled')).toBe(false))
+  fireEvent.click(within(dialog).getByLabelText(/Broader accepted profile/i))
+  fireEvent.click(save)
+  expect((await within(dialog).findByRole('alert')).textContent).toMatch(/Review the latest access/i)
+  expect(save.hasAttribute('disabled')).toBe(true)
+  vi.mocked(api.getCareerProfile).mockResolvedValue({ ...complete, profileRevision: 5 })
+  fireEvent.click(within(dialog).getByRole('button', { name: 'Review latest access' }))
+  await waitFor(() => expect(save.hasAttribute('disabled')).toBe(false))
+  expect((within(dialog).getByLabelText(/Broader accepted profile/i) as HTMLInputElement).checked).toBe(true)
+  fireEvent.click(save)
+  await waitFor(() => expect(updateCareerProfileContext).toHaveBeenCalledTimes(2))
+  expect(updateCareerProfileContext.mock.calls[1]?.[1].expectedProfileRevision).toBe(5)
+  expect(updateCareerProfileContext.mock.calls[1]?.[1].idempotencyKey).not.toBe(updateCareerProfileContext.mock.calls[0]?.[1].idempotencyKey)
+})
+
+test('offers a complete-profile History retry and stops its loading state after failure', async () => {
+  const api = bridge()
+  render(<CareerProfileWorkspace bridge={api} hasActiveTurn={false} />)
+  await screen.findByRole('heading', { name: 'Work arrangement' })
+  vi.mocked(api.getCareerProfileChangeHistory).mockRejectedValueOnce(new Error('offline'))
+  fireEvent.click(screen.getByRole('button', { name: 'History' }))
+  const history = await screen.findByRole('dialog', { name: 'Career Profile history' })
+  expect((await within(history).findByRole('alert')).textContent).toMatch(/could not load/i)
+  expect(within(history).queryByText('Loading history…')).toBeNull()
+  fireEvent.click(within(history).getByRole('button', { name: 'Try again' }))
+  expect(await within(history).findByText('No complete-profile changes yet')).not.toBeNull()
+})
+
+test('refreshes open Evidence details after an external removal', async () => {
+  const getCareerProfile = vi.fn().mockResolvedValue(complete)
+  const getCareerProfileChangeHistory = vi.fn().mockResolvedValue({ profileRevision: 4, revisions: [] })
+  render(<CareerProfileWorkspace bridge={bridge({ getCareerProfile, getCareerProfileChangeHistory })} hasActiveTurn={false} />)
+  await screen.findByRole('heading', { name: 'Work arrangement' })
+  fireEvent.click(screen.getByRole('button', { name: /My Evidence/i }))
+  fireEvent.click(await screen.findByRole('button', { name: /Resume\.pdf details/i }))
+  const details = await screen.findByRole('dialog', { name: /Resume\.pdf details/i })
+  expect(within(details).getByText('Available')).not.toBeNull()
+  getCareerProfile.mockResolvedValue({ ...complete, profileRevision: 5, sourceEvidence: [{ ...evidence, active: false }] })
+  getCareerProfileChangeHistory.mockResolvedValue({ profileRevision: 5, revisions: [] })
+  act(() => window.dispatchEvent(new Event('focus')))
+  expect(await within(details).findByText('Unavailable')).not.toBeNull()
+  expect(within(details).getByRole('button', { name: 'Remove from active use' }).hasAttribute('disabled')).toBe(true)
 })
 
 test('shows truthful item state, saved preference guidance, and Evidence provenance', async () => {

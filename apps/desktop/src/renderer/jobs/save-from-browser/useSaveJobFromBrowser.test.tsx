@@ -82,7 +82,7 @@ test('reconciles a terminal failure that arrives before send resolves', async ()
 
   await act(() => result.current.saveJob(sourceTab))
 
-  await waitFor(() => expect(result.current.saveStates[sourceTab.tabId]).toEqual({
+  await waitFor(() => expect(result.current.saveStates[sourceTab.tabId]).toMatchObject({
     status: 'error',
     message: 'Agent connection unavailable'
   }))
@@ -126,7 +126,7 @@ test('confirms creation and association before transferring success to a recover
 
   await act(() => result.current.saveJob(sourceTab))
 
-  await waitFor(() => expect(result.current.saveStates[recoveredTab.tabId]).toEqual({
+  await waitFor(() => expect(result.current.saveStates[recoveredTab.tabId]).toMatchObject({
     status: 'saved',
     message: `Saved to JobOS: ${savedJob.company} · ${savedJob.title}`
   }))
@@ -204,4 +204,65 @@ test('cancels subscriptions and in-flight saves when the controller becomes inac
 
   expect(send).not.toHaveBeenCalled()
   expect(onJobSaved).not.toHaveBeenCalled()
+})
+
+test('a pending save follows its captured URL and does not block another listing in the same tab', async () => {
+  const pending: Array<(value: { turnId: string }) => void> = []
+  const send = vi.fn((_conversationId: string, _prompt: string, _operationId?: string) => new Promise<{ turnId: string }>(resolve => pending.push(resolve)))
+  let session = 0
+  const get = vi.fn(async (conversationId: string) => ({
+    ...conversation(conversationId, 'pending', ''), entries: [], latestEventId: 0
+  }))
+  const { result } = renderHook(() => useSaveJobFromBrowser({
+    agent: { get, send, subscribe: vi.fn(() => () => undefined) },
+    browser: { getState: vi.fn().mockResolvedValue(browserState()), reconcileExternalState: vi.fn() },
+    jobs: { getState: vi.fn() },
+    onCreateSaveSession: vi.fn(async () => `conversation-${++session}`),
+    onJobSaved: vi.fn()
+  }))
+  let first!: Promise<void>
+  act(() => { first = result.current.saveJob(sourceTab) })
+  await waitFor(() => expect(send).toHaveBeenCalledTimes(1))
+  const otherListing = { ...sourceTab, url: 'https://jobs.example.com/second-listing' }
+  let second!: Promise<void>
+  act(() => { second = result.current.saveJob(otherListing) })
+  await waitFor(() => expect(send).toHaveBeenCalledTimes(2))
+  expect(result.current.saveStates[sourceTab.tabId]).toMatchObject({ sourceUrl: otherListing.url, status: 'saving' })
+  expect(send.mock.calls[0]?.[1]).toContain(sourceTab.url)
+  expect(send.mock.calls[1]?.[1]).toContain(otherListing.url)
+  await act(async () => {
+    pending[0]?.({ turnId: 'first-turn' })
+    pending[1]?.({ turnId: 'second-turn' })
+    await Promise.all([first, second])
+  })
+})
+
+test('an older save completion cannot replace newer feedback on a navigated source tab', async () => {
+  let listener!: (update: AgentSessionStreamUpdate) => void
+  const secondListing = { ...sourceTab, url: 'https://jobs.example.com/second-listing' }
+  const recovered = { ...sourceTab, tabId: 'recovered-first', associatedJobId: 'job-1' }
+  const liveBrowser: BrowserState = { tabs: [secondListing, recovered], activeTabId: sourceTab.tabId, download: null, notice: null }
+  const savedJob: JobListItem = { jobId: 'job-1', company: 'Northstar Labs', title: sourceTab.title, status: 'discovered', statusGroup: 'Inbox', canonicalUrl: sourceTab.url, discoveredAt: '', lastSeenAt: '' }
+  const terminal = `JOBOS_SAVE_RESULT:${JSON.stringify({ jobId: 'job-1', created: true, tabId: recovered.tabId })}`
+  let completedFirst = false
+  const get = vi.fn(async (conversationId: string) => conversationId === 'conversation-1' && completedFirst
+    ? conversation(conversationId, 'conversation-1-turn', terminal)
+    : { ...conversation(conversationId, `${conversationId}-turn`, ''), entries: [], latestEventId: 0 })
+  let session = 0
+  const { result } = renderHook(() => useSaveJobFromBrowser({
+    agent: {
+      get, send: vi.fn(async conversationId => ({ turnId: `${conversationId}-turn` })),
+      subscribe: vi.fn(callback => { listener = callback; return () => undefined })
+    },
+    browser: { getState: vi.fn().mockResolvedValue(liveBrowser), reconcileExternalState: vi.fn() },
+    jobs: { getState: vi.fn().mockResolvedValue({ jobs: [savedJob], selectedJobId: null, sortMode: 'manual', manualOrder: [] }) },
+    onCreateSaveSession: vi.fn(async () => `conversation-${++session}`), onJobSaved: vi.fn()
+  }))
+  await act(async () => { await result.current.saveJob(sourceTab) })
+  await act(async () => { await result.current.saveJob(secondListing) })
+  const currentOperation = result.current.saveStates[sourceTab.tabId]?.operationId
+  completedFirst = true
+  act(() => listener({ kind: 'event', conversationId: 'conversation-1', recoveryState: 'ready', event: conversation('conversation-1', 'conversation-1-turn', terminal).entries[0]! }))
+  await waitFor(() => expect(result.current.saveStates[recovered.tabId]?.status).toBe('saved'))
+  expect(result.current.saveStates[sourceTab.tabId]).toMatchObject({ status: 'saving', sourceUrl: secondListing.url, operationId: currentOperation })
 })

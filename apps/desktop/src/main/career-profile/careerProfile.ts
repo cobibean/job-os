@@ -1,4 +1,5 @@
 import { jobOsAuthenticatedHeaders } from '@jobos/contracts'
+import { careerProfileContextConflictCode } from '../../shared/careerProfileContextErrors.js'
 import type {
   CareerProfileChangeProposal as ApiCareerProfileChangeProposal,
   CareerProfileCompleteCurrent as ApiCareerProfileCompleteCurrent,
@@ -950,6 +951,7 @@ export function createMainCareerProfileClient(
         `${COLLABORATION_ROUTE}/agents/${encodeURIComponent(validateAgentId(agentId))}/context`,
         { method: 'PUT', body: JSON.stringify(body) }
       )
+      if (response.status === 409) throw new Error(`${careerProfileContextConflictCode} ${await errorMessage(response)}`)
       if (!response.ok) throw new Error(await errorMessage(response))
       return mapContextScope(await response.json() as ApiCareerProfileContextScope)
     },
