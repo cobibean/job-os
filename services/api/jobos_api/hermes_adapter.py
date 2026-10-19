@@ -24,6 +24,7 @@ from .agent_gateway import (
 )
 from .browser_policy import browser_title_contains_credentials
 from .career_profile_context import CareerProfileContextSnapshot
+from .installation_profiles import HermesConnectionConfiguration, InstallationProfileRegistry
 from .redaction import (
     redact_detail,
     safe_error_summary,
@@ -192,10 +193,21 @@ class _HermesRpcError(RuntimeError):
 class HermesGatewayFactory:
     """Shared Hermes configuration that creates independent WebSocket adapters."""
 
-    def __init__(self, *, url: str, token: str, cwd: Path, request_timeout: float = 120) -> None:
+    def __init__(
+        self,
+        *,
+        url: str,
+        token: str,
+        cwd: Path,
+        profile: str = "job-hunter",
+        request_timeout: float = 120,
+        registry: InstallationProfileRegistry | None = None,
+    ) -> None:
         self._url = url
         self._token = token
         self._cwd = cwd
+        self._profile = profile
+        self._registry = registry
         self._request_timeout = request_timeout
 
     def create(self, conversation_id: str) -> "HermesWebSocketGateway":
@@ -204,10 +216,29 @@ class HermesGatewayFactory:
     def create_bound(
         self, conversation_id: str, binding: RuntimeBinding
     ) -> "HermesWebSocketGateway":
+        profile, cwd = self._profile, self._cwd
+        if self._registry is not None and binding.connected_agent_id is not None:
+            agent = next(
+                (agent for agent in self._registry.load().connected_agents
+                 if agent.id == binding.connected_agent_id),
+                None,
+            )
+            if agent is None or agent.provider != "hermes" or agent.lifecycle != "connected":
+                raise ConnectionError("Connected Agent Hermes runtime is unavailable")
+            config = agent.connection_config
+            if not isinstance(config, HermesConnectionConfiguration):
+                raise ConnectionError("Connected Agent Hermes configuration is unavailable")
+            # Revalidate at use time: the workspace may have disappeared since registration.
+            config = HermesConnectionConfiguration.model_validate(config.model_dump())
+            profile = config.runtime_profile or "job-hunter"
+            cwd = Path(config.runtime_cwd) if config.runtime_cwd is not None else self._cwd
+        # Endpoint/token are installation-owned. Never forward the dashboard credential
+        # to the per-agent endpoint recorded in the registry.
         return HermesWebSocketGateway(
             url=self._url,
             token=self._token,
-            cwd=self._cwd,
+            cwd=cwd,
+            profile=profile,
             request_timeout=self._request_timeout,
             model_id=binding.model_id,
             reasoning_effort=binding.reasoning_effort,
@@ -230,14 +261,18 @@ class HermesWebSocketGateway:
         reasoning_effort: str | None = None,
     ) -> None:
         self._require_loopback(url)
-        if profile != "job-hunter":
+        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}", profile):
             raise ValueError("Hermes profile is not approved")
+        if profile != "job-hunter" and not cwd.is_absolute():
+            raise ValueError("Hermes working directory is not approved")
         self._url = self._without_token(url)
         self._token = token
         try:
             self._cwd = cwd.expanduser().resolve(strict=True)
         except (OSError, RuntimeError) as error:
             raise ValueError("Hermes working directory is not approved") from error
+        if not self._cwd.is_dir():
+            raise ValueError("Hermes working directory is not approved")
         self._profile = profile
         self._model_id = model_id
         self._reasoning_effort = reasoning_effort
