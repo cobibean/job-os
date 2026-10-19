@@ -24,6 +24,7 @@ interface ConnectedAgentsConfig {
   deviceToken: string
   installationProfileId?: string
   fetch?: typeof fetch
+  readTimeoutMs?: number
 }
 
 interface ApiResult<T> {
@@ -108,7 +109,7 @@ export function createMainConnectedAgentsClient(config: ConnectedAgentsConfig) {
   if (config.fetch) client.setConfig({ fetch: config.fetch })
   return {
     async list(): Promise<ConnectedAgentsSnapshot> {
-      const value = unwrap(await connectedAgentsListV1ConnectedAgentsGet({ client }), [200], 'Connected Agents unavailable')
+      const value = unwrap(await connectedAgentsListV1ConnectedAgentsGet({ client, signal: AbortSignal.timeout(config.readTimeoutMs ?? 20_000) }), [200], 'Agent connection check did not finish. Refresh to try again.')
       const raw = value as unknown as Record<string, unknown>
       if (!Number.isInteger(raw.registry_revision) || typeof raw.profile_id !== 'string' || !Array.isArray(raw.agents)) {
         throw new Error('Connected Agents response unavailable')
@@ -121,7 +122,7 @@ export function createMainConnectedAgentsClient(config: ConnectedAgentsConfig) {
       }
     },
     async models(agentId: string): Promise<ConnectedAgentModelsSnapshot> {
-      const value = unwrap(await connectedAgentModelsV1ConnectedAgentsAgentIdModelsGet({ client, path: { agent_id: agentId } }), [200], 'Models unavailable')
+      const value = unwrap(await connectedAgentModelsV1ConnectedAgentsAgentIdModelsGet({ client, path: { agent_id: agentId }, signal: AbortSignal.timeout(config.readTimeoutMs ?? 20_000) }), [200], 'Models unavailable')
       return {
         live: value.live,
         models: value.models.map(model => ({ modelId: model.model_id, displayName: model.display_name, reasoningEfforts: model.reasoning_efforts }))

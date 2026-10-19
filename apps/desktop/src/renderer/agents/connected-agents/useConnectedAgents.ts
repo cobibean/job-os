@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 
 import type { ConnectedAgentModelsSnapshot, ConnectedAgentsSnapshot } from '../../../shared/contracts'
 
@@ -8,21 +8,25 @@ export function useConnectedAgents() {
   const [models, setModels] = useState<Record<string, ConnectedAgentModelsSnapshot>>({})
   const [loading, setLoading] = useState(Boolean(bridge))
   const [error, setError] = useState<string | null>(null)
+  const pendingRefresh = useRef<Promise<ConnectedAgentsSnapshot | null> | null>(null)
 
-  const refresh = useCallback(async () => {
-    if (!bridge) return null
+  const refresh = useCallback(() => {
+    if (!bridge) return Promise.resolve(null)
+    if (pendingRefresh.current) return pendingRefresh.current
     setLoading(true)
-    try {
-      const value = await bridge.list()
+    const request = Promise.resolve().then(() => bridge.list()).then(value => {
       setSnapshot(value)
       setError(null)
       return value
-    } catch (cause) {
+    }).catch(cause => {
       setError(cause instanceof Error ? cause.message : 'Connected Agents unavailable')
       return null
-    } finally {
+    }).finally(() => {
+      pendingRefresh.current = null
       setLoading(false)
-    }
+    })
+    pendingRefresh.current = request
+    return request
   }, [bridge])
 
   const loadModels = useCallback(async (agentId: string, force = false) => {

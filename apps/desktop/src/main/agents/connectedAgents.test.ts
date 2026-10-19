@@ -19,6 +19,17 @@ const rawAgent = {
   impact: { active_chats: 1, locked_chats: 0 }
 }
 
+test('ends a stalled roster read and permits a fresh retry', async () => {
+  const fetcher = vi.fn()
+    .mockImplementationOnce((input: Request) => new Promise((_resolve, reject) => {
+      input.signal.addEventListener('abort', () => reject(input.signal.reason), { once: true })
+    }))
+    .mockResolvedValueOnce(Response.json({ registry_revision: 8, profile_id: 'default', default_connected_agent_id: agentId, agents: [rawAgent] }))
+  const client = createMainConnectedAgentsClient({ baseUrl: 'http://jobos.test', deviceToken: 'test-device-token', fetch: fetcher, readTimeoutMs: 20 })
+  await expect(client.list()).rejects.toThrow('Agent connection check did not finish')
+  await expect(client.list()).resolves.toMatchObject({ registryRevision: 8 })
+})
+
 test('normalizes the profile roster and uses only runtime-provided models', async () => {
   const fetcher = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
     const request = input instanceof Request ? input : new Request(input, init)

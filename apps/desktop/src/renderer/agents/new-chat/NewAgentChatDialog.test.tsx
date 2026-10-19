@@ -42,6 +42,21 @@ function connectedAgents(): ReturnType<typeof useConnectedAgents> {
 
 afterEach(cleanup)
 
+test('keeps cached agent choices usable and explains an ongoing refresh', async () => {
+  const state = connectedAgents()
+  state.loading = true
+  state.snapshot!.agents.push({ ...state.snapshot!.agents[0]!, id: `jagent_${'c'.repeat(32)}`, provider: 'hermes', displayName: 'Hermes' })
+  render(<NewAgentChatDialog atMaximum={false} connectedAgents={state} onArchiveCurrent={vi.fn()} onClose={vi.fn()} onCreate={vi.fn()} />)
+
+  await screen.findByText('GPT Live')
+  expect((screen.getByLabelText('Agent') as HTMLSelectElement).disabled).toBe(false)
+  fireEvent.change(screen.getByLabelText('Agent'), { target: { value: state.snapshot!.agents[1]!.id } })
+  expect((screen.getByLabelText('Agent') as HTMLSelectElement).value).toBe(state.snapshot!.agents[1]!.id)
+  expect(screen.getByRole('status').textContent).toContain('Checking agent connections')
+  expect((screen.getByRole('button', { name: 'Refreshing agents…' }) as HTMLButtonElement).disabled).toBe(true)
+  expect((screen.getByRole('button', { name: 'Start chat' }) as HTMLButtonElement).disabled).toBe(true)
+})
+
 test('keeps unavailable Codex visible and refreshes health when the dialog opens', async () => {
   const state = connectedAgents()
   const codex = state.snapshot!.agents[0]!

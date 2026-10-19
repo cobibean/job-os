@@ -34,6 +34,29 @@ const snapshot: ConnectedAgentsSnapshot = {
 
 afterEach(cleanup)
 
+test('shares an in-flight refresh and allows retry after a failure', async () => {
+  const pending = Promise.withResolvers<ConnectedAgentsSnapshot>()
+  const list = vi.fn().mockReturnValueOnce(pending.promise).mockResolvedValueOnce(snapshot)
+  Object.defineProperty(window, 'jobos', {
+    configurable: true, value: { connectedAgents: { list, models: vi.fn() } }
+  })
+  const { result } = renderHook(() => useConnectedAgents())
+  await waitFor(() => expect(list).toHaveBeenCalledOnce())
+  let shared: Promise<ConnectedAgentsSnapshot | null>
+  act(() => { shared = result.current.refresh() })
+  expect(list).toHaveBeenCalledOnce()
+  await act(async () => {
+    pending.reject(new Error('Connection check timed out'))
+    expect(await shared).toBeNull()
+  })
+  expect(result.current.loading).toBe(false)
+  expect(result.current.error).toBe('Connection check timed out')
+  await act(async () => { await result.current.refresh() })
+  expect(list).toHaveBeenCalledTimes(2)
+  expect(result.current.error).toBeNull()
+  expect(result.current.snapshot).toEqual(snapshot)
+})
+
 test('refresh returns the loaded roster so startup actions can await readiness', async () => {
   const list = vi.fn().mockResolvedValue(snapshot)
   Object.defineProperty(window, 'jobos', {
