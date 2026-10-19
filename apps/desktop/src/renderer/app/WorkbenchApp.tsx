@@ -574,6 +574,10 @@ export function WorkbenchApp() {
           }}
           onClose={() => setNewChatOpen(false)}
           onCreate={agentSessions.create}
+          onOpenSettings={() => {
+            setNewChatOpen(false)
+            void openSettings()
+          }}
         />
       ) : null}
     </div>

@@ -42,6 +42,24 @@ function connectedAgents(): ReturnType<typeof useConnectedAgents> {
 
 afterEach(cleanup)
 
+test('keeps unavailable Codex visible and refreshes health when the dialog opens', async () => {
+  const state = connectedAgents()
+  const codex = state.snapshot!.agents[0]!
+  codex.health = { ...codex.health, state: 'unavailable', label: 'Provider unavailable', providerAvailable: false, toolsAvailable: false }
+  state.snapshot!.agents.push({ ...codex, id: `jagent_${'b'.repeat(32)}`, provider: 'hermes', displayName: 'Hermes', health: { ...codex.health, providerAvailable: true, toolsAvailable: true } })
+  const onOpenSettings = vi.fn()
+  render(<NewAgentChatDialog atMaximum={false} connectedAgents={state} onArchiveCurrent={vi.fn()} onClose={vi.fn()} onCreate={vi.fn()} onOpenSettings={onOpenSettings} />)
+
+  expect(state.refresh).toHaveBeenCalledOnce()
+  const unavailable = screen.getByRole('option', { name: 'Codex · ChatGPT · Provider unavailable' }) as HTMLOptionElement
+  expect(unavailable.disabled).toBe(true)
+  await waitFor(() => expect((screen.getByLabelText('Agent') as HTMLSelectElement).value).toBe(state.snapshot!.agents[1]!.id))
+  fireEvent.click(screen.getByRole('button', { name: 'Refresh agents' }))
+  expect(state.refresh).toHaveBeenCalledTimes(2)
+  fireEvent.click(screen.getByRole('button', { name: 'Manage agents' }))
+  expect(onOpenSettings).toHaveBeenCalledOnce()
+})
+
 test('creates a chat from only live ready choices and seals the exact selection receipt', async () => {
   const state = connectedAgents()
   const onCreate = vi.fn().mockResolvedValue(true)

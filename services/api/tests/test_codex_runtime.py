@@ -276,7 +276,7 @@ for line in sys.stdin:
     if message["method"] == "initialize":
         result = {"serverInfo": {"name": "fake"}}
     else:
-        result = {"data": "x" * (128 * 1024)}
+        result = {"data": "x" * (5 * 1024 * 1024)}
     print(json.dumps({"id": message["id"], "result": result}), flush=True)
 """,
         encoding="utf-8",
@@ -291,8 +291,56 @@ for line in sys.stdin:
     try:
         await client.start()
         result = await client.request("mcpServerStatus/list", {"detail": "full"})
-        assert result == {"data": "x" * (128 * 1024)}
-        assert await client.request("model/list") == {"data": "x" * (128 * 1024)}
+        assert result == {"data": "x" * (5 * 1024 * 1024)}
+        assert await client.request("model/list") == {"data": "x" * (5 * 1024 * 1024)}
+    finally:
+        await client.close()
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("failure", ["invalid", "oversized"])
+async def test_stdio_supervisor_restarts_after_reader_failure(
+    tmp_path: Path, failure: str
+) -> None:
+    starts_path = tmp_path / "starts"
+    server = tmp_path / "fake-codex-app-server"
+    server.write_text(
+        f"""#!/usr/bin/env python3
+import json
+import sys
+from pathlib import Path
+starts = Path({str(starts_path)!r})
+first = not starts.exists()
+starts.write_text("started")
+for line in sys.stdin:
+    message = json.loads(line)
+    if "id" not in message:
+        continue
+    if message["method"] == "initialize":
+        print(json.dumps({{"id": message["id"], "result": {{}}}}), flush=True)
+    elif first:
+        print("x" * (17 * 1024 * 1024) if {failure!r} == "oversized" else "invalid protocol frame", flush=True)
+    else:
+        print(json.dumps({{"id": message["id"], "result": {{"data": []}}}}), flush=True)
+""",
+        encoding="utf-8",
+    )
+    server.chmod(0o700)
+    client = CodexAppServerProcess(
+        server, tmp_path / "codex-home", request_timeout=1, verify_binary=lambda _: None
+    )
+    try:
+        await client.start()
+        failed_process = client._process
+        with pytest.raises(CodexRuntimeError, match="invalid|stopped"):
+            await client.request("mcpServerStatus/list", {"detail": "full"})
+        assert not client.is_running
+        with pytest.raises(CodexRuntimeError, match="stopped"):
+            await client.request("turn/start", {})
+        await client.start()
+        assert failed_process is not None and failed_process.returncode is not None
+        assert client.is_running
+        assert await client.request("account/read") == {"data": []}
     finally:
         await client.close()
 

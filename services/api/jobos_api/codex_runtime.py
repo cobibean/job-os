@@ -16,7 +16,9 @@ CODEX_APP_SERVER_VERSION = "0.144.4"
 CODEX_APP_SERVER_RECEIPT_ID = "codex-app-server-rust-v0.144.4-aarch64-apple-darwin"
 CODEX_APP_SERVER_SHA256 = "27d324bc906014c77e4e4286edae6b6d093ee60f49bdcf71495e0f57c31dc6fe"
 CODEX_CONFIG = 'cli_auth_credentials_store = "keyring"\n'
-MAX_PROTOCOL_LINE_BYTES = 4 * 1024 * 1024
+# Connected-app catalogs can exceed 5 MiB. Keep a finite limit without rejecting
+# a healthy runtime's full MCP status response.
+MAX_PROTOCOL_LINE_BYTES = 16 * 1024 * 1024
 
 
 class CodexRuntimeError(RuntimeError):
@@ -279,12 +281,19 @@ class CodexAppServerProcess:
 
     @property
     def is_running(self) -> bool:
-        return self._process is not None and self._process.returncode is None
+        return (
+            self._process is not None
+            and self._process.returncode is None
+            and self._reader_task is not None
+            and not self._reader_task.done()
+        )
 
     async def start(self) -> None:
         async with self._start_lock:
-            if self._process is not None and self._process.returncode is None:
+            if self.is_running:
                 return
+            if self._process is not None:
+                await self.close()
             prepare_codex_home(
                 self.codex_home,
                 mcp_command=self._mcp_command,
@@ -359,6 +368,8 @@ class CodexAppServerProcess:
     async def request(self, method: str, params: object | None = None) -> object:
         if self._process is None:
             await self.start()
+        if not self.is_running:
+            raise CodexRuntimeError("AGENT_PROVIDER_UNAVAILABLE", "Codex App Server stopped")
         request_id = self._next_id
         self._next_id += 1
         future: asyncio.Future[object] = asyncio.get_running_loop().create_future()
