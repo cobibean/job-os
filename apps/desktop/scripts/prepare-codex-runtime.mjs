@@ -12,7 +12,7 @@ const desktopRoot = path.resolve(scriptDirectory, '..')
 const repositoryRoot = path.resolve(desktopRoot, '../..')
 const receiptPath = path.join(
   repositoryRoot,
-  'docs/acceptance/connected-agents/phase-0/codex-redistribution-candidate.json'
+  'docs/architecture/codex-runtime-receipt.json'
 )
 const receipt = JSON.parse(readFileSync(receiptPath, 'utf8'))
 const output = path.join(desktopRoot, 'build/codex-runtime')

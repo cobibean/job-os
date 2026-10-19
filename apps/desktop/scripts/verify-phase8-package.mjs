@@ -16,7 +16,7 @@ const resources = path.join(app, 'Contents/Resources')
 const zip = path.join(releaseRoot, `JobOS-${packageJson.version}-arm64.zip`)
 const sourceReceiptPath = path.join(
   repositoryRoot,
-  'docs/acceptance/connected-agents/phase-0/codex-redistribution-candidate.json'
+  'docs/architecture/codex-runtime-receipt.json'
 )
 const packagedReceiptPath = path.join(
   resources,

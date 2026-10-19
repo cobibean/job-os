@@ -10,6 +10,7 @@ from jobos_api.codex_runtime import (
     CODEX_APP_SERVER_RECEIPT_ID,
     CODEX_APP_SERVER_VERSION,
     CodexRpcError,
+    CodexRuntimeError,
 )
 from jobos_api.connected_agent_auth import (
     AuthFlowError,
@@ -352,6 +353,71 @@ async def test_runtime_models_are_live_and_disconnect_is_vault_verified(tmp_path
     }
     assert await runtime.disconnect(agent) == {"verified": True}
     assert vault.removed is True
+
+
+@pytest.mark.anyio
+async def test_runtime_discovers_all_pages_and_uses_provider_model_defaults(tmp_path: Path) -> None:
+    registry = registry_with_codex_agent(tmp_path)
+    agent = registry.load().connected_agents[0].model_copy(
+        update={"credential_reference": "vault_ref_codex:test"}
+    )
+
+    class PaginatedClient(FakeCodexClient):
+        async def request(self, method: str, params: object | None = None) -> object:
+            assert method == "model/list"
+            self.calls.append((method, params))
+            if params == {"includeHidden": False}:
+                return {
+                    "data": [{
+                        "id": "(FAKE)-older", "displayName": "Older",
+                        "supportedReasoningEfforts": [{"reasoningEffort": "low"}],
+                    }],
+                    "nextCursor": "page-2",
+                }
+            assert params == {"includeHidden": False, "cursor": "page-2"}
+            return {
+                "data": [{
+                    "id": "(FAKE)-picker-id", "model": "(FAKE)-latest",
+                    "displayName": "Latest", "isDefault": True,
+                    "defaultReasoningEffort": "medium",
+                    "supportedReasoningEfforts": [
+                        {"reasoningEffort": "low"}, {"reasoningEffort": "medium"},
+                    ],
+                }, {
+                    "id": "(FAKE)-hidden", "displayName": "Hidden", "hidden": True,
+                    "supportedReasoningEfforts": [{"reasoningEffort": "medium"}],
+                }],
+                "nextCursor": None,
+            }
+
+    client = PaginatedClient()
+    result = await CodexConnectedAgentRuntime(client, FakeVault()).list_models(agent)
+    assert result == {"live": True, "models": [
+        {"model_id": "(FAKE)-latest", "display_name": "Latest",
+         "reasoning_efforts": ["medium", "low"]},
+        {"model_id": "(FAKE)-older", "display_name": "Older", "reasoning_efforts": ["low"]},
+    ]}
+    assert len(client.calls) == 2
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("next_cursor", ["repeated", 123, ""])
+async def test_runtime_rejects_incomplete_or_looping_model_catalog(
+    tmp_path: Path, next_cursor: object,
+) -> None:
+    agent = registry_with_codex_agent(tmp_path).load().connected_agents[0].model_copy(
+        update={"credential_reference": "vault_ref_codex:test"}
+    )
+
+    class InvalidPaginationClient(FakeCodexClient):
+        async def request(self, method: str, params: object | None = None) -> object:
+            self.calls.append((method, params))
+            return {"data": [], "nextCursor": next_cursor}
+
+    client = InvalidPaginationClient()
+    with pytest.raises(CodexRuntimeError, match="catalog is unavailable"):
+        await CodexConnectedAgentRuntime(client, FakeVault()).list_models(agent)
+    assert len(client.calls) <= 2
 
 
 @pytest.mark.anyio

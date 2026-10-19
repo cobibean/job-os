@@ -148,11 +148,11 @@
         "to": "licenses/docx-editor-core/UPSTREAM.md"
       },
       {
-        "from": "../../tests/connected_agents/receipts/codex-0.144.4/LICENSE",
+        "from": "../../tests/connected_agents/receipts/codex-0.163.0/LICENSE",
         "to": "licenses/codex/LICENSE"
       },
       {
-        "from": "../../tests/connected_agents/receipts/codex-0.144.4/NOTICE",
+        "from": "../../tests/connected_agents/receipts/codex-0.163.0/NOTICE",
         "to": "licenses/codex/NOTICE"
       }
     ],

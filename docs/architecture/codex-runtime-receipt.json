@@ -1,0 +1,74 @@
+{
+  "schema_version": 1,
+  "receipt_id": "codex-app-server-rust-v0.163.0-aarch64-apple-darwin",
+  "candidate": {
+    "release": "rust-v0.163.0",
+    "version": "0.163.0",
+    "source_commit": "83086188ae0614bd882818ff1aa23f3194962012",
+    "target": "aarch64-apple-darwin",
+    "release_url": "https://github.com/openai/codex/releases/tag/rust-v0.163.0",
+    "source_url": "https://github.com/openai/codex/commit/83086188ae0614bd882818ff1aa23f3194962012"
+  },
+  "package": {
+    "asset": "codex-app-server-package-aarch64-apple-darwin.tar.gz",
+    "asset_url": "https://github.com/openai/codex/releases/download/rust-v0.163.0/codex-app-server-package-aarch64-apple-darwin.tar.gz",
+    "sha256": "c64323d8d51933c3fe50489e841f3a9ebbce971d9e06dc3d734ac2f3c7ddb2cf",
+    "layout_version": 1,
+    "entrypoint": "bin/codex-app-server",
+    "path_dir": "codex-path",
+    "members": [
+      {
+        "path": "bin/codex-app-server",
+        "mode": "0755",
+        "size": 191578864
+      },
+      {
+        "path": "bin/codex-code-mode-host",
+        "mode": "0755",
+        "size": 65643072
+      },
+      {
+        "path": "codex-package.json",
+        "mode": "0644",
+        "size": 222
+      },
+      {
+        "path": "codex-path/rg",
+        "mode": "0755",
+        "size": 4030432
+      }
+    ]
+  },
+  "app_server_binary": {
+    "sha256": "da2c29c81ce5c5327d34bbc4986e59ab50a9b7fd51fec7eddf9d8bf5e2e4cd87",
+    "architecture": "arm64",
+    "signed": true,
+    "codesign_strict": {
+      "command": "codesign --verify --strict --verbose=2 bin/codex-app-server",
+      "result": "passed"
+    }
+  },
+  "protocol_contracts": [
+    {
+      "path": "tests/connected_agents/contracts/codex-0.163.0.v2.schemas.json",
+      "sha256": "d204b96d8560d56600127423b89df9db471b3e22338e8809bb91d5a952998978",
+      "source": "exact upstream rust-v0.163.0 aggregate v2 schema",
+      "local_0_163_0_generation_semantically_equal": true
+    }
+  ],
+  "redistribution": {
+    "license": {
+      "spdx": "Apache-2.0",
+      "path": "tests/connected_agents/receipts/codex-0.163.0/LICENSE",
+      "sha256": "d17f227e4df5da1600391338865ce0f3055211760a36688f816941d58232d8dc"
+    },
+    "notice": {
+      "path": "tests/connected_agents/receipts/codex-0.163.0/NOTICE",
+      "sha256": "9d71575ecfd9a843fc1677b0efb08053c6ba9fd686a0de1a6f5382fd3c220915"
+    },
+    "obligations": [
+      "Bundle the upstream LICENSE and NOTICE with redistributed Codex runtime bytes.",
+      "Runtime upgrades require explicit compatibility and redistribution verification."
+    ]
+  }
+}

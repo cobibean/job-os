@@ -31,11 +31,11 @@ REQUIRED_PACKAGED_NOTICES = {
         "licenses/docx-editor-core/UPSTREAM.md",
     ),
     (
-        "../../tests/connected_agents/receipts/codex-0.144.4/LICENSE",
+        "../../tests/connected_agents/receipts/codex-0.163.0/LICENSE",
         "licenses/codex/LICENSE",
     ),
     (
-        "../../tests/connected_agents/receipts/codex-0.144.4/NOTICE",
+        "../../tests/connected_agents/receipts/codex-0.163.0/NOTICE",
         "licenses/codex/NOTICE",
     ),
 }

@@ -28,8 +28,6 @@ from .installation_profiles import (
 )
 
 AUTH_TRANSACTION_TTL = timedelta(minutes=15)
-PREFERRED_CODEX_MODEL = "gpt-5.6-sol"
-PREFERRED_REASONING_EFFORT = "medium"
 
 
 class AuthModel(BaseModel):
@@ -545,17 +543,39 @@ class CodexConnectedAgentRuntime:
         status = await self.vault.inspect(agent.credential_reference)
         if not status.available or not status.authenticated:
             return {"live": False, "models": []}
-        response = await self.client.request("model/list", {"includeHidden": False})
-        data = response.get("data") if isinstance(response, dict) else None
-        if not isinstance(data, list):
+        data: list[object] = []
+        cursor: str | None = None
+        cursors: set[str] = set()
+        for _ in range(50):
+            response = await self.client.request(
+                "model/list",
+                {"includeHidden": False, **({"cursor": cursor} if cursor else {})},
+            )
+            page = response.get("data") if isinstance(response, dict) else None
+            if not isinstance(page, list):
+                break
+            data.extend(page)
+            cursor = response.get("nextCursor")
+            if cursor is None:
+                break
+            if not isinstance(cursor, str) or not cursor or cursor in cursors:
+                break
+            cursors.add(cursor)
+        else:
+            cursor = "incomplete"
+        if not isinstance(page, list) or cursor is not None:
             raise CodexRuntimeError(
                 "AGENT_PROVIDER_UNAVAILABLE", "Codex model catalog is unavailable"
             )
+        # Follow the account's current recommendation without pinning a model
+        # name in JobOS. Explicit saved agent defaults still take precedence.
+        data.sort(key=lambda item: not (isinstance(item, dict) and item.get("isDefault") is True))
         models: list[dict[str, object]] = []
+        model_ids: set[str] = set()
         for item in data:
             if not isinstance(item, dict) or item.get("hidden") is True:
                 continue
-            model_id = item.get("id")
+            model_id = item.get("model") or item.get("id")
             display_name = item.get("displayName")
             efforts = item.get("supportedReasoningEfforts")
             if not isinstance(model_id, str) or not isinstance(display_name, str):
@@ -566,7 +586,12 @@ class CodexConnectedAgentRuntime:
                 if isinstance(option, dict)
                 and isinstance(option.get("reasoningEffort"), str)
             ]
-            if normalized_efforts:
+            default_effort = item.get("defaultReasoningEffort")
+            if default_effort in normalized_efforts:
+                normalized_efforts.remove(default_effort)
+                normalized_efforts.insert(0, default_effort)
+            if normalized_efforts and model_id not in model_ids:
+                model_ids.add(model_id)
                 models.append(
                     {
                         "model_id": model_id,

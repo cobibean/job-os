@@ -12,9 +12,9 @@ from contextlib import suppress
 from pathlib import Path
 from typing import Protocol
 
-CODEX_APP_SERVER_VERSION = "0.144.4"
-CODEX_APP_SERVER_RECEIPT_ID = "codex-app-server-rust-v0.144.4-aarch64-apple-darwin"
-CODEX_APP_SERVER_SHA256 = "27d324bc906014c77e4e4286edae6b6d093ee60f49bdcf71495e0f57c31dc6fe"
+CODEX_APP_SERVER_VERSION = "0.163.0"
+CODEX_APP_SERVER_RECEIPT_ID = "codex-app-server-rust-v0.163.0-aarch64-apple-darwin"
+CODEX_APP_SERVER_SHA256 = "da2c29c81ce5c5327d34bbc4986e59ab50a9b7fd51fec7eddf9d8bf5e2e4cd87"
 CODEX_CONFIG = 'cli_auth_credentials_store = "keyring"\n'
 # Connected-app catalogs can exceed 5 MiB. Keep a finite limit without rejecting
 # a healthy runtime's full MCP status response.

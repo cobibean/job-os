@@ -14,6 +14,11 @@ Each adapted package preserves its own `LICENSE`, `NOTICE`, and `UPSTREAM.md`. T
 
 ## Declared direct runtime dependency inventory
 
+The macOS arm64 desktop bundle also includes OpenAI Codex App Server 0.163.0
+under Apache-2.0. Its pinned archive, binary, source commit, protocol, and legal
+file hashes are recorded in `docs/architecture/codex-runtime-receipt.json`.
+The upstream LICENSE and NOTICE are included under `licenses/codex/` in the app.
+
 | Package | Version | License | JobOS use |
 |---|---:|---|---|
 | `@tiptap/core`, `@tiptap/react`, `@tiptap/starter-kit`, `@tiptap/extensions`, `@tiptap/pm`, `@tiptap/extension-table`, `@tiptap/extension-image`, `@tiptap/extension-text-style`, `@tiptap/extension-text-align`, `@tiptap/extension-highlight`, `@tiptap/extension-unique-id`, `@tiptap/extension-placeholder`, `@tiptap/html` | 3.29.2 | MIT | Structured editor, schema, HTML conversion |
