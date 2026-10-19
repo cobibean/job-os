@@ -108,10 +108,15 @@ def jobos_mcp_ready(result: object) -> bool:
     )
 
 
-def _is_jobos_managed_config(value: str) -> bool:
+def _is_jobos_managed_config(value: str, codex_home: Path) -> bool:
     try:
         parsed = tomllib.loads(value)
     except tomllib.TOMLDecodeError:
+        return False
+    projects = parsed.pop("projects", None)
+    if projects is not None and projects != {
+        str(codex_home / "workspace"): {"trust_level": "trusted"}
+    }:
         return False
     if set(parsed) != {"cli_auth_credentials_store", "mcp_servers"}:
         return False
@@ -163,7 +168,7 @@ def prepare_codex_home(
     try:
         existing_config = config_path.read_text(encoding="utf-8") if config_path.exists() else None
         if existing_config not in {None, CODEX_CONFIG, expected_config} and not (
-            existing_config is not None and _is_jobos_managed_config(existing_config)
+            existing_config is not None and _is_jobos_managed_config(existing_config, resolved)
         ):
             raise CodexRuntimeError(
                 "AUTH_VAULT_UNAVAILABLE", "JobOS Codex credential storage is not keyring-only"

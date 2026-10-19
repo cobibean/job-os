@@ -99,6 +99,43 @@ def test_prepare_codex_home_updates_previous_jobos_owned_mcp_config(tmp_path: Pa
     assert 'args = ["new"]' in config
 
 
+def test_prepare_codex_home_accepts_runtime_written_workspace_trust(tmp_path: Path) -> None:
+    codex_home = tmp_path / "codex-home"
+    launcher = tmp_path / "launcher"
+    launcher.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    launcher.chmod(0o700)
+    prepare_codex_home(codex_home, mcp_command=launcher)
+    config = codex_home / "config.toml"
+    original = config.read_text()
+    workspace = str(codex_home.resolve() / "workspace")
+    config.write_text(original + f'\n[projects.{json.dumps(workspace)}]\ntrust_level = "trusted"\n')
+
+    prepare_codex_home(codex_home, mcp_command=launcher)
+
+    assert config.read_text() == original
+    assert not (codex_home / "auth.json").exists()
+
+
+def test_prepare_codex_home_rejects_unmanaged_project_settings(tmp_path: Path) -> None:
+    codex_home = tmp_path / "codex-home"
+    launcher = tmp_path / "launcher"
+    launcher.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    launcher.chmod(0o700)
+    prepare_codex_home(codex_home, mcp_command=launcher)
+    config = codex_home / "config.toml"
+    original = config.read_text()
+    for workspace, extra in (
+        (codex_home.resolve() / "workspace", 'trust_level = "untrusted"'),
+        (codex_home.resolve() / "workspace", 'trust_level = "trusted"\nother = true'),
+        (tmp_path / "other-workspace", 'trust_level = "trusted"'),
+    ):
+        value = original + f'\n[projects.{json.dumps(str(workspace))}]\n{extra}\n'
+        config.write_text(value)
+        with pytest.raises(CodexRuntimeError, match="keyring-only"):
+            prepare_codex_home(codex_home, mcp_command=launcher)
+        assert config.read_text() == value
+
+
 def test_prepare_codex_home_preserves_live_config_when_atomic_replace_fails(
     tmp_path: Path, monkeypatch
 ) -> None:
@@ -319,7 +356,8 @@ for line in sys.stdin:
     if message["method"] == "initialize":
         print(json.dumps({{"id": message["id"], "result": {{}}}}), flush=True)
     elif first:
-        print("x" * (17 * 1024 * 1024) if {failure!r} == "oversized" else "invalid protocol frame", flush=True)
+        frame = "x" * (17 * 1024 * 1024) if {failure!r} == "oversized" else "invalid protocol frame"
+        print(frame, flush=True)
     else:
         print(json.dumps({{"id": message["id"], "result": {{"data": []}}}}), flush=True)
 """,
