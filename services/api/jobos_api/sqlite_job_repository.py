@@ -48,21 +48,11 @@ LISTING_COMPLETENESS_RANK = {
     "partial": 3,
     "complete": 4,
 }
+# Any status may move to any other; every change is still recorded in
+# canonical_job_history. Kept equal to tests/fixtures/job-status-transitions.json,
+# which is contract-tested on both the API and desktop renderer sides.
 ALLOWED_TRANSITIONS: dict[str, frozenset[str]] = {
-    "discovered": frozenset({"scored", "reviewed", "shortlisted", "skipped", "archived"}),
-    "scored": frozenset(
-        {"reviewed", "shortlisted", "apply_now", "maybe", "stretch", "skipped", "archived"}
-    ),
-    "reviewed": frozenset({"shortlisted", "apply_now", "maybe", "stretch", "skipped", "archived"}),
-    "shortlisted": frozenset({"apply_now", "maybe", "stretch", "applied"}),
-    "apply_now": frozenset({"applied", "interviewing", "closed"}),
-    "maybe": frozenset({"reviewed", "apply_now", "skipped", "archived"}),
-    "stretch": frozenset({"reviewed", "apply_now", "skipped", "archived"}),
-    "skipped": frozenset({"reviewed", "archived"}),
-    "applied": frozenset({"interviewing", "closed", "archived"}),
-    "interviewing": frozenset({"closed", "archived"}),
-    "closed": frozenset({"archived"}),
-    "archived": frozenset(),
+    status: STATUSES - {status} for status in STATUSES
 }
 PRE_APPLICATION_STATUSES = frozenset(
     {"discovered", "scored", "reviewed", "shortlisted", "apply_now", "maybe", "stretch", "skipped"}
