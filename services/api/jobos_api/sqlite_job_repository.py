@@ -49,16 +49,32 @@ LISTING_COMPLETENESS_RANK = {
     "complete": 4,
 }
 ALLOWED_TRANSITIONS: dict[str, frozenset[str]] = {
-    "discovered": frozenset({"scored", "reviewed", "shortlisted", "skipped", "archived"}),
-    "scored": frozenset(
-        {"reviewed", "shortlisted", "apply_now", "maybe", "stretch", "skipped", "archived"}
+    # Keep in sync with tests/fixtures/job-status-transitions.json (contract-tested on
+    # both the API and desktop renderer sides). Every pre-application state may move
+    # straight to "applied" because users often apply directly from the inbox.
+    "discovered": frozenset(
+        {"scored", "reviewed", "shortlisted", "applied", "skipped", "archived"}
     ),
-    "reviewed": frozenset({"shortlisted", "apply_now", "maybe", "stretch", "skipped", "archived"}),
+    "scored": frozenset(
+        {
+            "reviewed",
+            "shortlisted",
+            "apply_now",
+            "maybe",
+            "stretch",
+            "applied",
+            "skipped",
+            "archived",
+        }
+    ),
+    "reviewed": frozenset(
+        {"shortlisted", "apply_now", "maybe", "stretch", "applied", "skipped", "archived"}
+    ),
     "shortlisted": frozenset({"apply_now", "maybe", "stretch", "applied"}),
     "apply_now": frozenset({"applied", "interviewing", "closed"}),
-    "maybe": frozenset({"reviewed", "apply_now", "skipped", "archived"}),
-    "stretch": frozenset({"reviewed", "apply_now", "skipped", "archived"}),
-    "skipped": frozenset({"reviewed", "archived"}),
+    "maybe": frozenset({"reviewed", "apply_now", "applied", "skipped", "archived"}),
+    "stretch": frozenset({"reviewed", "apply_now", "applied", "skipped", "archived"}),
+    "skipped": frozenset({"reviewed", "applied", "archived"}),
     "applied": frozenset({"interviewing", "closed", "archived"}),
     "interviewing": frozenset({"closed", "archived"}),
     "closed": frozenset({"archived"}),

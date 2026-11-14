@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import json
 import sqlite3
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import FrozenInstanceError, replace
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
 import pytest
 from job_repository_contract import command, exercise_repository_contract
@@ -14,7 +16,16 @@ from jobos_api.job_repository_migrations import (
     MigrationError,
     MigrationHistoryError,
 )
-from jobos_api.sqlite_job_repository import SQLiteJobRepository
+from jobos_api.sqlite_job_repository import (
+    ALLOWED_TRANSITIONS,
+    PRE_APPLICATION_STATUSES,
+    STATUSES,
+    SQLiteJobRepository,
+)
+
+TRANSITIONS_FIXTURE = json.loads(
+    (Path(__file__).parents[3] / "tests/fixtures/job-status-transitions.json").read_text()
+)["transitions"]
 
 
 def test_jobs_database_binds_once_to_an_installation_profile_and_preserves_legacy_rows(
@@ -291,25 +302,19 @@ def test_v1_database_upgrades_to_v2_without_losing_jobs(tmp_path):
 
     upgraded = SQLiteJobRepository(database)
 
-    assert upgraded.get_job("pre-v2").canonical_url == (
-        "https://jobs.example.com/roles/pre-v2"
-    )
+    assert upgraded.get_job("pre-v2").canonical_url == ("https://jobs.example.com/roles/pre-v2")
     with sqlite3.connect(database) as connection:
         columns = {
-            row[1]
-            for row in connection.execute("PRAGMA table_info(canonical_jobs)").fetchall()
+            row[1] for row in connection.execute("PRAGMA table_info(canonical_jobs)").fetchall()
         }
         assert {"synthetic_demo", "dataset_version"} <= columns
         assert connection.execute(
-            "SELECT name FROM sqlite_master "
-            "WHERE type = 'table' AND name = 'synthetic_demo_ledger'"
+            "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'synthetic_demo_ledger'"
         ).fetchone() == ("synthetic_demo_ledger",)
         assert connection.execute(
             "SELECT version FROM job_repository_migrations ORDER BY version"
         ).fetchall() == [(migration.version,) for migration in MIGRATIONS]
-        assert connection.execute(
-            "SELECT COUNT(*) FROM synthetic_demo_ledger"
-        ).fetchone() == (0,)
+        assert connection.execute("SELECT COUNT(*) FROM synthetic_demo_ledger").fetchone() == (0,)
 
 
 def _next_migration(counter: list[str], *, destructive: bool = False) -> Migration:
@@ -332,12 +337,8 @@ def test_migration_applies_once_and_non_destructive_steps_make_no_backup(tmp_pat
     counter: list[str] = []
     migrations = (*MIGRATIONS, _next_migration(counter))
 
-    SQLiteJobRepository(
-        database, migrations=migrations, backup_directory=backup_directory
-    )
-    SQLiteJobRepository(
-        database, migrations=migrations, backup_directory=backup_directory
-    )
+    SQLiteJobRepository(database, migrations=migrations, backup_directory=backup_directory)
+    SQLiteJobRepository(database, migrations=migrations, backup_directory=backup_directory)
 
     assert counter == ["applied"]
     assert not backup_directory.exists()
@@ -361,9 +362,12 @@ def test_failed_migration_rolls_back_schema_and_ledger(tmp_path):
         SQLiteJobRepository(database, migrations=(*MIGRATIONS, migration))
 
     with sqlite3.connect(database) as connection:
-        assert connection.execute(
-            "SELECT name FROM sqlite_master WHERE name = 'must_rollback'"
-        ).fetchone() is None
+        assert (
+            connection.execute(
+                "SELECT name FROM sqlite_master WHERE name = 'must_rollback'"
+            ).fetchone()
+            is None
+        )
         assert connection.execute(
             "SELECT version FROM job_repository_migrations ORDER BY version"
         ).fetchall() == [(migration.version,) for migration in MIGRATIONS]
@@ -382,9 +386,7 @@ def test_ahead_and_non_prefix_histories_fail_clearly(tmp_path, history_kind):
                 """
             )
         else:
-            connection.execute(
-                "UPDATE job_repository_migrations SET checksum = 'sha256:diverged'"
-            )
+            connection.execute("UPDATE job_repository_migrations SET checksum = 'sha256:diverged'")
         connection.commit()
 
     with pytest.raises(MigrationHistoryError, match="ahead|valid prefix"):
@@ -465,3 +467,34 @@ def test_job_id_conflicts_do_not_overwrite_an_unrelated_url(tmp_path):
     repository.create_job(command("same-id", "https://example.com/first"))
     with pytest.raises(Conflict):
         repository.create_job(command("same-id", "https://example.com/second"))
+
+
+def test_allowed_transitions_match_shared_contract_fixture():
+    # The desktop renderer's STATUS_TRANSITIONS is checked against the same fixture
+    # in jobStatus.test.ts, so the two tables cannot silently diverge.
+    assert set(TRANSITIONS_FIXTURE) == set(STATUSES)
+    assert {status: set(targets) for status, targets in ALLOWED_TRANSITIONS.items()} == {
+        status: set(targets) for status, targets in TRANSITIONS_FIXTURE.items()
+    }
+
+
+@pytest.mark.parametrize("source", sorted(PRE_APPLICATION_STATUSES))
+def test_every_pre_application_status_can_be_marked_applied_without_flag(tmp_path, source):
+    repository = SQLiteJobRepository(tmp_path / "jobs.db")
+    job = repository.create_job(command(f"direct-apply-{source}"))
+    with sqlite3.connect(tmp_path / "jobs.db") as connection:
+        connection.execute(
+            "UPDATE canonical_jobs SET status = ? WHERE job_id = ?", (source, job.job_id)
+        )
+
+    applied = repository.update_status(job.job_id, "applied")
+
+    assert applied.status == "applied"
+    assert repository.list_history(job.job_id)[-1].from_status == source
+
+
+def test_invalid_transition_still_conflicts(tmp_path):
+    repository = SQLiteJobRepository(tmp_path / "jobs.db")
+    job = repository.create_job(command("still-strict"))
+    with pytest.raises(Conflict, match="discovered -> interviewing"):
+        repository.update_status(job.job_id, "interviewing")

@@ -4,6 +4,8 @@ export const CANONICAL_STATUS_GROUPS = [
   'Inbox', 'Considering', 'Applied', 'Interviewing', 'Closed', 'Inactive'
 ] as const
 
+// Keep in sync with tests/fixtures/job-status-transitions.json; the API's
+// ALLOWED_TRANSITIONS is contract-tested against the same fixture.
 export const STATUS_TRANSITIONS: Record<JobStatus, JobStatus[]> = {
   discovered: ['shortlisted', 'applied', 'scored', 'reviewed', 'skipped', 'archived'],
   scored: ['applied', 'reviewed', 'shortlisted', 'apply_now', 'maybe', 'stretch', 'skipped', 'archived'],

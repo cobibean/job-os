@@ -1,0 +1,17 @@
+{
+  "description": "Canonical job lead-state transition table. services/api ALLOWED_TRANSITIONS and the desktop renderer STATUS_TRANSITIONS must both equal this; contract tests on each side fail when they drift.",
+  "transitions": {
+    "discovered": ["scored", "reviewed", "shortlisted", "applied", "skipped", "archived"],
+    "scored": ["reviewed", "shortlisted", "apply_now", "maybe", "stretch", "applied", "skipped", "archived"],
+    "reviewed": ["shortlisted", "apply_now", "maybe", "stretch", "applied", "skipped", "archived"],
+    "shortlisted": ["apply_now", "maybe", "stretch", "applied"],
+    "apply_now": ["applied", "interviewing", "closed"],
+    "maybe": ["reviewed", "apply_now", "applied", "skipped", "archived"],
+    "stretch": ["reviewed", "apply_now", "applied", "skipped", "archived"],
+    "skipped": ["reviewed", "applied", "archived"],
+    "applied": ["interviewing", "closed", "archived"],
+    "interviewing": ["closed", "archived"],
+    "closed": ["archived"],
+    "archived": []
+  }
+}
