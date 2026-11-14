@@ -24,12 +24,21 @@ from jobos_mcp.remote_auth import OwnerOAuthProvider
 from jobos_mcp.remote_http import create_http_app
 from starlette.testclient import TestClient
 from test_catalog import discover
-from test_remote_http import BASE, PASSWORD, authorize, exchange
+from test_remote_http import BASE, CALLBACK, CLAUDE_CALLBACK, PASSWORD, authorize, exchange
 
 
 @pytest.mark.parametrize("job_provider", ["sqlite", "job-hunter"])
 @pytest.mark.parametrize("document_key", ["resume", "cover_letter", "references"])
-def test_authenticated_remote_jobs_profile_and_files(tmp_path, job_provider, document_key):
+@pytest.mark.parametrize(
+    ("callback", "auth_method"),
+    [
+        pytest.param(CALLBACK, "client_secret_post", id="chatgpt"),
+        pytest.param(CLAUDE_CALLBACK, "none", id="claude"),
+    ],
+)
+def test_authenticated_remote_jobs_profile_and_files(
+    tmp_path, job_provider, document_key, callback, auth_method
+):
     internal, external, device = (
         "synthetic-internal-token",
         "synthetic-external-token",
@@ -116,7 +125,7 @@ def test_authenticated_remote_jobs_profile_and_files(tmp_path, job_provider, doc
                 ).status_code
                 == 200
             )
-            info, code = authorize(remote)
+            info, code = authorize(remote, callback, auth_method)
             tokens = exchange(remote, info, code).json()
             headers = {
                 "Authorization": "Bearer " + tokens["access_token"],

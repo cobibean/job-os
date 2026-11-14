@@ -9,13 +9,19 @@ import logging
 import stat
 from contextlib import asynccontextmanager
 from pathlib import Path
+from urllib.parse import urlencode
 
 import uvicorn
+from mcp.server.auth.handlers.metadata import MetadataHandler
+from mcp.server.auth.handlers.revoke import RevocationHandler
 from mcp.server.auth.middleware.auth_context import AuthContextMiddleware
 from mcp.server.auth.middleware.bearer_auth import BearerAuthBackend, RequireAuthMiddleware
+from mcp.server.auth.middleware.client_auth import ClientAuthenticator
 from mcp.server.auth.provider import ProviderTokenVerifier
 from mcp.server.auth.routes import (
+    build_metadata,
     build_resource_metadata_url,
+    cors_middleware,
     create_auth_routes,
     create_protected_resource_routes,
 )
@@ -70,13 +76,67 @@ def create_http_app(server: FastMCP, provider: OwnerOAuthProvider) -> Starlette:
             }
         )
 
+    registration = ClientRegistrationOptions(
+        enabled=True, valid_scopes=["jobos"], default_scopes=["jobos"]
+    )
+    revocation = RevocationOptions(enabled=True)
     routes = create_auth_routes(
         provider,
         origin,
-        client_registration_options=ClientRegistrationOptions(
-            enabled=True, valid_scopes=["jobos"], default_scopes=["jobos"]
-        ),
-        revocation_options=RevocationOptions(enabled=True),
+        client_registration_options=registration,
+        revocation_options=revocation,
+    )
+    # The SDK supports public clients, but its default discovery document only
+    # advertises confidential methods. Publish the methods our provider accepts.
+    metadata = build_metadata(origin, None, registration, revocation)
+    metadata.token_endpoint_auth_methods_supported = [
+        "client_secret_post",
+        "client_secret_basic",
+        "none",
+    ]
+    metadata.revocation_endpoint_auth_methods_supported = (
+        metadata.token_endpoint_auth_methods_supported.copy()
+    )
+    metadata_path = "/.well-known/oauth-authorization-server"
+    routes = [route for route in routes if route.path not in (metadata_path, "/revoke")]
+    routes.append(
+        Route(
+            metadata_path,
+            endpoint=cors_middleware(MetadataHandler(metadata).handle, ["GET", "OPTIONS"]),
+            methods=["GET", "OPTIONS"],
+        )
+    )
+    revocation_handler = RevocationHandler(provider, ClientAuthenticator(provider))
+
+    async def revoke(request: Request):
+        # MCP SDK 1.28.1's revocation schema requires the client_secret field even
+        # for public clients. Normalize only the missing field; the SDK still
+        # authenticates confidential clients and enforces token ownership.
+        if request.headers.get("content-type", "").split(";")[0] == (
+            "application/x-www-form-urlencoded"
+        ):
+            form = await request.form()
+            if "client_secret" not in form:
+                body = urlencode([*form.multi_items(), ("client_secret", "")]).encode()
+                headers = [
+                    (key, value)
+                    for key, value in request.scope["headers"]
+                    if key.lower() != b"content-length"
+                ]
+                headers.append((b"content-length", str(len(body)).encode()))
+
+                async def receive():
+                    return {"type": "http.request", "body": body, "more_body": False}
+
+                request = Request({**request.scope, "headers": headers}, receive)
+        return await revocation_handler.handle(request)
+
+    routes.append(
+        Route(
+            "/revoke",
+            endpoint=cors_middleware(revoke, ["POST", "OPTIONS"]),
+            methods=["POST", "OPTIONS"],
+        )
     )
     routes += create_protected_resource_routes(
         resource_url=resource, authorization_servers=[origin], scopes_supported=["jobos"]

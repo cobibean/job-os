@@ -26,6 +26,8 @@ from mcp.shared.auth import OAuthClientInformationFull, OAuthToken
 from starlette.requests import Request
 from starlette.responses import HTMLResponse, RedirectResponse, Response
 
+CLAUDE_CALLBACK = "https://claude.ai/api/mcp/auth_callback"
+
 
 class OwnerOAuthProvider:
     """One owner password, standard OAuth clients, persistent rotating bearer tokens."""
@@ -88,8 +90,13 @@ class OwnerOAuthProvider:
         return OAuthClientInformationFull.model_validate(data) if data else None
 
     async def register_client(self, client_info):
-        # This private integration only accepts ChatGPT redirects; no open redirect service.
-        for redirect in client_info.redirect_uris or []:
+        # Keep the supported clients' callbacks closed to arbitrary redirects.
+        redirects = client_info.redirect_uris or []
+        if not redirects:
+            raise RegistrationError("invalid_redirect_uri", "A supported callback URL is required")
+        for redirect in redirects:
+            if str(redirect) == CLAUDE_CALLBACK:
+                continue
             uri = urlsplit(str(redirect))
             if (
                 uri.scheme != "https"
@@ -100,11 +107,18 @@ class OwnerOAuthProvider:
                     or uri.path == "/connector_platform_oauth_redirect"
                 )
             ):
-                raise RegistrationError("invalid_redirect_uri", "Use the ChatGPT callback URL")
+                raise RegistrationError(
+                    "invalid_redirect_uri", "Use a supported ChatGPT or Claude callback URL"
+                )
+        # Claude's DCR flow uses a public client with PKCE. Do not relax the
+        # confidential-client requirement for existing ChatGPT registrations.
+        claude_public_client = client_info.token_endpoint_auth_method == "none" and all(
+            str(redirect) == CLAUDE_CALLBACK for redirect in redirects
+        )
         if client_info.token_endpoint_auth_method not in (
             "client_secret_post",
             "client_secret_basic",
-        ):
+        ) and not claude_public_client:
             raise RegistrationError(
                 "invalid_client_metadata", "A confidential OAuth client is required"
             )
@@ -152,21 +166,29 @@ class OwnerOAuthProvider:
             "Referrer-Policy": "same-origin",
             # Browsers also apply form-action to the post-login OAuth redirect.
             "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; "
-            "form-action 'self' https://chatgpt.com; frame-ancestors 'none'",
+            "form-action 'self' https://chatgpt.com https://claude.ai; frame-ancestors 'none'",
             "X-Content-Type-Options": "nosniff",
         }
         if request.method == "GET":
             request_id = request.query_params.get("request", "")
-            if not self._get("pending", request_id):
-                return Response("Connection request expired. Start again in ChatGPT.", 400)
+            pending = self._get("pending", request_id)
+            if not pending:
+                return Response(
+                    "Connection request expired. Start again in your connecting app.", 400
+                )
+            callback_host = urlsplit(pending["params"]["redirect_uri"]).hostname
+            client_name = "Claude" if callback_host == "claude.ai" else "ChatGPT"
+            safe_host = html.escape(callback_host or "", quote=True)
             safe = html.escape(request_id, quote=True)
             response = HTMLResponse(
                 '<!doctype html><meta name="viewport" content="width=device-width">'
                 "<title>Connect JobOS</title><style>body{font:18px system-ui;max-width:480px;"
                 "margin:12vh auto;padding:24px;background:#10141c;color:#eee}"
                 "input,button{font:inherit;padding:12px;box-sizing:border-box;width:100%;"
-                "margin-top:16px}button{cursor:pointer}</style><h1>Connect ChatGPT to JobOS</h1>"
+                "margin-top:16px}button{cursor:pointer}</style>"
+                f"<h1>Connect {client_name} to JobOS</h1>"
                 "<p>Enter your JobOS connection password to connect all JobOS tools.</p>"
+                f"<p>After connecting, you will return to {safe_host}.</p>"
                 '<form method="post" action="/connect">'
                 f'<input type="hidden" name="request" value="{safe}">'
                 '<label>Connection password<input type="password" name="password" '
@@ -190,7 +212,7 @@ class OwnerOAuthProvider:
             )
         pending = self._get("pending", request_id, consume=True)
         if not pending:
-            return Response("Connection request expired. Start again in ChatGPT.", 400)
+            return Response("Connection request expired. Start again in your connecting app.", 400)
         self._put("client", pending["client_id"], pending["client"], time.time() + 365 * 86400)
         self._get("unconnected_client", pending["client_id"], consume=True)
         params = AuthorizationParams.model_validate(pending["params"])

@@ -1,10 +1,10 @@
 # Remote MCP connections
 
-JobOS can expose its MCP tools to ChatGPT through an **optional authenticated Streamable HTTP server**. The local stdio integration remains unchanged. This does not require a new ChatGPT UI or a second JobOS workspace.
+JobOS can expose its MCP tools to ChatGPT and Claude through an **optional authenticated Streamable HTTP server**. The local stdio integration remains unchanged. Both clients work in the same JobOS workspace.
 
 ## Connection shape
 
-ChatGPT → HTTPS forwarding → OAuth-protected JobOS MCP → local JobOS API.
+ChatGPT or Claude → HTTPS forwarding → OAuth-protected JobOS MCP → local JobOS API.
 
 The API and remote MCP run independently of the desktop window. Browser and native document-editing tools still need the desktop surfaces that implement those operations. Keep all registered tools exposed; runtime availability is reported by each tool.
 
@@ -16,7 +16,7 @@ Run `jobos-mcp-http --config /absolute/path/to/private-remote-config.json` (or `
 - `port`: local loopback HTTP listener; default `8770`.
 - `api_base_url`: local JobOS API; default `http://127.0.0.1:8766`.
 - `api_token_file`: private file containing the distinct external MCP API credential. Configure the API's `JOBOS_EXTERNAL_MCP_TOKEN_FILE` with that same path. Never reuse the internal MCP credential here.
-- `owner_secret`: a generated random connection password of at least 32 characters; used only to connect the owner's ChatGPT account.
+- `owner_secret`: a generated random connection password of at least 32 characters; used only to connect the owner's accounts.
 - `artifact_root`: existing JobOS artifact directory on the MCP host.
 - `agent_id` / `agent_token`: the existing Career Profile connected-agent identity and credential to use for these tools. These are server-side values, never sent to ChatGPT.
 
@@ -33,6 +33,20 @@ Use the host's service manager to keep both processes running. OAuth state is pe
 - OAuth Client ID / Client Secret: **leave blank** (dynamic registration).
 
 When ChatGPT opens **Connect ChatGPT to JobOS**, enter the owner's connection password. This is account connection authentication, not an extra per-tool approval workflow. The server uses the MCP SDK's authorization-code/PKCE flow, access tokens, refresh rotation, and revocation.
+
+## Claude and Claude Desktop
+
+1. Open **Customize > Connectors > Add custom connector** in Claude.
+2. Name it **JobOS** and enter **`https://YOUR-HOST/mcp`**, using the same public HTTPS endpoint as ChatGPT.
+3. Select OAuth **Sign in now** and **Register automatically** for the OAuth client. Leave client ID, client secret, and request headers unset.
+4. On **Connect Claude to JobOS**, enter the owner's JobOS connection password.
+5. Enable JobOS in the conversation's connectors menu. Start with a job or Career Profile read before asking Claude to create documents.
+
+This connection works in Claude's hosted web and Desktop clients. It uses Anthropic's cloud network, so the HTTPS endpoint must be publicly reachable on port 443 even when using Claude Desktop. No local `claude_desktop_config.json` entry is needed.
+
+The server accepts Claude's exact hosted callback, `https://claude.ai/api/mcp/auth_callback`. Claude's automatic registration can use a public OAuth client with S256 PKCE and rotating refresh tokens; the owner password is still required. ChatGPT registrations still require confidential-client authentication. The server does not advertise Client ID Metadata Documents. Claude Code's loopback callbacks are outside this connection's scope.
+
+Connected clients share the existing external context and server-configured Career Profile agent permissions. Resume generation creates a matched PDF/DOCX pair in JobOS; browser and native document-editing tools still require the configured desktop. See the [capability map](mcp-capability-map.md) for the document workflow and formatting limits.
 
 ## External context and files
 
@@ -67,10 +81,12 @@ The transport remains stateless Streamable HTTP; JobOS does not advertise tool-l
 
 Verify the OAuth metadata and unauthenticated `401` first, then complete a real login and confirm MCP `tools/list`. Exercise job reads, a reversible Career Profile edit, and server-side generation/publication of a synthetic PDF/DOCX pair. Confirm registration/readback and hashes, rather than treating a successful HTTP connection as a successful file workflow. Keep fixtures out of the owner's real career facts.
 
-A successful generic MCP/OAuth test is not a claim that the ChatGPT connection has been accepted; the final check is the owner's actual connection in ChatGPT.
+A successful generic MCP/OAuth test is not a claim that a client connection has been accepted; the final check is the owner's actual connection in ChatGPT or Claude. Verify Claude public-client registration, callback handling, PKCE, refresh rotation, revocation, and post-restart access alongside the existing ChatGPT flow.
 
 ## Sources
 
 - [ChatGPT developer-mode MCP](https://developers.openai.com/api/docs/guides/developer-mode)
 - [ChatGPT OAuth requirements](https://developers.openai.com/apps-sdk/build/auth)
 - [Tailscale Funnel](https://tailscale.com/docs/features/tailscale-funnel)
+- [Claude connector authentication](https://claude.com/docs/connectors/building/authentication)
+- [Add a Claude custom connector](https://support.claude.com/en/articles/11175166-get-started-with-custom-connectors-using-remote-mcp)
