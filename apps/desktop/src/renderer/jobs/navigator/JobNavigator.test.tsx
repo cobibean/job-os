@@ -35,7 +35,7 @@ test('manual rows support deliberate drag ordering with an accessible button alt
   expect(screen.getByRole('button', { name: 'Move Alpha down' })).not.toBeNull()
 })
 
-test('status controls offer only transitions allowed from the current job state', () => {
+test('status controls offer the current status first, then every other status', () => {
   const jobs = [
     { jobId: 'a', company: 'Alpha', title: 'Builder', status: 'discovered' as const, statusGroup: 'Inbox', canonicalUrl: 'https://example.com/a', discoveredAt: '', lastSeenAt: '' },
     { jobId: 'b', company: 'Beta', title: 'Operator', status: 'shortlisted' as const, statusGroup: 'Considering', canonicalUrl: 'https://example.com/b', discoveredAt: '', lastSeenAt: '' }
@@ -55,9 +55,8 @@ test('status controls offer only transitions allowed from the current job state'
   const betaOptions = [...screen.getByRole('combobox', { name: 'Change Beta status' }).querySelectorAll('option')]
     .map(option => option.value)
 
-  expect(alphaOptions).toEqual(['discovered', 'shortlisted', 'applied', 'scored', 'reviewed', 'skipped', 'archived'])
-  expect(betaOptions).toEqual(['shortlisted', 'apply_now', 'maybe', 'stretch', 'applied'])
-  expect(alphaOptions).toContain('shortlisted')
+  expect(alphaOptions).toEqual(['discovered', 'scored', 'reviewed', 'shortlisted', 'apply_now', 'maybe', 'stretch', 'skipped', 'applied', 'interviewing', 'closed', 'archived'])
+  expect(betaOptions).toEqual(['shortlisted', 'discovered', 'scored', 'reviewed', 'apply_now', 'maybe', 'stretch', 'skipped', 'applied', 'interviewing', 'closed', 'archived'])
   expect(screen.getByRole('combobox', { name: 'Change Alpha status' }).querySelector('option[value="shortlisted"]')?.textContent).toBe('Considering')
   expect(screen.getByRole('combobox', { name: 'Change Beta status' }).querySelector('option[value="shortlisted"]')?.textContent).toBe('Considering')
   expect(screen.getAllByRole('option', { name: 'Mark applied' })).toHaveLength(2)

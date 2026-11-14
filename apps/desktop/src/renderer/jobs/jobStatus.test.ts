@@ -5,7 +5,7 @@ import { expect, test } from 'vitest'
 
 import type { JobStatus } from '../../shared/contracts'
 
-import { STATUS_TRANSITIONS, statusOptionLabel } from './jobStatus'
+import { JOB_STATUSES, STATUS_TRANSITIONS, statusOptionLabel } from './jobStatus'
 
 const transitionsFixture = (JSON.parse(readFileSync(
   new URL('../../../../../tests/fixtures/job-status-transitions.json', import.meta.url),
@@ -19,19 +19,17 @@ test('renderer transitions match the shared API transition contract', () => {
   expect(sorted(STATUS_TRANSITIONS)).toEqual(sorted(transitionsFixture))
 })
 
-test('every pre-application status can be marked applied directly', () => {
-  for (const status of ['discovered', 'scored', 'reviewed', 'shortlisted', 'apply_now', 'maybe', 'stretch', 'skipped'] as const) {
-    expect(STATUS_TRANSITIONS[status]).toContain('applied')
+test('every status can move to every other status', () => {
+  for (const status of JOB_STATUSES) {
+    expect(STATUS_TRANSITIONS[status]).toEqual(JOB_STATUSES.filter(target => target !== status))
   }
+  expect(STATUS_TRANSITIONS.archived).toContain('discovered')
+  expect(STATUS_TRANSITIONS.applied).toContain('shortlisted')
 })
 
-test('Considering is an Inbox-only target backed by shortlisted', () => {
-  expect(STATUS_TRANSITIONS.discovered).toContain('shortlisted')
-  expect(STATUS_TRANSITIONS.scored).toContain('shortlisted')
-  expect(STATUS_TRANSITIONS.reviewed).toContain('shortlisted')
+test('shortlisted is labelled Considering and applied as Mark applied', () => {
   expect(statusOptionLabel('discovered', 'shortlisted')).toBe('Considering')
-
-  for (const status of ['applied', 'interviewing', 'closed', 'skipped', 'archived'] as const) {
-    expect(STATUS_TRANSITIONS[status]).not.toContain('shortlisted')
-  }
+  expect(statusOptionLabel('closed', 'shortlisted')).toBe('Considering')
+  expect(statusOptionLabel('discovered', 'applied')).toBe('Mark applied')
+  expect(statusOptionLabel('applied', 'applied')).toBe('applied')
 })

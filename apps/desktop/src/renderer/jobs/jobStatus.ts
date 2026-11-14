@@ -4,22 +4,18 @@ export const CANONICAL_STATUS_GROUPS = [
   'Inbox', 'Considering', 'Applied', 'Interviewing', 'Closed', 'Inactive'
 ] as const
 
-// Keep in sync with tests/fixtures/job-status-transitions.json; the API's
+// Lifecycle order, used to order status dropdown options.
+export const JOB_STATUSES: readonly JobStatus[] = [
+  'discovered', 'scored', 'reviewed', 'shortlisted', 'apply_now', 'maybe',
+  'stretch', 'skipped', 'applied', 'interviewing', 'closed', 'archived'
+]
+
+// Any status may move to any other; the API records every change in job history.
+// Kept equal to tests/fixtures/job-status-transitions.json; the API's
 // ALLOWED_TRANSITIONS is contract-tested against the same fixture.
-export const STATUS_TRANSITIONS: Record<JobStatus, JobStatus[]> = {
-  discovered: ['shortlisted', 'applied', 'scored', 'reviewed', 'skipped', 'archived'],
-  scored: ['applied', 'reviewed', 'shortlisted', 'apply_now', 'maybe', 'stretch', 'skipped', 'archived'],
-  reviewed: ['applied', 'shortlisted', 'apply_now', 'maybe', 'stretch', 'skipped', 'archived'],
-  shortlisted: ['apply_now', 'maybe', 'stretch', 'applied'],
-  apply_now: ['applied', 'interviewing', 'closed'],
-  maybe: ['applied', 'reviewed', 'apply_now', 'skipped', 'archived'],
-  stretch: ['applied', 'reviewed', 'apply_now', 'skipped', 'archived'],
-  skipped: ['applied', 'reviewed', 'archived'],
-  applied: ['interviewing', 'closed', 'archived'],
-  interviewing: ['closed', 'archived'],
-  closed: ['archived'],
-  archived: []
-}
+export const STATUS_TRANSITIONS = Object.fromEntries(
+  JOB_STATUSES.map(status => [status, JOB_STATUSES.filter(target => target !== status)])
+) as Record<JobStatus, JobStatus[]>
 
 export function statusLabel(status: string) {
   return status.replaceAll('_', ' ')

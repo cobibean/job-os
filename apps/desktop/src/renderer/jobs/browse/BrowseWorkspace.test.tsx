@@ -189,16 +189,18 @@ test('Open job prevents duplicates and reports failure without leaving Browse', 
   expect((screen.getByRole('button', { name: 'Open job' }) as HTMLButtonElement).disabled).toBe(false)
 })
 
-test('status controls expose and execute legal canonical transitions only', async () => {
+test('status controls offer every status and execute a backwards move', async () => {
   const bridge = installJobsBridge()
   render(<Harness initialFocus="one" />)
   await screen.findByText('Description one')
   const status = screen.getByRole('combobox', { name: 'Change Alpha status' }) as HTMLSelectElement
   const values = Array.from(status.options).map(option => option.value)
-  expect(values).toEqual(['applied', 'interviewing', 'closed', 'archived'])
-  expect(values).not.toContain('reviewed')
-  fireEvent.change(status, { target: { value: 'interviewing' } })
-  expect(bridge.updateStatus).toHaveBeenCalledWith('one', 'interviewing')
+  expect(values).toEqual([
+    'applied', 'discovered', 'scored', 'reviewed', 'shortlisted', 'apply_now',
+    'maybe', 'stretch', 'skipped', 'interviewing', 'closed', 'archived'
+  ])
+  fireEvent.change(status, { target: { value: 'shortlisted' } })
+  expect(bridge.updateStatus).toHaveBeenCalledWith('one', 'shortlisted')
 })
 
 test('Inbox jobs can move to Considering and the rail exposes the canonical group', async () => {

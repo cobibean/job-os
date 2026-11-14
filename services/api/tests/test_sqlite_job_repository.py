@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 from job_repository_contract import command, exercise_repository_contract
-from jobos_api.job_repository import Conflict, NotFound
+from jobos_api.job_repository import Conflict, NotFound, Validation
 from jobos_api.job_repository_migrations import (
     MIGRATIONS,
     Migration,
@@ -18,7 +18,6 @@ from jobos_api.job_repository_migrations import (
 )
 from jobos_api.sqlite_job_repository import (
     ALLOWED_TRANSITIONS,
-    PRE_APPLICATION_STATUSES,
     STATUSES,
     SQLiteJobRepository,
 )
@@ -478,23 +477,52 @@ def test_allowed_transitions_match_shared_contract_fixture():
     }
 
 
-@pytest.mark.parametrize("source", sorted(PRE_APPLICATION_STATUSES))
-def test_every_pre_application_status_can_be_marked_applied_without_flag(tmp_path, source):
-    repository = SQLiteJobRepository(tmp_path / "jobs.db")
-    job = repository.create_job(command(f"direct-apply-{source}"))
-    with sqlite3.connect(tmp_path / "jobs.db") as connection:
+@pytest.mark.parametrize(
+    ("source", "target"),
+    [(source, target) for source in sorted(STATUSES) for target in sorted(STATUSES - {source})],
+)
+def test_any_status_can_move_to_any_other_and_is_recorded(tmp_path, source, target):
+    database = tmp_path / "jobs.db"
+    repository = SQLiteJobRepository(database)
+    job = repository.create_job(command(f"move-{source}-{target}"))
+    with sqlite3.connect(database) as connection:
         connection.execute(
             "UPDATE canonical_jobs SET status = ? WHERE job_id = ?", (source, job.job_id)
         )
 
-    applied = repository.update_status(job.job_id, "applied")
+    moved = repository.update_status(job.job_id, target, reason="contract")
 
-    assert applied.status == "applied"
-    assert repository.list_history(job.job_id)[-1].from_status == source
+    assert moved.status == target
+    last = repository.list_history(job.job_id)[-1]
+    assert (last.event_type, last.from_status, last.to_status, last.reason) == (
+        "lead_state_changed",
+        source,
+        target,
+        "contract",
+    )
 
 
-def test_invalid_transition_still_conflicts(tmp_path):
+def test_status_changes_each_append_history_and_same_status_is_a_no_op(tmp_path):
     repository = SQLiteJobRepository(tmp_path / "jobs.db")
-    job = repository.create_job(command("still-strict"))
-    with pytest.raises(Conflict, match="discovered -> interviewing"):
-        repository.update_status(job.job_id, "interviewing")
+    job = repository.create_job(command("round-trip"))
+    for target in ("applied", "shortlisted", "archived", "discovered", "discovered"):
+        repository.update_status(job.job_id, target)
+
+    changes = [
+        (event.from_status, event.to_status)
+        for event in repository.list_history(job.job_id)
+        if event.event_type == "lead_state_changed"
+    ]
+    assert changes == [
+        ("discovered", "applied"),
+        ("applied", "shortlisted"),
+        ("shortlisted", "archived"),
+        ("archived", "discovered"),
+    ]
+
+
+def test_unknown_status_is_still_rejected(tmp_path):
+    repository = SQLiteJobRepository(tmp_path / "jobs.db")
+    job = repository.create_job(command("unknown-status"))
+    with pytest.raises(Validation, match="Unknown job status"):
+        repository.update_status(job.job_id, "ghosted")
