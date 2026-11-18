@@ -88,7 +88,7 @@ This is appropriate for a trusted private demo boundary. It is not Developer ID 
 
 - an exact full expected source commit;
 - `HEAD` equality with that commit;
-- a completely clean worktree before and after packaging;
+- no changes to tracked files, and no untracked files in build input directories (`apps/`, `packages/`, `services/`, `scripts/`, `tools/`) or at the repository root, before and after packaging;
 - one exact app root in the inner ZIP;
 - safe ZIP names, member types, bounds, compression, and symlinks;
 - arm64, bundle, executable, CodeDirectory, and ad-hoc-signature identity checks.
