@@ -204,7 +204,7 @@ describe('trusted document workspace', () => {
 
     render(<DocumentWorkspace hydrated job={job} onViewChange={vi.fn()} restoredArtifactId={null} restoredPage={1} restoredZoom={1} />)
 
-    expect(await screen.findByText('Local documents loaded; optional artifact refresh is unavailable')).not.toBeNull()
+    expect(await screen.findByText('Local documents loaded; couldn’t check for newer versions')).not.toBeNull()
     expect(screen.getByText('Newest successful revision · render-2 · source source-2')).not.toBeNull()
     expect(screen.queryByText(/Document request failed/)).toBeNull()
   })
@@ -289,9 +289,9 @@ describe('trusted document workspace', () => {
     const installed = installDocxDocuments()
     vi.mocked(installed.docxDocuments.listBindings).mockResolvedValue([installed.opened.binding])
     render(<DocumentWorkspace hydrated job={job} onViewChange={vi.fn()} restoredArtifactId={olderPdf.artifactId} restoredPage={1} restoredZoom={1} />)
-    await screen.findByText('Artifact registry is current')
+    await screen.findByText('Documents are up to date')
     await waitFor(() => expect(installed.docxDocuments.listBindings).toHaveBeenCalled())
-    expect(screen.getByText('Published packet · older-pdf')).not.toBeNull()
+    expect(screen.getByText('Published · older-pdf')).not.toBeNull()
     expect(screen.queryByText('Local edits differ from this published packet. Its PDF does not include these edits.')).toBeNull()
     const selector = screen.getByRole('combobox', { name: 'Resume revision' }) as HTMLSelectElement
     expect(selector.value).toBe(olderPdf.artifactId)
@@ -302,7 +302,7 @@ describe('trusted document workspace', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Approve this revision' }))
     await waitFor(() => expect(documents.approve).toHaveBeenCalledWith(job.jobId, olderPdf.artifactId))
     fireEvent.change(selector, { target: { value: newerPdf.artifactId } })
-    expect(await screen.findByText('Published packet · newer-pdf')).not.toBeNull()
+    expect(await screen.findByText('Published · newer-pdf')).not.toBeNull()
     expect(screen.getByText('Local edits differ from this published packet. Its PDF does not include these edits.')).not.toBeNull()
     fireEvent.click(screen.getByRole('button', { name: 'Export' }))
     expect(screen.getByRole('menuitem', { name: 'Export published DOCX · newer-docx' })).not.toBeNull()
@@ -558,9 +558,9 @@ describe('trusted document workspace', () => {
       refresh: vi.fn(async () => { throw new Error('capability_unavailable') })
     })
     render(<DocumentWorkspace hydrated job={job} onViewChange={vi.fn()} restoredArtifactId={older.artifactId} restoredPage={2} restoredZoom={1.4} />)
-    await screen.findByText('Local documents loaded; optional artifact refresh is unavailable')
+    await screen.findByText('Local documents loaded; couldn’t check for newer versions')
     fireEvent.click(screen.getByRole('button', { name: 'Refresh' }))
-    await screen.findByText('Local artifacts reloaded; optional artifact refresh is unavailable')
+    await screen.findByText('Local documents reloaded; couldn’t check for newer versions')
     expect(documents.list).toHaveBeenCalledTimes(2)
     const selector = screen.getByRole('combobox', { name: 'Resume revision' }) as HTMLSelectElement
     expect(selector.value).toBe(older.artifactId)
@@ -595,7 +595,7 @@ describe('trusted document workspace', () => {
       })
     })
     const view = render(<DocumentWorkspace hydrated job={job} onViewChange={vi.fn()} restoredArtifactId={older.artifactId} restoredPage={1} restoredZoom={1} />)
-    await screen.findByText('Artifact registry is current')
+    await screen.findByText('Documents are up to date')
     fireEvent.click(screen.getByRole('button', { name: 'Refresh' }))
     await waitFor(() => expect(documents[phase]).toHaveBeenCalledTimes(2))
     view.rerender(<DocumentWorkspace hydrated job={otherJob} onViewChange={vi.fn()} restoredArtifactId={null} restoredPage={1} restoredZoom={1} />)
@@ -841,7 +841,7 @@ describe('trusted document workspace', () => {
     expect(await screen.findByText('PDF bytes 2 · page 1 at 100%')).not.toBeNull()
     refreshed.resolve(current)
 
-    await screen.findByText('Artifact registry is current')
+    await screen.findByText('Documents are up to date')
     expect(screen.getByText('PDF bytes 2 · page 1 at 100%')).not.toBeNull()
   })
 
@@ -886,6 +886,31 @@ describe('trusted document workspace', () => {
 
     expect(await screen.findByText('PDF bytes 5 · page 1 at 100%')).not.toBeNull()
     expect(screen.queryByText(/PDF bytes 1/)).toBeNull()
+  })
+
+  it('reports a failed PDF load in the canvas and retries on request', async () => {
+    const loadPdf = vi.fn()
+      .mockRejectedValueOnce(new Error("Error invoking remote method 'jobos:documents:load-pdf': Error: Local artifact storage is unavailable"))
+      .mockImplementation(async (artifactId: string) => ({
+        artifactId,
+        artifactRevision: 'render-2',
+        sourceRevision: 'source-2',
+        sha256: 'a'.repeat(64),
+        bytes: Uint8Array.of(2).buffer
+      }))
+    installDocuments({ loadPdf })
+    render(<DocumentWorkspace hydrated job={job} onViewChange={vi.fn()} restoredArtifactId={null} restoredPage={1} restoredZoom={1} />)
+
+    const alert = await screen.findByRole('alert')
+    expect(within(alert).getByText('Couldn’t load this PDF')).not.toBeNull()
+    expect(within(alert).getByText('Local artifact storage is unavailable')).not.toBeNull()
+    expect(screen.queryByText('No preview yet')).toBeNull()
+    expect(screen.queryByText(/Error invoking remote method/)).toBeNull()
+
+    fireEvent.click(within(alert).getByRole('button', { name: 'Try again' }))
+
+    expect(await screen.findByText('PDF bytes 2 · page 1 at 100%')).not.toBeNull()
+    expect(screen.queryByRole('alert')).toBeNull()
   })
 
   it('shows a last-successful DOCX instead of an older PDF when the newest render failed', async () => {
@@ -985,7 +1010,7 @@ describe('trusted document workspace', () => {
     expect((screen.getByRole('button', { name: 'Next document' }) as HTMLButtonElement).disabled).toBe(true)
     const coverSelector = screen.getByRole('combobox', { name: 'Cover Letter revision' }) as HTMLSelectElement
     expect(Array.from(coverSelector.options).map(option => option.textContent)).toEqual([
-      'No artifact',
+      'No version',
       'cover-2 · succeeded · newest',
       'cover-1 · succeeded'
     ])
@@ -1187,7 +1212,7 @@ describe('trusted document workspace', () => {
     const exported = deferred<string>()
     installDocuments({ list: vi.fn(async () => packet), refresh: vi.fn(async () => packet), export: vi.fn(() => exported.promise) })
     render(<DocumentWorkspace hydrated job={job} onViewChange={vi.fn()} restoredArtifactId={null} restoredPage={1} restoredZoom={1} />)
-    await screen.findByText('Artifact registry is current')
+    await screen.findByText('Documents are up to date')
     fireEvent.click(screen.getByRole('button', { name: 'Export' }))
     fireEvent.click(screen.getByRole('menuitem', { name: 'Export PDF' }))
     if (!pending) {

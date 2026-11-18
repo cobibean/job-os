@@ -1,8 +1,9 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { ArrowDown, ArrowUp, BriefcaseBusiness, ChevronRight, Search, UserRound } from 'lucide-react'
 
 import type { JobDetail, JobListItem, JobSortMode, JobStatus } from '../../../shared/contracts'
-import { CANONICAL_STATUS_GROUPS, STATUS_TRANSITIONS, statusOptionLabel } from '../jobStatus'
+import { CANONICAL_STATUS_GROUPS } from '../jobStatus'
+import { StatusOptions } from '../StatusOptions'
 
 interface JobNavigatorProps {
   jobs: JobListItem[]
@@ -27,6 +28,20 @@ interface JobNavigatorProps {
 
 export function JobNavigator(props: JobNavigatorProps) {
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(() => new Set())
+  // Reveal the selected job: open its status section when the selection (or the
+  // job's section) changes, then scroll its row into view. Keyed so a section the
+  // user collapses afterwards stays collapsed.
+  const selectedGroup = props.jobs.find(job => job.jobId === props.selectedJobId)?.statusGroup
+  const revealKey = props.selectedJobId && selectedGroup ? `${props.selectedJobId}:${selectedGroup}` : null
+  const [revealedKey, setRevealedKey] = useState<string | null>(null)
+  if (revealKey !== revealedKey) {
+    setRevealedKey(revealKey)
+    if (selectedGroup && !expandedGroups.has(selectedGroup)) setExpandedGroups(new Set(expandedGroups).add(selectedGroup))
+  }
+  const selectedRow = useRef<HTMLDivElement | null>(null)
+  useEffect(() => {
+    if (revealKey) selectedRow.current?.scrollIntoView?.({ block: 'nearest' })
+  }, [revealKey, props.sortMode])
   const canReorder = props.sortMode === 'manual' && !props.query && !props.statusGroup
   const groupedJobs = props.jobs.reduce<Array<{ name: string, jobs: Array<{ job: JobListItem, index: number }> }>>((groups, job, index) => {
     const existingGroup = groups.find(group => group.name === job.statusGroup)
@@ -57,6 +72,7 @@ export function JobNavigator(props: JobNavigatorProps) {
       className={`job-row${job.jobId === props.selectedJobId ? ' selected' : ''}`}
       draggable={canReorder}
       key={job.jobId}
+      ref={job.jobId === props.selectedJobId ? selectedRow : undefined}
       onDragOver={event => { if (canReorder) event.preventDefault() }}
       onDragStart={event => {
         event.dataTransfer.effectAllowed = 'move'
@@ -73,7 +89,7 @@ export function JobNavigator(props: JobNavigatorProps) {
       <div className="job-row-main">
         <button aria-current={job.jobId === props.selectedJobId ? true : undefined} aria-label={`Select ${job.company} ${job.title}`} className="job-select" onClick={() => props.onSelect(job.jobId)} type="button">
           <BriefcaseBusiness aria-hidden="true" size={17} strokeWidth={1.45} />
-          <span><strong>{job.company}{job.syntheticDemo ? <span className="demo-badge">Demo</span> : null}</strong><small>{job.title}</small></span>
+          <span><strong>{job.company}{job.syntheticDemo ? <span className="demo-badge">Demo</span> : null}</strong><small title={job.title}>{job.title}</small></span>
         </button>
         {canReorder ? (
           <span className="order-buttons">
@@ -83,7 +99,7 @@ export function JobNavigator(props: JobNavigatorProps) {
         ) : null}
       </div>
       <select aria-label={`Change ${job.company} status`} className="status-select" onChange={event => props.onStatusChange(job.jobId, event.target.value as JobStatus)} value={job.status}>
-        {[job.status, ...STATUS_TRANSITIONS[job.status]].map(status => <option key={status} value={status}>{statusOptionLabel(job.status, status)}</option>)}
+        <StatusOptions current={job.status} />
       </select>
       {detail ? (
         <div className="job-description-card">

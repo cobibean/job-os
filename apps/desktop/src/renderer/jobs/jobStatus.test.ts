@@ -31,5 +31,5 @@ test('shortlisted is labelled Considering and applied as Mark applied', () => {
   expect(statusOptionLabel('discovered', 'shortlisted')).toBe('Considering')
   expect(statusOptionLabel('closed', 'shortlisted')).toBe('Considering')
   expect(statusOptionLabel('discovered', 'applied')).toBe('Mark applied')
-  expect(statusOptionLabel('applied', 'applied')).toBe('applied')
+  expect(statusOptionLabel('applied', 'applied')).toBe('Applied')
 })

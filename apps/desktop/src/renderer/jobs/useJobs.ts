@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 
+import { statusLabel } from './jobStatus'
 import type { AgentSessionJobContext, JobDetail, JobListItem, JobSortMode, JobStatus } from '../../shared/contracts'
 
 const JOB_STATUSES = new Set<string>([
@@ -92,6 +93,10 @@ export function useJobs(
       if (request === listRequest.current && key === currentControlsKey.current) setError('Jobs unavailable')
     }
   }, [bridge])
+
+  // Feedback such as "Active job selected" describes the conversation it was
+  // produced in; it must not linger after switching to another one.
+  useEffect(() => { setFeedback(null) }, [activeConversationId])
 
   useEffect(() => {
     // A conversation context remains authoritative only for that conversation.
@@ -242,7 +247,7 @@ export function useJobs(
       setAllJobs(current => current.map(job => job.jobId === jobId ? result.job : job))
       setSelectedJob(current => current?.jobId === jobId ? result.job : current)
       if (selectedJobId === jobId) void loadDetail(jobId)
-      setFeedback(`Status changed to ${status}`)
+      setFeedback(`Status changed to ${statusLabel(status)}`)
       setError(null)
     } catch (statusError) {
       setError(statusChangeError(statusError))

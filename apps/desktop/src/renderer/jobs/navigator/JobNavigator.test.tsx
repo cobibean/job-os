@@ -35,7 +35,7 @@ test('manual rows support deliberate drag ordering with an accessible button alt
   expect(screen.getByRole('button', { name: 'Move Alpha down' })).not.toBeNull()
 })
 
-test('status controls offer the current status first, then every other status', () => {
+test('status controls list every status under the list it files the job into', () => {
   const jobs = [
     { jobId: 'a', company: 'Alpha', title: 'Builder', status: 'discovered' as const, statusGroup: 'Inbox', canonicalUrl: 'https://example.com/a', discoveredAt: '', lastSeenAt: '' },
     { jobId: 'b', company: 'Beta', title: 'Operator', status: 'shortlisted' as const, statusGroup: 'Considering', canonicalUrl: 'https://example.com/b', discoveredAt: '', lastSeenAt: '' }
@@ -55,8 +55,11 @@ test('status controls offer the current status first, then every other status', 
   const betaOptions = [...screen.getByRole('combobox', { name: 'Change Beta status' }).querySelectorAll('option')]
     .map(option => option.value)
 
-  expect(alphaOptions).toEqual(['discovered', 'scored', 'reviewed', 'shortlisted', 'apply_now', 'maybe', 'stretch', 'skipped', 'applied', 'interviewing', 'closed', 'archived'])
-  expect(betaOptions).toEqual(['shortlisted', 'discovered', 'scored', 'reviewed', 'apply_now', 'maybe', 'stretch', 'skipped', 'applied', 'interviewing', 'closed', 'archived'])
+  expect(alphaOptions).toEqual(['discovered', 'scored', 'reviewed', 'shortlisted', 'apply_now', 'maybe', 'stretch', 'applied', 'interviewing', 'closed', 'skipped', 'archived'])
+  expect(betaOptions).toEqual(['discovered', 'scored', 'reviewed', 'shortlisted', 'apply_now', 'maybe', 'stretch', 'applied', 'interviewing', 'closed', 'skipped', 'archived'])
+  expect([...screen.getByRole('combobox', { name: 'Change Beta status' }).querySelectorAll('optgroup')].map(group => group.label))
+    .toEqual(['Inbox', 'Considering', 'Applied', 'Interviewing', 'Closed', 'Inactive'])
+  expect((screen.getByRole('combobox', { name: 'Change Beta status' }) as HTMLSelectElement).value).toBe('shortlisted')
   expect(screen.getByRole('combobox', { name: 'Change Alpha status' }).querySelector('option[value="shortlisted"]')?.textContent).toBe('Considering')
   expect(screen.getByRole('combobox', { name: 'Change Beta status' }).querySelector('option[value="shortlisted"]')?.textContent).toBe('Considering')
   expect(screen.getAllByRole('option', { name: 'Mark applied' })).toHaveLength(2)
@@ -187,4 +190,34 @@ test('the active job exposes current state and moves it when selection changes',
   rerender(<JobNavigator {...props} selectedJobId="b" />)
   expect(screen.getByRole('button', { name: 'Select Alpha Builder' }).getAttribute('aria-current')).not.toBe('true')
   expect(screen.getByRole('button', { name: 'Select Beta Operator' }).getAttribute('aria-current')).toBe('true')
+})
+
+test('the selected job opens its status section and can still be collapsed afterwards', () => {
+  const jobs = [
+    { jobId: 'a', company: 'Alpha', title: 'Builder', status: 'discovered' as const, statusGroup: 'Inbox', canonicalUrl: 'https://example.com/a', discoveredAt: '', lastSeenAt: '' },
+    { jobId: 'c', company: 'Gamma', title: 'Designer', status: 'applied' as const, statusGroup: 'Applied', canonicalUrl: 'https://example.com/c', discoveredAt: '', lastSeenAt: '' }
+  ]
+  const navigator = (selectedJobId: string | null) => (
+    <JobNavigator
+      error={null} feedback={null} jobs={jobs} loading={false}
+      onMove={vi.fn()} onQueryChange={vi.fn()} onReorder={vi.fn()}
+      onSelect={vi.fn()} onSortChange={vi.fn()} onStatusChange={vi.fn()}
+      onStatusGroupChange={vi.fn()} query="" selectedJobId={selectedJobId}
+      sortMode="status" statusGroup=""
+    />
+  )
+  const view = render(navigator(null))
+  const applied = screen.getByRole('button', { name: 'Applied, 1 job' })
+  expect(applied.getAttribute('aria-expanded')).toBe('false')
+
+  view.rerender(navigator('c'))
+
+  expect(applied.getAttribute('aria-expanded')).toBe('true')
+  expect(screen.getByRole('button', { name: 'Select Gamma Designer' }).getAttribute('aria-current')).toBe('true')
+  expect(screen.getByRole('button', { name: 'Inbox, 1 job' }).getAttribute('aria-expanded')).toBe('false')
+
+  fireEvent.click(applied)
+  view.rerender(navigator('c'))
+
+  expect(applied.getAttribute('aria-expanded')).toBe('false')
 })

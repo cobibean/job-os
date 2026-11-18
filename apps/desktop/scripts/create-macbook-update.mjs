@@ -47,6 +47,25 @@ function run(command, arguments_, options = {}) {
   return options.capture ? `${result.stdout ?? ''}${result.stderr ?? ''}`.trim() : ''
 }
 
+// Directories whose contents can reach the packaged app. An untracked file here
+// could be compiled or bundled without belonging to the source commit.
+const BUILD_INPUT_ROOTS = ['apps/', 'packages/', 'services/', 'scripts/', 'tools/']
+
+/**
+ * Reduce `git status --porcelain=v1 --untracked-files=all` output to the lines
+ * that threaten provenance: every change to a tracked file, plus untracked files
+ * that sit in a build input directory or at the repository root. Untracked notes
+ * elsewhere (for example under docs/) cannot affect the build and are ignored.
+ */
+export function provenanceRelevantStatus(worktreeStatus) {
+  return worktreeStatus.split('\n').filter(line => {
+    if (!line.trim()) return false
+    if (!line.startsWith('?? ')) return true
+    const file = line.slice(3).replace(/^"/, '')
+    return !file.includes('/') || BUILD_INPUT_ROOTS.some(root => file.startsWith(root))
+  }).join('\n')
+}
+
 export function validateProvenance({ expectedCommit, currentCommit, worktreeStatus }) {
   if (!/^[0-9a-fA-F]{40}$/.test(expectedCommit ?? '')) {
     throw new Error('JOBOS_EXPECTED_SOURCE_COMMIT must be a full 40-hex Git commit SHA')
@@ -57,8 +76,9 @@ export function validateProvenance({ expectedCommit, currentCommit, worktreeStat
   if (currentCommit !== expectedCommit.toLowerCase()) {
     throw new Error(`Source commit mismatch: expected ${expectedCommit.toLowerCase()}, found ${currentCommit}`)
   }
-  if (worktreeStatus) {
-    throw new Error(`The entire worktree must be clean before and after packaging:\n${worktreeStatus}`)
+  const blocking = provenanceRelevantStatus(worktreeStatus ?? '')
+  if (blocking) {
+    throw new Error(`Tracked files and build inputs must be clean before and after packaging:\n${blocking}`)
   }
   return currentCommit
 }

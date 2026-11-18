@@ -89,11 +89,12 @@
 .job-row-main { display: flex; align-items: center; gap: 5px; }
 .job-select { min-width: 0; flex: 1; display: grid; grid-template-columns: 22px 1fr; align-items: center; gap: 7px; padding: 0; border: 0; text-align: left; color: var(--text); background: transparent; cursor: pointer; }
 .job-select > span { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
-.job-select strong, .job-select small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.job-select strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.job-select small { display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-height: 1.35; }
 .job-select strong { font-size: var(--text-sm); font-weight: var(--weight-medium); }
 .job-select small { color: var(--muted); font-size: var(--text-xs); }
-.status-select { max-width: 150px; margin: 7px 0 0 29px; padding: 0; border: 0; color: var(--accent); background: transparent; font-size: var(--text-xs); text-transform: capitalize; }
-.job-description-card { margin: 10px 0 0 29px; padding: 10px; border: 1px solid var(--border-soft); border-radius: var(--radius-md); background: var(--surface-inset); }
+.status-select { max-width: 150px; margin: 7px 0 0 29px; padding: 0; border: 0; color: var(--muted); background: transparent; font-size: var(--text-xs); text-transform: capitalize; }
+.job-description-card { margin: 10px 0 0; padding: 10px; border: 1px solid var(--border-soft); border-radius: var(--radius-md); background: var(--surface-inset); }
 .job-description-card p { margin: 6px 0 8px; color: var(--text-soft); font-size: var(--text-xs); line-height: 1.5; }
 .job-location { display: block; overflow: hidden; color: var(--text-soft); font-size: var(--text-xs); text-overflow: ellipsis; white-space: nowrap; }
 .job-description-card details { color: var(--muted); font-size: var(--text-xs); }
@@ -164,18 +165,18 @@
 .browse-list-pane > header strong { font-size: var(--text-lg); }
 .browse-list-pane > header span { color: var(--muted); font-size: var(--text-sm); }
 .browse-result-list { min-height: 0; overflow-y: auto; }
-.browse-result-row { position: relative; width: 100%; min-height: 92px; display: grid; grid-template-columns: 44px minmax(0, 1fr) auto; align-items: center; gap: 13px; padding: 15px 24px; border: 0; border-bottom: 1px solid var(--border-soft); color: var(--text); background: transparent; cursor: pointer; text-align: left; }
+.browse-result-row { position: relative; width: 100%; min-height: 72px; display: grid; grid-template-columns: 44px minmax(0, 1fr) auto; align-items: center; gap: 13px; padding: 11px 24px; border: 0; border-bottom: 1px solid var(--border-soft); color: var(--text); background: transparent; cursor: pointer; text-align: left; }
 .browse-result-row:hover { background: var(--surface-hover); }
 .browse-result-row[aria-current='true'] { background: var(--surface-selected); }
 .browse-result-row[aria-current='true']::before { content: ''; position: absolute; top: 0; bottom: 0; left: 0; width: 3px; background: var(--accent); }
-.browse-company-mark { width: 44px; height: 44px; display: grid; place-items: center; flex: 0 0 auto; border: 1px solid var(--border-strong); border-radius: var(--radius-md); color: var(--text-soft); background: var(--surface-inset); font-weight: var(--weight-bold); letter-spacing: -.03em; }
+.browse-company-mark { --mark-hue: 0; width: 44px; height: 44px; display: grid; place-items: center; flex: 0 0 auto; border: 1px solid color-mix(in oklch, oklch(0.62 0.12 var(--mark-hue)) 45%, var(--border)); border-radius: var(--radius-md); color: var(--text); background: color-mix(in oklch, oklch(0.62 0.12 var(--mark-hue)) 24%, var(--surface-inset)); font-weight: var(--weight-bold); letter-spacing: -.03em; }
 .browse-result-copy { min-width: 0; display: flex; flex-direction: column; gap: 5px; }
 .browse-result-copy strong, .browse-result-copy small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .browse-result-copy small { color: var(--muted); font-size: var(--text-sm); }
-.browse-result-status { color: var(--green); font-size: var(--text-xs); text-transform: capitalize; }
-.browse-reading-pane { min-width: 0; min-height: 0; display: flex; flex-direction: column; padding: 62px 38px 26px; overflow-y: auto; background: var(--bg); }
+.browse-result-status { color: var(--muted); font-size: var(--text-xs); text-transform: capitalize; }
+.browse-reading-pane { min-width: 0; min-height: 0; display: flex; flex-direction: column; padding: 36px 38px 26px; overflow-y: auto; background: var(--bg); }
 .browse-reading-pane > header, .browse-opportunity-sheet > header { display: flex; align-items: center; gap: 18px; }
-.browse-reading-pane h2, .browse-opportunity-sheet h2 { margin: 0 0 5px; font-size: 25px; letter-spacing: -.035em; }
+.browse-reading-pane h2, .browse-opportunity-sheet h2 { margin: 0 0 5px; font-size: var(--text-2xl); letter-spacing: -.035em; }
 .browse-reading-pane header p, .browse-opportunity-sheet header p { margin: 0; color: var(--text-soft); font-size: var(--text-lg); }
 .browse-meta { margin: 18px 0 0; color: var(--muted); font-size: var(--text-sm); text-transform: none; }
 .browse-reading-description { margin-top: 38px; padding-top: 28px; border-top: 1px solid var(--border); }
@@ -195,9 +196,15 @@
 .browse-swipe-stage { position: relative; min-width: 0; min-height: 0; display: flex; align-items: center; justify-content: center; gap: 18px; padding: 38px 44px; overflow: hidden; touch-action: pan-y; background: var(--bg); }
 .browse-opportunity-sheet { z-index: 2; width: min(665px, calc(100% - 270px)); height: min(615px, calc(100% - 44px)); min-height: 0; display: flex; flex-direction: column; padding: 54px 42px 38px; overflow: hidden; border: 1px solid var(--border-strong); border-radius: var(--radius-lg); background: var(--surface); box-shadow: 0 14px 34px var(--shadow-color-soft); }
 .browse-opportunity-sheet .browse-company-mark { width: 72px; height: 72px; font-size: var(--text-xl); }
-.browse-sheet-description { min-height: 0; margin-top: 30px; padding-top: 28px; overflow: hidden; border-top: 1px solid var(--border); }
-.browse-sheet-description p { display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 9; }
-.browse-opportunity-sheet > footer { display: flex; align-items: center; gap: 14px; margin-top: auto; padding-top: 28px; }
+.browse-sheet-description { min-height: 0; flex: 1; margin-top: 30px; padding: 28px 6px 0 0; overflow-y: auto; border-top: 1px solid var(--border); }
+.browse-decide { display: flex; align-items: center; gap: 10px; margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--border-soft); }
+.browse-decide button { height: 36px; display: inline-flex; align-items: center; gap: 7px; padding: 0 12px; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); color: var(--text-soft); background: var(--surface-raised); cursor: pointer; font-weight: var(--weight-medium); }
+.browse-decide button:hover:not(:disabled) { color: var(--text); background: var(--surface-hover); }
+.browse-decide button:disabled { opacity: var(--disabled-opacity); cursor: default; }
+.browse-decide .browse-decide-consider { border-color: var(--green-border); color: var(--green-text); }
+.browse-decide kbd { min-width: 18px; padding: 1px 5px; border: 1px solid var(--border); border-radius: 4px; color: var(--muted); background: var(--surface-inset); font: inherit; font-size: var(--text-xs); text-align: center; }
+.browse-decide > span { display: inline-flex; align-items: center; gap: 4px; margin-left: auto; color: var(--muted); font-size: var(--text-xs); }
+.browse-opportunity-sheet > footer { display: flex; align-items: center; gap: 14px; padding-top: 22px; }
 .browse-opportunity-sheet > footer > span { margin-left: auto; color: var(--muted); font-size: var(--text-sm); }
 .swipe-arrow { z-index: 3; width: 44px; height: 44px; display: grid; place-items: center; flex: 0 0 auto; border: 1px solid var(--border); border-radius: 50%; color: var(--text-soft); background: var(--surface-raised); cursor: pointer; }
 .swipe-arrow:hover:not(:disabled) { border-color: var(--accent-border-strong); color: var(--text); }

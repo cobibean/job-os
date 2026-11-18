@@ -42,5 +42,5 @@ test('resolves the complete owner stylesheet cascade in manifest order', () => {
   ])
   expect(new Set(files).size).toBe(files.length)
   expect(source).not.toMatch(/@import\b/)
-  expect(createHash('sha256').update(source).digest('hex')).toBe('808d535f51bbfb7930b956cdbbb74fc084116897eb46bcacec03a6402b616f9f')
+  expect(createHash('sha256').update(source).digest('hex')).toBe('b50aa670c3937bff3d22b5916a9db2977ab73f64fb095037b60e22052a9c04be')
 })

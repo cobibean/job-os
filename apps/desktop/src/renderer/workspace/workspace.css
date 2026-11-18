@@ -43,18 +43,12 @@
 .mode-toggle { width: 28px; height: 28px; border-radius: var(--radius-sm); }
 .mode-toggle:hover { color: var(--text); background: var(--surface-hover); }
 
-.reset-layout {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  border: 0;
-  color: var(--text-soft);
-  background: transparent;
-  font-size: var(--text-sm);
-  cursor: pointer;
-}
+.layout-option.first-place { margin-left: 9px; }
+.layout-option.first-place::before { content: ""; position: absolute; top: 4px; bottom: 4px; left: -5px; width: 1px; background: var(--border-strong); }
 
-.reset-layout:hover { color: var(--text); }
+.reset-layout { width: 28px; height: 28px; border-radius: var(--radius-sm); }
+.reset-layout:hover:not(:disabled) { color: var(--text); background: var(--surface-hover); }
+.reset-layout:disabled { visibility: hidden; }
 
 .workbench {
   min-height: 0;
@@ -132,9 +126,9 @@
   border-bottom: 1px solid var(--border);
   background: var(--bg);
 }
-.collapsed-panels button { padding: 6px 10px; border: 1px solid var(--accent-border); border-radius: var(--radius-sm); color: var(--accent-text); background: var(--accent-tint); cursor: pointer; font-size: var(--text-xs); }
-.collapsed-panels button:hover { border-color: var(--accent-border-strong); background: var(--accent-tint-strong); }
-.collapsed-panels button:active { background: var(--accent-tint); }
+.collapsed-panels button { padding: 5px 10px; border: 1px solid var(--border); border-radius: var(--radius-sm); color: var(--muted); background: transparent; cursor: pointer; font-size: var(--text-xs); }
+.collapsed-panels button:hover { border-color: var(--border-strong); color: var(--text); background: var(--surface-hover); }
+.collapsed-panels button:active { background: var(--surface-selected); }
 .layout-announcement { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 

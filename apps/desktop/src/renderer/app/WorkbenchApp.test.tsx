@@ -357,7 +357,7 @@ test('real jobs render compactly and user selection and status use the shared br
   })
 
   expect(updateStatus).toHaveBeenCalledWith('job-1', 'reviewed')
-  expect(await screen.findByText('Status changed to reviewed')).not.toBeNull()
+  expect(await screen.findByText('Status changed to Reviewed')).not.toBeNull()
 })
 
 test('saving dispatches job-hunter and reconciles a failure emitted before send resolves', async () => {
@@ -848,12 +848,12 @@ test('an MCP status event refreshes the navigator without a manual action', asyn
   })
 
   render(<WorkbenchApp />)
-  expect(await screen.findByDisplayValue('discovered')).not.toBeNull()
+  expect(await screen.findByDisplayValue('Discovered')).not.toBeNull()
   await act(async () => {
     listener?.({ eventId: 8, eventType: 'job_status_changed', origin: 'mcp' })
   })
 
-  expect(await screen.findByDisplayValue('reviewed')).not.toBeNull()
+  expect(await screen.findByDisplayValue('Reviewed')).not.toBeNull()
   expect(screen.getByText('Agent changes synced')).not.toBeNull()
   expect(list).toHaveBeenCalled()
 })

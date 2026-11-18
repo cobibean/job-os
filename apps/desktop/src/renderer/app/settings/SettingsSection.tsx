@@ -4,13 +4,14 @@ import { type ReactNode, useState } from 'react'
 interface SettingsSectionProps {
   children: ReactNode
   className?: string
+  defaultExpanded?: boolean
   description?: string
   id: string
   title: string
 }
 
-export function SettingsSection({ children, className = '', description, id, title }: SettingsSectionProps) {
-  const [expanded, setExpanded] = useState(false)
+export function SettingsSection({ children, className = '', defaultExpanded = false, description, id, title }: SettingsSectionProps) {
+  const [expanded, setExpanded] = useState(defaultExpanded)
   const headingId = `${id}-heading`
   const contentId = `${id}-content`
 

@@ -61,10 +61,10 @@ function captureSpec(outputDirectory) {
     actions: [
       { kind: 'wait', selector: '.app-shell[data-workspace="review"]', text: 'Northstar Kites', timeoutMs: 15000 },
       { kind: 'wait', selector: '.job-row.selected', text: 'Demo', timeoutMs: 10000 },
-      { kind: 'wait', selector: '.document-announcement', text: 'No local artifacts registered; optional artifact refresh is unavailable', timeoutMs: 10000 },
+      { kind: 'wait', selector: '.document-announcement', text: 'No documents for this job yet; couldn’t check for newer versions', timeoutMs: 10000 },
       { kind: 'frames', prefix: 'frame-', start: 1, count: 6, intervalMs: 83 },
       { kind: 'wait', selector: '.job-row.selected', text: 'Demo', timeoutMs: 10000 },
-      { kind: 'wait', selector: '.document-announcement', text: 'No local artifacts registered; optional artifact refresh is unavailable', timeoutMs: 10000 },
+      { kind: 'wait', selector: '.document-announcement', text: 'No documents for this job yet; couldn’t check for newer versions', timeoutMs: 10000 },
       { kind: 'capture', filename: 'jobos-hero-1440x1024.png' },
       { kind: 'frames', prefix: 'frame-', start: 7, count: 30, intervalMs: 83 },
       { kind: 'click', selector: '.layout-option', text: 'Browse', timeoutMs: 5000 },

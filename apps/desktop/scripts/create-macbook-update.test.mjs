@@ -73,13 +73,25 @@ const validInnerEntries = [
 describe('source provenance', () => {
   const commit = '0123456789abcdef0123456789abcdef01234567'
 
-  test('requires an exact full expected commit and a completely clean status', () => {
+  test('requires an exact full expected commit and clean tracked files and build inputs', () => {
     assert.equal(validateProvenance({ expectedCommit: commit.toUpperCase(), currentCommit: commit, worktreeStatus: '' }), commit)
     assert.throws(() => validateProvenance({ expectedCommit: commit.slice(0, 12), currentCommit: commit, worktreeStatus: '' }), /full 40-hex/)
     assert.throws(() => validateProvenance({ expectedCommit: 'f'.repeat(40), currentCommit: commit, worktreeStatus: '' }), /Source commit mismatch/)
     assert.throws(
       () => validateProvenance({ expectedCommit: commit, currentCommit: commit, worktreeStatus: '?? packages/docx-engine/new.ts' }),
-      /entire worktree must be clean/
+      /Tracked files and build inputs must be clean/
+    )
+    for (const worktreeStatus of ['M docs/public/release-process.md', ' M apps/desktop/package.json', '?? stray.config.js', '?? "apps/desktop/src/with space.ts"']) {
+      assert.throws(() => validateProvenance({ expectedCommit: commit, currentCommit: commit, worktreeStatus }), /must be clean/)
+    }
+  })
+
+  test('ignores untracked files that cannot reach the build', () => {
+    const worktreeStatus = '?? .task/report.md\n?? docs/memory/2026-11-14/notes.md\n?? docs/research/idea.md'
+    assert.equal(validateProvenance({ expectedCommit: commit, currentCommit: commit, worktreeStatus }), commit)
+    assert.throws(
+      () => validateProvenance({ expectedCommit: commit, currentCommit: commit, worktreeStatus: `${worktreeStatus}\n?? services/api/extra.py` }),
+      /packaging:\n\?\? services\/api\/extra\.py$/
     )
   })
 })
