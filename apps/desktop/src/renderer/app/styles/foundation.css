@@ -1,7 +1,7 @@
 :root {
   color: var(--text);
   background: var(--bg);
-  font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif;
+  font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif;
   font-synthesis: none;
   text-rendering: geometricPrecision;
 
@@ -67,12 +67,14 @@
   --weight-medium: 560;
   --weight-bold: 650;
 
-  --text-xs: 11px;
-  --text-sm: 12px;
-  --text-base: 13px;
-  --text-lg: 15px;
-  --text-xl: 18px;
-  --text-2xl: 21px;
+  /* xs is for metadata and labels only; anything meant to be read is sm or larger. */
+  --text-xs: 12px;
+  --text-sm: 13px;
+  --text-base: 14px;
+  --text-md: 15px;
+  --text-lg: 16px;
+  --text-xl: 19px;
+  --text-2xl: 22px;
 }
 
 * { box-sizing: border-box; }

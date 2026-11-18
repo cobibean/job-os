@@ -27,7 +27,7 @@
 .docx-recovery-panel > p { margin: 0 0 14px; color: var(--muted); font-size: var(--text-xs); line-height: 1.45; }
 .docx-recovery-panel > button { width: 100%; display: grid; gap: 2px; margin-bottom: 6px; padding: 8px 9px; text-align: left; border: 1px solid var(--border-soft); border-radius: 8px; background: var(--surface); }
 .docx-recovery-panel > button strong { text-transform: capitalize; font-size: var(--text-xs); }
-.docx-recovery-panel > button span { color: var(--muted); font-size: 10px; }
+.docx-recovery-panel > button span { color: var(--muted); font-size: 11px; }
 .docx-conflict-banner { display: flex; align-items: center; gap: 10px; padding: 9px 14px; border-bottom: 1px solid var(--danger-border); color: var(--danger-text); background: var(--danger-tint); }
 .docx-conflict-banner span { flex: 1; color: var(--text-soft); font-size: var(--text-xs); }
 .docx-conflict-banner button { min-height: 28px; }

@@ -1,6 +1,6 @@
 .document-workspace {
   display: grid;
-  grid-template-rows: 42px auto minmax(0, 1fr) 24px;
+  grid-template-rows: auto auto minmax(0, 1fr) 24px;
   overflow: hidden;
   background: var(--bg);
 }
@@ -31,7 +31,7 @@
 .document-position { min-width: 82px; display: flex; flex-direction: column; align-items: center; gap: 1px; color: var(--muted); font-size: var(--text-xs); }
 .document-position strong { max-width: 110px; font-size: var(--text-xs); }
 
-.document-toolbar { min-width: 0; display: flex; align-items: center; gap: 3px; margin-right: 58px; padding: 4px 4px 4px 9px; overflow-x: auto; overscroll-behavior-x: contain; border-bottom: 1px solid var(--border); background: var(--surface); scrollbar-width: thin; }
+.document-toolbar { min-width: 0; display: flex; align-items: center; gap: 3px; min-height: 42px; flex-wrap: wrap; margin-right: 58px; padding: 4px 4px 4px 9px; border-bottom: 1px solid var(--border); background: var(--surface); scrollbar-width: thin; }
 .document-toolbar > * { flex-shrink: 0; }
 .document-toolbar button { height: 30px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 0 9px; border: 0; border-radius: var(--radius-sm); color: var(--muted); background: transparent; cursor: pointer; font-size: var(--text-xs); white-space: nowrap; }
 .document-toolbar button:hover:not(:disabled) { color: var(--text); background: var(--surface-hover); }
@@ -65,6 +65,11 @@
 .document-error { position: absolute; z-index: 2; margin: 12px; padding: 8px 10px; border: 1px solid var(--danger-border); border-radius: var(--radius-sm); color: var(--danger-text); background: var(--danger-tint); font-size: var(--text-xs); }
 .document-external-only { min-height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 30px; text-align: center; color: var(--muted); }
 .document-external-only svg { margin-bottom: 12px; color: var(--accent); }
+.document-preview-error > svg { color: var(--danger); }
+.document-preview-error button { height: 30px; display: inline-flex; align-items: center; gap: 6px; margin-top: 16px; padding: 0 12px; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); color: var(--text-soft); background: var(--surface); cursor: pointer; font-size: var(--text-sm); }
+.document-preview-error button svg { margin: 0; color: inherit; }
+.document-preview-error button:hover:not(:disabled) { color: var(--text); background: var(--surface-hover); }
+.document-preview-error button:disabled { opacity: var(--disabled-opacity); cursor: default; }
 .document-external-only h1 { margin: 0 0 8px; color: var(--text); font-size: var(--text-xl); font-weight: var(--weight-medium); }
 .document-external-only p { max-width: 430px; margin: 0; font-size: var(--text-sm); line-height: 1.6; }
 .document-announcement { min-width: 0; margin: 0; padding: 6px 12px; overflow: hidden; border-top: 1px solid var(--border); color: var(--quiet); background: var(--bg); font-size: var(--text-xs); text-overflow: ellipsis; white-space: nowrap; }

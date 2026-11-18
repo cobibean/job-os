@@ -87,7 +87,7 @@ afterEach(() => {
 test('explains the saved preference in normal language without exposing plumbing', async () => {
   render(<CareerProfileWorkspace bridge={bridge()} hasActiveTurn={false} />)
 
-  expect(await screen.findByRole('heading', { name: 'Work arrangement' })).not.toBeNull()
+  expect(await screen.findByRole('heading', { name: 'What I’m Looking For' })).not.toBeNull()
   expect(screen.getAllByText('JobOS Career Profile').length).toBeGreaterThan(0)
   expect(screen.getByText('This is the shared context JobOS and connected agents use.')).not.toBeNull()
   expect(screen.queryByText(/staging profile/i)).toBeNull()
@@ -191,7 +191,7 @@ test('reloads history after accepting the latest value from a stale conflict', a
 test('shows history, performs Undo as a new revision, and closes the drawer', async () => {
   const api = bridge()
   render(<CareerProfileWorkspace bridge={api} hasActiveTurn={false} />)
-  await screen.findByRole('heading', { name: 'Work arrangement' })
+  await screen.findByRole('heading', { name: 'What I’m Looking For' })
 
   const historyButton = screen.getByRole('button', { name: 'View history' })
   fireEvent.click(historyButton)
@@ -232,7 +232,7 @@ test('Undo selects the earlier work-arrangement revision across an interleaved c
     })
   })
   render(<CareerProfileWorkspace bridge={api} hasActiveTurn={false} />)
-  await screen.findByRole('heading', { name: 'Work arrangement' })
+  await screen.findByRole('heading', { name: 'What I’m Looking For' })
   fireEvent.click(screen.getByRole('button', { name: 'View history' }))
   fireEvent.click(await screen.findByRole('button', { name: 'Undo to before revision 3' }))
   await waitFor(() => expect(api.restoreWorkArrangement).toHaveBeenCalledWith(expect.objectContaining({
@@ -329,7 +329,7 @@ test('reapplies a stale Undo as the selected restore, not as a normal save', asy
     .mockResolvedValueOnce({ status: 'saved', current: { ...current, profileRevision: 4 } })
   const api = bridge({ restoreWorkArrangement })
   render(<CareerProfileWorkspace bridge={api} hasActiveTurn={false} />)
-  await screen.findByRole('heading', { name: 'Work arrangement' })
+  await screen.findByRole('heading', { name: 'What I’m Looking For' })
 
   fireEvent.click(screen.getByRole('button', { name: 'View history' }))
   fireEvent.click(await screen.findByRole('button', { name: 'Undo to before revision 2' }))
@@ -350,7 +350,7 @@ test('shows history load errors inside the drawer and retries in place', async (
     .mockRejectedValueOnce(new Error('offline'))
     .mockResolvedValueOnce(await bridge().getWorkArrangementHistory())
   render(<CareerProfileWorkspace bridge={bridge({ getWorkArrangementHistory })} hasActiveTurn={false} />)
-  await screen.findByRole('heading', { name: 'Work arrangement' })
+  await screen.findByRole('heading', { name: 'What I’m Looking For' })
 
   fireEvent.click(screen.getByRole('button', { name: 'View history' }))
   expect(await screen.findByText('History could not load. Try again.')).not.toBeNull()
@@ -426,7 +426,8 @@ test('uses the latest loaded profile revision when accepting an exact zero-Evide
   expect(screen.getByText(/No Evidence attached — that’s okay/i)).not.toBeNull()
   expect(screen.getAllByText(/intermediate/).length).toBeGreaterThan(0)
   expect(screen.getByText(/advanced/)).not.toBeNull()
-  expect(screen.getAllByText('Level')).toHaveLength(2)
+  // Only the changed field is listed, once, with both values beside it.
+  expect(screen.getAllByText('Level')).toHaveLength(1)
   expect(screen.queryByText(/"level":/)).toBeNull()
 
   const timeout = vi.spyOn(window, 'setTimeout')

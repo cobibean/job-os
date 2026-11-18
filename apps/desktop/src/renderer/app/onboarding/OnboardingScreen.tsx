@@ -45,7 +45,7 @@ export function OnboardingScreen({ initial }: OnboardingScreenProps) {
         {recovery ? (
           <>
             <button className="primary-button" disabled={snapshot.state === 'working' || snapshot.state === 'succeeded'} onClick={() => { void retryConnection() }} type="button">Retry connection</button>
-            <button disabled={snapshot.state === 'working'} onClick={() => { void window.jobos.setup.restart() }} type="button">Restart JobOS</button>
+            <button className="secondary-button" disabled={snapshot.state === 'working'} onClick={() => { void window.jobos.setup.restart() }} type="button">Restart JobOS</button>
           </>
         ) : snapshot.state === 'succeeded' ? (
           <button className="primary-button" onClick={() => { void window.jobos.setup.restart() }} type="button">

@@ -196,9 +196,10 @@ test('status controls offer every status and execute a backwards move', async ()
   const status = screen.getByRole('combobox', { name: 'Change Alpha status' }) as HTMLSelectElement
   const values = Array.from(status.options).map(option => option.value)
   expect(values).toEqual([
-    'applied', 'discovered', 'scored', 'reviewed', 'shortlisted', 'apply_now',
-    'maybe', 'stretch', 'skipped', 'interviewing', 'closed', 'archived'
+    'discovered', 'scored', 'reviewed', 'shortlisted', 'apply_now', 'maybe',
+    'stretch', 'applied', 'interviewing', 'closed', 'skipped', 'archived'
   ])
+  expect(status.value).toBe('applied')
   fireEvent.change(status, { target: { value: 'shortlisted' } })
   expect(bridge.updateStatus).toHaveBeenCalledWith('one', 'shortlisted')
 })
@@ -282,4 +283,19 @@ test('a failed initial Browse load offers retry and recovers in place', async ()
   fireEvent.click(screen.getByRole('button', { name: 'Retry loading jobs' }))
   expect(await screen.findByText('Description two')).not.toBeNull()
   expect(screen.queryByText('Jobs unavailable')).toBeNull()
+})
+
+test('swipe decisions file the focused job and advance to the next one', async () => {
+  const bridge = installJobsBridge()
+  render(<Harness initialFocus="one" initialMode="swipe" />)
+  await screen.findByText('Description one')
+
+  fireEvent.click(screen.getByRole('button', { name: /Skip/ }))
+
+  await waitFor(() => expect(bridge.updateStatus).toHaveBeenCalledWith('one', 'skipped'))
+  expect(await screen.findByRole('heading', { name: 'Beta' })).not.toBeNull()
+
+  fireEvent.keyDown(window, { key: 'c' })
+
+  await waitFor(() => expect(bridge.updateStatus).toHaveBeenCalledWith('two', 'shortlisted'))
 })

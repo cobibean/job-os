@@ -15,11 +15,13 @@ interface WorkspaceBarProps {
   profileControl: ReactNode
 }
 
-const workspaces: Array<{ id: WorkspaceBarWorkspace; label: string }> = [
+// Research, Review and Agent Focus rearrange the same job workbench; Browse and
+// Career Profile are separate places. A divider keeps the two kinds apart.
+const workspaces: Array<{ id: WorkspaceBarWorkspace; label: string; place?: boolean }> = [
   { id: 'research', label: 'Research' },
   { id: 'review', label: 'Review' },
   { id: 'agent-focus', label: 'Agent Focus' },
-  { id: 'browse', label: 'Browse' }
+  { id: 'browse', label: 'Browse', place: true }
 ]
 
 export function WorkspaceBar({ activeWorkspace, careerProfileEnabled, onWorkspaceChange, onReset, onToggleMode, themeMode, profileControl }: WorkspaceBarProps) {
@@ -32,10 +34,10 @@ export function WorkspaceBar({ activeWorkspace, careerProfileEnabled, onWorkspac
       </div>
 
       <nav aria-label="Workspace layouts" className="layout-switcher">
-        {[...workspaces, ...(careerProfileEnabled ? [{ id: 'career-profile' as const, label: 'Career Profile' }] : [])].map(workspace => (
+        {[...workspaces, ...(careerProfileEnabled ? [{ id: 'career-profile' as const, label: 'Career Profile', place: true }] : [])].map((workspace, index, all) => (
           <button
             aria-pressed={activeWorkspace === workspace.id}
-            className="layout-option"
+            className={`layout-option${workspace.place && !all[index - 1]?.place ? ' first-place' : ''}`}
             key={workspace.id}
             onClick={() => onWorkspaceChange(workspace.id)}
             type="button"
@@ -58,9 +60,8 @@ export function WorkspaceBar({ activeWorkspace, careerProfileEnabled, onWorkspac
             ? <Sun aria-hidden="true" size={16} strokeWidth={1.5} />
             : <Moon aria-hidden="true" size={16} strokeWidth={1.5} />}
         </button>
-        <button className="reset-layout" disabled={activeWorkspace === 'browse' || activeWorkspace === 'career-profile'} onClick={onReset} type="button">
+        <button aria-label="Reset layout" className="icon-button reset-layout" disabled={activeWorkspace === 'browse' || activeWorkspace === 'career-profile'} onClick={onReset} title="Reset this layout's panels to their default sizes and order" type="button">
           <RotateCcw aria-hidden="true" size={16} strokeWidth={1.5} />
-          Reset layout
         </button>
       </div>
     </header>

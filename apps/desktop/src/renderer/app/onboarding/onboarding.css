@@ -53,4 +53,7 @@
 .onboarding-card .primary-button:hover:not(:disabled) { border-color: var(--accent); background: var(--accent-solid-hover); }
 .onboarding-card .primary-button:active:not(:disabled) { transform: translateY(1px); }
 .onboarding-card .primary-button:disabled { opacity: var(--disabled-opacity); cursor: wait; }
+.onboarding-card .secondary-button { min-height: 38px; justify-self: start; padding: 0 15px; border: 1px solid var(--border-strong); border-radius: var(--radius-md); color: var(--text-soft); background: var(--surface-hover); cursor: pointer; }
+.onboarding-card .secondary-button:hover:not(:disabled) { color: var(--text); background: var(--surface-selected); }
+.onboarding-card .secondary-button:disabled { opacity: var(--disabled-opacity); cursor: wait; }
 .onboarding-loading { min-height: 100vh; display: grid; place-items: center; background: var(--bg); color: var(--muted); }

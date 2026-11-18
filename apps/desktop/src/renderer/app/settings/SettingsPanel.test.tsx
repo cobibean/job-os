@@ -23,7 +23,7 @@ test('shows the selected agent avatar and reports selection through the settings
   const themeSection = screen.getByRole('button', { name: 'Color theme' })
   const avatarSection = screen.getByRole('button', { name: 'Agent icon' })
   const diagnosticsSection = screen.getByRole('button', { name: 'Diagnostics' })
-  expect(themeSection.getAttribute('aria-expanded')).toBe('false')
+  expect(themeSection.getAttribute('aria-expanded')).toBe('true')
   expect(avatarSection.getAttribute('aria-expanded')).toBe('false')
   expect(diagnosticsSection.getAttribute('aria-expanded')).toBe('false')
 

@@ -1,5 +1,5 @@
 import { BriefcaseBusiness, MapPin, Sparkles } from 'lucide-react'
-import { useCallback, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 
 import type { CareerProfileArea, CareerProfileBridge } from '../../shared/contracts'
 import { CollaborationArea } from './collaboration/CollaborationArea'
@@ -25,7 +25,7 @@ const sectionCopy: Record<CareerProfileArea, { breadcrumb: string; description: 
   what_im_looking_for: {
     breadcrumb: 'What I’m Looking For',
     description: 'Tell JobOS what you want next and how firmly it should apply each choice.',
-    title: 'Work arrangement'
+    title: 'What I’m Looking For'
   },
   my_evidence: {
     breadcrumb: 'My Evidence',
@@ -43,6 +43,9 @@ export function CareerProfileWorkspace({ active = true, bridge = window.jobos.ca
   }, [product.load, profile.load])
   const collaboration = useCareerProfileCollaboration(bridge, online, refreshProfile)
   const [activeArea, setActiveArea] = useState<CareerProfileArea>('what_im_looking_for')
+  // Each section starts at its top instead of inheriting the previous one's scroll position.
+  const mainRegion = useRef<HTMLElement | null>(null)
+  useEffect(() => { if (mainRegion.current) mainRegion.current.scrollTop = 0 }, [activeArea])
 
   if (profile.status === 'loading') {
     return (
@@ -89,7 +92,7 @@ export function CareerProfileWorkspace({ active = true, bridge = window.jobos.ca
         <div className="career-staging-note"><span>JobOS Career Profile</span><p>This is the shared context JobOS and connected agents use.</p></div>
       </aside>
 
-      <section className="career-profile-main">
+      <section className="career-profile-main" ref={mainRegion}>
         <span className="career-mobile-staging">JobOS Career Profile</span>
         <label className="career-mobile-nav">
           <span>Profile section</span>

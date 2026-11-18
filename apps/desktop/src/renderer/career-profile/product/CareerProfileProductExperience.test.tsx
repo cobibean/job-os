@@ -213,7 +213,7 @@ afterEach(() => {
 
 test('navigates all three real areas and explains item provenance without scoring the user', async () => {
   render(<CareerProfileWorkspace bridge={bridge()} hasActiveTurn={false} />)
-  await screen.findByRole('heading', { name: 'Work arrangement' })
+  await screen.findByRole('heading', { name: 'What I’m Looking For' })
 
   fireEvent.click(screen.getByRole('button', { name: /My Career/i }))
   expect(await screen.findByRole('heading', { name: 'My Career' })).not.toBeNull()
@@ -241,7 +241,7 @@ test('renders list-valued career details as human-readable words', async () => {
   })
   render(<CareerProfileWorkspace bridge={api} hasActiveTurn={false} />)
 
-  await screen.findByRole('heading', { name: 'Work arrangement' })
+  await screen.findByRole('heading', { name: 'What I’m Looking For' })
   expect(screen.getByRole('button', { name: /applied ai builder, internal ai enablement/i })).not.toBeNull()
   expect(screen.queryByText(/applied_ai_builder|internal_ai_enablement/)).toBeNull()
 
@@ -265,7 +265,7 @@ test('organizes My Career into searchable collapsible type groups', async () => 
   render(<CareerProfileWorkspace bridge={bridge({
     getCareerProfile: vi.fn().mockResolvedValue(savedProfile({ items: [skill, experience, project] }))
   })} hasActiveTurn={false} />)
-  await screen.findByRole('heading', { name: 'Work arrangement' })
+  await screen.findByRole('heading', { name: 'What I’m Looking For' })
   fireEvent.click(screen.getByRole('button', { name: /My Career/i }))
 
   const skillsGroup = await screen.findByRole('button', { name: 'Skills, 1 detail' })
@@ -294,7 +294,7 @@ test('explains My Career usage even before the first detail is added', async () 
   render(<CareerProfileWorkspace bridge={bridge({
     getCareerProfile: vi.fn().mockResolvedValue(savedProfile({ items: [] }))
   })} hasActiveTurn={false} />)
-  await screen.findByRole('heading', { name: 'Work arrangement' })
+  await screen.findByRole('heading', { name: 'What I’m Looking For' })
   fireEvent.click(screen.getByRole('button', { name: /My Career/i }))
 
   const guidance = await screen.findByRole('region', { name: 'How JobOS uses My Career' })
@@ -318,7 +318,7 @@ test('presents claim records as bounded professional statements', async () => {
   render(<CareerProfileWorkspace bridge={bridge({
     getCareerProfile: vi.fn().mockResolvedValue(savedProfile({ items: [statement] }))
   })} hasActiveTurn={false} />)
-  await screen.findByRole('heading', { name: 'Work arrangement' })
+  await screen.findByRole('heading', { name: 'What I’m Looking For' })
   fireEvent.click(screen.getByRole('button', { name: /My Career/i }))
 
   expect(await screen.findByRole('button', { name: 'Professional statements, 1 detail' })).not.toBeNull()
@@ -343,7 +343,7 @@ test('adds a typed career detail and dismisses its success feedback', async () =
   })
   const api = bridge({ createCareerProfileItem })
   render(<CareerProfileWorkspace bridge={api} hasActiveTurn={false} />)
-  await screen.findByRole('heading', { name: 'Work arrangement' })
+  await screen.findByRole('heading', { name: 'What I’m Looking For' })
   fireEvent.click(screen.getByRole('button', { name: /My Career/i }))
   fireEvent.click(await screen.findByRole('button', { name: 'Add career detail' }))
 
@@ -381,7 +381,7 @@ test('keeps an actionable career-detail error visible', async () => {
     createCareerProfileItem: vi.fn().mockRejectedValue(new Error('offline'))
   })
   render(<CareerProfileWorkspace bridge={api} hasActiveTurn={false} />)
-  await screen.findByRole('heading', { name: 'Work arrangement' })
+  await screen.findByRole('heading', { name: 'What I’m Looking For' })
   fireEvent.click(screen.getByRole('button', { name: /My Career/i }))
   fireEvent.click(await screen.findByRole('button', { name: 'Add career detail' }))
   const editor = screen.getByRole('dialog', { name: 'Add career detail' })
@@ -422,7 +422,7 @@ test('imports Evidence with live recovery and retries the full original mutation
   })
   const api = bridge({ importCareerProfileEvidence })
   const view = render(<CareerProfileWorkspace active bridge={api} hasActiveTurn={false} />)
-  await screen.findByRole('heading', { name: 'Work arrangement' })
+  await screen.findByRole('heading', { name: 'What I’m Looking For' })
   fireEvent.click(screen.getByRole('button', { name: /My Evidence/i }))
 
   const file = new File([new Uint8Array([1, 2, 3])], '(FAKE) New Resume.pdf', { type: 'application/pdf' })
@@ -455,7 +455,7 @@ test('imports Evidence with live recovery and retries the full original mutation
 test('makes agent context, export scope, and baseline restore explicit owner choices', async () => {
   const api = bridge()
   render(<CareerProfileWorkspace bridge={api} hasActiveTurn={false} />)
-  await screen.findByRole('heading', { name: 'Work arrangement' })
+  await screen.findByRole('heading', { name: 'What I’m Looking For' })
 
   fireEvent.click(screen.getByRole('button', { name: 'Agent access' }))
   const access = await screen.findByRole('dialog', { name: 'Agent Career Profile access' })
@@ -514,7 +514,7 @@ test('makes agent context, export scope, and baseline restore explicit owner cho
 
 test('blocks baseline restore while agent work is active', async () => {
   render(<CareerProfileWorkspace bridge={bridge()} hasActiveTurn />)
-  await screen.findByRole('heading', { name: 'Work arrangement' })
+  await screen.findByRole('heading', { name: 'What I’m Looking For' })
   fireEvent.click(screen.getByRole('button', { name: 'Restore baseline' }))
   const restore = await screen.findByRole('dialog', { name: 'Restore Career Profile baseline' })
   expect(within(restore).getByText(/Finish or stop the active agent turn/i)).not.toBeNull()
@@ -538,7 +538,7 @@ test('preserves the latest item, proposed draft, and linked sources in a stale-e
     updateCareerProfileItem
   })
   render(<CareerProfileWorkspace bridge={api} hasActiveTurn={false} />)
-  await screen.findByRole('heading', { name: 'Work arrangement' })
+  await screen.findByRole('heading', { name: 'What I’m Looking For' })
   fireEvent.click(screen.getByRole('button', { name: /My Career/i }))
   fireEvent.click(await screen.findByRole('button', { name: /TypeScript details/i }))
   fireEvent.click(within(screen.getByRole('dialog', { name: 'TypeScript details' })).getByRole('button', { name: 'Edit detail' }))
@@ -583,7 +583,7 @@ test('reapplies a stale draft against the latest revision and can preserve a par
   })
   const api = bridge({ updateCareerProfileItem, createCareerProfileItem })
   render(<CareerProfileWorkspace bridge={api} hasActiveTurn={false} />)
-  await screen.findByRole('heading', { name: 'Work arrangement' })
+  await screen.findByRole('heading', { name: 'What I’m Looking For' })
   fireEvent.click(screen.getByRole('button', { name: /My Career/i }))
   fireEvent.click(await screen.findByRole('button', { name: /TypeScript details/i }))
   fireEvent.click(within(screen.getByRole('dialog', { name: 'TypeScript details' })).getByRole('button', { name: 'Edit detail' }))
@@ -609,7 +609,7 @@ test('reapplies a stale draft against the latest revision and can preserve a par
 
 test('explains interpretation, example, and affected behavior for every search-preference kind', async () => {
   render(<CareerProfileWorkspace bridge={bridge()} hasActiveTurn={false} />)
-  await screen.findByRole('heading', { name: 'Work arrangement' })
+  await screen.findByRole('heading', { name: 'What I’m Looking For' })
   fireEvent.click(screen.getByRole('button', { name: 'Add preference' }))
   const editor = screen.getByRole('dialog', { name: 'Add preference' })
   const kinds = [
@@ -633,7 +633,7 @@ test('explains interpretation, example, and affected behavior for every search-p
 test('parses list fields only at newlines so commas remain part of each value', async () => {
   const createCareerProfileItem = vi.fn().mockResolvedValue({ status: 'saved', current: savedProfile({ profileRevision: 5 }) })
   render(<CareerProfileWorkspace bridge={bridge({ createCareerProfileItem })} hasActiveTurn={false} />)
-  await screen.findByRole('heading', { name: 'Work arrangement' })
+  await screen.findByRole('heading', { name: 'What I’m Looking For' })
   fireEvent.click(screen.getByRole('button', { name: 'Add preference' }))
   const editor = screen.getByRole('dialog', { name: 'Add preference' })
   fireEvent.change(within(editor).getByLabelText('Detail type'), { target: { value: 'location' } })
@@ -646,7 +646,7 @@ test('parses list fields only at newlines so commas remain part of each value', 
 
 test('requires a complete explicit Evidence export choice before enabling Save', async () => {
   render(<CareerProfileWorkspace bridge={bridge()} hasActiveTurn={false} />)
-  await screen.findByRole('heading', { name: 'Work arrangement' })
+  await screen.findByRole('heading', { name: 'What I’m Looking For' })
   fireEvent.click(screen.getByRole('button', { name: 'Export' }))
   const dialog = screen.getByRole('dialog', { name: 'Export Career Profile' })
   const save = within(dialog).getByRole('button', { name: 'Save export' })
@@ -660,7 +660,7 @@ test('requires a complete explicit Evidence export choice before enabling Save',
 
 test('makes selected and broader agent Evidence scope explicit without linked-source hitchhiking', async () => {
   render(<CareerProfileWorkspace bridge={bridge()} hasActiveTurn={false} />)
-  await screen.findByRole('heading', { name: 'Work arrangement' })
+  await screen.findByRole('heading', { name: 'What I’m Looking For' })
   fireEvent.click(screen.getByRole('button', { name: 'Agent access' }))
   const dialog = await screen.findByRole('dialog', { name: 'Agent Career Profile access' })
   expect(within(dialog).getByText(/Linked Evidence is not included unless you explicitly select My Evidence/i)).not.toBeNull()
@@ -669,7 +669,7 @@ test('makes selected and broader agent Evidence scope explicit without linked-so
 
 test('restores focus to the trigger after any product dialog closes', async () => {
   render(<CareerProfileWorkspace bridge={bridge()} hasActiveTurn={false} />)
-  await screen.findByRole('heading', { name: 'Work arrangement' })
+  await screen.findByRole('heading', { name: 'What I’m Looking For' })
   const trigger = screen.getByRole('button', { name: 'Export' })
   trigger.focus()
   fireEvent.click(trigger)
@@ -685,7 +685,7 @@ test('restores focus to the trigger after any product dialog closes', async () =
 test('hard-disables Evidence picker change and drop behavior while offline', async () => {
   const importCareerProfileEvidence = vi.fn()
   render(<CareerProfileWorkspace bridge={bridge({ importCareerProfileEvidence })} hasActiveTurn={false} online={false} />)
-  await screen.findByRole('heading', { name: 'Work arrangement' })
+  await screen.findByRole('heading', { name: 'What I’m Looking For' })
   fireEvent.click(screen.getByRole('button', { name: /My Evidence/i }))
   const input = screen.getByLabelText('Choose Evidence files') as HTMLInputElement
   const dropzone = input.closest('label')!
@@ -704,7 +704,7 @@ test('distinguishes a confirmed Evidence conflict and starts a fresh latest-revi
     .mockResolvedValueOnce({ status: 'conflict', current: savedProfile({ profileRevision: 5 }) })
     .mockResolvedValueOnce({ status: 'saved', current: savedProfile({ profileRevision: 6 }) })
   render(<CareerProfileWorkspace bridge={bridge({ importCareerProfileEvidence })} hasActiveTurn={false} />)
-  await screen.findByRole('heading', { name: 'Work arrangement' })
+  await screen.findByRole('heading', { name: 'What I’m Looking For' })
   fireEvent.click(screen.getByRole('button', { name: /My Evidence/i }))
   const file = new File([new Uint8Array([1])], '(FAKE) Conflict.pdf', { type: 'application/pdf' })
   Object.defineProperty(file, 'arrayBuffer', { value: vi.fn().mockResolvedValue(new Uint8Array([1]).buffer) })
@@ -797,7 +797,7 @@ test('keeps the editor opening revision so a background refresh produces an expl
   const api = bridge({ getCareerProfile, getCareerProfileChangeHistory, updateCareerProfileItem })
 
   render(<CareerProfileWorkspace bridge={api} hasActiveTurn={false} />)
-  await screen.findByRole('heading', { name: 'Work arrangement' })
+  await screen.findByRole('heading', { name: 'What I’m Looking For' })
   fireEvent.click(screen.getByRole('button', { name: /My Career/i }))
   fireEvent.click(await screen.findByRole('button', { name: /TypeScript details/i }))
   fireEvent.click(within(screen.getByRole('dialog', { name: 'TypeScript details' })).getByRole('button', { name: 'Edit detail' }))
@@ -850,7 +850,7 @@ test('fails closed when a different agent scope cannot load', async () => {
   })
 
   render(<CareerProfileWorkspace bridge={api} hasActiveTurn={false} />)
-  await screen.findByRole('heading', { name: 'Work arrangement' })
+  await screen.findByRole('heading', { name: 'What I’m Looking For' })
   fireEvent.click(screen.getByRole('button', { name: 'Agent access' }))
   const access = await screen.findByRole('dialog', { name: 'Agent Career Profile access' })
   await waitFor(() => expect(within(access).getByRole('button', { name: 'Save access' }).hasAttribute('disabled')).toBe(false))
@@ -867,7 +867,7 @@ test('retries an ambiguous agent-scope save with one identity and rotates it onl
   const updateCareerProfileContext = vi.fn().mockRejectedValue(new Error('response lost'))
   const api = bridge({ updateCareerProfileContext })
   render(<CareerProfileWorkspace bridge={api} hasActiveTurn={false} />)
-  await screen.findByRole('heading', { name: 'Work arrangement' })
+  await screen.findByRole('heading', { name: 'What I’m Looking For' })
   fireEvent.click(screen.getByRole('button', { name: 'Agent access' }))
   const access = await screen.findByRole('dialog', { name: 'Agent Career Profile access' })
   const save = within(access).getByRole('button', { name: 'Save access' })
@@ -895,7 +895,7 @@ test('replays the full uncertain access request after the profile head and autho
   const getCareerProfile = vi.fn().mockResolvedValue(complete)
   const getCareerProfileChangeHistory = vi.fn().mockResolvedValue({ profileRevision: 4, revisions: [] })
   render(<CareerProfileWorkspace bridge={bridge({ updateCareerProfileContext, getCareerProfile, getCareerProfileChangeHistory })} hasActiveTurn={false} />)
-  await screen.findByRole('heading', { name: 'Work arrangement' })
+  await screen.findByRole('heading', { name: 'What I’m Looking For' })
   fireEvent.click(screen.getByRole('button', { name: 'Agent access' }))
   const dialog = await screen.findByRole('dialog', { name: 'Agent Career Profile access' })
   const save = within(dialog).getByRole('button', { name: 'Save access' })
@@ -938,7 +938,7 @@ test('requires review after a confirmed access conflict and starts a new intent 
     .mockResolvedValue({ agentId: 'job-hunter', mode: 'broader', selectedAreas: [], selectedItemIds: [], updatedAt: skill.updatedAt })
   const api = bridge({ updateCareerProfileContext })
   render(<CareerProfileWorkspace bridge={api} hasActiveTurn={false} />)
-  await screen.findByRole('heading', { name: 'Work arrangement' })
+  await screen.findByRole('heading', { name: 'What I’m Looking For' })
   fireEvent.click(screen.getByRole('button', { name: 'Agent access' }))
   const dialog = await screen.findByRole('dialog', { name: 'Agent Career Profile access' })
   const save = within(dialog).getByRole('button', { name: 'Save access' })
@@ -960,7 +960,7 @@ test('requires review after a confirmed access conflict and starts a new intent 
 test('offers a complete-profile History retry and stops its loading state after failure', async () => {
   const api = bridge()
   render(<CareerProfileWorkspace bridge={api} hasActiveTurn={false} />)
-  await screen.findByRole('heading', { name: 'Work arrangement' })
+  await screen.findByRole('heading', { name: 'What I’m Looking For' })
   vi.mocked(api.getCareerProfileChangeHistory).mockRejectedValueOnce(new Error('offline'))
   fireEvent.click(screen.getByRole('button', { name: 'History' }))
   const history = await screen.findByRole('dialog', { name: 'Career Profile history' })
@@ -974,7 +974,7 @@ test('refreshes open Evidence details after an external removal', async () => {
   const getCareerProfile = vi.fn().mockResolvedValue(complete)
   const getCareerProfileChangeHistory = vi.fn().mockResolvedValue({ profileRevision: 4, revisions: [] })
   render(<CareerProfileWorkspace bridge={bridge({ getCareerProfile, getCareerProfileChangeHistory })} hasActiveTurn={false} />)
-  await screen.findByRole('heading', { name: 'Work arrangement' })
+  await screen.findByRole('heading', { name: 'What I’m Looking For' })
   fireEvent.click(screen.getByRole('button', { name: /My Evidence/i }))
   fireEvent.click(await screen.findByRole('button', { name: /Resume\.pdf details/i }))
   const details = await screen.findByRole('dialog', { name: /Resume\.pdf details/i })
@@ -1001,7 +1001,7 @@ test('shows truthful item state, saved preference guidance, and Evidence provena
   render(<CareerProfileWorkspace bridge={bridge({
     getCareerProfile: vi.fn().mockResolvedValue(savedProfile({ items: [proposedSkill, location], sourceEvidence: [agentEvidence] }))
   })} hasActiveTurn={false} />)
-  await screen.findByRole('heading', { name: 'Work arrangement' })
+  await screen.findByRole('heading', { name: 'What I’m Looking For' })
 
   fireEvent.click(screen.getByRole('button', { name: /My Career/i }))
   fireEvent.click(await screen.findByRole('button', { name: /TypeScript details/i }))
@@ -1040,7 +1040,7 @@ test('changing the chosen restore archive clears confirmation and starts a new m
   const restoreCareerProfile = vi.fn().mockRejectedValue(new Error('response lost'))
   const api = bridge({ chooseCareerProfileArchive, restoreCareerProfile })
   render(<CareerProfileWorkspace bridge={api} hasActiveTurn={false} />)
-  await screen.findByRole('heading', { name: 'Work arrangement' })
+  await screen.findByRole('heading', { name: 'What I’m Looking For' })
   fireEvent.click(screen.getByRole('button', { name: 'Restore baseline' }))
   const restore = await screen.findByRole('dialog', { name: 'Restore Career Profile baseline' })
   const choose = within(restore).getByRole('button', { name: 'Choose archive' })
@@ -1084,7 +1084,7 @@ test('reloads the authoritative complete profile after restore and retries an un
   })
   const api = bridge({ getCareerProfile, restoreCareerProfile })
   render(<CareerProfileWorkspace bridge={api} hasActiveTurn={false} />)
-  await screen.findByRole('heading', { name: 'Work arrangement' })
+  await screen.findByRole('heading', { name: 'What I’m Looking For' })
   await waitFor(() => expect(window.localStorage.getItem('jobos.careerProfile.complete.v1')).not.toBeNull())
 
   fireEvent.click(screen.getByRole('button', { name: 'Restore baseline' }))
@@ -1152,7 +1152,7 @@ test('resolves an open detail by ID against the latest profile and opens editing
     updateCareerProfileItem
   })
   render(<CareerProfileWorkspace bridge={api} hasActiveTurn={false} />)
-  await screen.findByRole('heading', { name: 'Work arrangement' })
+  await screen.findByRole('heading', { name: 'What I’m Looking For' })
   fireEvent.click(screen.getByRole('button', { name: /My Career/i }))
   fireEvent.click(await screen.findByRole('button', { name: /TypeScript details/i }))
 
@@ -1177,7 +1177,7 @@ test('shows a truthful missing state when an open detail disappears during refre
     getCareerProfileChangeHistory: vi.fn().mockImplementation(async () => ({ profileRevision: headRevision, revisions: [] }))
   })
   render(<CareerProfileWorkspace bridge={api} hasActiveTurn={false} />)
-  await screen.findByRole('heading', { name: 'Work arrangement' })
+  await screen.findByRole('heading', { name: 'What I’m Looking For' })
   fireEvent.click(screen.getByRole('button', { name: /My Career/i }))
   fireEvent.click(await screen.findByRole('button', { name: /TypeScript details/i }))
 
@@ -1196,7 +1196,7 @@ test('credits imported Evidence before the primary-device actor fallback', async
   render(<CareerProfileWorkspace bridge={bridge({
     getCareerProfile: vi.fn().mockResolvedValue(savedProfile({ items: [importedSkill] }))
   })} hasActiveTurn={false} />)
-  await screen.findByRole('heading', { name: 'Work arrangement' })
+  await screen.findByRole('heading', { name: 'What I’m Looking For' })
   fireEvent.click(screen.getByRole('button', { name: /My Career/i }))
   expect(await screen.findByText('Added from imported Evidence')).not.toBeNull()
   expect(screen.queryByText('Added by you')).toBeNull()

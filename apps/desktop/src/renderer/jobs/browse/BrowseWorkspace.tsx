@@ -1,10 +1,11 @@
-import { ArrowLeft, ArrowRight, BriefcaseBusiness, ExternalLink, Search } from 'lucide-react'
+import { ArrowLeft, ArrowRight, BriefcaseBusiness, Check, ExternalLink, Search, X } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties, ReactNode } from 'react'
 
 import type { BrowseMode } from '../../workspace/workspaceLayout'
 import type { JobSortMode, JobStatus } from '../../../shared/contracts'
-import { CANONICAL_STATUS_GROUPS, STATUS_TRANSITIONS, statusLabel, statusOptionLabel } from '../jobStatus'
+import { CANONICAL_STATUS_GROUPS, STATUS_TRANSITIONS, statusLabel } from '../jobStatus'
+import { StatusOptions } from '../StatusOptions'
 import { useBrowseJobs } from './useBrowseJobs'
 
 interface BrowseWorkspaceProps {
@@ -40,7 +41,10 @@ export function isBrowseInteractionControl(target: EventTarget | null) {
 
 function CompanyMark({ company }: { company: string }) {
   const initials = company.trim().split(/\s+/).slice(0, 2).map(part => part[0]).join('').toLocaleUpperCase()
-  return <span aria-hidden="true" className="browse-company-mark">{initials || '•'}</span>
+  // A stable per-company hue, so a column of tiles can be told apart at a glance.
+  let hash = 0
+  for (const character of company.trim().toLocaleLowerCase()) hash = (hash * 31 + character.codePointAt(0)!) % 360
+  return <span aria-hidden="true" className="browse-company-mark" style={{ '--mark-hue': hash } as CSSProperties}>{initials || '•'}</span>
 }
 
 export function BrowseWorkspace(props: BrowseWorkspaceProps) {
@@ -89,11 +93,32 @@ export function BrowseWorkspace(props: BrowseWorkspaceProps) {
     if (next) updateFocus(next.jobId, `${next.company}, ${next.title}, ${nextIndex + 1} of ${state.results.length}`)
   }, [focusIndex, state.results, updateFocus])
 
+  // Swipe decisions: file the focused job, then advance so the next one is ready.
+  const [deciding, setDeciding] = useState(false)
+  const decide = useCallback(async (status: JobStatus) => {
+    if (!focusedJob || deciding || focusedJob.status === status) return
+    const next = state.results[focusIndex + 1] ?? state.results[focusIndex - 1]
+    setDeciding(true)
+    try {
+      const changed = await state.changeStatus(focusedJob.jobId, status)
+      if (changed && next) updateFocus(next.jobId, `${statusLabel(status)}. Now ${next.company}, ${next.title}`)
+    } finally {
+      setDeciding(false)
+    }
+  }, [deciding, focusIndex, focusedJob, state.changeStatus, state.results, updateFocus])
+
   useEffect(() => {
     if (props.mode !== 'swipe') return
     const onKeyDown = (event: KeyboardEvent) => {
       if (isBrowseInteractionControl(event.target)) return
-      if (event.key === 'ArrowLeft') {
+      if (event.metaKey || event.ctrlKey || event.altKey) return
+      if (event.key === 'x' || event.key === 'X') {
+        event.preventDefault()
+        void decide('skipped')
+      } else if (event.key === 'c' || event.key === 'C') {
+        event.preventDefault()
+        void decide('shortlisted')
+      } else if (event.key === 'ArrowLeft') {
         event.preventDefault()
         move(-1)
       } else if (event.key === 'ArrowRight') {
@@ -103,7 +128,7 @@ export function BrowseWorkspace(props: BrowseWorkspaceProps) {
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [move, props.mode])
+  }, [decide, move, props.mode])
 
   const counts = useMemo(() => new Map(CANONICAL_STATUS_GROUPS.map(group => [
     group, state.jobs.filter(job => job.statusGroup === group).length
@@ -118,9 +143,7 @@ export function BrowseWorkspace(props: BrowseWorkspaceProps) {
         onChange={event => { void state.changeStatus(focusedJob.jobId, event.target.value as JobStatus) }}
         value={focusedJob.status}
       >
-        {[focusedJob.status, ...STATUS_TRANSITIONS[focusedJob.status]].map(status => (
-          <option key={status} value={status}>{statusOptionLabel(focusedJob.status, status)}</option>
-        ))}
+        <StatusOptions current={focusedJob.status} />
       </select>
       {state.mutationError ? <p className="browse-status-error" role="alert">{state.mutationError}</p> : null}
     </div>
@@ -245,6 +268,11 @@ export function BrowseWorkspace(props: BrowseWorkspaceProps) {
               {statusControl}
               <span>{focusIndex + 1} of {state.results.length}</span>
             </footer>
+            <div aria-label="Decide on this job" className="browse-decide" role="group">
+              <button aria-keyshortcuts="X" className="browse-decide-skip" disabled={deciding || focusedJob.status === 'skipped'} onClick={() => { void decide('skipped') }} type="button"><X aria-hidden="true" size={16} />Skip<kbd>X</kbd></button>
+              <button aria-keyshortcuts="C" className="browse-decide-consider" disabled={deciding || focusedJob.status === 'shortlisted'} onClick={() => { void decide('shortlisted') }} type="button"><Check aria-hidden="true" size={16} />Consider<kbd>C</kbd></button>
+              <span><kbd>←</kbd><kbd>→</kbd> to move without deciding</span>
+            </div>
             {openError ? <p className="browse-open-error" role="alert">{openError}</p> : null}
           </article>
           <button aria-label="Next job" className="swipe-arrow swipe-next" disabled={focusIndex === state.results.length - 1} onClick={() => move(1)} type="button"><ArrowRight aria-hidden="true" /></button>

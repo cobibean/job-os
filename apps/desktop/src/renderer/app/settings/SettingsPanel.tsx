@@ -59,6 +59,7 @@ export function SettingsPanel({
         </header>
 
         <SettingsSection
+          defaultExpanded
           description="Applies in both light and dark. Switch light/dark from the toggle in the top bar."
           id="settings-theme"
           title="Color theme"

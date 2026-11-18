@@ -137,18 +137,20 @@ export function useBrowseJobs(options: {
   }, [bridge, detailRevision, focusJobId, options.active])
 
   const changeStatus = useCallback(async (jobId: string, status: JobStatus) => {
-    if (!bridge) return
+    if (!bridge) return false
     const job = jobs.find(candidate => candidate.jobId === jobId)
-    if (!job || !STATUS_TRANSITIONS[job.status].includes(status)) return
+    if (!job || !STATUS_TRANSITIONS[job.status].includes(status)) return false
     const request = jobsRequest.current + 1
     jobsRequest.current = request
     try {
       const result = await bridge.updateStatus(jobId, status)
-      if (request !== jobsRequest.current) return
+      if (request !== jobsRequest.current) return true
       setJobs(current => current.map(candidate => candidate.jobId === jobId ? result.job : candidate))
       setMutationError(null)
+      return true
     } catch {
       if (request === jobsRequest.current) setMutationError('Status change failed')
+      return false
     }
   }, [bridge, jobs])
 

@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from 'react'
 
 import type { InstallationProfileListSnapshot, InstallationProfileSummary } from '../../shared/contracts'
 import { useModalDialog } from '../app/dialogs/useModalDialog'
+import { ipcErrorMessage } from '../app/ipcError'
 
 interface Props {
   activeProfileName: string
@@ -20,14 +21,7 @@ function idempotencyKey(prefix: string): string {
   return `${prefix}-${globalThis.crypto?.randomUUID?.() ?? Date.now()}`
 }
 
-function actionErrorMessage(failure: unknown, fallback: string): string {
-  if (!(failure instanceof Error)) return fallback
-  const message = failure.message.replace(
-    /^Error invoking remote method '[^']+':\s*(?:Error:\s*)?/,
-    ''
-  ).trim()
-  return message || fallback
-}
+const actionErrorMessage = ipcErrorMessage
 
 export function InstallationProfileMenu({ activeProfileName, onOverlayClose, prepareOverlay }: Props) {
   const [profiles, setProfiles] = useState<InstallationProfileListSnapshot | null>(null)

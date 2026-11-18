@@ -340,7 +340,7 @@ export function AgentPanel({ agentLabel, avatarId, contextLabel, apiState = 'con
                     )}
                     {assistant && assistant.text && (
                       <article className={`message assistant-message ${visualState}`}>
-                        <header><AgentAvatar avatarId={avatarId} size="message" state={avatarState} /> Agent {streaming && <span>Streaming</span>}</header>
+                        <header><AgentAvatar avatarId={avatarId} size="message" state={avatarState} /> Agent {streaming && <span className="message-streaming">Streaming</span>}</header>
                         <AssistantMarkdown>{assistant.text}</AssistantMarkdown>
                       </article>
                     )}

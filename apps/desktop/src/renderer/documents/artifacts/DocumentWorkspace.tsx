@@ -1,8 +1,10 @@
 import { useModalDialog } from '../../app/dialogs/useModalDialog'
+import { ipcErrorMessage } from '../../app/ipcError'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import {
   CheckCircle2,
+  CircleAlert,
   ChevronLeft,
   ChevronRight,
   Download,
@@ -62,6 +64,12 @@ const emptyState = (jobId = ''): JobArtifactsState => ({
   approvedArtifactId: null
 })
 
+// Content-hash revisions are 64 hex characters; a short prefix is enough to tell
+// versions apart, and the full value stays in the tooltip and Details.
+function shortRevision(revision: string): string {
+  return /^[0-9a-f]{16,}$/i.test(revision) ? revision.slice(0, 8) : revision
+}
+
 export function DocumentWorkspace(props: DocumentWorkspaceProps) {
   const bridge = useRef(window.jobos?.documents).current
   const docxBridge = useRef(window.jobos?.docxDocuments).current
@@ -76,6 +84,8 @@ export function DocumentWorkspace(props: DocumentWorkspaceProps) {
   const [payload, setPayload] = useState<PdfArtifactPayload | null>(null)
   const [loading, setLoading] = useState(false)
   const [message, setMessage] = useState('')
+  const [previewError, setPreviewError] = useState<string | null>(null)
+  const [previewAttempt, setPreviewAttempt] = useState(0)
   const [exportOpen, setExportOpen] = useState(false)
   const [exportBusy, setExportBusy] = useState(false)
   const [exportMenuPosition, setExportMenuPosition] = useState({ left: 0, top: 0 })
@@ -223,7 +233,7 @@ export function DocumentWorkspace(props: DocumentWorkspaceProps) {
     setPayload(null)
     setExportOpen(false)
     setLoading(true)
-    setMessage('Loading registered artifacts…')
+    setMessage('Loading documents…')
     void (async () => {
       try {
         const listed = await bridge.list(jobId)
@@ -235,12 +245,12 @@ export function DocumentWorkspace(props: DocumentWorkspaceProps) {
           if (!active) return
           setState(refreshed)
           choosePreview(refreshed, listedId)
-          setMessage(refreshed.artifacts.length ? 'Artifact registry is current' : 'No artifacts registered for this job')
+          setMessage(refreshed.artifacts.length ? 'Documents are up to date' : 'No documents for this job yet')
         } catch {
           if (active) {
             setMessage(listed.artifacts.length
-              ? 'Local documents loaded; optional artifact refresh is unavailable'
-              : 'No local artifacts registered; optional artifact refresh is unavailable')
+              ? 'Local documents loaded; couldn’t check for newer versions'
+              : 'No documents for this job yet; couldn’t check for newer versions')
           }
         }
       } catch {
@@ -331,23 +341,24 @@ export function DocumentWorkspace(props: DocumentWorkspaceProps) {
 
   useEffect(() => {
     setPayload(null)
+    setPreviewError(null)
     if (previewMode !== 'pdf' || !activeArtifact?.previewAvailable || !bridge) return
     let active = true
     setLoading(true)
     bridge.loadPdf(activeArtifact.artifactId).then(value => {
       if (!active) return
       if (value.artifactId !== activeArtifact.artifactId) {
-        setMessage('PDF preview identity mismatch')
+        setPreviewError('The loaded PDF did not match the selected document.')
         return
       }
       setPayload(value)
     }).catch(error => {
-      if (active) setMessage(error instanceof Error ? error.message : 'PDF preview failed')
+      if (active) setPreviewError(ipcErrorMessage(error, 'The PDF preview failed to load.'))
     }).finally(() => {
       if (active) setLoading(false)
     })
     return () => { active = false }
-  }, [activeArtifact?.artifactId, activeArtifact?.previewAvailable, bridge, previewMode])
+  }, [activeArtifact?.artifactId, activeArtifact?.previewAvailable, bridge, previewAttempt, previewMode])
 
   useEffect(() => {
     const key = `${activeId ?? ''}:${page}:${zoom}`
@@ -408,7 +419,7 @@ export function DocumentWorkspace(props: DocumentWorkspaceProps) {
         choosePreview(refreshed, selectedId.current)
         setMessage('Checked for newer artifacts')
       } catch {
-        if (activeJobId.current === requestJobId) setMessage('Local artifacts reloaded; optional artifact refresh is unavailable')
+        if (activeJobId.current === requestJobId) setMessage('Local documents reloaded; couldn’t check for newer versions')
       }
     } catch {
       if (activeJobId.current === requestJobId) setMessage('Could not reload local artifacts; existing documents remain available')
@@ -594,7 +605,7 @@ export function DocumentWorkspace(props: DocumentWorkspaceProps) {
         <section className="workspace-empty">
           <span className="empty-orbit"><FileText aria-hidden="true" size={23} /></span>
           <h1>Select a job to review its documents</h1>
-          <p>Registered document artifacts appear here without filesystem browsing.</p>
+          <p>Resumes and cover letters for the selected job appear here once they’re created.</p>
         </section>
       </main>
     )
@@ -608,7 +619,7 @@ export function DocumentWorkspace(props: DocumentWorkspaceProps) {
             <span className="document-job">Documents for {props.job.company} · {props.job.title}</span>
             <strong>{previewMode === 'docx' && previewFilename
               ? previewFilename
-              : displayedArtifact?.filename ?? 'Document artifacts'}</strong>
+              : displayedArtifact?.filename ?? 'Documents'}</strong>
           </div>
           <div aria-label="Preview format" className="document-preview-switch" role="group">
           <button
@@ -640,12 +651,12 @@ export function DocumentWorkspace(props: DocumentWorkspaceProps) {
           }}
           value={activeArtifact?.artifactId ?? ''}
         >
-          <option value="">{activeBinding && !activeRevision ? 'Current local DOCX' : 'No artifact'}</option>
+          <option value="">{activeBinding && !activeRevision ? 'Current local DOCX' : 'No version'}</option>
           {activeDocument?.revisions.map(revision => {
             const artifact = revision.representative
             return (
               <option key={`${revision.documentKey}:${revision.sourceRevision}`} value={artifact.artifactId}>
-                {artifact.artifactRevision} · {artifact.renderStatus}
+                {shortRevision(artifact.artifactRevision)} · {artifact.renderStatus}
                 {artifact.isApproved ? ' · approved' : revision === currentRevision ? ' · newest' : ''}
               </option>
             )
@@ -738,9 +749,9 @@ export function DocumentWorkspace(props: DocumentWorkspaceProps) {
         ) : currentArtifact?.renderStatus === 'rendering' ? (
           <div className="render-progress" role="status">A newer revision is rendering. The last successful document remains available.</div>
         ) : selectedPacketArtifact ? (
-          <div className="render-current" role="status"><CheckCircle2 aria-hidden="true" size={13} /> Published packet · {selectedPacketArtifact.artifactRevision}</div>
+          <div className="render-current" role="status"><CheckCircle2 aria-hidden="true" size={13} /> <span title={selectedPacketArtifact.artifactRevision}>Published · {shortRevision(selectedPacketArtifact.artifactRevision)}</span></div>
         ) : (
-          <div className="render-progress" role="status">No registered render is available for this document.</div>
+          <div className="render-progress" role="status">No published version of this document yet.</div>
         )}
 
         {currentArtifact || previewBinding || exportDocx || activeArtifact ? (
@@ -778,11 +789,23 @@ export function DocumentWorkspace(props: DocumentWorkspaceProps) {
           <OriginalDocxPreview artifactId={exportDocx.artifactId} sourceFilename={exportDocx.filename} />
         ) : payload && activeArtifact && payload.artifactId === activeArtifact.artifactId && activeArtifact.previewAvailable ? (
           <PdfPreview key={payload.artifactId} bytes={payload.bytes} onPageCount={setPageCount} page={page} zoom={zoom} />
+        ) : previewMode === 'pdf' && previewError ? (
+          <div className="document-external-only document-preview-error" role="alert">
+            <CircleAlert aria-hidden="true" size={28} />
+            <h1>Couldn’t load this PDF</h1>
+            <p>{previewError}</p>
+            <button disabled={loading} onClick={() => setPreviewAttempt(attempt => attempt + 1)} type="button"><RefreshCw aria-hidden="true" size={14} /> Try again</button>
+          </div>
+        ) : previewMode === 'pdf' && loading && activeArtifact?.previewAvailable ? (
+          <div className="document-external-only" role="status">
+            <FileText aria-hidden="true" size={28} />
+            <h1>Loading preview…</h1>
+          </div>
         ) : (
           <div className="document-external-only">
             <FileText aria-hidden="true" size={28} />
-            <h1>No trusted preview yet</h1>
-            <p>Refresh after the agent produces and registers a PDF document for this job.</p>
+            <h1>No preview yet</h1>
+            <p>A preview appears here once a PDF has been created for this document.</p>
           </div>
         )}
       </section>
