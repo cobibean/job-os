@@ -1207,6 +1207,10 @@ export type ClaimValue = {
      */
     kind: 'claim';
     /**
+     * Notes
+     */
+    notes?: string | null;
+    /**
      * Qualifiers
      */
     qualifiers?: Array<string>;

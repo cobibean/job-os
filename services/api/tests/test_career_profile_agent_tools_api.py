@@ -514,3 +514,77 @@ def test_agent_saves_guidance_and_converts_a_custom_item_without_review(tmp_path
             (item["value"]["kind"], item["value"]["category"]) for item in current["items"]
         ) == [("guidance", "brief"), ("guidance", "rule")]
         assert {item["item_id"] for item in current["items"]} >= {custom_id}
+
+
+def test_agent_claim_notes_apply_directly_while_dropping_a_limit_needs_review(tmp_path: Path):
+    app = app_with_migration_candidate(tmp_path / "jobos.db")
+
+    with TestClient(app) as client:
+        direct = client.patch(
+            f"/v1/career-profile/agents/{AGENT_ID}",
+            headers=user_headers(),
+            json={"trust_mode": "direct"},
+        )
+        assert direct.status_code == 200, direct.text
+        enable_full_agent_context(client, revision=0)
+
+        claim = {
+            "kind": "claim",
+            "statement": "(FAKE) Shipped the workflow.",
+            "qualifiers": ["(FAKE) Say shipped"],
+            "forbidden_uses": ["(FAKE) Do not claim adoption"],
+        }
+        created = client.post(
+            "/v1/career-profile/agent-edits/batch",
+            headers=agent_headers(),
+            json=batch_edit(
+                0,
+                "agent-tools-claim-notes-0001",
+                [
+                    create_edit(
+                        "claim",
+                        "User stated it",
+                        **{key: value for key, value in claim.items() if key != "kind"},
+                    )
+                ],
+            ),
+        )
+        assert created.status_code == 200, created.text
+        claim_id = created.json()["results"][0]["target_id"]
+
+        def update(revision: int, key: str, value: dict[str, object]):
+            return client.post(
+                "/v1/career-profile/agent-edits/batch",
+                headers=agent_headers(),
+                json=batch_edit(
+                    revision,
+                    key,
+                    [
+                        {
+                            "operation": "item.update",
+                            "target_id": claim_id,
+                            "reason": "Synthetic claim edit",
+                            "value": value,
+                            "evidence_ids": [],
+                        }
+                    ],
+                ),
+            )
+
+        noted = update(
+            1, "agent-tools-claim-notes-0002", {**claim, "notes": "(FAKE) Confirmed in March."}
+        )
+        assert noted.status_code == 200, noted.text
+        assert noted.json()["results"][0]["outcome"] == "applied"
+
+        without_notes = update(2, "agent-tools-claim-notes-0003", claim)
+        assert without_notes.status_code == 200, without_notes.text
+        assert without_notes.json()["results"][0]["outcome"] == "applied"
+
+        loosened = update(3, "agent-tools-claim-notes-0004", {**claim, "forbidden_uses": []})
+        assert loosened.status_code == 200, loosened.text
+        assert loosened.json()["results"][0]["outcome"] == "proposal"
+
+        current = client.get("/v1/career-profile", headers=user_headers()).json()
+        assert current["profile_revision"] == 3
+        assert current["items"][0]["value"] == claim

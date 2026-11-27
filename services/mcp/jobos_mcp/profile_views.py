@@ -45,13 +45,27 @@ def _item_kind(item: dict[str, Any]) -> str | None:
     return value.get("kind") if isinstance(value, dict) else None
 
 
+def _has_claim_notes(value: Any) -> bool:
+    return isinstance(value, dict) and value.get("kind") == "claim" and bool(value.get("notes"))
+
+
 def compact_item(item: dict[str, Any]) -> dict[str, Any]:
-    """Keep an item's identity, value, and Evidence links."""
+    """Keep an item's identity, value, and Evidence links.
+
+    A claim's notes are the person's own history, not guidance for an agent, so the
+    compact view leaves them out and says that they exist.
+    """
+    value = item.get("value")
+    hidden_notes = _has_claim_notes(value)
+    if hidden_notes:
+        value = {key: field for key, field in value.items() if key != "notes"}
     compact: dict[str, Any] = {
         "item_id": item.get("item_id"),
-        "value": item.get("value"),
+        "value": value,
         "evidence_ids": list(item.get("evidence_ids") or []),
     }
+    if hidden_notes:
+        compact["has_notes"] = True
     review_status = item.get("review_status")
     if review_status not in (None, "accepted"):
         compact["review_status"] = review_status
@@ -227,14 +241,49 @@ def list_items(
     return listed
 
 
-def existing_evidence_ids(preview: dict[str, Any], target_id: str | None) -> list[str] | None:
-    """Return an authorized item's current Evidence links, or None when it is not visible."""
+def existing_item(preview: dict[str, Any], target_id: str | None) -> dict[str, Any] | None:
+    """Return an authorized item's current record, or None when it is not visible."""
     if target_id is None:
         return None
     for item in _records(preview.get("projection"), "items"):
         if item.get("item_id") == target_id:
-            return list(item.get("evidence_ids") or [])
+            return item
     return None
+
+
+def existing_evidence_ids(preview: dict[str, Any], target_id: str | None) -> list[str] | None:
+    """Return an authorized item's current Evidence links, or None when it is not visible."""
+    item = existing_item(preview, target_id)
+    return None if item is None else list(item.get("evidence_ids") or [])
+
+
+def _omits_claim_notes(value: Any) -> bool:
+    return isinstance(value, dict) and value.get("kind") == "claim" and "notes" not in value
+
+
+def leaves_fields_unsaid(edit: Any) -> bool:
+    """Whether an update omits Evidence links or claim notes that it should not drop."""
+    if not isinstance(edit, dict) or edit.get("operation") != "item.update":
+        return False
+    return edit.get("evidence_ids") is None or _omits_claim_notes(edit.get("value"))
+
+
+def keep_unsaid_fields(edit: dict[str, Any], preview: dict[str, Any]) -> dict[str, Any]:
+    """Carry over what an update left unsaid, so it never drops them by accident.
+
+    Omitted evidence_ids keep the item's Evidence links, and a claim sent without a notes
+    key keeps its notes. Sending [] or notes: null removes them on purpose.
+    """
+    if not leaves_fields_unsaid(edit):
+        return edit
+    current = existing_item(preview, edit.get("target_id")) or {}
+    kept = dict(edit)
+    if kept.get("evidence_ids") is None:
+        kept["evidence_ids"] = list(current.get("evidence_ids") or [])
+    value = kept.get("value")
+    if _omits_claim_notes(value) and _has_claim_notes(current.get("value")):
+        kept["value"] = {**value, "notes": current["value"]["notes"]}
+    return kept
 
 
 def _created_item_id(profile: dict[str, Any], value: dict[str, Any] | None) -> str | None:

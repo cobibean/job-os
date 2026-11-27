@@ -39,7 +39,7 @@ export function ItemDetails({ item, online, onClose, onEdit, product }: {
           <div><strong>{provenanceLabel(item)}</strong><span>{readableLabel(item.reviewStatus)} · Revision {item.itemRevision} · Updated {new Date(item.updatedAt).toLocaleDateString()}</span></div>
         </div>
         <dl className="career-product-detail-list">
-          {values.map(([key, value]) => <div key={key}><dt>{readableLabel(key)}</dt><dd>{readableValue(value)}</dd></div>)}
+          {values.map(([key, value]) => <div key={key}><dt>{spec?.fields.find(field => field.key === key)?.label ?? readableLabel(key)}</dt><dd>{readableValue(value)}</dd></div>)}
         </dl>
         {guidance && spec ? (
           <section aria-label={`${spec.label} behavior`} className="career-product-plain-note" role="region">
