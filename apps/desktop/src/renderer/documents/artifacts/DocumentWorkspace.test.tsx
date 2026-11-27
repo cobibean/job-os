@@ -628,7 +628,10 @@ describe('trusted document workspace', () => {
       <DocumentWorkspace hydrated job={job} onViewChange={vi.fn()} refreshGeneration={0} restoredArtifactId={null} restoredPage={1} restoredZoom={1} />
     )
 
-    fireEvent.click(await screen.findByRole('button', { name: /^Export$/ }))
+    // Export exists but stays disabled until the document list loads; a click before then is ignored.
+    const exportButton = await screen.findByRole('button', { name: /^Export$/ })
+    await waitFor(() => expect((exportButton as HTMLButtonElement).disabled).toBe(false))
+    fireEvent.click(exportButton)
     expect(screen.getByRole('menuitem', { name: 'Export PDF' })).not.toBeNull()
     expect(screen.queryByRole('menuitem', { name: 'Export DOCX' })).toBeNull()
 
