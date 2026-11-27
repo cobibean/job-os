@@ -163,7 +163,9 @@ export type AgentProfileBatchEditItem = {
         kind: 'dealbreaker';
     } & DealbreakerValue) | ({
         kind: 'custom';
-    } & CustomValue) | null;
+    } & CustomValue) | ({
+        kind: 'guidance';
+    } & GuidanceValue) | null;
 };
 
 /**
@@ -303,7 +305,9 @@ export type AgentProfileEditRequest = {
         kind: 'dealbreaker';
     } & DealbreakerValue) | ({
         kind: 'custom';
-    } & CustomValue) | null;
+    } & CustomValue) | ({
+        kind: 'guidance';
+    } & GuidanceValue) | null;
 };
 
 /**
@@ -2482,7 +2486,9 @@ export type EvidenceExtraction = {
         kind: 'dealbreaker';
     } & DealbreakerValue) | ({
         kind: 'custom';
-    } & CustomValue);
+    } & CustomValue) | ({
+        kind: 'guidance';
+    } & GuidanceValue);
 };
 
 /**
@@ -2574,6 +2580,30 @@ export type ExperienceValue = {
      * Summary
      */
     summary?: string | null;
+};
+
+/**
+ * GuidanceValue
+ *
+ * Instructions and reference notes for agents; never a fact about the person's career.
+ */
+export type GuidanceValue = {
+    /**
+     * Category
+     */
+    category?: 'brief' | 'rule' | 'wording' | 'strength' | 'objection' | 'private' | 'other';
+    /**
+     * Kind
+     */
+    kind: 'guidance';
+    /**
+     * Label
+     */
+    label: string;
+    /**
+     * Text
+     */
+    text: string;
 };
 
 /**
@@ -3577,7 +3607,9 @@ export type ProfileItemMutation = {
         kind: 'dealbreaker';
     } & DealbreakerValue) | ({
         kind: 'custom';
-    } & CustomValue);
+    } & CustomValue) | ({
+        kind: 'guidance';
+    } & GuidanceValue);
 };
 
 /**
@@ -3650,7 +3682,9 @@ export type ProfileItemRecord = {
         kind: 'dealbreaker';
     } & DealbreakerValue) | ({
         kind: 'custom';
-    } & CustomValue);
+    } & CustomValue) | ({
+        kind: 'guidance';
+    } & GuidanceValue);
 };
 
 /**
@@ -5273,7 +5307,7 @@ export type CareerProfileAgentSearchV1CareerProfileAgentSearchGetData = {
         /**
          * Kinds
          */
-        kinds?: Array<'identity' | 'education' | 'skill' | 'positioning' | 'experience' | 'project' | 'claim' | 'target_roles' | 'compensation' | 'location' | 'work_arrangement' | 'industries' | 'priority' | 'dealbreaker' | 'custom'> | null;
+        kinds?: Array<'identity' | 'education' | 'skill' | 'positioning' | 'experience' | 'project' | 'claim' | 'target_roles' | 'compensation' | 'location' | 'work_arrangement' | 'industries' | 'priority' | 'dealbreaker' | 'custom' | 'guidance'> | null;
         /**
          * Areas
          */

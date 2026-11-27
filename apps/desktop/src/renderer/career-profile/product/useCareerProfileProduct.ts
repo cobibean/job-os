@@ -36,7 +36,8 @@ const parallelItemKinds = new Set([
   'industries',
   'priority',
   'dealbreaker',
-  'custom'
+  'custom',
+  'guidance'
 ])
 
 interface CompleteProfileCacheEnvelope {

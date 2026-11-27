@@ -13,6 +13,15 @@ describe('Career Profile item specifications', () => {
     }
   })
 
+  it('offers guidance for agents as a My Career item with a type, title, and text', () => {
+    const guidance = specsByKind.get('guidance')!
+    expect(guidance.area).toBe('my_career')
+    expect(guidance.requiredAll).toEqual(['label', 'text'])
+    expect(guidance.fields.map(field => field.key)).toEqual(['category', 'label', 'text'])
+    expect(guidance.fields[0]?.options?.map(option => option.value))
+      .toEqual(['', 'brief', 'rule', 'wording', 'strength', 'objection', 'private', 'other'])
+  })
+
   it('keeps dealbreaker unavailable for positive-only importance fields', () => {
     for (const kind of ['target_roles', 'priority'] as const) {
       expect(specsByKind.get(kind)?.fields.find(field => field.key === 'strength')?.options)

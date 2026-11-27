@@ -360,6 +360,18 @@ class CustomValue(StrictModel):
     text: str = Field(min_length=1, max_length=4000)
 
 
+GuidanceCategory = Literal["brief", "rule", "wording", "strength", "objection", "private", "other"]
+
+
+class GuidanceValue(StrictModel):
+    """Instructions and reference notes for agents; never a fact about the person's career."""
+
+    kind: Literal["guidance"]
+    category: GuidanceCategory = "other"
+    label: str = Field(min_length=1, max_length=300)
+    text: str = Field(min_length=1, max_length=4000)
+
+
 ProfileValue = Annotated[
     IdentityValue
     | EducationValue
@@ -375,7 +387,8 @@ ProfileValue = Annotated[
     | IndustryPreferencesValue
     | PriorityValue
     | DealbreakerValue
-    | CustomValue,
+    | CustomValue
+    | GuidanceValue,
     Field(discriminator="kind"),
 ]
 
@@ -631,6 +644,7 @@ def _area_for_kind(kind: str) -> Literal["my_career", "what_im_looking_for", "my
         "project",
         "claim",
         "custom",
+        "guidance",
     }:
         return "my_career"
     return "what_im_looking_for"

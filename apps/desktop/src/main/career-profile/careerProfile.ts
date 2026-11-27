@@ -83,7 +83,7 @@ const evidenceKinds = new Set(['resume', 'portfolio', 'supporting_document', 'ci
 const profileValueKinds = new Set([
   'identity', 'education', 'skill', 'positioning', 'experience', 'project', 'claim',
   'target_roles', 'compensation', 'location', 'work_arrangement', 'industries',
-  'priority', 'dealbreaker', 'custom'
+  'priority', 'dealbreaker', 'custom', 'guidance'
 ])
 
 export interface CareerProfileNative {

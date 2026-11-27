@@ -29,6 +29,7 @@ from jobos_api.career_profile_complete import (
     EvidenceErasureRequest,
     EvidenceImportRequest,
     EvidenceVault,
+    GuidanceValue,
     ProfileIntentGrantRequest,
     ProfileItemMutation,
     ProfileItemRemoval,
@@ -306,6 +307,58 @@ def test_bounded_custom_record_and_custom_vocabularies_round_trip(tmp_path: Path
     oversized["value"]["text"] = "x" * 4001
     with pytest.raises(ValueError):
         ProfileItemMutation.model_validate(oversized)
+
+
+def test_guidance_record_round_trips_with_a_category_and_defaults_to_other(tmp_path: Path):
+    guidance = ProfileItemMutation.model_validate(
+        {
+            "expected_profile_revision": 0,
+            "idempotency_key": "guidance-profile-rule-0001",
+            "value": {
+                "kind": "guidance",
+                "category": "rule",
+                "label": "(FAKE) Writing rule",
+                "text": "(FAKE) Open each resume bullet with the result.",
+            },
+        }
+    )
+    assert isinstance(guidance.value, GuidanceValue)
+    store = initialized_store(tmp_path)
+    saved = store.upsert_item(principal="device:primary-device", command=guidance)
+    restarted = CareerProfileCompleteStore(
+        tmp_path / "state/jobos.db", tmp_path / "evidence-vault"
+    ).current()
+    assert restarted == saved
+    assert restarted.items[0].area == "my_career"
+    assert restarted.items[0].value.model_dump(mode="json") == {
+        "kind": "guidance",
+        "category": "rule",
+        "label": "(FAKE) Writing rule",
+        "text": "(FAKE) Open each resume bullet with the result.",
+    }
+
+    uncategorized = ProfileItemMutation.model_validate(
+        {
+            "expected_profile_revision": 1,
+            "idempotency_key": "guidance-profile-note-0001",
+            "value": {"kind": "guidance", "label": "(FAKE) Note", "text": "(FAKE) Read first."},
+        }
+    )
+    assert uncategorized.value.category == "other"
+
+    for invalid in (
+        {"kind": "guidance", "category": "fact", "label": "(FAKE) Note", "text": "(FAKE) Text"},
+        {"kind": "guidance", "category": "rule", "label": "(FAKE) Note"},
+        {"kind": "guidance", "category": "rule", "label": "(FAKE) Note", "text": "x" * 4001},
+    ):
+        with pytest.raises(ValueError):
+            ProfileItemMutation.model_validate(
+                {
+                    "expected_profile_revision": 0,
+                    "idempotency_key": "guidance-profile-bad-0001",
+                    "value": invalid,
+                }
+            )
 
 
 def test_capture_time_is_optional_or_partial_while_import_time_remains_exact(tmp_path: Path):

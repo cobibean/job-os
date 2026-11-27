@@ -270,6 +270,7 @@ def _area_for_kind(kind: str) -> Literal["my_career", "what_im_looking_for", "my
         "project",
         "claim",
         "custom",
+        "guidance",
     }:
         return "my_career"
     return "what_im_looking_for"

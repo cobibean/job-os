@@ -236,6 +236,7 @@
                     "dealbreaker": "#/components/schemas/DealbreakerValue",
                     "education": "#/components/schemas/EducationValue",
                     "experience": "#/components/schemas/ExperienceValue",
+                    "guidance": "#/components/schemas/GuidanceValue",
                     "identity": "#/components/schemas/IdentityValue",
                     "industries": "#/components/schemas/IndustryPreferencesValue",
                     "location": "#/components/schemas/LocationPreferenceValue",
@@ -293,6 +294,9 @@
                   },
                   {
                     "$ref": "#/components/schemas/CustomValue"
+                  },
+                  {
+                    "$ref": "#/components/schemas/GuidanceValue"
                   }
                 ]
               },
@@ -509,6 +513,7 @@
                     "dealbreaker": "#/components/schemas/DealbreakerValue",
                     "education": "#/components/schemas/EducationValue",
                     "experience": "#/components/schemas/ExperienceValue",
+                    "guidance": "#/components/schemas/GuidanceValue",
                     "identity": "#/components/schemas/IdentityValue",
                     "industries": "#/components/schemas/IndustryPreferencesValue",
                     "location": "#/components/schemas/LocationPreferenceValue",
@@ -566,6 +571,9 @@
                   },
                   {
                     "$ref": "#/components/schemas/CustomValue"
+                  },
+                  {
+                    "$ref": "#/components/schemas/GuidanceValue"
                   }
                 ]
               },
@@ -4606,6 +4614,7 @@
                 "dealbreaker": "#/components/schemas/DealbreakerValue",
                 "education": "#/components/schemas/EducationValue",
                 "experience": "#/components/schemas/ExperienceValue",
+                "guidance": "#/components/schemas/GuidanceValue",
                 "identity": "#/components/schemas/IdentityValue",
                 "industries": "#/components/schemas/IndustryPreferencesValue",
                 "location": "#/components/schemas/LocationPreferenceValue",
@@ -4663,6 +4672,9 @@
               },
               {
                 "$ref": "#/components/schemas/CustomValue"
+              },
+              {
+                "$ref": "#/components/schemas/GuidanceValue"
               }
             ],
             "title": "Value"
@@ -4887,6 +4899,50 @@
           "kind"
         ],
         "title": "ExperienceValue",
+        "type": "object"
+      },
+      "GuidanceValue": {
+        "additionalProperties": false,
+        "description": "Instructions and reference notes for agents; never a fact about the person's career.",
+        "properties": {
+          "category": {
+            "default": "other",
+            "enum": [
+              "brief",
+              "rule",
+              "wording",
+              "strength",
+              "objection",
+              "private",
+              "other"
+            ],
+            "title": "Category",
+            "type": "string"
+          },
+          "kind": {
+            "const": "guidance",
+            "title": "Kind",
+            "type": "string"
+          },
+          "label": {
+            "maxLength": 300,
+            "minLength": 1,
+            "title": "Label",
+            "type": "string"
+          },
+          "text": {
+            "maxLength": 4000,
+            "minLength": 1,
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "label",
+          "text"
+        ],
+        "title": "GuidanceValue",
         "type": "object"
       },
       "HeaderFooter": {
@@ -6805,6 +6861,7 @@
                 "dealbreaker": "#/components/schemas/DealbreakerValue",
                 "education": "#/components/schemas/EducationValue",
                 "experience": "#/components/schemas/ExperienceValue",
+                "guidance": "#/components/schemas/GuidanceValue",
                 "identity": "#/components/schemas/IdentityValue",
                 "industries": "#/components/schemas/IndustryPreferencesValue",
                 "location": "#/components/schemas/LocationPreferenceValue",
@@ -6862,6 +6919,9 @@
               },
               {
                 "$ref": "#/components/schemas/CustomValue"
+              },
+              {
+                "$ref": "#/components/schemas/GuidanceValue"
               }
             ],
             "title": "Value"
@@ -6943,6 +7003,7 @@
                 "dealbreaker": "#/components/schemas/DealbreakerValue",
                 "education": "#/components/schemas/EducationValue",
                 "experience": "#/components/schemas/ExperienceValue",
+                "guidance": "#/components/schemas/GuidanceValue",
                 "identity": "#/components/schemas/IdentityValue",
                 "industries": "#/components/schemas/IndustryPreferencesValue",
                 "location": "#/components/schemas/LocationPreferenceValue",
@@ -7000,6 +7061,9 @@
               },
               {
                 "$ref": "#/components/schemas/CustomValue"
+              },
+              {
+                "$ref": "#/components/schemas/GuidanceValue"
               }
             ],
             "title": "Value"
@@ -10441,7 +10505,8 @@
                       "industries",
                       "priority",
                       "dealbreaker",
-                      "custom"
+                      "custom",
+                      "guidance"
                     ],
                     "type": "string"
                   },

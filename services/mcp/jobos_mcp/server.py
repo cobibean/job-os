@@ -607,7 +607,9 @@ def create_server(client: JobOsMcpClient, *, artifact_root: Path | None = None) 
         bookkeeping; "full" returns the exact records, including review status, provenance,
         and timestamps. The default "auto" returns compact records when they fit in one
         response and the index when they do not. Pass kinds (for example
-        ["positioning", "custom"]) or item_ids to read part of a large profile.
+        ["guidance", "positioning"]) or item_ids to read part of a large profile. Items of
+        kind "guidance" are the user's instructions for agents, not career facts: read them
+        first, and never put guidance with category "private" in candidate-facing material.
         """
         client.scope_turn(conversation_id, turn_id)
         return shape_projection(
