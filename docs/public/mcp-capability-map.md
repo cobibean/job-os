@@ -45,11 +45,11 @@ The OAuth-protected external server exposes **all 45 shared tools plus five exte
 
 Use this workflow for a blank profile, a sparse profile, or incremental profile improvement.
 
-1. **Orient:** Call `career_profile_get` to learn the authorized projection and current profile revision.
+1. **Orient:** Call `career_profile_get` to learn the authorized projection and current profile revision. By default it returns compact records when they fit in one response and an index of item IDs, kinds, and titles when they do not. Pass `kinds` or `item_ids` to read part of a large profile, or `view: "full"` for the exact records.
 2. **Listen:** Ask for one coherent slice of the user's story in plain language—for example identity and positioning, one role, one project, or what they want next. Do not require a résumé or proof.
-3. **Check for overlap:** Call `career_profile_search` using the people, employers, skills, projects, or preferences the user mentioned. This prevents accidental duplicates without loading the entire profile repeatedly.
+3. **Check for overlap:** Call `career_profile_search` using the people, employers, skills, projects, or preferences the user mentioned. This prevents accidental duplicates without loading the entire profile repeatedly. Leave `query` empty to list items by `kinds` or `areas`.
 4. **Structure the facts:** Translate only what the user actually supplied into typed Career Profile items. Keep uncertainty visible; ask a focused follow-up when a required fact is missing.
-5. **Save coherently:** Use `career_profile_edit_batch` when the conversation produced multiple related records. Use `career_profile_edit` for one isolated change. Pass the current expected profile revision and optional Evidence IDs.
+5. **Save coherently:** Use `career_profile_edit_batch` when the conversation produced multiple related records. Use `career_profile_edit` for one isolated change. Pass the current expected profile revision and optional Evidence IDs. An update that omits `evidence_ids` keeps the item's current Evidence links; pass `[]` to remove them.
 6. **Verify authority outcome:** Inspect the mutation response, then call `career_profile_changes_list` when proposals or prior agent changes matter. Tell the user which changes applied and which await review.
 7. **Continue incrementally:** Re-read or search before the next batch because an accepted edit, another device, or another agent may have advanced the profile revision.
 
@@ -133,9 +133,9 @@ Snapshot targets are short-lived page references, not durable selectors.
 
 | Tool | What it does |
 |---|---|
-| `career_profile_get` | Reads the exact Career Profile projection authorized for the connected agent. |
-| `career_profile_search` | Searches authorized Profile items and Evidence without loading the whole profile. |
-| `career_profile_edit` | Creates, updates, or removes one item under the user's current review mode. |
+| `career_profile_get` | Reads the Career Profile projection authorized for the connected agent as an index, compact records, or the exact records, optionally filtered by item kind or item ID. |
+| `career_profile_search` | Searches authorized Profile items and Evidence without loading the whole profile, or lists them by kind or area when `query` is empty. |
+| `career_profile_edit` | Creates, updates, or removes one item under the user's current review mode, and returns the outcome, revision, item ID, and any proposal. |
 | `career_profile_edit_batch` | Atomically applies or proposes several related edits under one expected revision. |
 | `career_profile_changes_list` | Lists this agent's proposals and directly applied profile revisions. |
 | `career_profile_evidence_import` | Optionally imports immutable user-supplied Evidence into the JobOS vault. |
