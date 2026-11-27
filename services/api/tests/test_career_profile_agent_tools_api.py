@@ -426,3 +426,91 @@ def test_agent_search_changes_and_evidence_are_projection_scoped(tmp_path: Path)
         assert "Synthetic conversation notes" not in scoped_changes.text
         current = client.get("/v1/career-profile", headers=user_headers()).json()
         assert current["profile_revision"] == 3
+
+
+def test_agent_saves_guidance_and_converts_a_custom_item_without_review(tmp_path: Path):
+    app = app_with_migration_candidate(tmp_path / "jobos.db")
+
+    with TestClient(app) as client:
+        direct = client.patch(
+            f"/v1/career-profile/agents/{AGENT_ID}",
+            headers=user_headers(),
+            json={"trust_mode": "direct"},
+        )
+        assert direct.status_code == 200, direct.text
+        enable_full_agent_context(client, revision=0)
+
+        created = client.post(
+            "/v1/career-profile/agent-edits/batch",
+            headers=agent_headers(),
+            json=batch_edit(
+                0,
+                "agent-tools-guidance-0001",
+                [
+                    create_edit(
+                        "guidance",
+                        "The user stated a writing rule",
+                        category="rule",
+                        label="(FAKE) Writing rule",
+                        text="(FAKE) Open each resume bullet with the result.",
+                    ),
+                    create_edit(
+                        "custom",
+                        "The user gave reading instructions",
+                        label="(FAKE) Start here",
+                        text="(FAKE) Read the positioning item first.",
+                    ),
+                ],
+            ),
+        )
+        assert created.status_code == 200, created.text
+        assert [result["outcome"] for result in created.json()["results"]] == ["applied", "applied"]
+        custom_id = created.json()["results"][1]["target_id"]
+
+        searched = client.get(
+            "/v1/career-profile/agent-search",
+            headers=agent_headers(),
+            params={"query": "fake", "kinds": "guidance", "limit": 10},
+        )
+        assert searched.status_code == 200, searched.text
+        assert [item["value"] for item in searched.json()["items"]] == [
+            {
+                "kind": "guidance",
+                "category": "rule",
+                "label": "(FAKE) Writing rule",
+                "text": "(FAKE) Open each resume bullet with the result.",
+            }
+        ]
+        assert searched.json()["items"][0]["area"] == "my_career"
+
+        converted = client.post(
+            "/v1/career-profile/agent-edits/batch",
+            headers=agent_headers(),
+            json=batch_edit(
+                2,
+                "agent-tools-guidance-0002",
+                [
+                    {
+                        "operation": "item.update",
+                        "target_id": custom_id,
+                        "reason": "Reading instructions are guidance, not a career fact",
+                        "value": {
+                            "kind": "guidance",
+                            "category": "brief",
+                            "label": "(FAKE) Start here",
+                            "text": "(FAKE) Read the positioning item first.",
+                        },
+                        "evidence_ids": [],
+                    }
+                ],
+            ),
+        )
+        assert converted.status_code == 200, converted.text
+        assert converted.json()["results"][0]["outcome"] == "applied"
+
+        current = client.get("/v1/career-profile", headers=user_headers()).json()
+        assert current["profile_revision"] == 3
+        assert sorted(
+            (item["value"]["kind"], item["value"]["category"]) for item in current["items"]
+        ) == [("guidance", "brief"), ("guidance", "rule")]
+        assert {item["item_id"] for item in current["items"]} >= {custom_id}

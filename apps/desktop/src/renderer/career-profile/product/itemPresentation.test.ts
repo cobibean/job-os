@@ -53,6 +53,13 @@ describe('Career Profile item presentation', () => {
     const custom = specsByKind.get('custom')!
     expect(validateItemValue(custom, buildItemValue(custom, { label: 'Only a label' })))
       .toBe('Complete both required fields before saving.')
+    const guidance = specsByKind.get('guidance')!
+    expect(buildItemValue(guidance, { category: 'rule', label: ' Writing rule ', text: 'Lead with the result.' }))
+      .toEqual({ kind: 'guidance', category: 'rule', label: 'Writing rule', text: 'Lead with the result.' })
+    expect(buildItemValue(guidance, { category: '', label: 'Note', text: 'Read first.' }))
+      .toEqual({ kind: 'guidance', label: 'Note', text: 'Read first.' })
+    expect(validateItemValue(guidance, buildItemValue(guidance, { category: 'rule', label: 'Only a title' })))
+      .toBe('Complete both required fields before saving.')
     const compensation = specsByKind.get('compensation')!
     expect(validateItemValue(compensation, buildItemValue(compensation, { currency: 'US' })))
       .toBe('Use a three-letter currency code, such as USD.')

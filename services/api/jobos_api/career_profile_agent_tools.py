@@ -30,6 +30,7 @@ CareerProfileItemKind = Literal[
     "priority",
     "dealbreaker",
     "custom",
+    "guidance",
 ]
 CareerProfileReviewStatus = Literal["accepted", "proposed", "conflicting"]
 

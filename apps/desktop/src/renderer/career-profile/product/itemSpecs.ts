@@ -15,6 +15,7 @@ export type EditableItemKind =
   | 'priority'
   | 'dealbreaker'
   | 'custom'
+  | 'guidance'
 
 export type ItemFieldKind = 'text' | 'textarea' | 'list' | 'number' | 'select'
 
@@ -44,6 +45,17 @@ const strengthOptions = [
 ]
 
 const positiveStrengthOptions = strengthOptions.filter(option => option.value !== 'dealbreaker')
+
+const guidanceCategoryOptions = [
+  { label: 'Not specified', value: '' },
+  { label: 'Start here', value: 'brief' },
+  { label: 'Rule', value: 'rule' },
+  { label: 'Approved wording', value: 'wording' },
+  { label: 'Strength', value: 'strength' },
+  { label: 'Likely objection', value: 'objection' },
+  { label: 'Private note', value: 'private' },
+  { label: 'Other guidance', value: 'other' }
+]
 
 export const itemSpecs: ItemSpec[] = [
   {
@@ -138,6 +150,15 @@ export const itemSpecs: ItemSpec[] = [
     ]
   },
   {
+    area: 'my_career', kind: 'guidance', label: 'Guidance for agents',
+    requiredAny: ['label', 'text'], requiredAll: ['label', 'text'],
+    fields: [
+      { key: 'category', kind: 'select', label: 'Guidance type', options: guidanceCategoryOptions },
+      { key: 'label', label: 'Title' },
+      { key: 'text', kind: 'textarea', label: 'Guidance' }
+    ]
+  },
+  {
     area: 'what_im_looking_for', kind: 'target_roles', label: 'Target roles',
     requiredAny: ['roles'],
     fields: [
@@ -221,7 +242,8 @@ export const careerGroupLabels: Partial<Record<EditableItemKind, string>> = {
   experience: 'Experience',
   project: 'Projects',
   claim: 'Professional statements',
-  custom: 'Other details'
+  custom: 'Other details',
+  guidance: 'Guidance for agents'
 }
 
 export const careerGroupDescriptions: Partial<Record<EditableItemKind, string>> = {
@@ -232,7 +254,8 @@ export const careerGroupDescriptions: Partial<Record<EditableItemKind, string>> 
   experience: 'Roles and work history JobOS can reference as career context.',
   project: 'Concrete examples of what you built, led, or contributed to.',
   claim: 'Statements you approved, with saved context and limits on how JobOS may use them.',
-  custom: 'Additional career context that does not fit another section.'
+  custom: 'Additional career context that does not fit another section.',
+  guidance: 'Instructions and reference notes for connected agents, such as how to read this profile, writing rules, and approved wording. These are not facts about your career.'
 }
 
 export function isEditableKind(value: unknown): value is EditableItemKind {
