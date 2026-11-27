@@ -752,6 +752,7 @@ def create_app(
             token=str(settings.hermes_dashboard_token),
             cwd=settings.hermes_job_hunter_cwd,  # type: ignore[arg-type]
             request_timeout=settings.hermes_request_timeout,
+            registry=installation_profiles,
         )
         configured_gateway = True
     selected_gateway_factory = gateway_factory or OfflineAgentGatewayFactory()

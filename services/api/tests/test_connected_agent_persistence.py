@@ -474,6 +474,7 @@ def test_completed_provider_offline_migration_accepts_late_hermes_runtime_config
     assert repaired.connection_config.model_dump() == {
         "endpoint_url": "http://127.0.0.1:9120",
         "runtime_profile": None,
+        "runtime_cwd": None,
     }
     assert repaired.disconnected_at is None
     assert repaired.default_model_id == "gpt-5.6-sol-900k"
