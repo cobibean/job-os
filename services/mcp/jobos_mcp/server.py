@@ -14,6 +14,14 @@ from mcp.server.fastmcp import FastMCP
 from pydantic import Field
 
 from jobos_mcp.jobs import JobOsMcpClient
+from jobos_mcp.profile_views import (
+    ProfileView,
+    existing_evidence_ids,
+    list_items,
+    shape_edit_result,
+    shape_projection,
+    shape_search,
+)
 
 ConversationId = Annotated[str, Field(pattern=r"^conv_[A-Za-z0-9_-]{1,128}$", max_length=133)]
 TurnId = Annotated[str, Field(pattern=r"^turn_[A-Za-z0-9_-]{8,200}$", max_length=205)]
@@ -334,6 +342,30 @@ def _read_publication_input(
     )
 
 
+async def _keep_existing_evidence(
+    client: JobOsMcpClient, edits: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """Fill omitted Evidence links on updates so an edit never drops them by accident."""
+
+    def omitted(edit: Any) -> bool:
+        return (
+            isinstance(edit, dict)
+            and edit.get("operation") == "item.update"
+            and edit.get("evidence_ids") is None
+        )
+
+    if not any(omitted(edit) for edit in edits):
+        return edits
+    preview = await client.get_career_profile_projection()
+    kept: list[dict[str, Any]] = []
+    for edit in edits:
+        if omitted(edit):
+            current = existing_evidence_ids(preview, edit.get("target_id"))
+            edit = {**edit, "evidence_ids": current or []}
+        kept.append(edit)
+    return kept
+
+
 def create_server(client: JobOsMcpClient, *, artifact_root: Path | None = None) -> FastMCP:
     server = FastMCP(
         "JobOS Jobs",
@@ -539,10 +571,17 @@ def create_server(client: JobOsMcpClient, *, artifact_root: Path | None = None) 
 
         Ordinary edits may apply immediately when the user allows direct edits. Review-mode
         edits, identity changes, removals, Evidence removal, and loosened claim boundaries
-        become proposals for the user. Evidence is optional.
+        become proposals for the user. Evidence is optional. On item.update, omit
+        evidence_ids to keep the item's current Evidence links; pass [] to remove them.
+        The result reports the outcome, the new profile revision, the item ID, and any
+        proposal. Read the profile again to see the saved item.
         """
         client.scope_turn(conversation_id, turn_id)
-        return await client.edit_career_profile(
+        if operation == "item.update" and evidence_ids is None:
+            evidence_ids = existing_evidence_ids(
+                await client.get_career_profile_projection(), target_id
+            )
+        result = await client.edit_career_profile(
             expected_profile_revision=expected_profile_revision,
             operation=operation,
             reason=reason,
@@ -551,29 +590,63 @@ def create_server(client: JobOsMcpClient, *, artifact_root: Path | None = None) 
             evidence_ids=evidence_ids,
             idempotency_key=idempotency_key,
         )
+        return shape_edit_result(result, operation=operation, target_id=target_id, value=value)
 
     @server.tool(name="career_profile_get", structured_output=True)
     async def career_profile_get(
-        conversation_id: ConversationId, turn_id: TurnId
+        conversation_id: ConversationId,
+        turn_id: TurnId,
+        view: ProfileView = "auto",
+        kinds: list[str] | None = None,
+        item_ids: list[str] | None = None,
     ) -> dict[str, Any]:
-        """Read the exact user-authorized post-cutover Career Profile projection."""
+        """Read the user-authorized post-cutover Career Profile projection.
+
+        Views: "index" lists each item's ID, kind, and title with a count per kind;
+        "compact" returns each item's ID, value, and Evidence links without revision
+        bookkeeping; "full" returns the exact records, including review status, provenance,
+        and timestamps. The default "auto" returns compact records when they fit in one
+        response and the index when they do not. Pass kinds (for example
+        ["positioning", "custom"]) or item_ids to read part of a large profile.
+        """
         client.scope_turn(conversation_id, turn_id)
-        return await client.get_career_profile_projection()
+        return shape_projection(
+            await client.get_career_profile_projection(),
+            view=view,
+            kinds=kinds,
+            item_ids=item_ids,
+        )
 
     @server.tool(name="career_profile_search", structured_output=True)
     async def career_profile_search(
         conversation_id: ConversationId,
         turn_id: TurnId,
-        query: str,
+        query: str = "",
         kinds: list[str] | None = None,
         areas: list[str] | None = None,
         review_statuses: list[str] | None = None,
         has_evidence: bool | None = None,
         limit: int = 25,
+        view: ProfileView = "auto",
     ) -> dict[str, Any]:
-        """Search only the Career Profile items and Evidence authorized for this agent."""
+        """Search or list only the Career Profile items and Evidence authorized for this agent.
+
+        Leave query empty to list items, filtered by kinds, areas, review_statuses, or
+        has_evidence. Views match career_profile_get: "index", "compact", "full", or the
+        default "auto", which returns compact records when they fit in one response.
+        """
         client.scope_turn(conversation_id, turn_id)
-        return await client.search_career_profile(
+        if not query.strip():
+            return list_items(
+                await client.get_career_profile_projection(),
+                view=view,
+                kinds=kinds,
+                areas=areas,
+                review_statuses=review_statuses,
+                has_evidence=has_evidence,
+                limit=limit,
+            )
+        result = await client.search_career_profile(
             query=query,
             kinds=kinds,
             areas=areas,
@@ -581,6 +654,7 @@ def create_server(client: JobOsMcpClient, *, artifact_root: Path | None = None) 
             has_evidence=has_evidence,
             limit=limit,
         )
+        return shape_search(result, view=view)
 
     @server.tool(name="career_profile_edit_batch", structured_output=True)
     async def career_profile_edit_batch(
@@ -593,10 +667,12 @@ def create_server(client: JobOsMcpClient, *, artifact_root: Path | None = None) 
         """Atomically apply or propose several related Career Profile edits.
 
         Each edit uses the same item.create, item.update, or item.remove shape as
-        career_profile_edit. Evidence IDs remain optional. If any edit is invalid,
-        none of the batch is saved.
+        career_profile_edit. Evidence IDs remain optional: an item.update that omits
+        evidence_ids keeps the item's current Evidence links, and [] removes them. If any
+        edit is invalid, none of the batch is saved.
         """
         client.scope_turn(conversation_id, turn_id)
+        edits = await _keep_existing_evidence(client, edits)
         return await client.edit_career_profile_batch(
             expected_profile_revision=expected_profile_revision,
             edits=edits,
