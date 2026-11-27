@@ -137,8 +137,9 @@ export const itemSpecs: ItemSpec[] = [
     requiredAny: ['statement', 'qualifiers', 'forbidden_uses'],
     fields: [
       { key: 'statement', kind: 'textarea', label: 'What JobOS should know' },
-      { key: 'qualifiers', kind: 'list', label: 'Context and qualifiers', placeholder: 'One piece of context per line' },
-      { key: 'forbidden_uses', kind: 'list', label: 'Do not use this for', placeholder: 'One restriction per line' }
+      { key: 'qualifiers', kind: 'list', label: 'How to say it', placeholder: 'One point per line' },
+      { key: 'forbidden_uses', kind: 'list', label: 'Can’t say', placeholder: 'One limit per line' },
+      { key: 'notes', kind: 'textarea', label: 'Notes and history', placeholder: 'For your records. Connected agents do not read this by default.' }
     ]
   },
   {
@@ -253,7 +254,7 @@ export const careerGroupDescriptions: Partial<Record<EditableItemKind, string>> 
   positioning: 'The headline and framing you want JobOS to use for your career story.',
   experience: 'Roles and work history JobOS can reference as career context.',
   project: 'Concrete examples of what you built, led, or contributed to.',
-  claim: 'Statements you approved, with saved context and limits on how JobOS may use them.',
+  claim: 'Statements you approved, with how to say them and what JobOS can’t say.',
   custom: 'Additional career context that does not fit another section.',
   guidance: 'Instructions and reference notes for connected agents, such as how to read this profile, writing rules, and approved wording. These are not facts about your career.'
 }

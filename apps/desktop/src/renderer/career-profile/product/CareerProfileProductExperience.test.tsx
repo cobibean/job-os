@@ -322,17 +322,25 @@ test('presents claim records as bounded professional statements', async () => {
   fireEvent.click(screen.getByRole('button', { name: /My Career/i }))
 
   expect(await screen.findByRole('button', { name: 'Professional statements, 1 detail' })).not.toBeNull()
-  expect(screen.getByText(/Statements you approved, with saved context and limits/i)).not.toBeNull()
+  expect(screen.getByText(/Statements you approved, with how to say them and what JobOS can’t say/i)).not.toBeNull()
   expect(screen.getByText('Professional statement')).not.toBeNull()
   expect(screen.queryByText(/Career claims?/i)).toBeNull()
+
+  fireEvent.click(screen.getByRole('button', { name: 'I build trustworthy AI workflows. details' }))
+  const details = screen.getByRole('dialog', { name: 'I build trustworthy AI workflows. details' })
+  expect(within(details).getByText('How to say it')).not.toBeNull()
+  expect(within(details).getByText('Can’t say')).not.toBeNull()
+  expect(within(details).queryByText('Forbidden Uses')).toBeNull()
+  fireEvent.click(within(details).getByRole('button', { name: 'Close details' }))
 
   fireEvent.click(screen.getByRole('button', { name: 'Add career detail' }))
   const editor = screen.getByRole('dialog', { name: 'Add career detail' })
   fireEvent.change(within(editor).getByLabelText('Detail type'), { target: { value: 'claim' } })
   expect(within(editor).getByRole('option', { name: 'Professional statement' })).not.toBeNull()
   expect(within(editor).getByLabelText('What JobOS should know')).not.toBeNull()
-  expect(within(editor).getByLabelText('Context and qualifiers')).not.toBeNull()
-  expect(within(editor).getByLabelText('Do not use this for')).not.toBeNull()
+  expect(within(editor).getByLabelText('How to say it')).not.toBeNull()
+  expect(within(editor).getByLabelText('Can’t say')).not.toBeNull()
+  expect(within(editor).getByLabelText('Notes and history')).not.toBeNull()
 })
 
 test('adds a typed career detail and dismisses its success feedback', async () => {

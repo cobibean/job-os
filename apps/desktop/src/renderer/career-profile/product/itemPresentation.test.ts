@@ -53,6 +53,13 @@ describe('Career Profile item presentation', () => {
     const custom = specsByKind.get('custom')!
     expect(validateItemValue(custom, buildItemValue(custom, { label: 'Only a label' })))
       .toBe('Complete both required fields before saving.')
+    const claim = specsByKind.get('claim')!
+    expect(buildItemValue(claim, { statement: 'Shipped it.', qualifiers: 'Say shipped\n', forbidden_uses: '', notes: ' Confirmed in March. ' }))
+      .toEqual({ kind: 'claim', statement: 'Shipped it.', qualifiers: ['Say shipped'], notes: 'Confirmed in March.' })
+    expect(buildItemValue(claim, { statement: 'Shipped it.', notes: '' }))
+      .toEqual({ kind: 'claim', statement: 'Shipped it.' })
+    expect(validateItemValue(claim, buildItemValue(claim, { notes: 'Only notes' })))
+      .toBe('Add at least one meaningful detail before saving.')
     const guidance = specsByKind.get('guidance')!
     expect(buildItemValue(guidance, { category: 'rule', label: ' Writing rule ', text: 'Lead with the result.' }))
       .toEqual({ kind: 'guidance', category: 'rule', label: 'Writing rule', text: 'Lead with the result.' })

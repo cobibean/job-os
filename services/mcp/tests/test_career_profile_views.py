@@ -9,6 +9,8 @@ from jobos_mcp.profile_views import (
     compact_item,
     existing_evidence_ids,
     index_item,
+    keep_unsaid_fields,
+    leaves_fields_unsaid,
     list_items,
     shape_edit_result,
     shape_projection,
@@ -488,3 +490,124 @@ async def test_career_profile_batch_fills_only_omitted_evidence_links_on_updates
     assert sent[1]["evidence_ids"] == ["cpe_syntheticsource0001"]
     assert sent[2]["evidence_ids"] == []
     assert "evidence_ids" not in sent[3]
+
+
+def _claim_preview() -> dict:
+    preview = _preview()
+    preview["projection"]["items"].append(
+        _item(
+            "cpi_syntheticclaim000001",
+            {
+                "kind": "claim",
+                "statement": "Synthetic statement",
+                "qualifiers": ["Synthetic point"],
+                "forbidden_uses": [],
+                "notes": "Synthetic history",
+            },
+            evidence_ids=["cpe_syntheticsource0001"],
+        )
+    )
+    return preview
+
+
+def test_compact_view_leaves_out_claim_notes_and_says_they_exist():
+    preview = _claim_preview()
+    claim = preview["projection"]["items"][-1]
+
+    compact = compact_item(claim)
+    full = shape_projection(preview, view="full", kinds=["claim"])
+
+    assert "notes" not in compact["value"] and compact["has_notes"] is True
+    assert compact["value"]["statement"] == "Synthetic statement"
+    assert claim["value"]["notes"] == "Synthetic history"
+    assert full["projection"]["items"][0]["value"]["notes"] == "Synthetic history"
+    assert "has_notes" not in compact_item(preview["projection"]["items"][0])
+
+
+def test_an_update_keeps_claim_notes_and_evidence_it_did_not_mention():
+    preview = _claim_preview()
+    rewrite = {
+        "operation": "item.update",
+        "target_id": "cpi_syntheticclaim000001",
+        "reason": "Synthetic rewording",
+        "value": {"kind": "claim", "statement": "Synthetic statement, reworded"},
+    }
+    explicit = {
+        **rewrite,
+        "value": {**rewrite["value"], "notes": None},
+        "evidence_ids": [],
+    }
+    skill = {
+        "operation": "item.update",
+        "target_id": "cpi_syntheticskill000001",
+        "reason": "Synthetic rewording",
+        "value": {"kind": "skill", "name": "Synthetic Python 3"},
+        "evidence_ids": [],
+    }
+
+    kept = keep_unsaid_fields(rewrite, preview)
+
+    assert leaves_fields_unsaid(rewrite) and not leaves_fields_unsaid(explicit)
+    assert not leaves_fields_unsaid(skill)
+    assert not leaves_fields_unsaid({**rewrite, "operation": "item.create"})
+    assert kept["value"]["notes"] == "Synthetic history"
+    assert kept["evidence_ids"] == ["cpe_syntheticsource0001"]
+    assert "notes" not in rewrite["value"]
+    assert keep_unsaid_fields(explicit, preview) is explicit
+    assert keep_unsaid_fields(skill, preview) is skill
+
+
+@pytest.mark.anyio
+async def test_career_profile_edit_keeps_claim_notes_unless_told_to_remove_them():
+    requests: list[httpx.Request] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if request.method == "GET":
+            return httpx.Response(200, json=_claim_preview())
+        return httpx.Response(
+            200,
+            json={
+                "outcome": "applied",
+                "profile": _claim_preview()["projection"],
+                "proposal": None,
+            },
+        )
+
+    client = _client(handler)
+    server = create_server(client)
+    update = {
+        "expected_profile_revision": 7,
+        "operation": "item.update",
+        "target_id": "cpi_syntheticclaim000001",
+        "reason": "Synthetic rewording",
+        "evidence_ids": ["cpe_syntheticsource0001"],
+    }
+
+    await server.call_tool(
+        "career_profile_edit",
+        SCOPE
+        | update
+        | {
+            "value": {"kind": "claim", "statement": "Synthetic statement, reworded"},
+            "idempotency_key": "synthetic-keep-notes-0001",
+        },
+    )
+    await server.call_tool(
+        "career_profile_edit",
+        SCOPE
+        | update
+        | {
+            "value": {"kind": "claim", "statement": "Synthetic statement", "notes": None},
+            "idempotency_key": "synthetic-clear-notes-001",
+        },
+    )
+    await client.aclose()
+
+    assert [(request.method, request.url.path) for request in requests] == [
+        ("GET", "/v1/career-profile/consumer-projection"),
+        ("POST", "/v1/career-profile/agent-edits"),
+        ("POST", "/v1/career-profile/agent-edits"),
+    ]
+    assert json.loads(requests[1].content)["value"]["notes"] == "Synthetic history"
+    assert json.loads(requests[2].content)["value"]["notes"] is None

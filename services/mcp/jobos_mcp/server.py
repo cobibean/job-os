@@ -16,7 +16,8 @@ from pydantic import Field
 from jobos_mcp.jobs import JobOsMcpClient
 from jobos_mcp.profile_views import (
     ProfileView,
-    existing_evidence_ids,
+    keep_unsaid_fields,
+    leaves_fields_unsaid,
     list_items,
     shape_edit_result,
     shape_projection,
@@ -342,28 +343,14 @@ def _read_publication_input(
     )
 
 
-async def _keep_existing_evidence(
+async def _keep_unsaid_fields(
     client: JobOsMcpClient, edits: list[dict[str, Any]]
 ) -> list[dict[str, Any]]:
-    """Fill omitted Evidence links on updates so an edit never drops them by accident."""
-
-    def omitted(edit: Any) -> bool:
-        return (
-            isinstance(edit, dict)
-            and edit.get("operation") == "item.update"
-            and edit.get("evidence_ids") is None
-        )
-
-    if not any(omitted(edit) for edit in edits):
+    """Carry over Evidence links and claim notes that updates left unsaid."""
+    if not any(leaves_fields_unsaid(edit) for edit in edits):
         return edits
     preview = await client.get_career_profile_projection()
-    kept: list[dict[str, Any]] = []
-    for edit in edits:
-        if omitted(edit):
-            current = existing_evidence_ids(preview, edit.get("target_id"))
-            edit = {**edit, "evidence_ids": current or []}
-        kept.append(edit)
-    return kept
+    return [keep_unsaid_fields(edit, preview) for edit in edits]
 
 
 def create_server(client: JobOsMcpClient, *, artifact_root: Path | None = None) -> FastMCP:
@@ -573,14 +560,24 @@ def create_server(client: JobOsMcpClient, *, artifact_root: Path | None = None) 
         edits, identity changes, removals, Evidence removal, and loosened claim boundaries
         become proposals for the user. Evidence is optional. On item.update, omit
         evidence_ids to keep the item's current Evidence links; pass [] to remove them.
+        A claim updated without a notes key keeps its notes; pass notes: null to remove them.
         The result reports the outcome, the new profile revision, the item ID, and any
         proposal. Read the profile again to see the saved item.
         """
         client.scope_turn(conversation_id, turn_id)
-        if operation == "item.update" and evidence_ids is None:
-            evidence_ids = existing_evidence_ids(
-                await client.get_career_profile_projection(), target_id
+        if operation == "item.update":
+            (edit,) = await _keep_unsaid_fields(
+                client,
+                [
+                    {
+                        "operation": operation,
+                        "target_id": target_id,
+                        "value": value,
+                        "evidence_ids": evidence_ids,
+                    }
+                ],
             )
+            evidence_ids, value = edit["evidence_ids"], edit["value"]
         result = await client.edit_career_profile(
             expected_profile_revision=expected_profile_revision,
             operation=operation,
@@ -604,8 +601,9 @@ def create_server(client: JobOsMcpClient, *, artifact_root: Path | None = None) 
 
         Views: "index" lists each item's ID, kind, and title with a count per kind;
         "compact" returns each item's ID, value, and Evidence links without revision
-        bookkeeping; "full" returns the exact records, including review status, provenance,
-        and timestamps. The default "auto" returns compact records when they fit in one
+        bookkeeping or a claim's private notes (has_notes marks where they exist); "full"
+        returns the exact records, including review status, provenance, timestamps, and
+        notes. The default "auto" returns compact records when they fit in one
         response and the index when they do not. Pass kinds (for example
         ["guidance", "positioning"]) or item_ids to read part of a large profile. Items of
         kind "guidance" are the user's instructions for agents, not career facts: read them
@@ -670,11 +668,12 @@ def create_server(client: JobOsMcpClient, *, artifact_root: Path | None = None) 
 
         Each edit uses the same item.create, item.update, or item.remove shape as
         career_profile_edit. Evidence IDs remain optional: an item.update that omits
-        evidence_ids keeps the item's current Evidence links, and [] removes them. If any
-        edit is invalid, none of the batch is saved.
+        evidence_ids keeps the item's current Evidence links, and [] removes them. A claim
+        updated without a notes key keeps its notes. If any edit is invalid, none of the
+        batch is saved.
         """
         client.scope_turn(conversation_id, turn_id)
-        edits = await _keep_existing_evidence(client, edits)
+        edits = await _keep_unsaid_fields(client, edits)
         return await client.edit_career_profile_batch(
             expected_profile_revision=expected_profile_revision,
             edits=edits,

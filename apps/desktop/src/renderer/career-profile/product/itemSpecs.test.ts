@@ -22,6 +22,17 @@ describe('Career Profile item specifications', () => {
       .toEqual(['', 'brief', 'rule', 'wording', 'strength', 'objection', 'private', 'other'])
   })
 
+  it('labels a professional statement by how to say it and what can’t be said, with private notes', () => {
+    const claim = specsByKind.get('claim')!
+    expect(claim.fields.map(field => [field.key, field.label])).toEqual([
+      ['statement', 'What JobOS should know'],
+      ['qualifiers', 'How to say it'],
+      ['forbidden_uses', 'Can’t say'],
+      ['notes', 'Notes and history']
+    ])
+    expect(claim.requiredAny).toEqual(['statement', 'qualifiers', 'forbidden_uses'])
+  })
+
   it('keeps dealbreaker unavailable for positive-only importance fields', () => {
     for (const kind of ['target_roles', 'priority'] as const) {
       expect(specsByKind.get(kind)?.fields.find(field => field.key === 'strength')?.options)

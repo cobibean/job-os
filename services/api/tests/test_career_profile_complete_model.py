@@ -309,6 +309,72 @@ def test_bounded_custom_record_and_custom_vocabularies_round_trip(tmp_path: Path
         ProfileItemMutation.model_validate(oversized)
 
 
+def test_claim_notes_round_trip_and_stay_out_of_claims_that_have_none(tmp_path: Path):
+    plain = ProfileItemMutation.model_validate(
+        {
+            "expected_profile_revision": 0,
+            "idempotency_key": "claim-without-notes-0001",
+            "value": {
+                "kind": "claim",
+                "statement": "(FAKE) Shipped the workflow.",
+                "qualifiers": ["(FAKE) Say shipped"],
+                "forbidden_uses": ["(FAKE) Do not claim adoption"],
+            },
+        }
+    )
+    # A claim with no notes serializes exactly as it did before the field existed.
+    assert plain.value.model_dump(mode="json") == {
+        "kind": "claim",
+        "statement": "(FAKE) Shipped the workflow.",
+        "qualifiers": ["(FAKE) Say shipped"],
+        "forbidden_uses": ["(FAKE) Do not claim adoption"],
+    }
+    store = initialized_store(tmp_path)
+    store.upsert_item(principal="device:primary-device", command=plain)
+
+    noted = ProfileItemMutation.model_validate(
+        {
+            "expected_profile_revision": 1,
+            "idempotency_key": "claim-with-notes-0001",
+            "value": {
+                "kind": "claim",
+                "statement": "(FAKE) Led the rollout.",
+                "notes": "(FAKE) Confirmed in a March conversation.",
+            },
+        }
+    )
+    store.upsert_item(principal="device:primary-device", command=noted)
+    restarted = CareerProfileCompleteStore(
+        tmp_path / "state/jobos.db", tmp_path / "evidence-vault"
+    ).current()
+    saved = {item.value.statement: item.value.model_dump(mode="json") for item in restarted.items}
+    assert "notes" not in saved["(FAKE) Shipped the workflow."]
+    assert saved["(FAKE) Led the rollout."]["notes"] == "(FAKE) Confirmed in a March conversation."
+
+    cleared = ProfileItemMutation.model_validate(
+        {
+            "expected_profile_revision": 2,
+            "idempotency_key": "claim-clear-notes-0001",
+            "value": {"kind": "claim", "statement": "(FAKE) Led the rollout.", "notes": None},
+        }
+    )
+    assert "notes" not in cleared.value.model_dump(mode="json")
+
+    for invalid in (
+        {"kind": "claim", "notes": "(FAKE) Notes alone are not a statement."},
+        {"kind": "claim", "statement": "(FAKE) Statement", "notes": "x" * 4001},
+        {"kind": "claim", "statement": "(FAKE) Statement", "notes": ""},
+    ):
+        with pytest.raises(ValueError):
+            ProfileItemMutation.model_validate(
+                {
+                    "expected_profile_revision": 0,
+                    "idempotency_key": "claim-bad-notes-0001",
+                    "value": invalid,
+                }
+            )
+
+
 def test_guidance_record_round_trips_with_a_category_and_defaults_to_other(tmp_path: Path):
     guidance = ProfileItemMutation.model_validate(
         {

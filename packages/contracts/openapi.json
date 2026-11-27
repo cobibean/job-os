@@ -2272,6 +2272,19 @@
             "title": "Kind",
             "type": "string"
           },
+          "notes": {
+            "anyOf": [
+              {
+                "maxLength": 4000,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Notes"
+          },
           "qualifiers": {
             "items": {
               "maxLength": 2000,

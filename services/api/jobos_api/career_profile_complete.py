@@ -254,6 +254,14 @@ class ClaimValue(StrictModel):
     statement: str | None = Field(default=None, min_length=1, max_length=2000)
     qualifiers: list[ConstraintText] = Field(default_factory=list, max_length=20)
     forbidden_uses: list[ConstraintText] = Field(default_factory=list, max_length=20)
+    # History and provenance for the person's own records. Left out of serialized values
+    # when empty, so claims saved before this field keep their exact stored form and hashes.
+    notes: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=4000,
+        exclude_if=lambda value: value is None,
+    )
 
     @model_validator(mode="after")
     def require_meaningful_field(self) -> ClaimValue:
