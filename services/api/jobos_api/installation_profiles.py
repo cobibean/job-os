@@ -275,6 +275,7 @@ class PersistentIdempotencyReplay(StrictModel):
 class HermesConnectionConfiguration(StrictModel):
     endpoint_url: str = Field(min_length=1, max_length=512)
     runtime_profile: str | None = Field(default=None, pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
+    runtime_cwd: str | None = Field(default=None, min_length=1, max_length=4096)
 
     @model_validator(mode="after")
     def validate_endpoint(self) -> HermesConnectionConfiguration:
@@ -289,6 +290,12 @@ class HermesConnectionConfiguration(StrictModel):
             or parsed.fragment
         ):
             raise ValueError("Hermes endpoint URL contains unsupported or secret-bearing data")
+        if self.runtime_profile not in {None, "job-hunter"} and self.runtime_cwd is None:
+            raise ValueError("Hermes runtime profile requires an explicit working directory")
+        if self.runtime_cwd is not None:
+            path = Path(self.runtime_cwd)
+            if not path.is_absolute() or not path.is_dir():
+                raise ValueError("Hermes working directory must be an existing absolute directory")
         return self
 
 
